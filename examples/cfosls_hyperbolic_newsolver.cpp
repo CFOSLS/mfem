@@ -2764,6 +2764,11 @@ int main(int argc, char *argv[])
     NewSmoother.SetRelTol(smooth_reltol);//(1.0e-10);//(new_reltol);
     NewSmoother.SetMaxIterInt(20000);
 
+    HCurlGSSmoother NewGSSmoother(num_levels - 1, &Divfree_op_sp,
+                   Proj_Hcurl, Dof_TrueDof_Hcurl,
+                   EssBdrDofs_Hcurl);
+    NewGSSmoother.SetSweepsNumber(1);
+
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
 
@@ -2966,10 +2971,11 @@ int main(int argc, char *argv[])
 #ifdef WITH_SMOOTHER
     MinConstrSolver NewSolver(ref_levels + 1, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_coarse_Func, *d_td_coarse_W,
-                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, &NewSmoother, Xinit, ess_dof_coarsestlvl_list,
+                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit, ess_dof_coarsestlvl_list,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
+                     &NewGSSmoother,
                      false);
 #else
     MinConstrSolver NewSolver(ref_levels + 1, P_WT,
