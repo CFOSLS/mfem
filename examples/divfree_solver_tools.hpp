@@ -139,7 +139,6 @@ void MultilevelSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
                  " class but must have been redefined \n";
 }
 
-/*
 class HCurlGSSmoother : public MultilevelSmoother
 {
     using MultilevelSmoother::SetUpSmoother;
@@ -153,6 +152,13 @@ protected:
     // Curl_hT * A_l * Curlh matrices at all levels
     mutable Array<SparseMatrix*> CTMC_lvls;
 
+    // Projection of the system matrix onto discrete Hcurl space
+    // stored as HypreParMatrices at all levels;
+    mutable Array<HypreParMatrix*> CTMC_global_lvls;
+
+    // stores additionally diagonal entries of global CTMC matrices
+    mutable Array<Vector*> CTMC_global_diag_lvls;
+
     // dof_Truedof tables at all levels;
     const Array<HypreParMatrix*> & d_td_lvls;
 
@@ -164,7 +170,6 @@ protected:
     mutable Array<Vector*> tempvec2_lvls; // lives in H(div)_h
     mutable Array<Vector*> truerhs_lvls;  // rhs for H(curl) problems on true dofs
     mutable Array<Vector*> truex_lvls;    // sol for H(curl) problems on true dofs
-
 public:
     // constructor
     HCurlGSSmoother (int Num_Levels, SparseMatrix *DiscreteCurl,
@@ -186,7 +191,152 @@ public:
     // problem in H(curl) at level l (using the precomputed righthand side)
     void MultLevel(int level, Vector& in_lvl, Vector& out_lvl);
 };
-*/
+
+HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, SparseMatrix* DiscreteCurl,
+                              const Array< SparseMatrix*>& Proj_lvls, const Array<HypreParMatrix*>& Dof_TrueDof_lvls,
+                              const std::vector<Array<int>* > & EssBdrdofs_lvls) :
+    MultilevelSmoother(Num_Levels),
+    P_lvls(Proj_lvls), d_td_lvls(Dof_TrueDof_lvls), essbdrdofs_lvls(EssBdrdofs_lvls)
+{
+    std::cout << "Calling constructor of the HCurlGSSmoother \n";
+    Curlh_lvls.SetSize(num_levels);
+    for ( int l = 0; l < num_levels; ++l)
+        Curlh_lvls[l] = NULL;
+    Curlh_lvls[0] = DiscreteCurl;
+
+    CTMC_lvls.SetSize(num_levels);
+    for ( int l = 0; l < num_levels; ++l)
+        CTMC_lvls[l] = NULL;
+
+    CTMC_global_lvls.SetSize(num_levels);
+    for ( int l = 0; l < num_levels; ++l)
+        CTMC_global_lvls[l] = NULL;
+
+    CTMC_global_diag_lvls.SetSize(num_levels);
+    for ( int l = 0; l < num_levels; ++l)
+        CTMC_global_diag_lvls[l] = NULL;
+
+    rhs_lvls.SetSize(num_levels);
+    tempvec2_lvls.SetSize(num_levels);
+    tempvec_lvls.SetSize(num_levels);
+    truerhs_lvls.SetSize(num_levels);
+    truex_lvls.SetSize(num_levels);
+}
+
+void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl, const BlockMatrix& Proj_lvl)
+{
+    MFEM_ABORT("HcurlGSSmoother: BlockMatrix arguments are not supported\n");
+}
+
+void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl, const SparseMatrix& Proj_lvl)
+{
+    if ( !finalized_lvls[level] ) // if level was not set up before
+    {
+        if (Curlh_lvls[level])
+        {
+            // form CT*M*C as a SparseMatrix
+            SparseMatrix *CurlhT = Transpose( *(Curlh_lvls[level]));
+            SparseMatrix *SysMat_Curlh = mfem::Mult(SysMat_lvl, *(Curlh_lvls[level]));
+            CTMC_lvls[level] = mfem::Mult(*CurlhT, *SysMat_Curlh);
+
+            // FIXME: Is sorting necessary?
+            //CTMC_lvls[level]->SortColumnIndices();
+
+            delete SysMat_Curlh;
+            delete CurlhT;
+
+            // imposing essential boundary conditions
+            Array<int> * temp = essbdrdofs_lvls[level];
+            for ( int dof = 0; dof < temp->Size(); ++dof)
+            {
+                if ( (*temp)[dof] != 0)
+                {
+                    CTMC_lvls[level]->EliminateRowCol(dof);
+                }
+            }
+
+            // form CT*M*C as HypreParMatrices
+            // FIXME: Can one avoid allocation of intermediate matrices?
+            HypreParMatrix* CTMC_d_td;
+            d_td_lvls[level]->SetOwnerFlags(3,3,1);
+            CTMC_d_td = d_td_lvls[level]->LeftDiagMult( *(CTMC_lvls[level]) );
+            HypreParMatrix * d_td_T = d_td_lvls[level]->Transpose();
+
+            CTMC_global_lvls[level] = ParMult(d_td_T, CTMC_d_td);
+
+            CTMC_global_lvls[level]->CopyRowStarts();
+            CTMC_global_lvls[level]->CopyColStarts();
+
+            CTMC_global_diag_lvls[level] = new Vector();
+            CTMC_global_lvls[level]->GetDiag(*(CTMC_global_diag_lvls[level]));
+
+            delete CTMC_d_td;
+            delete d_td_T;
+
+            // resizing local-to-level vector arrays
+            rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+            tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+            tempvec2_lvls[level] = new Vector(Curlh_lvls[level]->Height());
+            truerhs_lvls[level] = new Vector(CTMC_global_lvls[level]->Height());
+            truex_lvls[level] = new Vector(CTMC_global_lvls[level]->Height());
+            finalized_lvls[level] = true;
+        }
+        else
+        {
+            MFEM_ABORT("HCurlGSSmoother::SetUpSmoother(): curl operator must have been"
+                       " set alreeady at this level \n");
+        }
+
+
+    }// end of if level wasn't finelized already before the call
+}
+
+void HCurlGSSmoother::ComputeRhsLevel(int level, const Vector& res_lvl)
+{
+    // rhs_l = CT_l * res_lvl
+    Curlh_lvls[level]->MultTranspose(res_lvl, *(rhs_lvls[level]));
+}
+
+
+// Solves the minimization problem in the div-free subspace
+// Takes the current iterate in_lvl
+// and returns the updated iterate
+//      out_lvl = in_lvl + Curl_l * sol_l
+// where
+//      CurlT_l M Curl_l sol_l = rhs_l
+// rhs_l is computed using the residual of the original problem
+// during the call to SetUpRhs() before MultLevel
+void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
+{
+    MFEM_ABORT("HCurlGSSmoother::MultLevel() hasn't been implemented yet!");
+    MFEM_ASSERT(finalized_lvls[level] == true,
+                "MultLevel() must not be called for a non-finalized level");
+
+    *(truex_lvls[level]) = 0.0;
+
+    // looping over all dofs, making an update for each non-eliminated dof
+    // truex = sum over all dofs of
+    Array<int> * temp = essbdrdofs_lvls[level];
+    for ( int dof = 0; dof < temp->Size(); ++dof)
+    {
+        if ( (*temp)[dof] == 0) // excluding essential boundary
+        {
+            (*(truex_lvls[level]))[dof] += 0.0;
+        }
+    }
+
+    // temp_l = truex_l, but on dofs
+    d_td_lvls[level]->Mult(*(truex_lvls[level]), *(tempvec_lvls[level]));
+
+    // 5. computing the solution update in the H(div)_h space
+
+    // out = Curlh_l * temp_l = Curlh_l * x_l
+    Curlh_lvls[level]->Mult( *(tempvec_lvls[level]), out_lvl);
+
+    // out_lvl = in_lvl + Curlh_l * x_l
+    out_lvl += in_lvl;
+
+}
 
 
 // Implements a multilevelel smoother which can update the solution x = (x_l)
