@@ -2975,7 +2975,7 @@ int main(int argc, char *argv[])
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
-                     &NewGSSmoother,
+                     &NewSmoother,
                      false);
 #else
     MinConstrSolver NewSolver(ref_levels + 1, P_WT,

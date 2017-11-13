@@ -8,8 +8,6 @@ using std::unique_ptr;
 #define DEBUG_INFO
 //#define OLDFASHION
 
-//#define TODAYDEBUG
-
 // FIXME: fix const-correctness, there is a non-clarified mess of const and mutable
 
 // Checking routines used for debugging
@@ -750,12 +748,12 @@ protected:
     const std::vector<std::vector<Array<int>* > > & essbdrdofs_Func;
 
     // BlockMatrix which defines the Functional at the finest level
-    const BlockMatrix& Funct;
+    //const BlockMatrix& Funct;
     const int numblocks;
     const Array<int>& block_offsets;
 
     // SparseMatrix which defines the constraint (divergence) at the finest level
-    const SparseMatrix& Constr;
+    //const SparseMatrix& Constr;
     const Vector& ConstrRhs;
 
     // Structures related to the smoothing at the interfaces after local updates
@@ -857,10 +855,6 @@ protected:
     void SolveLocalProblems(int level, BlockVector &lvlrhs_func,
                             Vector& rhs_constr, BlockVector& sol_update) const;
 
-#ifdef TODAYDEBUG
-    void SolveFinerLevelProblem(int level, BlockVector &lvlrhs_func, Vector& rhs_constr, BlockVector& sol_update) const;
-#endif
-
     // These are the main differences between possible inheriting classes
     // since they define the way how the local problems are solved
     virtual void SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
@@ -879,8 +873,8 @@ public:
                            const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
-                           const BlockMatrix& FunctBlockMat,
-                           const SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
+                           BlockMatrix& FunctBlockMat,
+                           SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_Finest,
                            const Array<int>& Ess_dof_coarsest,
 #ifdef COMPUTING_LAMBDA
@@ -934,8 +928,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
                        const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                        const std::vector<std::vector<Array<int> *> > &BdrDofs_Func,
                        const std::vector<std::vector<Array<int> *> > &EssBdrDofs_Func,
-                       const BlockMatrix& FunctBlockMat,
-                       const SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
+                       BlockMatrix& FunctBlockMat,
+                       SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
                        const BlockVector& Bdrdata_Finest,
                        const Array<int>& Ess_dof_coarsest,
 #ifdef COMPUTING_LAMBDA
@@ -951,10 +945,10 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
        P_Func(Proj_Func), P_L2(Proj_L2),
        bdrdofs_Func(BdrDofs_Func),
        essbdrdofs_Func(EssBdrDofs_Func),
-       Funct(FunctBlockMat),
-       numblocks(Funct.NumColBlocks()),
-       block_offsets(Funct.RowOffsets()),
-       Constr(ConstrMat),
+       //Funct(FunctBlockMat),
+       numblocks(FunctBlockMat.NumColBlocks()),
+       block_offsets(FunctBlockMat.RowOffsets()),
+       //Constr(ConstrMat),
        ConstrRhs(ConstrRhsVec),
        bdrdata_finest(Bdrdata_Finest),
        ess_dof_coarsest(Ess_dof_coarsest),
@@ -965,9 +959,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 {
     AE_edofs_L2.SetSize(num_levels - 1);
     AE_eintdofs_Func.SetSize(num_levels - 1);
-    rhs_constr = new Vector(Constr.Height());
-    Qlminus1_f = new Vector(Constr.Height());
-    workfvec = new Vector(Constr.Height());
+    rhs_constr = new Vector(ConstrMat.Height());
+    Qlminus1_f = new Vector(ConstrMat.Height());
+    workfvec = new Vector(ConstrMat.Height());
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
     current_iteration = 0;
@@ -977,10 +971,12 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     abs_tol = 1.0e-12;
     rel_tol = 1.0e-12;
     max_iter_internal = 20000;
-    Funct_lvls.SetSize(num_levels - 1);
-    Constr_lvls.SetSize(num_levels - 1);
+    Funct_lvls.SetSize(num_levels);
+    Funct_lvls[0] = &FunctBlockMat;
+    Constr_lvls.SetSize(num_levels);
+    Constr_lvls[0] = &ConstrMat;
     tempvec_lvls.SetSize(num_levels);
-    tempvec_lvls[0] = new BlockVector(Funct.RowOffsets());
+    tempvec_lvls[0] = new BlockVector(FunctBlockMat.RowOffsets());
     rhsfunc_lvls.SetSize(num_levels);
     rhsfunc_lvls[0] = new BlockVector(block_offsets);
     solupdate_lvls.SetSize(num_levels);
@@ -1006,17 +1002,17 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         Solve(*xblock, *yblock);
 
-        MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), Constr,
+        MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *(Constr_lvls[0]),
                                    ConstrRhs, "at the end of iteration"), "");
         MFEM_ASSERT(CheckBdrError(yblock->GetBlock(0),
                                   bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
         if (print_level >= 1)
         {
-            funct_currnorm = CheckFunctValue(comm, Funct, *yblock, "at the end of iteration: ", true);
+            funct_currnorm = CheckFunctValue(comm, *(Funct_lvls[0]), *yblock, "at the end of iteration: ", true);
         }
         else
-            funct_currnorm = CheckFunctValue(comm, Funct, *yblock, "at the end of iteration: ", false);
+            funct_currnorm = CheckFunctValue(comm, *(Funct_lvls[0]), *yblock, "at the end of iteration: ", false);
 
         if (i > 0 && StoppingCriteria(funct_currnorm, funct_prevnorm, funct_firstnorm))
         {
@@ -1031,24 +1027,8 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             xblock = yblock;
         }
 
-    }
+    } // end of main iterative loop
 
-
-    /*
-    xblock->Update(x.GetData(), block_offsets);
-    yblock->Update(y.GetData(), block_offsets);
-
-
-    Solve(*xblock, *yblock);
-
-#ifdef DEBUG_INFO
-    CheckFunctValue(Funct, *yblock, "at the end of iteration: ");
-    MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), Constr,
-                               ConstrRhs, "at the end of iteration"), "");
-    MFEM_ASSERT(CheckBdrError(yblock->GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
-#endif
-    */
 }
 
 // Computes rhs coming from the last iterate sigma
@@ -1057,7 +1037,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 // the minimized variable (e.g. sigma, or (sigma,S)).
 void BaseGeneralMinConstrSolver::ComputeRhsFunc(BlockVector &rhs_func, const BlockVector& xblock) const
 {
-    Funct.Mult(xblock, rhs_func);
+    Funct_lvls[0]->Mult(xblock, rhs_func);
     rhs_func *= -1.0;
 }
 
@@ -1077,10 +1057,7 @@ void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const Block
                                                           const BlockVector& solupd_l, BlockVector& out_l) const
 {
     // out_l = M_l * solupd_l
-    if (level == 0)
-        Funct.Mult(solupd_l, out_l );
-    else
-        Funct_lvls[level - 1]->Mult(solupd_l, out_l);
+    Funct_lvls[level]->Mult(solupd_l, out_l);
 
     // out_l = - M_l * solupd_l
     out_l *= -1;
@@ -1113,7 +1090,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         // ensure that the initial iterate satisfies essential boundary conditions
         previous_sol = bdrdata_finest;
 #ifdef DEBUG_INFO
-        CheckFunctValue(comm, Funct, previous_sol, "for prev_sol at the beginning of iteration 0: ", true);
+        CheckFunctValue(comm, *(Funct_lvls[0]), previous_sol, "for prev_sol at the beginning of iteration 0: ", true);
 #endif
     }
 
@@ -1129,23 +1106,23 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
 #ifdef DEBUG_INFO
     if (current_iteration > 0)
-        CheckFunctValue(comm, Funct, next_sol, "for next_sol at the beginning of iteration 0: ", true);
+        CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "for next_sol at the beginning of iteration: ", true);
 #endif
 
+#ifdef COMPUTING_LAMBDA
     /*
-#ifdef DEBUG_INFO
-    #ifdef COMPUTING_LAMBDA
-    BlockVector sigma_special_block(block_offsets);
-    sigma_special_block.GetBlock(0) = sigma_special;
-    CheckFunctValue(Funct, sigma_special_block, "for sigma_special at the beginning of iteration 0: ");
-    #endif
-#endif
+#ifdef      DEBUG_INFO
+                BlockVector sigma_special_block(block_offsets);
+                sigma_special_block.GetBlock(0) = sigma_special;
+                CheckFunctValue(Funct, sigma_special_block, "for sigma_special at the beginning of iteration: ");
+#           endif
     */
+#endif
 
     if (current_iteration == 0) // for the first iteration rhs in the constraint is nonzero
     {
         // setting rhs in the constraint to the input rhs - Constr * given bdr_data
-        Constr.Mult(previous_sol.GetBlock(0), *rhs_constr);
+        Constr_lvls[0]->Mult(previous_sol.GetBlock(0), *rhs_constr);
         *rhs_constr *= -1.0;
         *rhs_constr += ConstrRhs;
 
@@ -1184,10 +1161,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 #ifdef DEBUG_INFO
         if ( current_iteration == 0)
         {
-            if (l == 0)
-                CheckConstrRes(*(solupdate_lvls[l]), Constr, *rhs_constr, "before hcurl update");
-            else
-                CheckConstrRes(*(solupdate_lvls[l]), *(Constr_lvls[l-1]), *rhs_constr, "before hcurl update");
+            CheckConstrRes(*(solupdate_lvls[l]), *(Constr_lvls[l]), *rhs_constr, "before hcurl update");
         }
 #endif
 
@@ -1198,12 +1172,12 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         {
             if (numblocks == 1)
             {
-                Smoo->SetUpSmoother(l, (Funct.GetBlock(0,0)), (P_Func[l]->GetBlock(0,0)));
+                Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0), (P_Func[l]->GetBlock(0,0)));
                 Smoo->ComputeRhsLevel(l, tempvec_lvls[l]->GetBlock(0));
             }
             else
             {
-                Smoo->SetUpSmoother(l, Funct, *(P_Func[l]));
+                Smoo->SetUpSmoother(l, *(Funct_lvls[l]), *(P_Func[l]));
                 Smoo->ComputeRhsLevel(l, *(tempvec_lvls[l]));
             }
             Smoo->MultLevel(l, *(solupdate_lvls[l]), *(tempvec_lvls[l]));
@@ -1212,68 +1186,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         }
 
         *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
-
-        /*
-        // for now we are smoothing in Hcurl only at the finest level
-        // because we don't have canonical projectors to ensure that
-        // coarsened curl will be in the kernel of coarsened divergence
-        if (Smoo && l == 0)
-        {
-            if (numblocks == 1)
-            {
-                if (l == 0)
-                {
-                    Smoo->SetUpSmoother(l, (Funct.GetBlock(0,0)), (P_Func[l]->GetBlock(0,0)));
-                }
-                else
-                    Smoo->SetUpSmoother(l, Funct_lvls[l - 1]->GetBlock(0,0), P_Func[l - 1]->GetBlock(0,0) );
-                Smoo->ComputeRhsLevel(l, tempvec_lvls[l]->GetBlock(0));
-            }
-            else
-            {
-
-                if (l == 0)
-                    Smoo->SetUpSmoother(l, Funct, *(P_Func[l]));
-                else
-                    Smoo->SetUpSmoother(l, *(Funct_lvls[l - 1]), *(P_Func[l]) );
-                Smoo->ComputeRhsLevel(l, *(tempvec_lvls[l]));
-            }
-            Smoo->MultLevel(l, *(solupdate_lvls[l]), *(tempvec_lvls[l]));
-
-#ifdef DEBUG_INFO
-            Vector tempdelta;
-            tempdelta.SetSize(tempvec_lvls[l]->Size());
-            tempdelta = *(tempvec_lvls[l]);
-            tempdelta -= *(solupdate_lvls[l]);
-            Vector zeros;
-            if (l == 0)
-                zeros.SetSize(Constr.Height());
-            else
-                zeros.SetSize(Constr_lvls[l-1]->Height());
-            zeros = 0.0;
-            if (l == 0)
-                CheckConstrRes(tempdelta, Constr, zeros, "for hcurl update delta");
-            else
-                CheckConstrRes(tempdelta, *(Constr_lvls[l-1]), zeros, "for hcurl update delta");
-#endif
-            *(solupdate_lvls[l]) = *(tempvec_lvls[l]);
-
-#ifdef DEBUG_INFO
-            if ( current_iteration == 0)
-            {
-                if (l == 0)
-                    CheckConstrRes(*(solupdate_lvls[l]), Constr, *rhs_constr, "after hcurl update");
-                else
-                    CheckConstrRes(*(solupdate_lvls[l]), *(Constr_lvls[l-1]), *rhs_constr, "after hcurl update");
-            }
-#endif
-            ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
-        }
-        else
-        {
-            *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
-        }
-        */
 
         // setting up rhs from the functional for the next (coarser) level
         ComputeNextLvlRhsFunc(l);
@@ -1290,7 +1202,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         SetUpCoarsestLvl();
     }
     else
-        rhs_constr->SetSize(Constr_lvls[num_levels - 1 - 1]->Height());
+        rhs_constr->SetSize(Constr_lvls[num_levels - 1]->Height());
 
     SetUpCoarsestRhsFunc();
     // needs to have coarse level rhs in the func already set before the call
@@ -1317,13 +1229,13 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         {
             next_sol += *(solupdate_lvls[0]);
             if (*current_iteration == 0)
-                MFEM_ASSERT(CheckConstrRes(solupdate_lvls[0]->GetBlock(0), Constr,
+                MFEM_ASSERT(CheckConstrRes(solupdate_lvls[0]->GetBlock(0), *(Constr_lvls[0]),
                             ConstrRhs, "only for the level solution"), "");
             else
             {
                 Vector zeros(ConstrRhs.Size());
                 zeros = 0.0;
-                MFEM_ASSERT(CheckConstrRes(solupdate_lvls[0]->GetBlock(0), Constr,
+                MFEM_ASSERT(CheckConstrRes(solupdate_lvls[0]->GetBlock(0), *(Constr_lvls[0]),
                             zeros, "only for the level solution"), "");
             }
             ofstream ofs("newsolver_out_sol_level_0.txt");
@@ -1333,13 +1245,13 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         {
             InterpolateBack(level, *(solupdate_lvls[level]), 0, *(tempvec_lvls[0]));
             if (*current_iteration == 0)
-                MFEM_ASSERT(CheckConstrRes(tempvec_lvls[0]->GetBlock(0), Constr,
+                MFEM_ASSERT(CheckConstrRes(tempvec_lvls[0]->GetBlock(0), *(Constr_lvls[0]),
                             ConstrRhs, "only for the level solution"),"");
             else
             {
                 Vector zeros(ConstrRhs.Size());
                 zeros = 0.0;
-                MFEM_ASSERT(CheckConstrRes(tempvec_lvls[0]->GetBlock(0), Constr,
+                MFEM_ASSERT(CheckConstrRes(tempvec_lvls[0]->GetBlock(0), *(Constr_lvls[0]),
                             zeros, "only for the level solution"),"");
             }
             next_sol += *(tempvec_lvls[0]);
@@ -1347,8 +1259,8 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
             {
                 ofstream ofs("newsolver_out_sol_level_1.txt");
                 (*tempvec_lvls)[0]->GetBlock(0).Print(ofs,1);
-                Vector res_constr(Constr_lvls[level - 1]->Height());
-                Constr_lvls[level - 1]->Mult(solupdate_lvls[level]->GetBlock(0), res_constr);
+                Vector res_constr(Constr_lvls[level]->Height());
+                Constr_lvls[level]->Mult(solupdate_lvls[level]->GetBlock(0), res_constr);
                 ofstream ofs2("newsolver_out_right_at_level1.txt");
                 res_constr.Print(ofs2,1);
             }
@@ -1361,7 +1273,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
             }
         }
 
-        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), Constr,
+        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]),
                                    ConstrRhs, "after finer level"),"");
     }
 #else
@@ -1388,7 +1300,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     /*
 #ifdef DEBUG_INFO
-    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), Constr, ConstrRhs, "after all levels update"),"");
+    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 #endif
     */
@@ -1492,26 +1404,20 @@ void BaseGeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     AE_edofs_L2[lvl] = mfem::Mult(*(AE_e[lvl]), *(el_to_dofs_L2[lvl]));
     AE_eintdofs_Func[lvl] = Get_AE_eintdofs(lvl, *el_to_dofs_Func[lvl], essbdrdofs_Func, bdrdofs_Func);
 
-    // Funct_lvls[lvl] stores the Functional matrix on level lvl + 1
+    // Funct_lvls[lvl] stores the Functional matrix on level lvl
     BlockMatrix * Funct_PR;
     BlockMatrix * P_FuncT = Transpose(*P_Func[lvl]);
-    if (lvl == 0)
-        Funct_PR = mfem::Mult(Funct,*P_Func[lvl]);
-    else
-        Funct_PR = mfem::Mult(*(Funct_lvls[lvl - 1]),*P_Func[lvl]);
-    Funct_lvls[lvl] = mfem::Mult(*P_FuncT, *Funct_PR);
+    Funct_PR = mfem::Mult(*(Funct_lvls[lvl]),*P_Func[lvl]);
+    Funct_lvls[lvl + 1] = mfem::Mult(*P_FuncT, *Funct_PR);
 
     SparseMatrix *P_L2T = Transpose(*P_L2[lvl]);
     SparseMatrix *Constr_PR;
-    if (lvl == 0)
-        Constr_PR = mfem::Mult(Constr, P_Func[lvl]->GetBlock(0,0));
-    else
-        Constr_PR = mfem::Mult(*(Constr_lvls[lvl - 1]), P_Func[lvl]->GetBlock(0,0));
-    Constr_lvls[lvl] = mfem::Mult(*P_L2T, *Constr_PR);
+    Constr_PR = mfem::Mult(*(Constr_lvls[lvl]), P_Func[lvl]->GetBlock(0,0));
+    Constr_lvls[lvl + 1] = mfem::Mult(*P_L2T, *Constr_PR);
 
-    tempvec_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl]->RowOffsets());
-    solupdate_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl]->RowOffsets());
-    rhsfunc_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl]->RowOffsets());
+    tempvec_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
+    solupdate_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
+    rhsfunc_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 
     delete Funct_PR;
     delete Constr_PR;
@@ -1663,104 +1569,6 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
     return res;
 }
 
-#ifdef TODAYDEBUG
-void BaseGeneralMinConstrSolver::SolveFinerLevelProblem(int level, BlockVector &lvlrhs_func, Vector& rhs_constr, BlockVector& sol_update) const
-{
-    const SparseMatrix * Constr_fine;
-    if (level == 0)
-        Constr_fine = &Constr;
-    else
-        Constr_fine = (*Constr_lvls)[level - 1];
-    SparseMatrix * Constr_fine_copy = new SparseMatrix(*Constr_fine);
-
-    const Array<int> * temp = essbdrdofs_Func[0][level];
-    Constr_fine_copy->EliminateCols(*temp);
-
-    SparseMatrix * ConstrT_fine = Transpose(*Constr_fine);
-
-    const BlockMatrix * Funct_fine;
-    if (level == 0)
-        Funct_fine = &Funct;
-    else
-        Funct_fine = (*Funct_lvls)[level - 1];
-    BlockMatrix * Funct_fine_copy = new BlockMatrix(Funct_fine->ColOffsets());
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        SparseMatrix * Funct_fine_blk_copy = new SparseMatrix(Funct_fine->GetBlock(blk,blk));
-        Funct_fine_copy->SetBlock(blk,blk,Funct_fine_blk_copy);
-    }
-
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        const Array<int> * temp = essbdrdofs_Func[blk][level];
-        for ( int dof = 0; dof < temp->Size(); ++dof)
-            if ((*temp)[dof] != 0)
-            {
-                Funct_fine_copy->GetBlock(blk,blk).EliminateRowCol(dof);
-                lvlrhs_func.GetBlock(blk)[dof] = 0.0;
-            }
-    }
-
-
-
-    //for (int i = 0; i < Funct_fine->ColOffsets().Size(); ++i )
-        //std::cout << Funct_fine->ColOffsets()[i] << "\n";
-
-    Array<int> offsets(numblocks + 2);
-    for ( int blk = 0; blk <= numblocks; ++blk)
-    {
-        //std::cout << "hmm blk = " << blk << ", value = " << Funct_fine->ColOffsets()[blk] << "\n";
-        offsets[blk] = Funct_fine->ColOffsets()[blk];
-    }
-    //offsets.Print();
-    offsets[numblocks + 1] = offsets[numblocks] + Constr_fine->Height();
-    //offsets.Print();
-
-    BlockVector X_special(offsets);
-    BlockVector Rhs_special(offsets);
-    X_special = 0.0;
-    Rhs_special = 0.0;
-
-
-    for ( int blk = 0; blk < numblocks; ++blk)
-        Rhs_special.GetBlock(blk) = lvlrhs_func.GetBlock(blk);
-    Rhs_special.GetBlock(numblocks) = rhs_constr;
-
-    BlockOperator *CFOSLSop_lvl = new BlockOperator(offsets);
-    for ( int blk = 0; blk < numblocks; ++blk)
-        CFOSLSop_lvl->SetBlock(blk ,blk, &(Funct_fine_copy->GetBlock(blk,blk)));
-    CFOSLSop_lvl->SetBlock(0,numblocks, ConstrT_fine);
-    CFOSLSop_lvl->SetBlock(numblocks,0, Constr_fine_copy);
-
-    double rtol = 1e-12;
-    double atol = 1e-14;
-    MINRESSolver solver(MPI_COMM_WORLD);
-    solver.SetAbsTol(atol);
-    solver.SetRelTol(rtol);
-    solver.SetMaxIter(70000);
-    solver.SetOperator(*CFOSLSop_lvl);
-    solver.SetPrintLevel(0);
-
-    //Rhs_special.Print();
-    solver.Mult(Rhs_special, X_special);
-
-    for ( int blk = 0; blk < numblocks; ++blk)
-        sol_update.GetBlock(blk) = X_special.GetBlock(blk);
-
-#ifdef DEBUG_INFO
-    {
-       if (solver.GetConverged())
-          std::cout << "MINRES converged in " << solver.GetNumIterations()
-                    << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
-       else
-          std::cout << "MINRES did not converge in " << solver.GetNumIterations()
-                    << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
-    }
-#endif
-
-}
-#endif
-
 void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlrhs_func,
                                                     Vector& rhs_constr, BlockVector& sol_update) const
 {
@@ -1770,19 +1578,13 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
     Vector sub_rhsconstr;
     Array<int> sub_Func_offsets(numblocks + 1);
 
-    //SparseMatrix A_fine = Funct.GetBlock(0,0);
+    //SparseMatrix A_fine = Funct_lvls[0]->GetBlock(0,0);
     //SparseMatrix B_fine = Constr;
     const SparseMatrix * Constr_fine;
-    if (level == 0)
-        Constr_fine = &Constr;
-    else
-        Constr_fine = Constr_lvls[level - 1];
+    Constr_fine = Constr_lvls[level];
 
     const BlockMatrix * Funct_fine;
-    if (level == 0)
-        Funct_fine = &Funct;
-    else
-        Funct_fine = Funct_lvls[level - 1];
+    Funct_fine = Funct_lvls[level];
 
     /*
 #ifdef DEBUG_INFO
@@ -1905,97 +1707,8 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
 
-        /*
-        if (level == 0 && AE == 0)
-        {
-            //lvlrhs_func.GetBlock(0).Print();
-            std::cout << "AE = 0, level = 1 \n";
-            std::cout << "sub_M \n";
-            LocalAE_Matrices[0].Print();
-            //std::cout << "sub_Constr \n";
-            //sub_Constr.Print();
-            //sub_ConstrT = sub_Constr.Transpose();
-            std::cout << "sub_ConstrT \n";
-            sub_Constr.PrintT();
-            std::cout << "sub_Func \n";
-            sub_Func.GetBlock(0).Print();
-            std::cout << "sub_rhsconstr \n";
-            sub_rhsconstr.Print();
-            std::cout << "local problem is ";
-            if (is_degenerate)
-                std::cout << "singular \n";
-            else
-                std::cout << "nonsingular \n";
-#ifdef COMPUTING_LAMBDA
-            std::cout << "Full vectors: lvlrhs_func - (-Msigma_special) \n";
-            Msigma_special += lvlrhs_func.GetBlock(0);
-            Msigma_special.Print();
-#endif
-            std::cout << "?\n";
-        }
-        */
-
-        // only for debugging
-        //sub_Func.GetBlock(0) = Msigma_sp_local;
-        //sub_Func.GetBlock(0) *= -1.0;
-
         // Solving local problem at the agglomerate element AE:
         SolveLocalProblem(LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr, sol_loc, is_degenerate);
-
-        /*
-        if (level == 0 && AE == 0)
-        {
-            std::cout << "sol_loc \n";
-            sol_loc.GetBlock(0).Print();
-            //std::cout << "sub_Constr * sol_loc[0] \n";
-            //Vector temp(sub_Constr.Height());
-            //sub_Constr.Mult(sol_loc.GetBlock(0), temp);
-            //temp.Print();
-#ifdef DEBUG_INFO
-            std::cout << "sub_lambda \n";
-            sub_lambda.Print();
-            if (is_degenerate)
-            {
-                double average = 0.0;
-                for ( int i = 0; i < sub_lambda.Size(); ++i)
-                    average += sub_lambda[i];
-                average /= sub_lambda.Size();
-                std::cout << "sub_lambda_average = " << average << "\n";
-            }
-
-
-            Vector check_local(LocalAE_Matrices[0].Height());
-
-            Vector BTlambda_local(sub_Constr.Width());
-            sub_Constr.MultTranspose(sub_lambda, BTlambda_local);
-            check_local = BTlambda_local;
-            BTlambda_local -= sub_Func.GetBlock(0);
-            std::cout << "sub_BT * sub_lambda - sub_F \n";
-            BTlambda_local.Print();
-#ifdef COMPUTING_LAMBDA
-            // Msigma as sub_M * sub_sigma
-            //Vector Mloc_sigmaloc(LocalAE_Matrices[0].Height());
-            //LocalAE_Matrices[0].Mult(sub_sigma, Mloc_sigmaloc);
-            //check_local += Mloc_sigmaloc;
-            //Mloc_sigmaloc *= -1.0;
-            //Mloc_sigmaloc -= sub_Func.GetBlock(0);
-            //std::cout << "(- sub_M * sub_lambda) - sub_F \n";
-            //Mloc_sigmaloc.Print();
-            //std::cout << "sub_M * sigma_local + sub_BT * lambda_local \n";
-            //check_local.Print();
-
-            // using Msigma as sub ( M * sigma )
-            check_local += Msigma_sp_local;
-            std::cout << " (M * sigma)_local + sub_BT * lambda_local \n";
-            check_local.Print();
-            std::cout << " G_local - (- (M * sigma)_local) \n";
-            sub_Func.GetBlock(0) += Msigma_sp_local;
-            sub_Func.GetBlock(0).Print();
-#endif
-#endif
-            std::cout << "? \n \n";
-        }
-        */
 
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
@@ -2009,8 +1722,6 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
     return;
 }
 
-// FIXME: Does something wrong in parallel case
-// Not fixed because the serial solution is already wrong for now
 void BaseGeneralMinConstrSolver::SetUpCoarsestRhsFunc() const
 {
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -2034,7 +1745,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     // 1. eliminating boundary conditions at coarse level
     const Array<int> * temp = essbdrdofs_Func[0][num_levels-1];
 
-    Constr_lvls[num_levels-1-1]->EliminateCols(*temp);
+    Constr_lvls[num_levels - 1]->EliminateCols(*temp);
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -2042,7 +1753,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
         for ( int dof = 0; dof < temp->Size(); ++dof)
             if ( (*temp)[dof] != 0)
             {
-                Funct_lvls[num_levels-1-1]->GetBlock(blk,blk).EliminateRowCol(dof);
+                Funct_lvls[num_levels - 1]->GetBlock(blk,blk).EliminateRowCol(dof);
             }
 
     }
@@ -2058,7 +1769,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     // 2. Creating the block matrix from the local parts using dof_truedof relation
 
     HypreParMatrix * Constr_global = dof_trueDof_Func[0]->LeftDiagMult(
-                *(Constr_lvls[num_levels-1-1]), dof_trueDof_L2.GetColStarts());
+                *(Constr_lvls[num_levels - 1]), dof_trueDof_L2.GetColStarts());
 
     HypreParMatrix *ConstrT_global = Constr_global->Transpose();
 
@@ -2068,7 +1779,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     std::vector<HypreParMatrix*> Funct_global(numblocks);
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        Funct_d_td[blk] = dof_trueDof_Func[blk]->LeftDiagMult(Funct_lvls[num_levels-1-1]->GetBlock(blk,blk));
+        Funct_d_td[blk] = dof_trueDof_Func[blk]->LeftDiagMult(Funct_lvls[num_levels - 1]->GetBlock(blk,blk));
         d_td_T[blk] = dof_trueDof_Func[blk]->Transpose();
 
         Funct_global[blk] = ParMult(d_td_T[blk], Funct_d_td[blk]);
@@ -2150,8 +1861,8 @@ public:
                            const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
-                           const BlockMatrix& FunctBlockMat,
-                           const SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
+                           BlockMatrix& FunctBlockMat,
+                           SparseMatrix& ConstrMat, const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_Finest,
                            const Array<int>& Ess_dof_coarsest,
 #ifdef COMPUTING_LAMBDA
