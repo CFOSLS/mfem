@@ -13,23 +13,16 @@
 
 #define NEW_STUFF // for new multilevel solver
 
-// TODO: Add divergence matrices at all levels (assembled from bilinear forms)
-// TODO: as an input to the new solver and check that it won't change anything
-// TODO: so that coarsened divergence matrices constructed inside new solver now
-// TODO are the same as the former
-
-// additional printing option
-//#define COMPARE_WITH_OLD
-
 // additional options used for debugging
 //#define EXACTSOLH_INIT
 //#define COMPUTING_LAMBDA
 
+// switches on/off usage of smoother in the new minimization solver
 #define WITH_SMOOTHER
 
 #include "divfree_solver_tools.hpp"
 
-// must be on
+// must be active
 #define USE_CURLMATRIX
 
 //#define BAD_TEST
@@ -1252,6 +1245,9 @@ int main(int argc, char *argv[])
     std::vector<HypreParMatrix*> Dof_TrueDof_L2_lvls(num_levels);
 
     Array<SparseMatrix*> Divfree_mat_lvls(num_levels);
+    std::vector<Array<int>*> Funct_mat_offsets_lvls(num_levels);
+    Array<BlockMatrix*> Funct_mat_lvls(num_levels);
+    Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
    for (int l = 0; l < num_levels; ++l)
     {
@@ -1259,6 +1255,7 @@ int main(int argc, char *argv[])
         BdrDofs_R[0][l] = new Array<int>;
         EssBdrDofs_R[0][l] = new Array<int>;
         EssBdrDofs_Hcurl[l] = new Array<int>;
+        Funct_mat_offsets_lvls[l] = new Array<int>;
     }
 
     const SparseMatrix* Proj_Hcurl_local;
@@ -1522,7 +1519,7 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][l]));
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[l]));
 
-        // getting curl operator at level l
+        // getting operators at level l
         // curl or divskew operator from C_space into R_space
         ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
         if (dim == 3)
@@ -1532,6 +1529,29 @@ int main(int argc, char *argv[])
         Divfree_op.Assemble();
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
+
+        ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
+        //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Ablock->Assemble();
+        //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+        Ablock->Finalize();
+
+        Funct_mat_offsets_lvls[l]->SetSize(2);
+        //SparseMatrix Aloc = Ablock->SpMat();
+        //Array<int> offsets(2);
+        (*(Funct_mat_offsets_lvls[l]))[0] = 0;
+        (*(Funct_mat_offsets_lvls[l]))[1] = Ablock->Height();
+
+        Funct_mat_lvls[l] = new BlockMatrix(*(Funct_mat_offsets_lvls[l]));
+        Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
+
+        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
+        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Bblock->Assemble();
+        //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
+        Bblock->Finalize();
+        Constraint_mat_lvls[l] = Bblock->LoseMat();
 
         // getting pointers to dof_truedof matrices
         Dof_TrueDof_Hcurl[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
@@ -3147,20 +3167,27 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
+    const bool higher_order = false;
+    const bool construct_coarseops = true;
+    MultilevelSmoother * Smoother;
 #ifdef WITH_SMOOTHER
+    Smoother = &NewGSSmoother;
+    //Smoother = &NewSmoother;
+#else
+    Smoother = NULL;
+#endif
+
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit,
+                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R,
+                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit, //Ablockmat, Bloc, Floc, Xinit,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
-                     &NewGSSmoother, false);
-#else
-    update here from the with_smoother case;
-#endif
+                     Smoother, higher_order, construct_coarseops);
 
     double newsolver_abstol = 1.0e-12;
-    double newsolver_reltol = 1.0e-12;
+    double newsolver_reltol = 1.0e-6;
 
     if (verbose)
     {
@@ -3170,7 +3197,7 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAbsTol(newsolver_abstol);
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(300);
+    NewSolver.SetMaxIter(30);
     NewSolver.SetPrintLevel(1);
 
     Vector tempp(sigma_exact->Size());
@@ -3385,35 +3412,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "\n";
-
-#ifdef COMPARE_WITH_OLD
-    std::cout << "Comparing input righthand sides: \n";
-    Vector diff1(F_fine.Size());
-    diff1 = F_fine;
-    diff1 -= Floc;
-    std::cout << "Norm of difference old vs new = " << diff1.Norml2() / sqrt(diff1.Size()) << "\n";
-    std::cout << "Rel. norm of difference old vs new = " << (diff1.Norml2() / sqrt(diff1.Size())) / (F_fine.Norml2() / sqrt(F_fine.Size())) << "\n";
-
-    std::cout << "Comparing input matrices for constraint (as SparseMatrices): \n";
-    SparseMatrix diff2(*B_local);
-    diff2.Add(-1.0, Bloc);
-    std::cout << "Norm of difference old vs new = " << diff2.MaxNorm() << "\n";
-    std::cout << "Rel. norm of difference old vs new = " << diff2.MaxNorm() / B_local->MaxNorm() << "\n";
-
-    std::cout << "Comparing input matrices for functional (as SparseMatrices): \n";
-    SparseMatrix diff3(*M_local);
-    diff3.Add(-1.0, Aloc);
-    std::cout << "Norm of difference old vs new = " << diff3.MaxNorm() << "\n";
-    std::cout << "Rel. norm of difference old vs new = " << diff3.MaxNorm() / M_local->MaxNorm() << "\n";
-
-    std::cout << "Comparing solutions (the most important!): \n";
-    Vector diff(sigmahat_pau.Size());
-    diff = sigmahat_pau;
-    diff -= *NewSigmahat;
-    std::cout << "Norm of difference old vs new = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
-    std::cout << "Rel. norm of difference old vs new = " << (diff.Norml2() / sqrt(diff.Size())) / (sigmahat_pau.Norml2() / sqrt(sigmahat_pau.Size())) << "\n";
-#endif
-
 
     MPI_Finalize();
     return 0;
