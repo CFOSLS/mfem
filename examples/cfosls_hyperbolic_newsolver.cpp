@@ -768,7 +768,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1208,15 +1208,15 @@ int main(int argc, char *argv[])
 
     // For geometric multigrid
     Array<HypreParMatrix*> P_C(par_ref_levels);
-    ParFiniteElementSpace *coarseC_space;
 
-    if (prec_is_MG)
-        coarseC_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
+    //ParFiniteElementSpace *coarseC_space;
+    //if (prec_is_MG)
+        //coarseC_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
 
     Array<HypreParMatrix*> P_H(par_ref_levels);
-    ParFiniteElementSpace *coarseH_space;
-    if (prec_is_MG)
-        coarseH_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
+    //ParFiniteElementSpace *coarseH_space;
+    //if (prec_is_MG)
+        //coarseH_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
 
     //ParFiniteElementSpace *coarseR_space;
     //ParFiniteElementSpace *coarseW_space;
@@ -1233,7 +1233,7 @@ int main(int argc, char *argv[])
     const SparseMatrix* P_W_local;
     const SparseMatrix* P_R_local;
 
-    Array<int> ess_dof_coarsestlvl_list;
+    //Array<int> ess_dof_coarsestlvl_list;
     DivPart divp;
 
 #ifdef NEW_STUFF
@@ -1245,33 +1245,24 @@ int main(int argc, char *argv[])
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
 
-    //ProjH_Curl looks wrong, thus failure for num_levels > 2
     Array< SparseMatrix* > Proj_Hcurl(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl(num_levels);
 
-    std::vector<std::vector<HypreParMatrix*> > Dof_trueDof_Func_lvls(num_levels);
-    for ( int l = 0; l < num_levels; ++l)
-        Dof_trueDof_Func_lvls[l].resize(1);
-    std::vector<HypreParMatrix*> Dof_trueDof_L2_lvls(num_levels);
+    std::vector<std::vector<HypreParMatrix*> > Dof_TrueDof_Func_lvls(num_levels);
+    std::vector<HypreParMatrix*> Dof_TrueDof_L2_lvls(num_levels);
 
-
-    //MPI_Finalize();
-    //return 0;
-
-    //std::vector<std::vector<Array<int> > > EssBdrDofs_R(1);
-
-
+    Array<SparseMatrix*> Divfree_mat_lvls(num_levels);
 
    for (int l = 0; l < num_levels; ++l)
     {
-        //std::cout << "l = " << l << "\n";
+        Dof_TrueDof_Func_lvls[l].resize(1);
         BdrDofs_R[0][l] = new Array<int>;
         EssBdrDofs_R[0][l] = new Array<int>;
         EssBdrDofs_Hcurl[l] = new Array<int>;
     }
 
     const SparseMatrix* Proj_Hcurl_local;
-    HypreParMatrix * temp;
+    //HypreParMatrix * temp;
 #endif
 
     /*
@@ -1464,82 +1455,132 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    if (with_multilevel)
+    const int finest_level = 0;
+    const int coarsest_level = num_levels - 1;
+
+    if (verbose)
+        std::cout << "Creating a hierarchy of meshes by successive refinements "
+                     "(with multilevel and multigrid prerequisites) \n";
+
+    if (!withDiv && verbose)
+        std::cout << "Multilevel code cannot be used without withDiv flag \n";
+
+    for (int l = num_levels - 1; l >=0; --l)
     {
-
-        if (verbose)
-            std::cout << "Creating a hierarchy of meshes by successive refinements "
-                         "(with multilevel and multigrid prerequisites) \n";
-
-        if (!withDiv && verbose)
-            std::cout << "Multilevel code cannot be used without withDiv flag \n";
-
-        for (int l = num_levels - 1; l >=0; --l)
+        // creating pmesh for level l
+        if (l == num_levels - 1)
         {
-            // creating pmesh for level l
-            if (l == num_levels - 1)
+            pmesh_lvls[l] = pmesh.get();
+        }
+        else
+        {
+            if (aniso_refine && refine_t_first)
             {
-                pmesh_lvls[l] = pmesh.get();
+                Array<Refinement> refs(pmesh->GetNE());
+                if (l < par_ref_levels/2+1)
+                {
+                    for (int i = 0; i < pmesh->GetNE(); i++)
+                        refs[i] = Refinement(i, 4);
+                }
+                else
+                {
+                    for (int i = 0; i < pmesh->GetNE(); i++)
+                        refs[i] = Refinement(i, 3);
+                }
+                pmesh->GeneralRefinement(refs, -1, -1);
+            }
+            else if (aniso_refine && !refine_t_first)
+            {
+                Array<Refinement> refs(pmesh->GetNE());
+                if (l < par_ref_levels/2+1)
+                {
+                    for (int i = 0; i < pmesh->GetNE(); i++)
+                        refs[i] = Refinement(i, 3);
+                }
+                else
+                {
+                    for (int i = 0; i < pmesh->GetNE(); i++)
+                        refs[i] = Refinement(i, 4);
+                }
+                pmesh->GeneralRefinement(refs, -1, -1);
             }
             else
             {
                 pmesh->UniformRefinement();
-                pmesh_lvls[l] = new ParMesh(*pmesh);
             }
 
-            // creating pfespaces for level l
-            R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
-            W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
-            C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
+            pmesh_lvls[l] = new ParMesh(*pmesh);
+        }
 
-            R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][l]));
-            R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][l]));
-            C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[l]));
+        // creating pfespaces for level l
+        R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
+        W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
+        C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
 
-            // getting pointers to dof_truedof matrices
-            Dof_TrueDof_Hcurl[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
-            Dof_trueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
-            Dof_trueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
+        // getting boundary and essential boundary dofs
+        R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][l]));
+        R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][l]));
+        C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[l]));
 
-            if (l < num_levels - 1)
+        // getting curl operator at level l
+        // curl or divskew operator from C_space into R_space
+        ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        if (dim == 3)
+            Divfree_op.AddDomainInterpolator(new CurlInterpolator());
+        else // dim == 4
+            Divfree_op.AddDomainInterpolator(new DivSkewInterpolator());
+        Divfree_op.Assemble();
+        Divfree_op.Finalize();
+        Divfree_mat_lvls[l] = Divfree_op.LoseMat();
+
+        // getting pointers to dof_truedof matrices
+        Dof_TrueDof_Hcurl[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
+
+        // for all but one levels we create projection matrices between levels
+        // and projectors assembled on true dofs if MG preconditioner is used
+        if (l < num_levels - 1)
+        {
+            C_space->Update();
+            Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
+            Proj_Hcurl[l] = RemoveZeroEntries(*Proj_Hcurl_local);
+
+            W_space->Update();
+            R_space->Update();
+
+            P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
+            P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
+
+            SparseMatrix* R_Element_to_dofs1 = new SparseMatrix();
+            SparseMatrix* W_Element_to_dofs1 = new SparseMatrix();
+
+            divp.Elem2Dofs(*R_space, *R_Element_to_dofs1);
+            divp.Elem2Dofs(*W_space, *W_Element_to_dofs1);
+
+            P_W[l] = RemoveZeroEntries(*P_W_local);
+            P_R[l] = RemoveZeroEntries(*P_R_local);
+
+            Element_dofs_R[l] = R_Element_to_dofs1;
+            Element_dofs_W[l] = W_Element_to_dofs1;
+
+            // computing projectors assembled on true dofs
+            if (prec_is_MG)
             {
-                C_space->Update();
-                Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-                Proj_Hcurl[l] = RemoveZeroEntries(*Proj_Hcurl_local);
-
-                W_space->Update();
-                R_space->Update();
-
-                P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
-                P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
-
-                SparseMatrix* R_Element_to_dofs1 = new SparseMatrix();
-                SparseMatrix* W_Element_to_dofs1 = new SparseMatrix();
-
-                divp.Elem2Dofs(*R_space, *R_Element_to_dofs1);
-                divp.Elem2Dofs(*W_space, *W_Element_to_dofs1);
-
-                P_W[l] = RemoveZeroEntries(*P_W_local);
-                P_R[l] = RemoveZeroEntries(*P_R_local);
-
-                Element_dofs_R[l] = R_Element_to_dofs1;
-                Element_dofs_W[l] = W_Element_to_dofs1;
-
-                if (prec_is_MG)
-                {
-                    HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
-                            LeftDiagMult( *(Proj_Hcurl[l]),  C_space_lvls[l]->GetDofOffsets());
-                    P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl[l]->Transpose(), P_C_coarser_d_td);
-                    P_C[num_levels - 2 - l]->CopyColStarts();
-                    P_C[num_levels - 2 - l]->CopyRowStarts();
-                }
-
+                HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
+                        LeftDiagMult( *(Proj_Hcurl[l]),  C_space_lvls[l]->GetDofOffsets());
+                P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl[l]->Transpose(), P_C_coarser_d_td);
+                P_C[num_levels - 2 - l]->CopyColStarts();
+                P_C[num_levels - 2 - l]->CopyRowStarts();
             }
 
         }
 
-        if (verbose)
-            std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
+    }
+
+    if (verbose)
+        std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
+
     /*
     if (with_multilevel)
     {
@@ -1697,7 +1738,6 @@ int main(int argc, char *argv[])
 #endif
             }
         } // end of loop over levels
-        */
     }
     else // not a multilevel algo
     {
@@ -1790,6 +1830,7 @@ int main(int argc, char *argv[])
     } // end of else (not a multilevel algo)
     if (verbose)
         cout << "MG hierarchy constructed in " << chrono.RealTime() << " seconds.\n";
+*/
 
 #ifdef NEW_STUFF
     ParGridFunction * sigma_exact_finest;
@@ -1957,8 +1998,8 @@ int main(int argc, char *argv[])
                           P_W, P_R, P_W,
                           Element_dofs_R,
                           Element_dofs_W,
-                          Dof_trueDof_Func_lvls[num_levels - 1][0],
-                          Dof_trueDof_L2_lvls[num_levels - 1],
+                          Dof_TrueDof_Func_lvls[num_levels - 1][0],
+                          Dof_TrueDof_L2_lvls[num_levels - 1],
                           sigmahat_pau,
                           *(EssBdrDofs_R[0][num_levels - 1]));
 
@@ -2087,7 +2128,7 @@ int main(int argc, char *argv[])
     //Divfree_op.EliminateTestDofs(ess_bdrU);
     Divfree_op.Finalize();
 #ifdef NEW_STUFF
-    SparseMatrix Divfree_op_sp = Divfree_op.SpMat();
+    //SparseMatrix Divfree_op_sp = Divfree_op.SpMat();
 #endif
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
@@ -2903,17 +2944,17 @@ int main(int argc, char *argv[])
         std::cout << "smooth_reltol = " << smooth_reltol << "\n";
     }
 
-    HCurlSmoother NewSmoother(num_levels - 1, &Divfree_op_sp,
+    HCurlSmoother NewSmoother(num_levels - 1, Divfree_mat_lvls[0],
                    Proj_Hcurl, Dof_TrueDof_Hcurl,
                    EssBdrDofs_Hcurl);
     NewSmoother.SetAbsTol(smooth_abstol);//(1.0e-10);//(new_abstol);
     NewSmoother.SetRelTol(smooth_reltol);//(1.0e-10);//(new_reltol);
     NewSmoother.SetMaxIterInt(20000);
 
-    HCurlGSSmoother NewGSSmoother(num_levels - 1, &Divfree_op_sp,
+    HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
                    Proj_Hcurl, Dof_TrueDof_Hcurl,
                    EssBdrDofs_Hcurl);
-    NewGSSmoother.SetSweepsNumber(1);
+    NewGSSmoother.SetSweepsNumber(5);
 
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
@@ -2993,16 +3034,6 @@ int main(int argc, char *argv[])
     Vector Floc(P_W[0]->Height());
     Floc = *constrfform;
 
-    //std::vector<HypreParMatrix*> Dof_TrueDof_coarse_Func(1);
-    //Dof_TrueDof_coarse_Func[0] = d_td_coarse_R;
-
-    //std::cout << "Looking at input:";
-    //Floc.Print();
-
-    //std::cout << "Looking at Bloc \n";
-    //Bloc.Print();
-
-
     BlockVector Xinit(Ablockmat.ColOffsets());
     Xinit.GetBlock(0) = 0.0;
     MFEM_ASSERT(Xinit.GetBlock(0).Size() == sigma_exact_finest->Size(),
@@ -3019,7 +3050,7 @@ int main(int argc, char *argv[])
         if ( (*(EssBdrDofs_R[0][0]))[i] != 0)
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
 
-        //probably doing somethijg better than just essential boundary values
+        //probably doing something better than just essential boundary values
 #ifdef EXACTSOLH_INIT
     #ifdef COMPUTING_LAMBDA
         Xinit.GetBlock(0)[i] = (*sigma_special)[i];
@@ -3117,15 +3148,13 @@ int main(int argc, char *argv[])
     chrono.Start();
 
 #ifdef WITH_SMOOTHER
-    //Element_dofs_Func, Element_dofs_W, Dof_TrueDof_coarse_Func, *d_td_coarse_W,
-    MinConstrSolver NewSolver(ref_levels + 1, P_WT,
-                     Element_dofs_Func, Element_dofs_W, Dof_trueDof_Func_lvls, Dof_trueDof_L2_lvls,
-                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit, ess_dof_coarsestlvl_list,
+    MinConstrSolver NewSolver(num_levels, P_WT,
+                     Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
+                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
-                     &NewSmoother,
-                     false);
+                     &NewGSSmoother, false);
 #else
     update here from the with_smoother case;
 #endif
