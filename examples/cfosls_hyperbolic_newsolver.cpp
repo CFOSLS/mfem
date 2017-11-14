@@ -1528,7 +1528,7 @@ int main(int argc, char *argv[])
                 if (prec_is_MG)
                 {
                     HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
-                            LeftDiagMult( *(Proj_Hcurl[l]),  C_space_lvls[l]->GetTrueDofOffsets());
+                            LeftDiagMult( *(Proj_Hcurl[l]),  C_space_lvls[l]->GetDofOffsets());
                     P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl[l]->Transpose(), P_C_coarser_d_td);
                     P_C[num_levels - 2 - l]->CopyColStarts();
                     P_C[num_levels - 2 - l]->CopyRowStarts();
