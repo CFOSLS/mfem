@@ -15,6 +15,8 @@
 
 //#define WITH_PETSC
 
+#define BUG
+
 #ifdef WITH_PETSC
 #   include<petsc.h>
 #   include<petscmathypre.h>
@@ -33,11 +35,6 @@
 //#define COMPUTING_LAMBDA
 
 #define WITH_SMOOTHER
-
-// used for extracting Dof_TrueDof relations for all tables
-// will be redundant when no global H(curl) solve is
-// involved into the smoother
-#define POINTER_SWAP_AS_COPY
 
 #include "divfree_solver_tools.hpp"
 
@@ -1186,7 +1183,22 @@ int main(int argc, char *argv[])
         hdivfree_coll = new ND_FECollection(feorder + 1, nDimensions);
     else // dim == 4
         hdivfree_coll = new DivSkew1_4DFECollection;
+
     C_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
+
+    /*
+    ParMesh * pmesh_copy;
+    {
+        ifstream imesh(mesh_file);
+        mesh = new Mesh(imesh, 1, 1);
+        imesh.close();
+
+        for (int l = 0; l < ser_ref_levels; l++)
+            mesh->UniformRefinement();
+        pmesh_copy = new ParMesh(comm, *mesh);
+    }
+    */
+    ParFiniteElementSpace * testW_space = C_space;//new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
 
     FiniteElementCollection *h1_coll;
     ParFiniteElementSpace *H_space;
@@ -1216,6 +1228,7 @@ int main(int argc, char *argv[])
     // For geometric multigrid
     Array<HypreParMatrix*> P_C(par_ref_levels);
     ParFiniteElementSpace *coarseC_space;
+
     if (prec_is_MG)
         coarseC_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
 
@@ -1244,7 +1257,7 @@ int main(int argc, char *argv[])
     Array<int> ess_dof_coarsestlvl_list;
     DivPart divp;
 
-//#ifdef NEW_STUFF
+#ifdef NEW_STUFF
     int num_levels = ref_levels + 1;
     Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
     all_bdrSigma = 1;
@@ -1257,6 +1270,12 @@ int main(int argc, char *argv[])
     //ProjH_Curl looks wrong, thus failure for num_levels > 2
     Array< SparseMatrix* > Proj_Hcurl(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl(num_levels - 1);
+
+    std::vector<std::vector<HypreParMatrix*> > Dof_trueDof_Func_lvls(num_levels);
+    for ( int l = 0; l < num_levels; ++l)
+        Dof_trueDof_Func_lvls[l].resize(1);
+    std::vector<HypreParMatrix*> Dof_trueDof_L2_lvls(num_levels);
+
 
     //MPI_Finalize();
     //return 0;
@@ -1275,6 +1294,8 @@ int main(int argc, char *argv[])
     }
 
     const SparseMatrix* Proj_Hcurl_local;
+    HypreParMatrix * temp;
+#endif
 
     /*
     Array<Array<int> > test(2);
@@ -1314,8 +1335,6 @@ int main(int argc, char *argv[])
     return 0;
     */
 
-//#endif
-
     /*
     // creating a bug reproducer for LeftDiagMult and ParMult
     ParMesh * pmesh_copy = new ParMesh(*pmesh);
@@ -1350,10 +1369,111 @@ int main(int argc, char *argv[])
     return 0;
     */
 
+    /*
+    ParMesh * pmesh_copy = new ParMesh(*pmesh);
+    // with vector of vector of pointers
+    ParFiniteElementSpace * testR_space = new ParFiniteElementSpace(pmesh_copy, hdiv_coll);
+    //HypreParMatrix * testmat = testR_space->Dof_TrueDof_Matrix();
+    std::vector< std::vector<HypreParMatrix* > > goals(2);
+    goals[0].resize(1);
+    goals[1].resize(1);
+    goals[0][0] = testmat;
+    testmat = NULL;
+    pmesh_copy->UniformRefinement();
+    testmat = testR_space->Dof_TrueDof_Matrix();
+    goals[1][0] = testmat;
+    testmat = NULL;
+    SparseMatrix * test_local = (SparseMatrix *)testR_space->GetUpdateOperator();
+    */
+
+    /*
+    // with vector of pointers for RT space
+    std::vector< HypreParMatrix* > goals(2);
+    goals[0] = testmat;
+    testmat = NULL;
+    pmesh_copy->UniformRefinement();
+    testmat = testR_space->Dof_TrueDof_Matrix();
+    goals[1] = testmat;
+    testmat = NULL;
+    SparseMatrix * test_local = (SparseMatrix *)testR_space->GetUpdateOperator();
+    */
+
+    //FiniteElementCollection *testhdivfree_coll;
+    //testhdivfree_coll = new ND_FECollection(feorder + 1, nDimensions);
+
+    /*
+    //ParMesh * pmesh_copy = new ParMesh(*(pmesh.get()));
+    ParMesh * pmesh_copy;
+    {
+        ifstream imesh(mesh_file);
+        mesh = new Mesh(imesh, 1, 1);
+        imesh.close();
+
+        for (int l = 0; l < ser_ref_levels; l++)
+            mesh->UniformRefinement();
+        pmesh_copy = new ParMesh(comm, *mesh);
+    }
+
+    ParFiniteElementSpace * testW_space = new ParFiniteElementSpace(pmesh_copy, hdivfree_coll);
+    */
+    //ParMesh * pmesh_copy = pmesh.get();
+    //ParFiniteElementSpace * testW_space = C_space;
+    /*
+    // with vector of pointers for W space
+    const SparseMatrix * test_local;
+    ParFiniteElementSpace * testW_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
+    Array< HypreParMatrix* > goals(2);
+    for ( int l = 0; l < 2; l++)
+    {
+        // refine
+        pmesh->UniformRefinement();
+
+        //update fe space
+        testW_space->Update();
+
+        test_local = (SparseMatrix *)testW_space->GetUpdateOperator();
+
+        // get d_td
+        HypreParMatrix * testmat = testW_space->Dof_TrueDof_Matrix();
+        goals[1 - l] = testmat;
+        testmat = NULL;
+
+        SparseMatrix * test_local2 = RemoveZeroEntries(*test_local);
+    }
+    */
+
+    for (int l = 0; l < ref_levels+1; l++)
+    {
+        if (l > 0)
+        {
+            // refine
+            pmesh->UniformRefinement();
+
+            //update fe space
+            testW_space->Update();
+
+            Proj_Hcurl_local = (SparseMatrix *)testW_space->GetUpdateOperator();
+
+            // get d_td
+            temp = testW_space->Dof_TrueDof_Matrix();
+            Dof_TrueDof_Hcurl[ref_levels - l] = temp;
+            temp = NULL;
+
+            Proj_Hcurl[ref_levels - l] = RemoveZeroEntries(*Proj_Hcurl_local);
+        }
+    }
+
+    //testW_space->RebuildElementToDofTable();
+    //SparseMatrix * test_local = (SparseMatrix *)testW_space->GetUpdateOperator();
+
+    MPI_Finalize();
+    return 0;
+
     chrono.Clear();
     chrono.Start();
     if (with_multilevel)
     {
+#ifndef BUG
         if (verbose)
             std::cout << "Creating a hierarchy of meshes by successive refinements "
                          "(with multilevel and multigrid prerequisites) \n";
@@ -1368,11 +1488,12 @@ int main(int argc, char *argv[])
 
         d_td_coarse_R = coarseR_space->Dof_TrueDof_Matrix();
         d_td_coarse_W = coarseW_space->Dof_TrueDof_Matrix();
-
+#endif
         for (int l = 0; l < ref_levels+1; l++)
         {
             if (l > 0){
 
+#ifndef BUG
                 if (l == 1)
                 {
                     R_space->GetEssentialVDofs(ess_bdrSigma, ess_dof_coarsestlvl_list);
@@ -1385,6 +1506,17 @@ int main(int argc, char *argv[])
                 if (l > 1)
                     C_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[num_levels - l]));
 #endif
+
+                /*
+#ifdef NEW_STUFF
+                temp = R_space->Dof_TrueDof_Matrix();
+                Dof_trueDof_Func_lvls[num_levels - l][0] = temp;
+                temp = NULL;
+                temp = W_space->Dof_TrueDof_Matrix();
+                Dof_trueDof_L2_lvls[num_levels - l] = temp;
+                temp = NULL;
+#endif
+                */
 
                 if (prec_is_MG)
                     coarseC_space->Update();
@@ -1426,45 +1558,22 @@ int main(int argc, char *argv[])
                 {
                     pmesh->UniformRefinement();
                 }
+#else
+                pmesh->UniformRefinement();
+#endif
 
                 C_space->Update();
 #ifdef NEW_STUFF
                 Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-                // PETSc work around (doesn't work)
-#ifdef WITH_PETSC
-                //PetscParMatrix * mat1 = new PetscParMatrix(MPI_COMM_WORLD, C_space->Dof_TrueDof_Matrix(), Operator::PETSC_MATHYPRE);
-                //PetscParMatrix * mat1 = new PetscParMatrix(C_space->Dof_TrueDof_Matrix(), Operator::PETSC_MATHYPRE);
-                PetscParMatrix * mat1 = new PetscParMatrix(C_space->Dof_TrueDof_Matrix(),Operator::PETSC_MATAIJ);
-                //Mat matt1 = mat1->ReleaseMat(false);
-                //PetscParMatrix * mat2 = new PetscParMatrix(matt1);
-                hypre_ParCSRMatrix *pcsr1;
-                MatHYPREGetParCSR(*mat1,&pcsr1);
-                if (pcsr1 == NULL)
-                    std::cout << "NULL pointer \n";
-                Dof_TrueDof_Hcurl[ref_levels - l] = new HypreParMatrix(pcsr1);
-                //Dof_TrueDof_Hcurl[ref_levels - l]->CopyRowStarts();
-                //Dof_TrueDof_Hcurl[ref_levels - l]->CopyColStarts();
-                //Dof_TrueDof_Hcurl[ref_levels - l]->SetOwnerFlags(3,3,1);
-#endif
-                // or standard
-                //Dof_TrueDof_Hcurl[ref_levels - l] = C_space->Dof_TrueDof_Matrix();
-                HypreParMatrix * temp = C_space->Dof_TrueDof_Matrix();
 
-#ifdef POINTER_SWAP_AS_COPY
+                temp = C_space->Dof_TrueDof_Matrix();
                 Dof_TrueDof_Hcurl[ref_levels - l] = temp;
                 temp = NULL;
-#else
-                //std::cout << "Copying the HyprParMatrix \n";
-                Dof_TrueDof_Hcurl[ref_levels - l] = CopyHypreParMatrix (*temp);
-                //std::cout << "Finished \n";
-                Dof_TrueDof_Hcurl[ref_levels - l]->CopyRowStarts();
-                Dof_TrueDof_Hcurl[ref_levels - l]->CopyColStarts();
-                Dof_TrueDof_Hcurl[ref_levels - l]->SetOwnerFlags(3,3,1);
-#endif
-                //Dof_TrueDof_Hcurl[ref_levels - l] = d_td;
 
                 Proj_Hcurl[ref_levels - l] = RemoveZeroEntries(*Proj_Hcurl_local);
 #endif
+
+#ifndef BUG
                 if (prec_is_MG)
                 {
                     auto d_td_coarse_C = coarseC_space->Dof_TrueDof_Matrix();
@@ -1494,9 +1603,22 @@ int main(int argc, char *argv[])
                     delete P_H_local;
                 }
 
-                P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
-                P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
+                W_space->Update();
+                R_space->Update();
 
+                P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
+                //W_space->SetUpdateOperatorOwner(false);
+                P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
+                //R_space->SetUpdateOperatorOwner(false);
+
+#ifdef NEW_STUFF
+                temp = R_space->Dof_TrueDof_Matrix();
+                Dof_trueDof_Func_lvls[ref_levels - l][0] = temp;
+                temp = NULL;
+                temp = W_space->Dof_TrueDof_Matrix();
+                Dof_trueDof_L2_lvls[ref_levels - l] = temp;
+                temp = NULL;
+#endif
                 SparseMatrix* R_Element_to_dofs1 = new SparseMatrix();
                 SparseMatrix* W_Element_to_dofs1 = new SparseMatrix();
 
@@ -1520,6 +1642,7 @@ int main(int argc, char *argv[])
                     //Proj_Hcurl[0] = RemoveZeroEntries(*Proj_Hcurl_local);
                 }
 #endif
+#endif
             }
         } // end of loop over levels
     }
@@ -1528,6 +1651,9 @@ int main(int argc, char *argv[])
         if (verbose)
             std::cout << "Creating a hierarchy of meshes by successive refinements (and multigrid prerequisites) \n";
 
+#ifdef NEW_STUFF
+        MFEM_ABORT("Was not updated for the new solver stuff \n");
+#endif
         for (int l = 0; l < par_ref_levels; l++)
         {
             if (prec_is_MG)
@@ -1574,33 +1700,9 @@ int main(int argc, char *argv[])
             if (withDiv)
                 W_space->Update();
 
-#ifdef NEW_STUFF
-            R_space->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][num_levels - l - 1]));
-            R_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][num_levels - l - 1]));
-            if (l > 0)
-                C_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[num_levels - l - 1]));
-#endif
-
             R_space->Update();
 
-#ifdef NEW_STUFF
-            if (l == par_ref_levels - 1)
-            {
-                R_space->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][0]));
-                R_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][0]));
-                C_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[0]));
-            }
-#endif
             C_space->Update();
-
-#ifdef NEW_STUFF
-            if (l > 1)
-            {
-                Dof_TrueDof_Hcurl[ref_levels - l] = C_space->Dof_TrueDof_Matrix();
-                Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-                Proj_Hcurl[ref_levels - l] = RemoveZeroEntries(*Proj_Hcurl_local);
-            }
-#endif
 
             H_space->Update();
 
@@ -1963,8 +2065,8 @@ int main(int argc, char *argv[])
 
     // curl-curl matrix for H(curl) in 3D
     // either as DivfreeT_dop * M * Divfree_dop
-    auto temp = ParMult(DivfreeT_dop,M);
-    auto A = ParMult(temp, Divfree_dop);
+    auto tempmat = ParMult(DivfreeT_dop,M);
+    auto A = ParMult(tempmat, Divfree_dop);
 
     HypreParMatrix *C, *CH, *CHT, *B, *BT;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -2804,6 +2906,8 @@ int main(int argc, char *argv[])
         P_Func[i]->SetBlock(0,0, P_R[i]);
     }
 
+
+
     Array<SparseMatrix*> P_WT(ref_levels); //AE_e matrices
     for (int i = 0; i < ref_levels; ++i)
     {
@@ -2969,8 +3073,9 @@ int main(int argc, char *argv[])
     chrono.Start();
 
 #ifdef WITH_SMOOTHER
+    //Element_dofs_Func, Element_dofs_W, Dof_TrueDof_coarse_Func, *d_td_coarse_W,
     MinConstrSolver NewSolver(ref_levels + 1, P_WT,
-                     Element_dofs_Func, Element_dofs_W, Dof_TrueDof_coarse_Func, *d_td_coarse_W,
+                     Element_dofs_Func, Element_dofs_W, Dof_trueDof_Func_lvls, Dof_trueDof_L2_lvls,
                      P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit, ess_dof_coarsestlvl_list,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
@@ -2978,13 +3083,7 @@ int main(int argc, char *argv[])
                      &NewSmoother,
                      false);
 #else
-    MinConstrSolver NewSolver(ref_levels + 1, P_WT,
-                     Element_dofs_Func, Element_dofs_W, Dof_TrueDof_coarse_Func, *d_td_coarse_W,
-                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R, Ablockmat, Bloc, Floc, Xinit, ess_dof_coarsestlvl_list,
-#ifdef COMPUTING_LAMBDA
-                     *sigma_special, *lambda_special,
-#endif
-                     false);
+    update here from the with_smoother case;
 #endif
 
     double newsolver_abstol = 1.0e-12;

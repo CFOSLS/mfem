@@ -733,8 +733,9 @@ protected:
     // dof_TrueDof relation tables for each level for functional-related variables
     // and constraint variable.
     // Used for assembling the coarsest level problem
-    const std::vector<HypreParMatrix*>& dof_trueDof_Func;
-    const HypreParMatrix& dof_trueDof_L2;
+    // and for the smoother setup in the general case
+    const std::vector<std::vector<HypreParMatrix*> >& dof_trueDof_Func_lvls;
+    const std::vector<HypreParMatrix*> & dof_trueDof_L2_lvls;
 
     const MPI_Comm comm;
 
@@ -868,8 +869,8 @@ public:
                            const Array< SparseMatrix*> &AE_to_e,
                            const Array< BlockMatrix*> &El_to_dofs_Func,
                            const Array< SparseMatrix*> &El_to_dofs_L2,
-                           const std::vector<HypreParMatrix*>& Dof_TrueDof_Func,
-                           const HypreParMatrix& Dof_TrueDof_L2,
+                           const std::vector<std::vector<HypreParMatrix *> > &Dof_TrueDof_Func_lvls,
+                           const std::vector<HypreParMatrix *> &Dof_TrueDof_L2_lvls,
                            const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
@@ -923,8 +924,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
                        const Array< SparseMatrix*> &AE_to_e,
                        const Array< BlockMatrix*> &El_to_dofs_Func,
                        const Array< SparseMatrix*> &El_to_dofs_L2,
-                       const std::vector<HypreParMatrix*>& Dof_TrueDof_Func,
-                       const HypreParMatrix& Dof_TrueDof_L2,
+                       const std::vector<std::vector<HypreParMatrix*> >& Dof_TrueDof_Func_lvls,
+                       const std::vector<HypreParMatrix*>& Dof_TrueDof_L2_lvls,
                        const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                        const std::vector<std::vector<Array<int> *> > &BdrDofs_Func,
                        const std::vector<std::vector<Array<int> *> > &EssBdrDofs_Func,
@@ -940,8 +941,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
      : IterativeSolver(), num_levels(NumLevels),
        AE_e(AE_to_e),
        el_to_dofs_Func(El_to_dofs_Func), el_to_dofs_L2(El_to_dofs_L2),
-       dof_trueDof_Func(Dof_TrueDof_Func), dof_trueDof_L2(Dof_TrueDof_L2),
-       comm(Dof_TrueDof_L2.GetComm()),
+       dof_trueDof_Func_lvls(Dof_TrueDof_Func_lvls), dof_trueDof_L2_lvls(Dof_TrueDof_L2_lvls),
+       comm(Dof_TrueDof_L2_lvls[0]->GetComm()),
        P_Func(Proj_Func), P_L2(Proj_L2),
        bdrdofs_Func(BdrDofs_Func),
        essbdrdofs_Func(EssBdrDofs_Func),
@@ -1100,7 +1101,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 #endif
 
     ComputeRhsFunc(*(rhsfunc_lvls[0]), previous_sol);
-    //(*rhsfunc_lvls)[0]->GetBlock(0).Print();
 
     next_sol = previous_sol;
 
@@ -1733,7 +1733,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestRhsFunc() const
                 rhsfunc_lvls[num_levels-1]->GetBlock(blk)[dof] = 0.0;
             }
 
-        dof_trueDof_Func[blk]->MultTranspose(rhsfunc_lvls[num_levels-1]->GetBlock(blk),
+        dof_trueDof_Func_lvls[num_levels-1][blk]->MultTranspose(rhsfunc_lvls[num_levels-1]->GetBlock(blk),
                 coarse_rhsfunc->GetBlock(blk));
     }
 
@@ -1768,8 +1768,8 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
 
     // 2. Creating the block matrix from the local parts using dof_truedof relation
 
-    HypreParMatrix * Constr_global = dof_trueDof_Func[0]->LeftDiagMult(
-                *(Constr_lvls[num_levels - 1]), dof_trueDof_L2.GetColStarts());
+    HypreParMatrix * Constr_global = dof_trueDof_Func_lvls[num_levels - 1][0]->LeftDiagMult(
+                *(Constr_lvls[num_levels - 1]), dof_trueDof_L2_lvls[num_levels - 1]->GetColStarts());
 
     HypreParMatrix *ConstrT_global = Constr_global->Transpose();
 
@@ -1779,8 +1779,8 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     std::vector<HypreParMatrix*> Funct_global(numblocks);
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        Funct_d_td[blk] = dof_trueDof_Func[blk]->LeftDiagMult(Funct_lvls[num_levels - 1]->GetBlock(blk,blk));
-        d_td_T[blk] = dof_trueDof_Func[blk]->Transpose();
+        Funct_d_td[blk] = dof_trueDof_Func_lvls[num_levels - 1][blk]->LeftDiagMult(Funct_lvls[num_levels - 1]->GetBlock(blk,blk));
+        d_td_T[blk] = dof_trueDof_Func_lvls[num_levels - 1][blk]->Transpose();
 
         Funct_global[blk] = ParMult(d_td_T[blk], Funct_d_td[blk]);
         Funct_global[blk]->CopyRowStarts();
@@ -1856,8 +1856,8 @@ public:
     MinConstrSolver(int NumLevels, const Array< SparseMatrix*> &AE_to_e,
                            const Array< BlockMatrix*> &El_to_dofs_Func,
                            const Array< SparseMatrix*> &El_to_dofs_L2,
-                           const std::vector<HypreParMatrix*>& Dof_TrueDof_Func,
-                           const HypreParMatrix& Dof_TrueDof_L2,
+                           const std::vector<std::vector<HypreParMatrix*> >& Dof_TrueDof_Func,
+                           const std::vector<HypreParMatrix* >& Dof_TrueDof_L2,
                            const Array< BlockMatrix*> &Proj_Func, const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
@@ -2015,7 +2015,7 @@ void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& co
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        dof_trueDof_Func[blk]->Mult(trueX.GetBlock(blk), sol_coarse.GetBlock(blk));
+        dof_trueDof_Func_lvls[num_levels - 1][blk]->Mult(trueX.GetBlock(blk), sol_coarse.GetBlock(blk));
         //dof_trueDof_Func[blk]->Mult(trueX.GetBlock(blk), ((*tempvec_lvls)[num_levels-1])->GetBlock(blk));
         //(*tempvec_lvls)[num_levels-1]->GetBlock(blk) = trueX.GetBlock(blk);
     }
