@@ -162,12 +162,6 @@ protected:
     // discrete curl operators at all levels;
     mutable Array<SparseMatrix*> Curlh_lvls;
 
-    // global discrete curl operators at all levels;
-    mutable Array<HypreParMatrix*> Curlh_global_lvls;
-
-    // global CT*M operators at all levels;
-    mutable Array<HypreParMatrix*> CTM_global_lvls;
-
     // Projection of the system matrix onto discrete Hcurl space
     // Curl_hT * A_l * Curlh matrices at all levels
     mutable Array<SparseMatrix*> CTMC_lvls;
@@ -175,28 +169,34 @@ protected:
     // global CTMC as HypreParMatrices at all levels;
     mutable Array<HypreParMatrix*> CTMC_global_lvls;
 
-    // stores additionally diagonal entries of global CTMC matrices
-    mutable Array<Vector*> CTMC_global_diag_lvls;
-
+    // structures used when all dofs are relaxed (via HypreSmoothers):
     // used when relax_all_dofs = true
     mutable Array<HypreSmoother*> Smoothers_lvls;
+    mutable Array<Vector*> truerhs_lvls;  // rhs for H(curl) problems on true dofs
+    mutable Array<Vector*> truex_lvls;    // sol for H(curl) problems on true dofs
 
-    // dof_Truedof tables at all levels;
-    const Array<HypreParMatrix*> & d_td_lvls;
-
-    const std::vector<Array<int>* >  & essbdrdofs_lvls;
+    // structures to be used when not all dofs are relaxed:
+    // stores additionally diagonal entries of global CTMC matrices
+    mutable Array<Vector*> CTMC_global_diag_lvls;
+    // global discrete curl operators at all levels;
+    mutable Array<HypreParMatrix*> Curlh_global_lvls;
+    // global CT*M operators at all levels;
+    mutable Array<HypreParMatrix*> CTM_global_lvls;
     mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
-
-    // temporary storage variables
-    mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
-    mutable Array<Vector*> tempvec_lvls;  // lives in H(curl)_h
-    mutable Array<Vector*> tempvec2_lvls; // lives in H(div)_h
     mutable Array<Vector*> truevec_lvls;  // lives in Hdiv_h on true dofs
     mutable Array<Vector*> truevec2_lvls;
     mutable Array<Vector*> truevec3_lvls; // lives in Hcurl_h on true dofs
 
-    mutable Array<Vector*> truerhs_lvls;  // rhs for H(curl) problems on true dofs
-    mutable Array<Vector*> truex_lvls;    // sol for H(curl) problems on true dofs
+    // Dof_TrueDof tables at all levels
+    const Array<HypreParMatrix*> & d_td_lvls;
+
+    // Lists of essential boundary dofs for Hcurl at all levels
+    const std::vector<Array<int>* >  & essbdrdofs_lvls;
+
+    // temporary storage variables
+    mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
+    mutable Array<Vector*> tempvec_lvls;  // lives in H(curl)_h
+    //mutable Array<Vector*> tempvec2_lvls; // lives in H(div)_h
 
 public:
     // constructor
@@ -288,7 +288,7 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & 
         CTMC_global_lvls[l] = NULL;
 
     rhs_lvls.SetSize(num_levels);
-    tempvec2_lvls.SetSize(num_levels);
+    //tempvec2_lvls.SetSize(num_levels);
     tempvec_lvls.SetSize(num_levels);
     truevec_lvls.SetSize(num_levels);
     truevec2_lvls.SetSize(num_levels);
@@ -403,7 +403,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
         // allocating memory for local-to-level vector arrays
         rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
         tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
-        tempvec2_lvls[level] = new Vector(Curlh_lvls[level]->Height());
+        //tempvec2_lvls[level] = new Vector(Curlh_lvls[level]->Height());
 
         delete CTMC_d_td;
         delete d_td_T;
@@ -431,9 +431,10 @@ void HCurlGSSmoother::ComputeRhsLevel(int level, const Vector& res_lvl)
 // during the call to SetUpRhs() before MultLevel
 void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 {
-    //MFEM_ABORT("HCurlGSSmoother::MultLevel() hasn't been implemented yet!");
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for a non-finalized level");
+
+    std::cout << "Smoothing with GSS smoother at level " << level << "\n";
 
     if (relax_all_dofs)
     {
@@ -733,6 +734,19 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for the non-finalized level");
 
+    // for now we are smoothing in Hcurl only at the finest level
+    // because we don't have canonical projectors to ensure that
+    // coarsened curl will be in the kernel of coarsened divergence
+    if (level != 0)
+    {
+        std::cout << "HCurlSmoother::MultLevel(): For now we are smoothing in "
+                     "Hcurl only at the finest level due to the absence of"
+                     "canonical projector. Thus, returning out = in!";
+        out_lvl = in_lvl;
+        return;
+    }
+
+
 #ifdef DEBUG_INFO
     //std::cout << "Checking that rhs = - C";
 #endif
@@ -800,7 +814,7 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 
 // TODO: Add blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
-// TODO: Symmetrize the Solver to make it available later as a preconditioner (w.r.t to smoothing)
+// TODO: Symmetrize the Solver to make it available later as a preconditioner (w.r.t to smoothing, e.g.)
 // TODO: Check the timings and make it faster
 
 class BaseGeneralMinConstrSolver : public IterativeSolver
@@ -827,8 +841,8 @@ protected:
     const Array< BlockMatrix*>& el_to_dofs_Func;
     const Array< SparseMatrix*>& el_to_dofs_L2;
 
-    // dof_TrueDof relation tables for each level for functional-related variables
-    // and constraint variable.
+    // Dof_TrueDof relation tables for each level for functional-related
+    // variables and the L2 variable (constraint space).
     // Used for assembling the coarsest level problem
     // and for the smoother setup in the general case
     const std::vector<std::vector<HypreParMatrix*> >& dof_trueDof_Func_lvls;
@@ -845,16 +859,16 @@ protected:
     const std::vector<std::vector<Array<int>* > > & bdrdofs_Func;
     const std::vector<std::vector<Array<int>* > > & essbdrdofs_Func;
 
-    // BlockMatrix which defines the Functional at the finest level
-    //const BlockMatrix& Funct;
+    // parts of block structure which define the Functional at the finest level
     const int numblocks;
     const Array<int>& block_offsets;
 
-    // SparseMatrix which defines the constraint (divergence) at the finest level
-    //const SparseMatrix& Constr;
+    // Righthand side of  the divergence contraint
+    // (remains unchanged throughout the solving process)
     const Vector& ConstrRhs;
 
-    // Structures related to the smoothing at the interfaces after local updates
+    // (Optionally used) Multilevel Smoother
+    // used for updates at the interfaces after local updates
     mutable MultilevelSmoother* Smoo;
 
     // a given blockvector which satisfies essential bdr conditions
@@ -1240,13 +1254,9 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
             ComputeLocalRhsConstr(l);
         }
 
-#ifdef TODAYDEBUG
-        SolveFinerLevelProblem(l, *(rhsfunc_lvls[l]), *rhs_constr, *(solupdate_lvls[l]));
-#else
         // solve local problems at level l
         // FIXME: all factors of local matrices can be stored after the first solver iteration
         SolveLocalProblems(l, *(rhsfunc_lvls[l]), *rhs_constr, *(solupdate_lvls[l]));
-#endif
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
 
 #ifdef DEBUG_INFO
@@ -1256,10 +1266,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         }
 #endif
 
-        // for now we are smoothing in Hcurl only at the finest level
-        // because we don't have canonical projectors to ensure that
-        // coarsened curl will be in the kernel of coarsened divergence
-        if (l == 0 && Smoo)
+        if (Smoo)
         {
             if (numblocks == 1)
             {
