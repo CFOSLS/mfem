@@ -844,81 +844,6 @@ int main(int argc, char *argv[])
         args.PrintOptions(cout);
     }
 
-    /*
-    // test of Array<Array<int>>
-    Array<Array<int> > arr1(2);
-    //Array<Array<int> > arr2(2);
-    arr1[0].SetSize(2);
-    arr1[0][0] = 1;
-    arr1[0][1] = 2;
-
-    //arr2[0].SetSize(2);
-    //arr2[0][0] = 3;
-    //arr2[0][1] = 4;
-
-    arr1[1].SetSize(2);
-    arr1[1][0] = 10;
-    arr1[1][1] = 20;
-
-    //arr2[1].SetSize(2);
-    //arr2[1][0] = 30;
-    //arr2[1][1] = 40;
-
-    arr1[0].Print();
-    arr1[1].Print();
-    //arr2[0].Print();
-    //arr2[1].Print();
-
-    //test of BlockArray "=" or "+" operators
-    Array<int> testblock_offsets(3);
-    int size1 = 4;
-    int size2 = 6;
-    testblock_offsets[0] = 0;
-    testblock_offsets[1] = size1;
-    testblock_offsets[2] = size1 + size2;
-
-    Vector vec1(size1);
-    vec1 = 1.0;
-    Vector vec2(size2);
-    vec2 = 3.0;
-    BlockVector blkvec1(testblock_offsets);
-    blkvec1.GetBlock(0) = vec1;
-    blkvec1.GetBlock(1) = vec2;
-
-    std::cout << "blkvec1 \n";
-    blkvec1.Print();
-
-    Vector vec11(size1);
-    vec11 = -0.5;
-    Vector vec22(size2);
-    vec22 = -0.5;
-    BlockVector blkvec2(testblock_offsets);
-    blkvec2.GetBlock(0) = vec11;
-    blkvec2.GetBlock(1) = vec22;
-
-    std::cout << "blkvec2 \n";
-    blkvec2.Print();
-
-    blkvec2 += blkvec1;
-
-    std::cout << "blkvec2 after assign \n";
-    blkvec2.Print();
-
-    MPI_Finalize();
-    return 0;
-
-    int * test = new int[0];
-    test[0] = 0;
-    delete [] test;
-    MPI_Finalize();
-    return 0;
-
-    */
-
-    //int ref_levels = par_ref_levels;
-    //int num_levels = ref_levels + 1;
-    //Array< SparseMatrix* > Proj_Hcurl(num_levels - 1);
-
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(!(strcmp(space_for_S,"L2") == 0 && !eliminateS), "Case: L2 space for S and S is not eliminated is working incorrectly, non pos.def. matrix. \n");
 
@@ -1145,6 +1070,7 @@ int main(int argc, char *argv[])
     Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> C_space_lvls(num_levels);
+    //Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
 #endif
     FiniteElementCollection *hdiv_coll;
     ParFiniteElementSpace *R_space;
@@ -1201,22 +1127,7 @@ int main(int argc, char *argv[])
 
     // For geometric multigrid
     Array<HypreParMatrix*> P_C(par_ref_levels);
-
-    //ParFiniteElementSpace *coarseC_space;
-    //if (prec_is_MG)
-        //coarseC_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
-
     Array<HypreParMatrix*> P_H(par_ref_levels);
-    //ParFiniteElementSpace *coarseH_space;
-    //if (prec_is_MG)
-        //coarseH_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
-
-    //ParFiniteElementSpace *coarseR_space;
-    //ParFiniteElementSpace *coarseW_space;
-
-    //HypreParMatrix * d_td_coarse_R;
-    //HypreParMatrix * d_td_coarse_W;
-    // Input to the algorithm::
 
     Array< SparseMatrix*> P_W(ref_levels);
     Array< SparseMatrix*> P_R(ref_levels);
@@ -1226,7 +1137,6 @@ int main(int argc, char *argv[])
     const SparseMatrix* P_W_local;
     const SparseMatrix* P_R_local;
 
-    //Array<int> ess_dof_coarsestlvl_list;
     DivPart divp;
 
 #ifdef NEW_STUFF
@@ -1250,123 +1160,19 @@ int main(int argc, char *argv[])
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
    for (int l = 0; l < num_levels; ++l)
-    {
-        Dof_TrueDof_Func_lvls[l].resize(1);
-        BdrDofs_R[0][l] = new Array<int>;
-        EssBdrDofs_R[0][l] = new Array<int>;
-        EssBdrDofs_Hcurl[l] = new Array<int>;
-        Funct_mat_offsets_lvls[l] = new Array<int>;
-    }
+   {
+       Dof_TrueDof_Func_lvls[l].resize(1);
+       BdrDofs_R[0][l] = new Array<int>;
+       EssBdrDofs_R[0][l] = new Array<int>;
+       EssBdrDofs_Hcurl[l] = new Array<int>;
+       Funct_mat_offsets_lvls[l] = new Array<int>;
+   }
 
-    const SparseMatrix* Proj_Hcurl_local;
-    //HypreParMatrix * temp;
+   const SparseMatrix* Proj_Hcurl_local;
 #endif
 
     /*
-    Array<Array<int> > test(2);
-    test[0].SetSize(3);
-    test[0] = 1;
-    test[1].SetSize(4);
-    test[1] = 2;
-    test[0].Print();
-    test[1].Print();
-
-    Array<Array<int> > arr(2);
-    arr[0].SetSize(2);
-    //arr[0][0] = 1;
-    //arr[0][1] = 2;
-    arr[0] = 1;
-
-    arr[1].SetSize(2);
-    //arr[1][0] = 10;
-    //arr[1][1] = 20;
-    arr[1] = 2;
-
-    arr[0].Print();
-    arr[1].Print();
-
-    std::vector<Array<int> > test(2);
-    test.resize(3);
-
-    MPI_Finalize();
-    return 0;
-
-    std::vector<std::vector<Array<int> > > test(2, std::vector<Array<int> >(1));
-    //std::vector<Array<int> > test(2);
-    test[0][0].SetSize(4);
-    test[1][0].SetSize(3);
-
-    MPI_Finalize();
-    return 0;
-    */
-
-    /*
-    // creating a bug reproducer for LeftDiagMult and ParMult
-    ParMesh * pmesh_copy = new ParMesh(*pmesh);
-    for ( int i = 0; i < par_ref_levels; ++i)
-        pmesh_copy->UniformRefinement();
-
-    ParFiniteElementSpace * testC_space = new ParFiniteElementSpace(pmesh_copy, hdivfree_coll);
-    ParFiniteElementSpace * testR_space = new ParFiniteElementSpace(pmesh_copy, hdiv_coll);
-
-    //HypreParMatrix * d_td = testC_space->Dof_TrueDof_Matrix();
-
-    HypreParMatrix * tempr = testC_space->Dof_TrueDof_Matrix();
-    //std::cout << "Copying the HyprParMatrix \n";
-    //HypreParMatrix * d_td = CopyHypreParMatrix (*tempr);
-    HypreParMatrix * d_td = CopyRAPHypreParMatrix (*tempr);
-    d_td->SetOwnerFlags(3,3,1);
-
-    HypreParMatrix * d_td_T = d_td->Transpose();
-
-    ParBilinearForm *testblock(new ParBilinearForm(testC_space));
-    testblock->AddDomainIntegrator(new VectorFEMassIntegrator);
-    testblock->Assemble();
-    testblock->Finalize();
-    SparseMatrix product1 = testblock->SpMat();
-
-    HypreParMatrix * product2 = d_td->LeftDiagMult(product1);
-    HypreParMatrix * product3 = ParMult(d_td_T, product2);
-
-    if (verbose)
-        std::cout << "Test has not failed \n";
-    MPI_Finalize();
-    return 0;
-    */
-
-    /*
-    ParMesh * pmesh_copy = new ParMesh(*pmesh);
-    // with vector of vector of pointers
-    ParFiniteElementSpace * testR_space = new ParFiniteElementSpace(pmesh_copy, hdiv_coll);
-    //HypreParMatrix * testmat = testR_space->Dof_TrueDof_Matrix();
-    std::vector< std::vector<HypreParMatrix* > > goals(2);
-    goals[0].resize(1);
-    goals[1].resize(1);
-    goals[0][0] = testmat;
-    testmat = NULL;
-    pmesh_copy->UniformRefinement();
-    testmat = testR_space->Dof_TrueDof_Matrix();
-    goals[1][0] = testmat;
-    testmat = NULL;
-    SparseMatrix * test_local = (SparseMatrix *)testR_space->GetUpdateOperator();
-    */
-
-    /*
-    // with vector of pointers for RT space
-    std::vector< HypreParMatrix* > goals(2);
-    goals[0] = testmat;
-    testmat = NULL;
-    pmesh_copy->UniformRefinement();
-    testmat = testR_space->Dof_TrueDof_Matrix();
-    goals[1] = testmat;
-    testmat = NULL;
-    SparseMatrix * test_local = (SparseMatrix *)testR_space->GetUpdateOperator();
-    */
-
-    //FiniteElementCollection *testhdivfree_coll;
-    //testhdivfree_coll = new ND_FECollection(feorder + 1, nDimensions);
-
-    /*
+     * I will just leave it here in case I will revisit the issue with HypreParMatrix copying
     //ParMesh * pmesh_copy = new ParMesh(*(pmesh.get()));
     ParMesh * pmesh_copy;
     {
@@ -1405,45 +1211,6 @@ int main(int argc, char *argv[])
 
         SparseMatrix * test_local2 = RemoveZeroEntries(*test_local);
     }
-    */
-
-    /*
-    ParMesh * pmesh_copy;
-    {
-        ifstream imesh(mesh_file);
-        mesh = new Mesh(imesh, 1, 1);
-        imesh.close();
-
-        for (int l = 0; l < ser_ref_levels; l++)
-            mesh->UniformRefinement();
-        pmesh_copy = new ParMesh(comm, *mesh);
-    }
-    */
-
-    /*
-    for (int l = 0; l < ref_levels+1; l++)
-    {
-        if (l > 0)
-        {
-            // refine
-            pmesh->UniformRefinement();
-
-            //update fe space
-            testW_space->Update();
-
-            Proj_Hcurl_local = (SparseMatrix *)testW_space->GetUpdateOperator();
-
-            // get d_td
-            temp = testW_space->Dof_TrueDof_Matrix();
-            Dof_TrueDof_Hcurl[ref_levels - l] = temp;
-            temp = NULL;
-
-            Proj_Hcurl[ref_levels - l] = RemoveZeroEntries(*Proj_Hcurl_local);
-        }
-    }
-
-    //testW_space->RebuildElementToDofTable();
-    //SparseMatrix * test_local = (SparseMatrix *)testW_space->GetUpdateOperator();
 
     MPI_Finalize();
     return 0;
@@ -1452,8 +1219,8 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    const int finest_level = 0;
-    const int coarsest_level = num_levels - 1;
+    //const int finest_level = 0;
+    //const int coarsest_level = num_levels - 1;
 
     if (verbose)
         std::cout << "Creating a hierarchy of meshes by successive refinements "
@@ -2974,7 +2741,10 @@ int main(int argc, char *argv[])
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
                    Proj_Hcurl, Dof_TrueDof_Hcurl,
                    EssBdrDofs_Hcurl);
-    NewGSSmoother.SetSweepsNumber(5);
+    NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
+
+    if (verbose)
+        std::cout << "Number of smoothing steps: " << NewGSSmoother.GetSweepsNumber() << "\n";
 
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
@@ -3197,7 +2967,7 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAbsTol(newsolver_abstol);
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(30);
+    NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
 
     Vector tempp(sigma_exact->Size());

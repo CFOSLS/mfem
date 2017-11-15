@@ -1101,6 +1101,8 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
         break;
     }
 
+    MFEM_ABORT("Must not get here in BaseGeneralMinConstrSolver::StoppingCriteria()");
+    return false;
 }
 
 
@@ -1229,6 +1231,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         solupdate_currnorm = ComputeBlockVecNorm(comm, *update, "of the update: ", print_level);
 
         //if (i > 0 && StoppingCriteria(stopcriteria_type, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol, true, "functional"))
+        StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol, true, "functional");
         if (i > 0 && StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm, sol_firstitnorm, rel_tol, true, "sol_update"))
         {
             converged = 1;
