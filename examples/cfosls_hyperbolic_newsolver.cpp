@@ -2969,6 +2969,7 @@ int main(int argc, char *argv[])
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
+    NewSolver.SetStopCriteriaType(2);
 
     Vector tempp(sigma_exact->Size());
     tempp = *sigma_exact;

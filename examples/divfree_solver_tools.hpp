@@ -8,6 +8,22 @@ using std::unique_ptr;
 #define DEBUG_INFO
 //#define OLDFASHION
 
+double ComputeMGNorm(MPI_Comm comm, const Vector& sol_update, const Vector& res)
+{
+    MFEM_ASSERT(sol_update.Size() == res.Size(), "Sizes mismatch in ComputeMGNorm()!");
+
+    int local_size = sol_update.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq = fabs(sol_update * res);
+    double global_norm = 0;
+    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm = sqrt (global_norm / global_size);
+
+    return global_norm;
+}
+
 double ComputeBlockVecNorm(MPI_Comm comm, const BlockVector& bvec, char const * string, bool print)
 {
     int local_size = bvec.Size();
@@ -851,16 +867,22 @@ protected:
     mutable int current_iteration;
 
     // stores the functional values on the consecutive iterations
-    // (needed for a variant of stopping criteria)
+    // (needed for a variant of stopping criteria, type = 0)
     mutable double funct_prevnorm;
     mutable double funct_currnorm;
     mutable double funct_firstnorm;
 
-    // used for stopping criteria based on solution updates
+    // used for stopping criteria (type = 1) based on solution updates
     mutable double solupdate_prevnorm;
     mutable double solupdate_currnorm;
     mutable double sol_firstitnorm;
     mutable BlockVector* update;
+
+    // used for stopping criteria (type = 2) based on solution updates
+    // in a special mg norm
+    mutable double solupdate_prevmgnorm;
+    mutable double solupdate_currmgnorm;
+    mutable double solupdate_firstmgnorm;
 
     mutable int max_iter_internal;
 
@@ -1040,6 +1062,7 @@ public:
                           double rel_tol, bool monotone_check = true, char const * name = NULL) const;
 
     int GetStopCriteriaType () {return stopcriteria_type;}
+    void SetStopCriteriaType (int StopCriteria_Type) {stopcriteria_type = StopCriteria_Type;}
 };
 
 bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
@@ -1072,8 +1095,9 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
         else
             return false;
     }
-    break;
+        break;
     case 1:
+    case 2:
     {
         if (print_level >= 1)
         {
@@ -1089,7 +1113,7 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
             return false;
 
     }
-    break;
+        break;
     default:
         MFEM_ABORT("Unknown value of type in StoppingCriteria \n");
         break;
@@ -1189,10 +1213,14 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     funct_prevnorm = 0.0;
     funct_currnorm = 0.0;
     funct_firstnorm = 0.0;
+
     solupdate_prevnorm = 0.0;
     solupdate_currnorm = 0.0;
     sol_firstitnorm = 0.0;
 
+    solupdate_prevmgnorm = 0.0;
+    solupdate_currmgnorm = 0.0;
+    solupdate_firstmgnorm = 0.0;
 }
 
 // The top-level wrapper for the solver
@@ -1226,7 +1254,8 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         //if (i > 0 && StoppingCriteria(stopcriteria_type, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol, true, "functional"))
         StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol, true, "functional");
-        if (i > 0 && StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm, sol_firstitnorm, rel_tol, true, "sol_update"))
+        StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm, sol_firstitnorm, rel_tol, true, "sol_update");
+        if (i > 0 && StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm, solupdate_firstmgnorm, rel_tol, true, "sol_update in mg "))
         {
             converged = 1;
             break;
@@ -1239,6 +1268,9 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             if (i == 0)
                 sol_firstitnorm = ComputeBlockVecNorm(comm, *yblock, "of the update: ", 0);
             solupdate_prevnorm = solupdate_currnorm;
+            if (i == 0)
+                solupdate_firstmgnorm = solupdate_currmgnorm;
+            solupdate_prevmgnorm = solupdate_currmgnorm;
             *xblock = *yblock;
         }
 
@@ -1498,6 +1530,9 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
     }
+
+    if (stopcriteria_type == 2)
+        solupdate_currmgnorm = ComputeMGNorm(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
