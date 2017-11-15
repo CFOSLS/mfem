@@ -8,8 +8,6 @@ using std::unique_ptr;
 #define DEBUG_INFO
 //#define OLDFASHION
 
-// FIXME: fix const-correctness, there is a non-clarified mess of const and mutable
-
 double ComputeBlockVecNorm(MPI_Comm comm, const BlockVector& bvec, char const * string, bool print)
 {
     int local_size = bvec.Size();
@@ -371,9 +369,6 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
         SparseMatrix *SysMat_Curlh = mfem::Mult(SysMat_lvl, *(Curlh_lvls[level]));
         CTMC_lvls[level] = mfem::Mult(*CurlhT, *SysMat_Curlh);
 
-        // FIXME: Is sorting necessary?
-        //CTMC_lvls[level]->SortColumnIndices();
-
         delete SysMat_Curlh;
         delete CurlhT;
 
@@ -423,7 +418,6 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
         // allocating memory for local-to-level vector arrays
         rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
         tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
-        //tempvec2_lvls[level] = new Vector(Curlh_lvls[level]->Height());
 
         delete CTMC_d_td;
         delete d_td_T;
@@ -433,6 +427,10 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
     }// end of if level wasn't finelized already before the call
 }
 
+
+// Computes the residual for the "smoother equation"
+// from the given residual of the basic minimization process:
+//      rhs_l = CT_l * res_l
 void HCurlGSSmoother::ComputeRhsLevel(int level, const Vector& res_lvl)
 {
     // rhs_l = CT_l * res_lvl
@@ -768,11 +766,6 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
         return;
     }
 
-
-#ifdef DEBUG_INFO
-    //std::cout << "Checking that rhs = - C";
-#endif
-
 #ifdef DEBUG_INFO
     std::cout << "Solving the minimization problem in Hcurl at level " << level << "\n";
 #endif
@@ -834,6 +827,7 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     out_lvl += in_lvl;
 }
 
+// TODO: Symmetrize the solver
 // TODO: Add blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
 // TODO: Symmetrize the Solver to make it available later as a preconditioner (w.r.t to smoothing, e.g.)
@@ -1270,8 +1264,6 @@ void BaseGeneralMinConstrSolver::ProjectFinerFuncToCoarser(int level,
     P_Func[level]->MultTranspose(in, out);
 }
 
-
-
 // Computes out_l as an updated rhs in the functional part for the given level
 //      out_l :=  rhs_l - M_l sol_l
 void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const BlockVector& rhs_l,
@@ -1304,9 +1296,8 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 #ifdef DEBUG_INFO
     std::cout << "Starting iteration " << current_iteration << " ... \n";
 #endif
-    // 0. preliminaries
 
-    if (current_iteration == 0) // initializing solution with the given boundary data
+    if (current_iteration == 0) // initializing first iterate with the given boundary data
     {
         // ensure that the initial iterate satisfies essential boundary conditions
         previous_sol = bdrdata_finest;
@@ -2240,28 +2231,10 @@ void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& co
     // 3. solve the linear system with preconditioned MINRES.
     solver.Mult(trueRhs, trueX);
 
-    /*
-#ifdef DEBUG_INFO
-    std::cout << "Checking residual in the constraint after solving the coarsest level problem:\n";
-    BlockVector res(*coarse_offsets);
-    coarse_matrix->Mult(trueX, res);
-    //ofstream ofs("newsolver_out_wrong.txt");
-    //res.GetBlock(1).Print(ofs,1);
-    res -= trueRhs;
-    double constr_resnorm = res.GetBlock(1).Norml2() /
-            sqrt (res.GetBlock(1).Size());
-    std::cout << "constr_resnorm at the coarsest level = " << constr_resnorm << "\n";
-#endif
-    */
-
     // 4. convert solution from truedof to dof
 
     for ( int blk = 0; blk < numblocks; ++blk)
-    {
         dof_trueDof_Func_lvls[num_levels - 1][blk]->Mult(trueX.GetBlock(blk), sol_coarse.GetBlock(blk));
-        //dof_trueDof_Func[blk]->Mult(trueX.GetBlock(blk), ((*tempvec_lvls)[num_levels-1])->GetBlock(blk));
-        //(*tempvec_lvls)[num_levels-1]->GetBlock(blk) = trueX.GetBlock(blk);
-    }
 
     return;
 }
@@ -2422,10 +2395,6 @@ public:
 
 //        chrono.Clear();
 //        chrono.Start();
-#ifdef DEBUG_INFO
-        SparseMatrix * B_input = B_fine;
-#endif
-
 
         for (int l=0; l < ref_levels; l++)
         {
@@ -2566,31 +2535,6 @@ public:
                 // Solving local problem:
                 Local_problem(sub_M, sub_B, sub_G, sub_F,sig);
 
-                /*
-#ifdef DEBUG_INFO
-                if (e == 0 && l == 1)
-                {
-                    std::cout << "Looking at one local problem in div part, e = " << e << "\n";
-                    std::cout << "Wtmp_j \n";
-                    Wtmp_j.Print();
-                    std::cout << "Rtmp_j \n";
-                    Rtmp_j.Print();
-                    std::cout << "sub_F \n";
-                    sub_F.Print();
-                    //std::cout << "rhs_l(partly) \n";
-                    //std::cout << rhs_l[0] << "\n";
-                    //for ( int i = 375; i < 395; ++i)
-                        //std::cout << rhs_l[i] << "\n";
-                    std::cout << "sub_M \n";
-                    sub_M.Print();
-                    std::cout << "sub_B \n";
-                    sub_B.Print();
-                    std::cout << "sig \n";
-                    sig.Print();
-                }
-#endif
-                */
-
 #ifdef MFEM_DEBUG
                 // Checking if the local problems satisfy the condition
                 Vector fcheck(Wtmp_j.Size());
@@ -2625,29 +2569,10 @@ public:
                 }
             }
 
-#ifdef DEBUG_INFO
-            CheckConstrRes(p_loc_vec, *B_input, F_fine, "for the fine level");
-            if (l == 0)
-            {
-                ofstream ofs("divpart_out_sol_level_0.txt");
-                p_loc_vec.Print(ofs,1);
-            }
-            if (l == 1)
-            {
-                ofstream ofs("divpart_out_sol_level_1.txt");
-                p_loc_vec.Print(ofs,1);
-            }
-#endif
-
-
             total_sig +=p_loc_vec;
 
             MFEM_ASSERT(total_sig.Norml2()<= 9e+9,
                         "checking global solution added" << total_sig.Norml2());
-
-#ifdef DEBUG_INFO
-            CheckConstrRes(total_sig, *B_input, F_fine, "after finer level");
-#endif
         } // end of loop over levels
 
         // The coarse problem::
@@ -2708,13 +2633,6 @@ public:
             BlockVector trueX(block_offsets), trueRhs(block_offsets);
             trueRhs =0;
             trueRhs.GetBlock(1)= FF_coarse;
-
-#ifdef DEBUG_INFO
-            {
-                ofstream ofs("div_part_constr_coarserhs.txt");
-                FF_coarse.Print(ofs,1);
-            }
-#endif
 
             // 9. Construct the operators for preconditioner
             //
@@ -2799,13 +2717,6 @@ public:
 
         d_td_coarse_R->Mult(Truesig_c,sig_c);
 
-#ifdef DEBUG_INFO
-        {
-            ofstream ofs("divpart_out_sol_level_coarse_at_coarse.txt");
-            sig_c.Print(ofs,1);
-        }
-#endif
-
         for (int k = ref_levels-1; k>=0; k--){
 
             vec1.SetSize(P_R[k]->Height());
@@ -2814,22 +2725,10 @@ public:
             sig_c = vec1;
 
         }
-#ifdef DEBUG_INFO
-        CheckConstrRes(sig_c, *B_input, F_fine, "for the coarsest level");
-        {
-            ofstream ofs("divpart_out_sol_level_coarse.txt");
-            sig_c.Print(ofs,1);
-        }
-#endif
 
         total_sig+=sig_c;
         sigma.SetSize(total_sig.Size());
         sigma = total_sig;
-
-#ifdef DEBUG_INFO
-        CheckConstrRes(sigma, *B_input, F_fine, "after all levels update");
-#endif
-
     }
 
     void Dofs_AE(SparseMatrix &Element_Dofs, const SparseMatrix &Element_Element_coarse, SparseMatrix &Dofs_Ae)
