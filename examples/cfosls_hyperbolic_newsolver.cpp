@@ -11,18 +11,25 @@
 
 #include "cfosls_testsuite.hpp"
 
-#define NEW_STUFF // for new multilevel solver
+// (de)activates solving of the discrete global problem
+#define OLD_CODE
 
-// additional options used for debugging
-//#define EXACTSOLH_INIT
-//#define COMPUTING_LAMBDA
+// for the new multilevel solver's implementation
+#define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
 #define WITH_SMOOTHER
 
+// initializes sigma with exact solution
+// if combined with COMPUTING_LAMBDA, it will
+// be exact discrete solution,
+// else a projection of the exact solution
+//#define EXACTSOLH_INIT
+//#define COMPUTING_LAMBDA
+
 #include "divfree_solver_tools.hpp"
 
-// must be active
+// must be always active
 #define USE_CURLMATRIX
 
 //#define BAD_TEST
@@ -741,7 +748,6 @@ Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl
         }
     } // end of setting test coefficients in correct case
 }
-//#endif
 
 int main(int argc, char *argv[])
 {
@@ -1119,11 +1125,13 @@ int main(int argc, char *argv[])
     }
     H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
 
+#ifdef OLD_CODE
     ParFiniteElementSpace * S_space;
     if (strcmp(space_for_S,"H1") == 0)
         S_space = H_space;
     else // "L2"
         S_space = W_space;
+#endif
 
     // For geometric multigrid
     Array<HypreParMatrix*> P_C(par_ref_levels);
@@ -1368,257 +1376,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
 
-    /*
-    if (with_multilevel)
-    {
-        if (verbose)
-            std::cout << "Creating a hierarchy of meshes by successive refinements "
-                         "(with multilevel and multigrid prerequisites) \n";
-
-        if (!withDiv && verbose)
-            std::cout << "Multilevel code cannot be used without withDiv flag \n";
-
-        coarseR_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
-        coarseW_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
-
-        // Dofs_TrueDofs at each space:
-
-        d_td_coarse_R = coarseR_space->Dof_TrueDof_Matrix();
-        d_td_coarse_W = coarseW_space->Dof_TrueDof_Matrix();
-
-        for (int l = 0; l < ref_levels+1; l++)
-        {
-            if (l > 0){
-
-                if (l == 1)
-                {
-                    R_space->GetEssentialVDofs(ess_bdrSigma, ess_dof_coarsestlvl_list);
-                    //ess_dof_list.Print();
-                }
-
-#ifdef NEW_STUFF
-                R_space->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][num_levels - l]));
-                R_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][num_levels - l]));
-                if (l > 1)
-                    C_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[num_levels - l]));
-#endif
-
-                if (prec_is_MG)
-                    coarseC_space->Update();
-
-                if (prec_is_MG)
-                    coarseH_space->Update();
-
-                if (aniso_refine && refine_t_first)
-                {
-                    Array<Refinement> refs(pmesh->GetNE());
-                    if (l < par_ref_levels/2+1)
-                    {
-                        for (int i = 0; i < pmesh->GetNE(); i++)
-                            refs[i] = Refinement(i, 4);
-                    }
-                    else
-                    {
-                        for (int i = 0; i < pmesh->GetNE(); i++)
-                            refs[i] = Refinement(i, 3);
-                    }
-                    pmesh->GeneralRefinement(refs, -1, -1);
-                }
-                else if (aniso_refine && !refine_t_first)
-                {
-                    Array<Refinement> refs(pmesh->GetNE());
-                    if (l < par_ref_levels/2+1)
-                    {
-                        for (int i = 0; i < pmesh->GetNE(); i++)
-                            refs[i] = Refinement(i, 3);
-                    }
-                    else
-                    {
-                        for (int i = 0; i < pmesh->GetNE(); i++)
-                            refs[i] = Refinement(i, 4);
-                    }
-                    pmesh->GeneralRefinement(refs, -1, -1);
-                }
-                else
-                {
-                    pmesh->UniformRefinement();
-                }
-
-                C_space->Update();
-#ifdef NEW_STUFF
-                Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-
-                temp = C_space->Dof_TrueDof_Matrix();
-                Dof_TrueDof_Hcurl[ref_levels - l] = temp;
-                temp = NULL;
-
-                Proj_Hcurl[ref_levels - l] = RemoveZeroEntries(*Proj_Hcurl_local);
-#endif
-
-                if (prec_is_MG)
-                {
-                    auto d_td_coarse_C = coarseC_space->Dof_TrueDof_Matrix();
-                    auto P_C_loc_tmp = (SparseMatrix *)C_space->GetUpdateOperator();
-                    auto P_C_local = RemoveZeroEntries(*P_C_loc_tmp);
-                    unique_ptr<SparseMatrix>RP_C_local(
-                                Mult(*C_space->GetRestrictionMatrix(), *P_C_local));
-                    P_C[l-1] = d_td_coarse_C->LeftDiagMult(
-                                *RP_C_local, C_space->GetTrueDofOffsets());
-                    P_C[l-1]->CopyColStarts();
-                    P_C[l-1]->CopyRowStarts();
-                    delete P_C_local;
-                }
-
-                H_space->Update();
-                if (prec_is_MG)
-                {
-                    auto d_td_coarse_H = coarseH_space->Dof_TrueDof_Matrix();
-                    auto P_H_loc_tmp = (SparseMatrix *)H_space->GetUpdateOperator();
-                    auto P_H_local = RemoveZeroEntries(*P_H_loc_tmp);
-                    unique_ptr<SparseMatrix>RP_H_local(
-                                Mult(*H_space->GetRestrictionMatrix(), *P_H_local));
-                    P_H[l-1] = d_td_coarse_H->LeftDiagMult(
-                                *RP_H_local, H_space->GetTrueDofOffsets());
-                    P_H[l-1]->CopyColStarts();
-                    P_H[l-1]->CopyRowStarts();
-                    delete P_H_local;
-                }
-
-                W_space->Update();
-                R_space->Update();
-
-                P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
-                //W_space->SetUpdateOperatorOwner(false);
-                P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
-                //R_space->SetUpdateOperatorOwner(false);
-
-#ifdef NEW_STUFF
-                temp = R_space->Dof_TrueDof_Matrix();
-                Dof_trueDof_Func_lvls[ref_levels - l][0] = temp;
-                temp = NULL;
-                temp = W_space->Dof_TrueDof_Matrix();
-                Dof_trueDof_L2_lvls[ref_levels - l] = temp;
-                temp = NULL;
-#endif
-                SparseMatrix* R_Element_to_dofs1 = new SparseMatrix();
-                SparseMatrix* W_Element_to_dofs1 = new SparseMatrix();
-
-                divp.Elem2Dofs(*R_space, *R_Element_to_dofs1);
-                divp.Elem2Dofs(*W_space, *W_Element_to_dofs1);
-
-                P_W[ref_levels -l] = RemoveZeroEntries(*P_W_local);
-                P_R[ref_levels -l] = RemoveZeroEntries(*P_R_local);
-
-                Element_dofs_R[ref_levels - l] = R_Element_to_dofs1;
-                Element_dofs_W[ref_levels - l] = W_Element_to_dofs1;
-
-#ifdef NEW_STUFF
-                if (l == ref_levels)
-                {
-                    R_space->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][0]));
-                    R_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][0]));
-                    C_space->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[0]));
-                    //Dof_TrueDof_Hcurl[0] = C_space->Dof_TrueDof_Matrix();
-                    //Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-                    //Proj_Hcurl[0] = RemoveZeroEntries(*Proj_Hcurl_local);
-                }
-#endif
-            }
-        } // end of loop over levels
-    }
-    else // not a multilevel algo
-    {
-        if (verbose)
-            std::cout << "Creating a hierarchy of meshes by successive refinements (and multigrid prerequisites) \n";
-
-#ifdef NEW_STUFF
-        MFEM_ABORT("Was not updated for the new solver stuff \n");
-#endif
-        for (int l = 0; l < par_ref_levels; l++)
-        {
-            if (prec_is_MG)
-                coarseC_space->Update();
-
-            if (prec_is_MG)
-                coarseH_space->Update();
-
-            if (aniso_refine && refine_t_first)
-            {
-                Array<Refinement> refs(pmesh->GetNE());
-                if (l < par_ref_levels/2)
-                {
-                    for (int i = 0; i < pmesh->GetNE(); i++)
-                        refs[i] = Refinement(i, 4);
-                }
-                else
-                {
-                    for (int i = 0; i < pmesh->GetNE(); i++)
-                        refs[i] = Refinement(i, 3);
-                }
-                pmesh->GeneralRefinement(refs, -1, -1);
-            }
-            else if (aniso_refine && !refine_t_first)
-            {
-                Array<Refinement> refs(pmesh->GetNE());
-                if (l < par_ref_levels/2)
-                {
-                    for (int i = 0; i < pmesh->GetNE(); i++)
-                        refs[i] = Refinement(i, 3);
-                }
-                else
-                {
-                    for (int i = 0; i < pmesh->GetNE(); i++)
-                        refs[i] = Refinement(i, 4);
-                }
-                pmesh->GeneralRefinement(refs, -1, -1);
-            }
-            else
-            {
-                pmesh->UniformRefinement();
-            }
-
-            if (withDiv)
-                W_space->Update();
-
-            R_space->Update();
-
-            C_space->Update();
-
-            H_space->Update();
-
-            if (prec_is_MG)
-            {
-                auto d_td_coarse_C = coarseC_space->Dof_TrueDof_Matrix();
-                auto P_C_loc_tmp = (SparseMatrix *)C_space->GetUpdateOperator();
-                auto P_C_local = RemoveZeroEntries(*P_C_loc_tmp);
-                unique_ptr<SparseMatrix>RP_C_local(
-                            Mult(*C_space->GetRestrictionMatrix(), *P_C_local));
-                P_C[l] = d_td_coarse_C->LeftDiagMult(
-                            *RP_C_local, C_space->GetTrueDofOffsets());
-                P_C[l]->CopyColStarts();
-                P_C[l]->CopyRowStarts();
-                delete P_C_local;
-            }
-
-            if (prec_is_MG)
-            {
-                auto d_td_coarse_H = coarseH_space->Dof_TrueDof_Matrix();
-                auto P_H_loc_tmp = (SparseMatrix *)H_space->GetUpdateOperator();
-                auto P_H_local = RemoveZeroEntries(*P_H_loc_tmp);
-                unique_ptr<SparseMatrix>RP_H_local(
-                            Mult(*H_space->GetRestrictionMatrix(), *P_H_local));
-                P_H[l] = d_td_coarse_H->LeftDiagMult(
-                            *RP_H_local, H_space->GetTrueDofOffsets());
-                P_H[l]->CopyColStarts();
-                P_H[l]->CopyRowStarts();
-                delete P_H_local;
-            }
-        } // end of loop over mesh levels
-    } // end of else (not a multilevel algo)
-    if (verbose)
-        cout << "MG hierarchy constructed in " << chrono.RealTime() << " seconds.\n";
-*/
-
 #ifdef NEW_STUFF
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space);
@@ -1628,16 +1385,9 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
 
+#ifdef OLD_CODE
     // 6. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
-#ifndef USE_CURLMATRIX
-    shared_ptr<mfem::HypreParMatrix> A;
-    HypreParMatrix Amat;
-    Vector Xdebug;
-    Vector X, B;
-    ParBilinearForm *Ablock;
-    ParLinearForm *ffform;
-#endif
 
     int numblocks = 1;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1914,9 +1664,6 @@ int main(int argc, char *argv[])
     //Divfree_op.EliminateTrialDofs(ess_bdrU, xblks.GetBlock(0), *rhside_Hcurl);
     //Divfree_op.EliminateTestDofs(ess_bdrU);
     Divfree_op.Finalize();
-#ifdef NEW_STUFF
-    //SparseMatrix Divfree_op_sp = Divfree_op.SpMat();
-#endif
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
 
@@ -2521,7 +2268,7 @@ int main(int argc, char *argv[])
                 cout << "|| Pi_h S_ex ||  = " << projection_error_S << " (S_ex = 0) \n";
         }
     }
-
+#endif
 
 #ifdef COMPUTING_LAMBDA
     ParGridFunction * sigma_special = new ParGridFunction(R_space);
@@ -2561,6 +2308,7 @@ int main(int argc, char *argv[])
         x_special.GetBlock(0) = *sigma_exact;
 
         ParLinearForm *fform = new ParLinearForm(R_space);
+        ConstantCoefficient zero(.0);
         fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zero));
         fform->Assemble();
 
@@ -2654,6 +2402,13 @@ int main(int argc, char *argv[])
         sigma_special->Distribute(&(trueX_special.GetBlock(0)));
         lambda_special->Distribute(&(trueX_special.GetBlock(1)));
 
+        int order_quad = max(2, 2*feorder+1);
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i=0; i < Geometry::NumGeom; ++i)
+        {
+            irs[i] = &(IntRules.Get(i, order_quad));
+        }
+
         double err_sigma = sigma_special->ComputeL2Error(*(Mytest.sigma), irs);
         double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
 
@@ -2707,20 +2462,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
-
-    ParBilinearForm *Ablock(new ParBilinearForm(R_space));
-    //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
-    Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
-    Ablock->Assemble();
-    //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
-    Ablock->Finalize();
-    //auto tempA = Ablock->ParallelAssemble();
-    SparseMatrix Aloc = Ablock->SpMat();
-    Array<int> offsets(2);
-    offsets[0] = 0;
-    offsets[1] = Aloc.Height();
-    BlockMatrix Ablockmat(offsets);
-    Ablockmat.SetBlock(0,0,&Aloc);
 
     double smooth_abstol = 1.0e-12;
     double smooth_reltol = 1.0e-12;
@@ -2789,24 +2530,6 @@ int main(int argc, char *argv[])
         P_WT[i] = Transpose(*P_W[i]);
     }
 
-    /*
-     * testing that interpolation operators handle boundary dofs correctly
-    int lvl = 0;
-    Vector test(P_Func[lvl]->GetBlock(0,0).Width());
-    test = 1.0;
-    for ( int i = 0; i < BdrDofs_R[0][lvl + 1]->Size(); ++i)
-        if ( (*(BdrDofs_R[0][lvl + 1]))[i] != 0 )
-            test[i] = 0.0;
-    Vector result(P_Func[lvl]->GetBlock(0,0).Height());
-    P_Func[lvl]->GetBlock(0,0).Mult(test, result);
-    for ( int i = 0; i < BdrDofs_R[0][lvl]->Size(); ++i)
-        if ( (*(BdrDofs_R[0][lvl]))[i] != 0 && result[i] != 0)
-            std::cout << "Wrong! \n";
-
-    MPI_Finalize();
-    return 0;
-    */
-
     //ParLinearForm *fform = new ParLinearForm(R_space);
 
     ParLinearForm * constrfform = new ParLinearForm(W_space);
@@ -2818,13 +2541,11 @@ int main(int argc, char *argv[])
     Bblock->Assemble();
     //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
     Bblock->Finalize();
-    //auto tempB = Bblock->ParallelAssemble();
-    SparseMatrix Bloc = Bblock->SpMat();
 
     Vector Floc(P_W[0]->Height());
     Floc = *constrfform;
 
-    BlockVector Xinit(Ablockmat.ColOffsets());
+    BlockVector Xinit(Funct_mat_lvls[0]->ColOffsets());
     Xinit.GetBlock(0) = 0.0;
     MFEM_ASSERT(Xinit.GetBlock(0).Size() == sigma_exact_finest->Size(),
                 "Xinit and sigma_exact_finest have different sizes! \n");
@@ -2853,8 +2574,8 @@ int main(int argc, char *argv[])
     }
 
 #ifdef EXACTSOLH_INIT
-    BlockVector res_func (Ablockmat.ColOffsets());
-    Ablockmat.Mult(Xinit, res_func);
+    BlockVector res_func (Funct_mat_lvls[0]->ColOffsets());
+    Funct_mat_lvls[0]->Mult(Xinit, res_func);
 
     ParGridFunction * Ax_check = new ParGridFunction(R_space);
     Vector trueAx_check(Adiag_check.Height());
@@ -2865,8 +2586,8 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "(Adiag sigma_special - A\' Xinit ) norm: " << Ax_diff_norm << "\n";
 
-    Vector BTlambda(Bloc.Width());
-    Bloc.MultTranspose(*lambda_special, BTlambda);
+    Vector BTlambda(Constraint_mat_lvls[0]->Width());
+    Constraint_mat_lvls[0]->MultTranspose(*lambda_special, BTlambda);
 
     ParGridFunction * BTlam_check = new ParGridFunction(R_space);
     Vector trueBTlam_check(Bdiag_check.Width());
@@ -2896,8 +2617,8 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "residual norm in functional for correct sigma_h: " << res_func_norm << "\n";
 
-    Vector res_constr (Bloc.Height());
-    Bloc.Mult(Xinit, res_constr);
+    Vector res_constr (Constraint_mat_lvls[0]->Height());
+    Constraint_mat_lvls[0]->Mult(Xinit, res_constr);
     res_constr -= Floc;
     double res_constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
     if (verbose)
@@ -2950,7 +2671,7 @@ int main(int argc, char *argv[])
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                      P_Func, P_W, BdrDofs_R, EssBdrDofs_R,
-                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit, //Ablockmat, Bloc, Floc, Xinit,
+                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
@@ -2969,24 +2690,26 @@ int main(int argc, char *argv[])
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
-    NewSolver.SetStopCriteriaType(2);
+    NewSolver.SetStopCriteriaType(1);
 
-    Vector tempp(sigma_exact->Size());
-    tempp = *sigma_exact;
+    Vector tempp(sigma_exact_finest->Size());
+    tempp = *sigma_exact_finest;
     tempp -= Xinit;
 
     std::cout << "norm of sigma_exact = " << sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size()) << "\n";
     std::cout << "norm of sigma_exact - Xinit = " << tempp.Norml2() / sqrt (tempp.Size()) << "\n";
 
-    Vector res(Ablockmat.GetBlock(0,0).Height());
-    Ablockmat.GetBlock(0,0).Mult(*sigma_exact_finest, res);
+    Vector res(Funct_mat_lvls[0]->GetBlock(0,0).Height());
+    Funct_mat_lvls[0]->GetBlock(0,0).Mult(*sigma_exact_finest, res);
     double func_norm = res.Norml2() / sqrt (res.Size());
     std::cout << "Functional norm for sigma_exact projection:  = " << func_norm << " ... \n";
 
+#ifdef OLD_CODE
     res = 0.0;
-    Ablockmat.GetBlock(0,0).Mult(*sigma, res);
+    Funct_mat_lvls[0]->GetBlock(0,0).Mult(*sigma, res);
     func_norm = res.Norml2() / sqrt (res.Size());
     std::cout << "Functional norm for exact sigma_h:  = " << func_norm << " ... \n";
+#endif
 
     if (verbose)
         std::cout << "New solver was set up in " << chrono.RealTime() << " seconds.\n";
@@ -3189,6 +2912,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+#ifdef VISUALIZATION
     if (visualization && nDimensions < 4)
     {
         char vishost[] = "localhost";
@@ -3292,23 +3016,9 @@ int main(int argc, char *argv[])
 
         MPI_Barrier(pmesh->GetComm());
     }
+#endif
 
     // 17. Free the used memory.
-#ifndef USE_CURLMATRIX
-    delete ffform;
-    if (withS)
-        delete qform;
-
-    if (withS || blockedversion)
-    {
-        delete Ablock;
-        if (withS)
-        {
-            delete Cblock;
-            delete CHblock;
-        }
-    }
-#endif
 
     delete C_space;
     delete hdivfree_coll;
