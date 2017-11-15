@@ -1008,14 +1008,14 @@ protected:
     // General routine which goes over all AEs at finer level and calls formulation-specific
     // routine SolveLocalProblem at each finer level
     void SolveLocalProblems(int level, BlockVector &lvlrhs_func,
-                            Vector& rhs_constr, BlockVector& sol_update) const;
+                            Vector *rhs_constr, BlockVector& sol_update) const;
 
     // These are the main differences between possible inheriting classes
     // since they define the way how the local problems are solved
     virtual void SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol,
                                    bool is_degenerate) const = 0;
-    virtual void SolveCoarseProblem(BlockVector &coarserhs_func, Vector& rhs_constr,
+    virtual void SolveCoarseProblem(BlockVector &coarserhs_func, Vector* rhs_constr,
                                     BlockVector& sol_coarse) const = 0;
 
     // constructs hierarchy of all objects requires
@@ -1330,7 +1330,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
 
         // solve local problems at level l
         // FIXME: all factors of local matrices can be stored after the first solver iteration
-        SolveLocalProblems(l, *(rhsfunc_lvls[l]), *rhs_constr, *(solupdate_lvls[l]));
+        SolveLocalProblems(l, *(rhsfunc_lvls[l]), rhs_constr, *(solupdate_lvls[l]));
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
 
         if (Smoo)
@@ -1355,7 +1355,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
     SetUpCoarsestRhsFunc();
 
     // 2.5 solve coarse problem
-    SolveCoarseProblem(*coarse_rhsfunc, *rhs_constr, *(solupdate_lvls[num_levels-1]));
+    SolveCoarseProblem(*coarse_rhsfunc, rhs_constr, *(solupdate_lvls[num_levels-1]));
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -1551,9 +1551,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     */
 #endif
 
-    *rhs_constr = 0.0;
-    *Qlminus1_f = *rhs_constr;
-
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
@@ -1562,7 +1559,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
         // solve local problems at level l
         // FIXME: all factors of local matrices can be stored after the first solver iteration
-        SolveLocalProblems(l, *(rhsfunc_lvls[l]), *rhs_constr, *(solupdate_lvls[l]));
+        SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
 
         //if ( current_iteration == 0)
@@ -1583,13 +1580,11 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     } // end of loop over finer levels
 
-    rhs_constr->SetSize(Constr_lvls[num_levels - 1]->Height());
-
     // needs to have coarse level rhs in the func already set before the call
     SetUpCoarsestRhsFunc();
 
     // 2.5 solve coarse problem
-    SolveCoarseProblem(*coarse_rhsfunc, *rhs_constr, *(solupdate_lvls[num_levels-1]));
+    SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels-1]));
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -1612,11 +1607,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
-
-    // 5. restore sizes of righthand side vectors for the constraint
-    // which were changed during transfer between levels
-    rhs_constr->SetSize(ConstrRhs.Size());
-    Qlminus1_f->SetSize(rhs_constr->Size());
 
     // some monitoring service calls
     if (print_level || stopcriteria_type == 0)
@@ -1904,7 +1894,7 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
 }
 
 void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlrhs_func,
-                                                    Vector& rhs_constr, BlockVector& sol_update) const
+                                                    Vector* rhs_constr, BlockVector& sol_update) const
 {
     // FIXME: factorization can be done only during the first solver iterate, then stored and re-used
     //DenseMatrix sub_A;
@@ -1947,8 +1937,8 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
                 sub_Constr.SetSize(Wtmp_j.Size(), Local_inds[blk]->Size());
                 Constr_fine->GetSubMatrix(Wtmp_j, *Local_inds[blk], sub_Constr);
 
-                if (current_iteration == 0)
-                    rhs_constr.GetSubVector(Wtmp_j, sub_rhsconstr);
+                if (rhs_constr)
+                    rhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
                 else
                 {
                     sub_rhsconstr.SetSize(Wtmp_j.Size());
@@ -2136,9 +2126,9 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
 
 
 void BaseGeneralMinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func,
-                                                    Vector& rhs_constr, BlockVector& sol_coarse) const
+                                                    Vector* rhs_constr, BlockVector& sol_coarse) const
 {
-    std::cout << "SolveCoarseProblem is not implemented in the base class! \n";
+    std::cout << "SolveCoarseProblem() is not implemented in the base class! \n";
     return;
 }
 
@@ -2148,7 +2138,7 @@ protected:
     virtual void SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol, bool is_degenerate) const;
     virtual void SolveCoarseProblem(BlockVector& coarserhs_func,
-                                    Vector& coarserhs_constr, BlockVector& sol_coarse) const;
+                                    Vector *coarserhs_constr, BlockVector& sol_coarse) const;
 public:
     // constructor with a smoother
     MinConstrSolver(int NumLevels, const Array< SparseMatrix*> &AE_to_e,
@@ -2263,19 +2253,22 @@ void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, Den
     return;
 }
 
-void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& coarserhs_constr,
+void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector* coarserhs_constr,
                                          BlockVector& sol_coarse) const
 {
     // 1. set up solution and righthand side vectors
     *coarsetrueX = 0.0;
-    //*coarsetrueRhs = 0.0;
+    *coarsetrueRhs = 0.0;
 
-    MFEM_ASSERT(coarsetrueRhs->GetBlock(0).Size() == coarserhs_func.GetBlock(0).Size() &&
-                coarsetrueRhs->GetBlock(1).Size() == coarserhs_constr.Size(),
+    MFEM_ASSERT(coarsetrueRhs->GetBlock(0).Size() == coarserhs_func.GetBlock(0).Size(),
                 "Sizes mismatch when finalizing rhs at the coarsest level!\n");
     coarsetrueRhs->GetBlock(0) = coarserhs_func.GetBlock(0);
-    if (current_iteration == 0) // else it is simply 0
-        coarsetrueRhs->GetBlock(1) = coarserhs_constr;
+    if (coarserhs_constr)
+    {
+        MFEM_ASSERT(coarsetrueRhs->GetBlock(1).Size() == coarserhs_constr->Size(),
+                    "Sizes mismatch when finalizing rhs at the coarsest level!\n");
+        coarsetrueRhs->GetBlock(1) = *coarserhs_constr;
+    }
 
     // 2. solve the linear system with preconditioned MINRES.
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
