@@ -942,6 +942,7 @@ protected:
     mutable BlockVector * coarse_rhsfunc;
     mutable BlockVector * coarsetrueX;
     mutable BlockVector * coarsetrueRhs;
+    mutable IterativeSolver * coarseSolver;
 
     mutable BlockVector* xblock; // temporary variables for casting (sigma,s) vectors into proper block vectors
     mutable BlockVector* yblock;
@@ -2087,6 +2088,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     coarse_matrix->SetBlock(0, numblocks, ConstrT_global);
     coarse_matrix->SetBlock(numblocks, 0, Constr_global);
 
+    // coarse solution and righthand side vectors
     coarsetrueX = new BlockVector(*coarse_offsets);
     coarsetrueRhs = new BlockVector(*coarse_offsets);
 
@@ -2116,6 +2118,20 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     for ( int blk = 0; blk < numblocks; ++blk)
         coarse_prec->SetDiagonalBlock(0, Funct_prec[blk]);
     coarse_prec->SetDiagonalBlock(numblocks, invSchur);
+
+    // coarse solver
+    int maxIter(20000);
+    double rtol(1.e-14);
+    double atol(1.e-14);
+
+    coarseSolver = new MINRESSolver(MPI_COMM_WORLD);
+    coarseSolver->SetAbsTol(atol);
+    coarseSolver->SetRelTol(rtol);
+    coarseSolver->SetMaxIter(maxIter);
+    coarseSolver->SetOperator(*coarse_matrix);
+    coarseSolver->SetPreconditioner(*coarse_prec);
+    coarseSolver->SetPrintLevel(0);
+
 }
 
 
@@ -2250,21 +2266,7 @@ void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, Den
 void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& coarserhs_constr,
                                          BlockVector& sol_coarse) const
 {
-    // 1. set up the solver parameters
-
-    int maxIter(20000);
-    double rtol(1.e-14);
-    double atol(1.e-14);
-
-    MINRESSolver solver(MPI_COMM_WORLD);
-    solver.SetAbsTol(atol);
-    solver.SetRelTol(rtol);
-    solver.SetMaxIter(maxIter);
-    solver.SetOperator(*coarse_matrix);
-    solver.SetPreconditioner(*coarse_prec);
-    solver.SetPrintLevel(0);
-
-    // 2. set up solution and righthand side vectors
+    // 1. set up solution and righthand side vectors
     *coarsetrueX = 0.0;
     //*coarsetrueRhs = 0.0;
 
@@ -2275,10 +2277,10 @@ void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& co
     if (current_iteration == 0) // else it is simply 0
         coarsetrueRhs->GetBlock(1) = coarserhs_constr;
 
-    // 3. solve the linear system with preconditioned MINRES.
-    solver.Mult(*coarsetrueRhs, *coarsetrueX);
+    // 2. solve the linear system with preconditioned MINRES.
+    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
-    // 4. convert solution from truedof to dof
+    // 3. convert solution from truedof to dof
 
     for ( int blk = 0; blk < numblocks; ++blk)
         dof_trueDof_Func_lvls[num_levels - 1][blk]->Mult(coarsetrueX->GetBlock(blk), sol_coarse.GetBlock(blk));
