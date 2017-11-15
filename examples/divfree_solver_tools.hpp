@@ -1077,8 +1077,6 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
             std::cout << "criteria: " << name << " is increasing! \n";
     }
 
-    MFEM_ASSERT(current_iteration > 0, "Stopping criteria must not be called at the first iteration!");
-
     switch(type)
     {
     case 0:
@@ -1540,9 +1538,8 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     next_sol = previous_sol;
 
-    if (current_iteration > 0)
-        CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "for next_sol at the beginning of iteration: ", print_level);
-
+    //if (current_iteration > 0)
+        //CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "for next_sol at the beginning of iteration: ", print_level);
 #ifdef COMPUTING_LAMBDA
     /*
     BlockVector sigma_special_block(block_offsets);
@@ -1561,9 +1558,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         // FIXME: all factors of local matrices can be stored after the first solver iteration
         SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
-
-        //if ( current_iteration == 0)
-            //CheckConstrRes(*(solupdate_lvls[l]), *(Constr_lvls[l]), *rhs_constr, "before hcurl update");
 
         if (Smoo)
         {
@@ -2227,10 +2221,7 @@ void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, Den
     // temp = ( B * invA * G - F )
     Vector temp(B.Height());
     B.Mult(invAG, temp);
-    if (current_iteration == 0) // else it is simply 0
-    {
-        temp -= F;
-    }
+    temp -= F;
 
     if (is_degenerate)
     {
