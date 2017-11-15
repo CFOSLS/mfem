@@ -5,6 +5,10 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+//delete this after debugging
+//#define TRYRUN
+
+// activates some additional checks
 //#define DEBUG_INFO
 
 double ComputeMGNorm(MPI_Comm comm, const Vector& sol_update, const Vector& res)
@@ -866,8 +870,6 @@ protected:
     mutable double solupdate_currmgnorm;
     mutable double solupdate_firstmgnorm;
 
-    mutable int max_iter_internal;
-
     // Relation tables which represent agglomerated elements-to-elements relation at each level
     const Array< SparseMatrix*>& AE_e;
 
@@ -938,6 +940,8 @@ protected:
     mutable BlockDiagonalPreconditioner * coarse_prec;
     mutable Array<int>* coarse_rhsfunc_offsets;
     mutable BlockVector * coarse_rhsfunc;
+    mutable BlockVector * coarsetrueX;
+    mutable BlockVector * coarsetrueRhs;
 
     mutable BlockVector* xblock; // temporary variables for casting (sigma,s) vectors into proper block vectors
     mutable BlockVector* yblock;
@@ -1056,14 +1060,14 @@ public:
     virtual void SetOperator(const Operator &op){}
 
     bool StoppingCriteria(int type, double value_curr, double value_prev, double value_scalefactor,
-                          double rel_tol, bool monotone_check = true, char const * name = NULL, bool print = false) const;
+                          double stop_tol, bool monotone_check = true, char const * name = NULL, bool print = false) const;
 
     int GetStopCriteriaType () {return stopcriteria_type;}
     void SetStopCriteriaType (int StopCriteria_Type) {stopcriteria_type = StopCriteria_Type;}
 };
 
 bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
-                                                  double value_scalefactor, double rel_tol,
+                                                  double value_scalefactor, double stop_tol,
                                                   bool monotone_check, char const * name, bool print) const
 {
     if (monotone_check)
@@ -1084,10 +1088,10 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
             std::cout << "current " << name << ": " << value_curr << "\n";
             std::cout << "previous " << name << ": " << value_prev << "\n";
             std::cout << "rel change = " << (value_prev - value_curr) / value_scalefactor
-                      << " (rel.tol = " << rel_tol << ")\n";
+                      << " (rel.tol = " << stop_tol << ")\n";
         }
 
-        if ( fabs(value_prev - value_curr) / value_scalefactor < rel_tol )
+        if ( fabs(value_prev - value_curr) / value_scalefactor < stop_tol )
             return true;
         else
             return false;
@@ -1101,10 +1105,10 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
 
             std::cout << "current " << name << ": " << value_curr << "\n";
             std::cout << "rel = " << value_curr / value_scalefactor
-                      << " (rel.tol = " << rel_tol << ")\n";
+                      << " (rel.tol = " << stop_tol << ")\n";
         }
 
-        if ( fabs(value_curr) / value_scalefactor < rel_tol )
+        if ( fabs(value_curr) / value_scalefactor < stop_tol )
             return true;
         else
             return false;
@@ -1142,6 +1146,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
        stopcriteria_type(StopCriteria_Type),
        setup_finished(false),
        num_levels(NumLevels),
+       current_iteration(0),
        AE_e(AE_to_e),
        el_to_dofs_Func(El_to_dofs_Func),
        el_to_dofs_L2(El_to_dofs_L2),
@@ -1185,10 +1190,6 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     yblock = new BlockVector(block_offsets);
     initguessblock = new BlockVector(block_offsets);
     update = new BlockVector(block_offsets);
-    current_iteration = 0;
-    abs_tol = 1.0e-12;
-    rel_tol = 1.0e-12;
-    max_iter_internal = 20000;
 
     Funct_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
@@ -1204,10 +1205,16 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     rhsfunc_lvls[0] = new BlockVector(block_offsets);
     solupdate_lvls.SetSize(num_levels);
     solupdate_lvls[0] = new BlockVector(block_offsets);
+
+    // cann't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
         Smoo = Smoother;
     else
         Smoo = NULL;
+
+    SetAbsTol(1.0e-12);
+    SetRelTol(1.0e-12);
+    SetMaxIter(1000);
 
     funct_prevnorm = 0.0;
     funct_currnorm = 0.0;
@@ -1287,7 +1294,6 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
 
     // in the end, initguessblock is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
-
     setup_finished = true;
 
     if (print_level)
@@ -1362,9 +1368,6 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
         *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
     }
 
-    if (print_level || stopcriteria_type == 2)
-        solupdate_currmgnorm = ComputeMGNorm(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
-
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     particular_solution += *(solupdate_lvls[0]);
 
@@ -1376,6 +1379,18 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
                 ConstrRhs, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(particular_solution.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+
+    // computing some numbers for stopping criterium
+    if (print_level || stopcriteria_type == 0)
+        funct_firstnorm = CheckFunctValue(comm, *(Funct_lvls[0]), particular_solution,
+                "for the particular solution: ", print_level);
+
+    if (print_level || stopcriteria_type == 1)
+        sol_firstitnorm = ComputeVecNorm(comm, particular_solution,
+                "for the particular solution", print_level);
+
+    if (print_level || stopcriteria_type == 2)
+        solupdate_firstmgnorm = ComputeMGNorm(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
 
     // 5. restore sizes of righthand side vectors for the constraint
     // which were changed during transfer between levels
@@ -1392,6 +1407,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     // start iteration
     converged = 0;
 
+    int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
@@ -1400,20 +1416,6 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         yblock->Update(y.GetData(), block_offsets);
 
         Solve(*xblock, *yblock);
-
-        MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *(Constr_lvls[0]),
-                                   ConstrRhs, "at the end of iteration"), "");
-        MFEM_ASSERT(CheckBdrError(yblock->GetBlock(0),
-                                  bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
-
-        if (print_level >= 1)
-            funct_currnorm = CheckFunctValue(comm, *(Funct_lvls[0]), *yblock, "at the end of iteration: ", true);
-        else
-            funct_currnorm = CheckFunctValue(comm, *(Funct_lvls[0]), *yblock, "at the end of iteration: ", false);
-
-        *update = *yblock;
-        *update -= *xblock;
-        solupdate_currnorm = ComputeVecNorm(comm, *update, "of the update: ", print_level);
 
         // monitoring convergence
         StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
@@ -1445,18 +1447,19 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         if (i > 0 && stopped)
         {
             converged = 1;
+            itnum = i;
             break;
         }
         else
         {
-            if (i == 0)
-                funct_firstnorm = funct_currnorm;
+            if (i == max_iter)
+            {
+                converged = -1;
+                itnum = i;
+                break;
+            }
             funct_prevnorm = funct_currnorm;
-            if (i == 0)
-                sol_firstitnorm = ComputeVecNorm(comm, *yblock, "of the update: ", 0);
             solupdate_prevnorm = solupdate_currnorm;
-            if (i == 0)
-                solupdate_firstmgnorm = solupdate_currmgnorm;
             solupdate_prevmgnorm = solupdate_currmgnorm;
 
             // resetting the input and output vectors for the next iteration
@@ -1464,6 +1467,15 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         }
 
     } // end of main iterative loop
+
+    // describing the reason for the stop:
+    if (print_level)
+    {
+        if (converged == 1)
+            std::cout << "Solver converged in " << itnum << " iterations. \n";
+        else // -1
+            std::cout << "Solver didn't converge in " << itnum << " iterations. \n";
+    }
 
 }
 
@@ -1518,12 +1530,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
     if (current_iteration == 0) // initializing first iterate with the given boundary data
-    {
-        // ensure that the initial iterate satisfies essential boundary conditions
-        previous_sol = bdrdata_finest;
-
-        CheckFunctValue(comm, *(Funct_lvls[0]), previous_sol, "for prev_sol at the beginning of iteration 0: ", print_level);
-    }
+        previous_sol = *initguessblock;
 
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
@@ -1543,17 +1550,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     */
 #endif
 
-    if (current_iteration == 0) // for the first iteration rhs in the constraint is nonzero
-    {
-        // setting rhs in the constraint to the input rhs - Constr * given bdr_data
-        Constr_lvls[0]->Mult(previous_sol.GetBlock(0), *rhs_constr);
-        *rhs_constr *= -1.0;
-        *rhs_constr += ConstrRhs;
-
-        MFEM_ASSERT(current_iteration == 0 || rhs_constr->Norml2() / sqrt(rhs_constr->Size()) > 1.0e-14,
-                    "Error! Rhs in the constraint must be 0 for any iteration after the first");
-    }
-
+    *rhs_constr = 0.0;
     *Qlminus1_f = *rhs_constr;
 
     // 1. loop over levels finer than the coarsest
@@ -1561,15 +1558,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     {
         // solution updates will always satisfy homogeneous essential boundary conditions
         *(solupdate_lvls[l]) = 0.0;
-
-        // at the first iteration we need to compute righthand side
-        // for the current level and set up next level data
-        // (i.e allocate memory, compute coarser matrices)
-        if (current_iteration == 0)
-        {
-            SetUpFinerLvl(l);
-            ComputeLocalRhsConstr(l);
-        }
 
         // solve local problems at level l
         // FIXME: all factors of local matrices can be stored after the first solver iteration
@@ -1581,20 +1569,6 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
         if (Smoo)
         {
-            if (numblocks == 1)
-            {
-                if (l == 0)
-                    Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0));
-                else
-                    Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0), &(P_Func[l - 1]->GetBlock(0,0)));
-            }
-            else
-            {
-                if (l == 0)
-                    Smoo->SetUpSmoother(l, *(Funct_lvls[l]));
-                else
-                    Smoo->SetUpSmoother(l, *(Funct_lvls[l]), P_Func[l - 1]);
-            }
             Smoo->ComputeRhsLevel(l, *(tempvec_lvls[l]));
             Smoo->MultLevel(l, *(solupdate_lvls[l]), *(tempvec_lvls[l]));
             *(solupdate_lvls[l]) = *(tempvec_lvls[l]);
@@ -1608,14 +1582,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     } // end of loop over finer levels
 
-    // 2. setup and solve the coarse problem
-    if (current_iteration == 0)
-    {
-        *rhs_constr = *Qlminus1_f;
-        SetUpCoarsestLvl();
-    }
-    else
-        rhs_constr->SetSize(Constr_lvls[num_levels - 1]->Height());
+    rhs_constr->SetSize(Constr_lvls[num_levels - 1]->Height());
 
     // needs to have coarse level rhs in the func already set before the call
     SetUpCoarsestRhsFunc();
@@ -1635,32 +1602,30 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
     }
 
-    if (print_level || stopcriteria_type == 2)
-        solupdate_currmgnorm = ComputeMGNorm(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
-
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
 
     if (print_level)
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
-    /*
+
     MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
-    */
 
     // 5. restore sizes of righthand side vectors for the constraint
     // which were changed during transfer between levels
     rhs_constr->SetSize(ConstrRhs.Size());
     Qlminus1_f->SetSize(rhs_constr->Size());
 
-    // for all but 1st iterate the rhs in the constraint will be 0
-    // FIXME: this is duplicating the block in the beginning of the iteration,
-    // the latter can be eliminated after debugging
-    if (current_iteration == 0)
-    {
-        *rhs_constr = 0.0;
-    }
+    // some monitoring service calls
+    if (print_level || stopcriteria_type == 0)
+        funct_currnorm = CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "at the end of iteration: ", print_level);
+
+    if (print_level || stopcriteria_type == 1)
+        solupdate_currnorm = ComputeVecNorm(comm, *(solupdate_lvls[0]), "of the update: ", print_level);
+
+    if (print_level || stopcriteria_type == 2)
+        solupdate_currmgnorm = ComputeMGNorm(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
 
     ++current_iteration;
 
@@ -2122,6 +2087,9 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     coarse_matrix->SetBlock(0, numblocks, ConstrT_global);
     coarse_matrix->SetBlock(numblocks, 0, Constr_global);
 
+    coarsetrueX = new BlockVector(*coarse_offsets);
+    coarsetrueRhs = new BlockVector(*coarse_offsets);
+
     // preconditioner for the coarse problem
 
     std::vector<Operator*> Funct_prec(numblocks);
@@ -2297,25 +2265,23 @@ void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector& co
     solver.SetPrintLevel(0);
 
     // 2. set up solution and righthand side vectors
-    // FIXME: Why creating Vectors here at each iteration?
-    BlockVector trueX(*coarse_offsets), trueRhs(*coarse_offsets);
-    trueX = 0.0;
-    trueRhs = 0.0;
+    *coarsetrueX = 0.0;
+    //*coarsetrueRhs = 0.0;
 
-    MFEM_ASSERT(trueRhs.GetBlock(0).Size() == coarserhs_func.GetBlock(0).Size() &&
-                trueRhs.GetBlock(1).Size() == coarserhs_constr.Size(),
+    MFEM_ASSERT(coarsetrueRhs->GetBlock(0).Size() == coarserhs_func.GetBlock(0).Size() &&
+                coarsetrueRhs->GetBlock(1).Size() == coarserhs_constr.Size(),
                 "Sizes mismatch when finalizing rhs at the coarsest level!\n");
-    trueRhs.GetBlock(0) = coarserhs_func.GetBlock(0);
+    coarsetrueRhs->GetBlock(0) = coarserhs_func.GetBlock(0);
     if (current_iteration == 0) // else it is simply 0
-        trueRhs.GetBlock(1) = coarserhs_constr;
+        coarsetrueRhs->GetBlock(1) = coarserhs_constr;
 
     // 3. solve the linear system with preconditioned MINRES.
-    solver.Mult(trueRhs, trueX);
+    solver.Mult(*coarsetrueRhs, *coarsetrueX);
 
     // 4. convert solution from truedof to dof
 
     for ( int blk = 0; blk < numblocks; ++blk)
-        dof_trueDof_Func_lvls[num_levels - 1][blk]->Mult(trueX.GetBlock(blk), sol_coarse.GetBlock(blk));
+        dof_trueDof_Func_lvls[num_levels - 1][blk]->Mult(coarsetrueX->GetBlock(blk), sol_coarse.GetBlock(blk));
 
     return;
 }
