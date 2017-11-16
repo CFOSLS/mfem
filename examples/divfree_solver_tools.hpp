@@ -1430,6 +1430,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
         xblock->Update(x.GetData(), block_offsets);
+        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "before the iteration"),"");
         yblock->Update(y.GetData(), block_offsets);
 
         Solve(*xblock, *yblock);

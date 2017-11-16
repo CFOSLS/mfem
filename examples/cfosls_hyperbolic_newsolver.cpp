@@ -20,6 +20,8 @@
 // switches on/off usage of smoother in the new minimization solver
 #define WITH_SMOOTHER
 
+#define CHECK_SYMMETRY
+
 // initializes sigma with exact solution
 // if combined with COMPUTING_LAMBDA, it will
 // be exact discrete solution,
@@ -2726,6 +2728,49 @@ int main(int argc, char *argv[])
     //Vector Tempy(Tempx.Size());
     Vector Tempy(ParticSol.Size());
     Tempy = 0.0;
+
+#ifdef CHECK_SYMMETRY
+    Vector VecRand1(Divfree_mat_lvls[0]->Width());
+    VecRand1.Randomize();
+    Vector VecRand2(Divfree_mat_lvls[0]->Width());
+    VecRand2.Randomize();
+    for ( int i = 0; i < VecRand1.Size(); ++i )
+    {
+        if ((*(EssBdrDofs_Hcurl[0]))[i] != 0 )
+        {
+            VecRand1[i] = 0.0;
+            VecRand2[i] = 0.0;
+        }
+    }
+    Vector Vec1(Divfree_mat_lvls[0]->Height());
+    Vector Vec2(Divfree_mat_lvls[0]->Height());
+    Divfree_mat_lvls[0]->Mult(VecRand1, Vec1);
+    Divfree_mat_lvls[0]->Mult(VecRand2, Vec2);
+
+    for ( int i = 0; i < Vec1.Size(); ++i )
+    {
+        if ((*(EssBdrDofs_R[0][0]))[i] != 0 )
+        {
+            Vec1[i] = 0.0;
+            Vec2[i] = 0.0;
+        }
+    }
+
+    NewSolver.SetMaxIter(1);
+
+    NewSolver.Mult(Vec1, Tempy);
+    double scal1 = Tempy * Vec2;
+
+    NewSolver.Mult(Vec2, Tempy);
+    double scal2 = Tempy * Vec1;
+
+    std::cout << "scal1 = " << scal1 << "\n";
+    std::cout << "scal2 = " << scal2 << "\n";
+
+    MPI_Finalize();
+    return 0;
+
+#endif
 
     chrono.Clear();
     chrono.Start();
