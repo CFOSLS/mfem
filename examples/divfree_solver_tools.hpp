@@ -1591,24 +1591,22 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     {
         // interpolate back
         P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
-        *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
 
         // update righthand side
         ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
-
-        // compute new rhs
-        //ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
 
         // smooth at the finer level
         if (Smoo)
         {
             Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
-            Smoo->MultLevel(l - 1, *(solupdate_lvls[l - 1]), *(tempvec_lvls[l - 1]));
-            *(solupdate_lvls[l - 1]) = *(tempvec_lvls[l - 1]);
+            Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
+            *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
             // update righthand side
-            ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(solupdate_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+            ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
         }
+
+        *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
 
         // solve at the finer level
         SolveLocalProblems(l - 1, *(tempvec2_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
