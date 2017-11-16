@@ -5,6 +5,9 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+// delete after implementing
+#define SYMMETRIC
+
 //delete this after debugging
 //#define TRYRUN
 
@@ -964,6 +967,7 @@ protected:
     // initialized in the constructor (partly) and in SetUpFinerLvl()
     // Used at least in Solve(), ComputeNextLvlRhsFunc() and InterpolateBack() // FIXME: update the list of functions mentioned
     mutable Array<BlockVector*> tempvec_lvls;
+    mutable Array<BlockVector*> tempvec2_lvls;
     mutable Array<BlockVector*> rhsfunc_lvls;
 
 protected:
@@ -979,7 +983,7 @@ protected:
     // minimization is done only over one of the variables, thus requiring
     // rhs computation more complicated than just a simple matvec
     // Computes rhs_func = - Funct * xblock
-    virtual void ComputeRhsFunc(BlockVector& rhs_func, const BlockVector& xblock) const;
+    virtual void ComputeRhsFunc(int l, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
     // Should be called only during the first solver iterate (since it must be 0 at the next)
@@ -1200,6 +1204,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 
     tempvec_lvls.SetSize(num_levels);
     tempvec_lvls[0] = new BlockVector(block_offsets);
+    tempvec2_lvls.SetSize(num_levels);
+    tempvec2_lvls[0] = new BlockVector(block_offsets);
     rhsfunc_lvls.SetSize(num_levels);
     rhsfunc_lvls[0] = new BlockVector(block_offsets);
     solupdate_lvls.SetSize(num_levels);
@@ -1314,7 +1320,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
 #endif
 
     // 0. Compute rhs in the functional for the finest level
-    ComputeRhsFunc(*(rhsfunc_lvls[0]), initial_guess);
+    ComputeRhsFunc(0, initial_guess, *(rhsfunc_lvls[0]));
 
     *Qlminus1_f = *rhs_constr;
 
@@ -1451,10 +1457,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         }
         else
         {
-            if (i == max_iter)
+            if (i == max_iter - 1)
             {
                 converged = -1;
-                itnum = i;
+                itnum = max_iter;
                 break;
             }
             funct_prevnorm = funct_currnorm;
@@ -1482,10 +1488,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 // rhs_func = - Funct * xblock, where Funct is the blockmatrix
 // which arises from the minimization functional, and xblock is
 // the minimized variable (e.g. sigma, or (sigma,S)).
-void BaseGeneralMinConstrSolver::ComputeRhsFunc(BlockVector &rhs_func, const BlockVector& xblock) const
+void BaseGeneralMinConstrSolver::ComputeRhsFunc(int l, const BlockVector& x_l, BlockVector &rhs_l) const
 {
-    Funct_lvls[0]->Mult(xblock, rhs_func);
-    rhs_func *= -1.0;
+    Funct_lvls[l]->Mult(x_l, rhs_l);
+    rhs_l *= -1.0;
 }
 
 // Simply applies a P_l^T which transfers the given blockvector to the (one-level) coarser space
@@ -1501,11 +1507,8 @@ void BaseGeneralMinConstrSolver::ProjectFinerFuncToCoarser(int level,
 void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const BlockVector& rhs_l,
                                                           const BlockVector& solupd_l, BlockVector& out_l) const
 {
-    // out_l = M_l * solupd_l
-    Funct_lvls[level]->Mult(solupd_l, out_l);
-
     // out_l = - M_l * solupd_l
-    out_l *= -1;
+    ComputeRhsFunc(level, solupd_l, out_l);
 
     // out_l = rhs_l - M_l * solupd_l
     out_l += rhs_l;
@@ -1513,7 +1516,6 @@ void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const Block
 
 // Computes rhs in the functional part for the next level
 // rhs_{l+1} = P_l^T ( rhs_l )
-// ComputeUpdatedLvlRhsFunc should be called before calling this routine
 // FIXME: one-liner?
 void BaseGeneralMinConstrSolver::ComputeNextLvlRhsFunc(int level) const
 {
@@ -1534,7 +1536,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
-    ComputeRhsFunc(*(rhsfunc_lvls[0]), previous_sol);
+    ComputeRhsFunc(0, previous_sol, *(rhsfunc_lvls[0]));
 
     next_sol = previous_sol;
 
@@ -1548,6 +1550,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
     */
 #endif
 
+    // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
@@ -1559,6 +1562,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
 
+        // smooth
         if (Smoo)
         {
             Smoo->ComputeRhsLevel(l, *(tempvec_lvls[l]));
@@ -1574,12 +1578,43 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
     } // end of loop over finer levels
 
+    // BOTTOM: at the coarest level
+    // 2.5 solve coarse problem
     // needs to have coarse level rhs in the func already set before the call
     SetUpCoarsestRhsFunc();
 
-    // 2.5 solve coarse problem
-    SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels-1]));
+    SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels - 1]));
 
+    // UPWARD loop: from coarsest to finest
+#ifdef SYMMETRIC
+    for (int l = num_levels - 1; l > 0; --l)
+    {
+        // interpolate back
+        P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
+        *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
+
+        // update righthand side
+        ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+
+        // compute new rhs
+        //ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+
+        // smooth at the finer level
+        if (Smoo)
+        {
+            Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
+            Smoo->MultLevel(l - 1, *(solupdate_lvls[l - 1]), *(tempvec_lvls[l - 1]));
+            *(solupdate_lvls[l - 1]) = *(tempvec_lvls[l - 1]);
+
+            // update righthand side
+            ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(solupdate_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+        }
+
+        // solve at the finer level
+        SolveLocalProblems(l - 1, *(tempvec2_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
+    }
+
+#else
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
     //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
@@ -1591,7 +1626,7 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
     }
-
+#endif
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
 
@@ -1741,6 +1776,7 @@ void BaseGeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     }
 
     tempvec_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
+    tempvec2_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
     solupdate_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
     rhsfunc_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 }
