@@ -2747,6 +2747,12 @@ int main(int argc, char *argv[])
     Divfree_mat_lvls[0]->Mult(VecRand1, Vec1);
     Divfree_mat_lvls[0]->Mult(VecRand2, Vec2);
 
+    // checing that Vec1 and Vec2 are divergence-free
+    Vector VecCheck1(Constraint_mat_lvls[0]->Height());
+    Vector VecCheck2(Constraint_mat_lvls[0]->Height());
+    Constraint_mat_lvls[0]->Mult(Vec1, VecCheck1);
+    Constraint_mat_lvls[0]->Mult(Vec2, VecCheck2);
+
     for ( int i = 0; i < Vec1.Size(); ++i )
     {
         if ((*(EssBdrDofs_R[0][0]))[i] != 0 )
@@ -2755,6 +2761,9 @@ int main(int argc, char *argv[])
             Vec2[i] = 0.0;
         }
     }
+
+    MFEM_ASSERT(VecCheck1.Norml2() / sqrt (VecCheck1.Size()) < 1.0e-14, "VecCheck1 is not divergence free");
+    MFEM_ASSERT(VecCheck2.Norml2() / sqrt (VecCheck2.Size()) < 1.0e-14, "VecCheck2 is not divergence free");
 
     NewSolver.SetMaxIter(1);
 

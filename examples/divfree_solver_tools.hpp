@@ -61,7 +61,7 @@ double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const BlockVecto
 }
 
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h
-bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector& ConstrRhs,
+bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector* ConstrRhs,
                                                 char const* string)
 {
     bool passed = true;
@@ -69,7 +69,8 @@ bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector& Con
     Constr.Mult(sigma, res_constr);
     //ofstream ofs("newsolver_out.txt");
     //res_constr.Print(ofs,1);
-    res_constr -= ConstrRhs;
+    if (ConstrRhs)
+        res_constr -= *ConstrRhs;
     double constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
     if (fabs(constr_norm) > 1.0e-13)
     {
@@ -1305,7 +1306,7 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         *part_solution = bdrdata_finest;
 
     MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *(Constr_lvls[0]),
-                ConstrRhs, "for the initial guess"),"");
+                &ConstrRhs, "for the initial guess"),"");
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
@@ -1393,7 +1394,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
     MFEM_ASSERT(CheckConstrRes(particular_solution.GetBlock(0), *(Constr_lvls[0]),
-                ConstrRhs, "after all levels update"),"");
+                &ConstrRhs, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(particular_solution.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
@@ -1422,6 +1423,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
 
     // start iteration
+    current_iteration = 0;
     converged = 0;
 
     int itnum = 0;
@@ -1430,7 +1432,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
         xblock->Update(x.GetData(), block_offsets);
-        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "before the iteration"),"");
+        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), NULL, "before the iteration"),"");
         yblock->Update(y.GetData(), block_offsets);
 
         Solve(*xblock, *yblock);
@@ -1634,7 +1636,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
-    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), ConstrRhs, "after all levels update"),"");
+    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), NULL, "after all levels update"),"");
     MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
     // some monitoring service calls
