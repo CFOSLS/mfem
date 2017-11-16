@@ -828,10 +828,9 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     out_lvl += in_lvl;
 }
 
-// TODO: Symmetrize the solver
+// TODO: Check the symmetrization
 // TODO: Add blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
-// TODO: Symmetrize the Solver to make it available later as a preconditioner (w.r.t to smoothing, e.g.)
 // TODO: Check the timings and make it faster
 
 class BaseGeneralMinConstrSolver : public IterativeSolver
@@ -947,13 +946,14 @@ protected:
     mutable BlockVector * coarsetrueRhs;
     mutable IterativeSolver * coarseSolver;
 
-    mutable BlockVector* xblock; // temporary variables for casting (sigma,s) vectors into proper block vectors
+    // temporary variables for casting (sigma,s) as vectors into proper block vectors
+    mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
     // stores a valid initial guess for the solver
     // which satisfies the divergence contraint
-    // computed in SetUpSolver()
-    mutable BlockVector* initguessblock;
+    // (*) computed in SetUpSolver()
+    mutable BlockVector* part_solution;
 
     // variable-size vectors (initialized with the finest level sizes)
     mutable Vector* rhs_constr;     // righthand side (from the divergence constraint) at level l
@@ -964,8 +964,8 @@ protected:
     mutable Array<BlockVector*> solupdate_lvls;
 
     // temporary storage for blockvectors related to the considered functional at all levels
-    // initialized in the constructor (partly) and in SetUpFinerLvl()
-    // Used at least in Solve(), ComputeNextLvlRhsFunc() and InterpolateBack() // FIXME: update the list of functions mentioned
+    // initialized in the constructor (partly) and in SetUpSolver()
+    // Used at least in Solve() and InterpolateBack() // FIXME: update the list of functions mentioned
     mutable Array<BlockVector*> tempvec_lvls;
     mutable Array<BlockVector*> tempvec2_lvls;
     mutable Array<BlockVector*> rhsfunc_lvls;
@@ -981,8 +981,8 @@ protected:
     // REMARK: It is virtual because one might want a complicated strategy where
     // e.g., if there are sigma and S in the functional, but each iteration
     // minimization is done only over one of the variables, thus requiring
-    // rhs computation more complicated than just a simple matvec
-    // Computes rhs_func = - Funct * xblock
+    // rhs computation more complicated than just a simple matvec.
+    // Computes rhs_func_l = - Funct_l * x_l in this base class
     virtual void ComputeRhsFunc(int l, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
@@ -990,18 +990,16 @@ protected:
     void ComputeLocalRhsConstr(int level) const;
 
     // Allocates current level-related data and computes coarser matrices for the functional
-    // and the constraint. Should be called only during the first solver iterate
+    // and the constraint.
+    // Called only during the SetUpSolver()
     virtual void SetUpFinerLvl(int lvl) const;
 
     // Allocates and assembles HypreParMatrices required for the coarsest level problem
+    // Called only during the SetUpSolver()
     virtual void SetUpCoarsestLvl() const;
 
     // Assembles the coarsest level righthand side for the functional
     void SetUpCoarsestRhsFunc() const;
-
-    // Computes the rhs in the functional for the next level:
-    // coarser rhs_func(at level l+1) = P_l^T ( rhs_func_l - Funct_l sol_l)
-    void ComputeNextLvlRhsFunc(int level) const;
 
     // Computes out_l as updated rhs in the functional for the current level
     //      out_l := rhs_l - M_l * solupd_l
@@ -1027,10 +1025,13 @@ protected:
     // the given contraint and sets it as the initial iterate.
     void SetUpSolver() const;
 
-    void FindParticularSolution( const BlockVector& initial_guess, BlockVector& particular_solution) const;
+    // finds a particular solution (like the first iteration of the previous
+    // version of the solver)
+    void FindParticularSolution( const BlockVector& initial_guess,
+                                 BlockVector& particular_solution) const;
 
     // main solver iteration routine
-    void Solve(BlockVector &previous_sol, BlockVector &next_sol) const;
+    void Solve(const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
     // constructor with a smoother
@@ -1058,6 +1059,8 @@ public:
 
     BaseGeneralMinConstrSolver() = delete;
 
+    const Vector* ParticularSolution() const;
+
     // external calling routine (as in any IterativeSolver) which takes care of convergence
     virtual void Mult(const Vector & x, Vector & y) const;
 
@@ -1065,15 +1068,24 @@ public:
     virtual void SetOperator(const Operator &op){}
 
     bool StoppingCriteria(int type, double value_curr, double value_prev, double value_scalefactor,
-                          double stop_tol, bool monotone_check = true, char const * name = NULL, bool print = false) const;
+                          double stop_tol, bool monotone_check = true, char const * name = NULL,
+                          bool print = false) const;
 
     int GetStopCriteriaType () {return stopcriteria_type;}
     void SetStopCriteriaType (int StopCriteria_Type) {stopcriteria_type = StopCriteria_Type;}
 };
 
+const Vector* BaseGeneralMinConstrSolver::ParticularSolution() const
+{
+    MFEM_ASSERT(setup_finished, "Cannot call BaseGeneralMinConstrSolver::ParticularSolution()"
+                                " before the setup was finished \n");
+    return &(part_solution->GetBlock(0));
+}
+
 bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
                                                   double value_scalefactor, double stop_tol,
-                                                  bool monotone_check, char const * name, bool print) const
+                                                  bool monotone_check, char const * name,
+                                                  bool print) const
 {
     if (monotone_check)
     {
@@ -1191,7 +1203,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     workfvec = new Vector(ConstrOp_lvls[0]->Height());
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
-    initguessblock = new BlockVector(block_offsets);
+    part_solution = new BlockVector(block_offsets);
     update = new BlockVector(block_offsets);
 
     Funct_lvls.SetSize(num_levels);
@@ -1287,17 +1299,17 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
         std::cout << "Calling FindParticularSolution()";
 
-        FindParticularSolution(bdrdata_finest, *initguessblock);
+        FindParticularSolution(bdrdata_finest, *part_solution);
     }
     else
-        *initguessblock = bdrdata_finest;
+        *part_solution = bdrdata_finest;
 
-    MFEM_ASSERT(CheckConstrRes(initguessblock->GetBlock(0), *(Constr_lvls[0]),
+    MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *(Constr_lvls[0]),
                 ConstrRhs, "for the initial guess"),"");
-    MFEM_ASSERT(CheckBdrError(initguessblock->GetBlock(0),
+    MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
-    // in the end, initguessblock is in any case a valid initial iterate
+    // in the end, part_solution is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
     setup_finished = true;
 
@@ -1348,7 +1360,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
         *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
 
         // setting up rhs from the functional for the next (coarser) level
-        ComputeNextLvlRhsFunc(l);
+        ProjectFinerFuncToCoarser(l, *(rhsfunc_lvls[l]), *(rhsfunc_lvls[l + 1]) );
 
     } // end of loop over finer levels
 
@@ -1514,24 +1526,13 @@ void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const Block
     out_l += rhs_l;
 }
 
-// Computes rhs in the functional part for the next level
-// rhs_{l+1} = P_l^T ( rhs_l )
-// FIXME: one-liner?
-void BaseGeneralMinConstrSolver::ComputeNextLvlRhsFunc(int level) const
-{
-    ProjectFinerFuncToCoarser(level, *(rhsfunc_lvls[level]), *(rhsfunc_lvls[level + 1]));
-}
-
 // Computes one iteration of the new solver
 // Input: previous_sol (and all the setup)
 // Output: next_sol
-void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& next_sol) const
+void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVector& next_sol) const
 {
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
-
-    if (current_iteration == 0) // initializing first iterate with the given boundary data
-        previous_sol = *initguessblock;
 
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
@@ -1573,8 +1574,8 @@ void BaseGeneralMinConstrSolver::Solve(BlockVector& previous_sol, BlockVector& n
 
         *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
 
-        // setting up rhs from the functional for the next (coarser) level
-        ComputeNextLvlRhsFunc(l);
+        // projecting rhs from the functional to the next (coarser) level
+        ProjectFinerFuncToCoarser(l, *(rhsfunc_lvls[l]), *(rhsfunc_lvls[l + 1]));
 
     } // end of loop over finer levels
 

@@ -2692,6 +2692,8 @@ int main(int argc, char *argv[])
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(1);
 
+    Vector ParticSol(*(NewSolver.ParticularSolution()));
+
     Vector tempp(sigma_exact_finest->Size());
     tempp = *sigma_exact_finest;
     tempp -= Xinit;
@@ -2719,15 +2721,17 @@ int main(int argc, char *argv[])
 
     ParGridFunction * NewSigmahat = new ParGridFunction(R_space);
 
-    Vector Tempx(sigma_exact_finest->Size());
-    Tempx = 0.0;
-    Vector Tempy(Tempx.Size());
+    //Vector Tempx(sigma_exact_finest->Size());
+    //Tempx = 0.0;
+    //Vector Tempy(Tempx.Size());
+    Vector Tempy(ParticSol.Size());
     Tempy = 0.0;
 
     chrono.Clear();
     chrono.Start();
 
-    NewSolver.Mult(Tempx, Tempy);
+    //NewSolver.Mult(Tempx, Tempy);
+    NewSolver.Mult(ParticSol, Tempy);
 
     *NewSigmahat = Tempy;
 
