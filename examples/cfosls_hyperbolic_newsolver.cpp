@@ -18,7 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHER
 
 #define CHECK_SYMMETRY
 
@@ -2733,7 +2733,7 @@ int main(int argc, char *argv[])
     Vector VecRand1(Divfree_mat_lvls[0]->Width());
     VecRand1.Randomize();
     Vector VecRand2(Divfree_mat_lvls[0]->Width());
-    VecRand2.Randomize();
+    VecRand2.Randomize(100);
     for ( int i = 0; i < VecRand1.Size(); ++i )
     {
         if ((*(EssBdrDofs_Hcurl[0]))[i] != 0 )
@@ -2765,16 +2765,39 @@ int main(int argc, char *argv[])
     MFEM_ASSERT(VecCheck1.Norml2() / sqrt (VecCheck1.Size()) < 1.0e-14, "VecCheck1 is not divergence free");
     MFEM_ASSERT(VecCheck2.Norml2() / sqrt (VecCheck2.Size()) < 1.0e-14, "VecCheck2 is not divergence free");
 
+    Vector VecDiff(Vec1.Size());
+    VecDiff = Vec1;
+
+    std::cout << "Norm of Vec1 = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
+
+    VecDiff -= Vec2;
+
+    MFEM_ASSERT(VecDiff.Norml2() / sqrt(VecDiff.Size()) > 1.0e-10, "Vec1 equals Vec2 but they must be different");
+    //VecDiff.Print();
+    std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
+
     NewSolver.SetMaxIter(1);
 
     NewSolver.Mult(Vec1, Tempy);
     double scal1 = Tempy * Vec2;
+    //std::cout << "A Vec1 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
 
     NewSolver.Mult(Vec2, Tempy);
     double scal2 = Tempy * Vec1;
+    //std::cout << "A Vec2 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
 
     std::cout << "scal1 = " << scal1 << "\n";
     std::cout << "scal2 = " << scal2 << "\n";
+
+    if ( fabs(scal1 - scal2) / fabs(scal1) > 1.0e-12)
+    {
+        std::cout << "Solver is not symmetric on two random vectors: \n";
+        std::cout << "vec2 * (A * vec1) = " << scal1 << " != " << scal2 << " = vec1 * (A * vec2)" << "\n";
+    }
+    else
+    {
+        std::cout << "Solver was symmetric on the given vectors: dot product = " << scal1 << "\n";
+    }
 
     MPI_Finalize();
     return 0;

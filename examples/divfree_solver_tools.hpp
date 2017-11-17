@@ -5,8 +5,10 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-// delete after implementing
+// delete after implementing & checking symmetry
 #define SYMMETRIC
+
+//#define CHECK_LOCALSOLVE_SYMMETRY
 
 //delete this after debugging
 //#define TRYRUN
@@ -1432,7 +1434,11 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
         xblock->Update(x.GetData(), block_offsets);
+#ifdef CHECK_SYMMETRY
         MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), NULL, "before the iteration"),"");
+#else
+        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "before the iteration"),"");
+#endif
         yblock->Update(y.GetData(), block_offsets);
 
         Solve(*xblock, *yblock);
@@ -1540,10 +1546,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
-    ComputeRhsFunc(0, previous_sol, *(rhsfunc_lvls[0]));
-
-    next_sol = previous_sol;
-
     //if (current_iteration > 0)
         //CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "for next_sol at the beginning of iteration: ", print_level);
 #ifdef COMPUTING_LAMBDA
@@ -1554,6 +1556,48 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
     */
 #endif
 
+    next_sol = previous_sol;
+    ComputeRhsFunc(0, previous_sol, *(rhsfunc_lvls[0]));
+
+#ifdef CHECK_LOCALSOLVE_SYMMETRY
+    BlockVector Vec1(block_offsets);
+    Vec1.Randomize();
+    BlockVector Sol1(block_offsets);
+    Sol1 = 0.0;
+    SolveLocalProblems(0, Vec1, NULL, Sol1);
+    Sol1 += Vec1;
+
+    BlockVector Vec2(block_offsets);
+    Vec2.Randomize(100);
+    BlockVector Sol2(block_offsets);
+    Sol2 = 0.0;
+    SolveLocalProblems(0, Vec2, NULL, Sol2);
+    Sol2 += Vec2;
+
+    double dot1 = Vec2 * Sol1;
+    double dot2 = Vec1 * Sol2;
+
+    std::cout << "dot1 = " << dot1 << ", dot2 = " << dot2 << "\n";
+    if (fabs (dot1 - dot2) > 1.0e-10)
+        std::cout << "Not equal! Diff = " << dot1 - dot2 << "\n";
+    else
+        std::cout << "Equal! \n";
+#endif
+
+
+#ifdef SYMMETRIC
+    int l = 0;
+    *(solupdate_lvls[l]) = 0.0;
+
+    SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
+
+    ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
+    *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
+
+    SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
+
+    next_sol += *(solupdate_lvls[0]);
+#else
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1593,9 +1637,24 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 #ifdef SYMMETRIC
     for (int l = num_levels - 1; l > 0; --l)
     {
+        /*
         // interpolate back
         P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
 
+        ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(rhsfunc_lvls[l - 1]));
+
+        SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(tempvec2_lvls[l - 1]));
+
+        *(tempvec_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
+
+        //ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
+        //*(tempvec2_lvls[l - 1]) *= -1.0;
+        //*(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
+
+        *(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
+        * */
+
+        /*
         // update righthand side
         ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
 
@@ -1614,6 +1673,15 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 
         // solve at the finer level
         SolveLocalProblems(l - 1, *(tempvec2_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
+        */
+
+        // interpolate back
+        //P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
+        //*(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
+
+        //ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(solupdate_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+        SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
+
     }
 
 #else
@@ -1629,14 +1697,19 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
         *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
     }
 #endif
+
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
+#endif
 
     if (print_level)
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
-
+#ifdef CHECK_SYMMETRY
     MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), NULL, "after all levels update"),"");
+#else
+    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "after all levels update"),"");
+#endif
     MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
     // some monitoring service calls
