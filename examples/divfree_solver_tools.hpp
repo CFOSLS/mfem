@@ -5,14 +5,6 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-// delete after implementing & checking symmetry
-#define SYMMETRIC
-
-//#define CHECK_LOCALSOLVE_SYMMETRY
-
-//delete this after debugging
-//#define TRYRUN
-
 // activates some additional checks
 //#define DEBUG_INFO
 
@@ -855,6 +847,9 @@ private:
     // makes changes if the solver is used as a preconditioner
     // FIXME:
     mutable bool preconditioner_mode;
+
+    // defines if the solver is symmetrized (default is yes)
+    mutable bool symmetric;
 protected:
     int num_levels;
 
@@ -1091,6 +1086,9 @@ public:
     void SetStopCriteriaType (int StopCriteria_Type) const {stopcriteria_type = StopCriteria_Type;}
 
     void SetAsPreconditioner() const {preconditioner_mode = true;}
+    bool IsSymmetric() const {return symmetric;}
+    void SetSymmetric() const {symmetric = true;}
+    void SetUnSymmetric() const {symmetric = false;}
 
     void SetInitialGuess(Vector& InitGuess) const;
 };
@@ -1272,6 +1270,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     solupdate_firstmgnorm = 0.0;
 
     preconditioner_mode = false;
+    symmetric = true;
 }
 
 void BaseGeneralMinConstrSolver::SetUpSolver() const
@@ -1606,50 +1605,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     next_sol = previous_sol;
     ComputeUpdatedLvlRhsFunc(0, righthand_side, previous_sol, *(rhsfunc_lvls[0]));
 
-#ifdef CHECK_LOCALSOLVE_SYMMETRY
-    BlockVector Vec1(block_offsets);
-    Vec1.Randomize();
-    BlockVector Sol1(block_offsets);
-    Sol1 = 0.0;
-    SolveLocalProblems(0, Vec1, NULL, Sol1);
-    Sol1 += Vec1;
-
-    BlockVector Vec2(block_offsets);
-    Vec2.Randomize(100);
-    BlockVector Sol2(block_offsets);
-    Sol2 = 0.0;
-    SolveLocalProblems(0, Vec2, NULL, Sol2);
-    Sol2 += Vec2;
-
-    double dot1 = Vec2 * Sol1;
-    double dot2 = Vec1 * Sol2;
-
-    std::cout << "dot1 = " << dot1 << ", dot2 = " << dot2 << "\n";
-    if (fabs (dot1 - dot2) > 1.0e-10)
-        std::cout << "Not equal! Diff = " << dot1 - dot2 << "\n";
-    else
-        std::cout << "Equal! \n";
-#endif
-
-
-    /*
-     * some simplified symmetry check for a part of the solver
-#ifdef SYMMETRIC
-
-    int l = 0;
-    *(solupdate_lvls[l]) = 0.0;
-
-    SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
-
-    ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
-    *(rhsfunc_lvls[l]) = *(tempvec_lvls[l]);
-
-    SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
-
-    next_sol += *(solupdate_lvls[0]);
-#else
-    */
-
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1686,45 +1641,48 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels - 1]));
 
     // UPWARD loop: from coarsest to finest
-#ifdef SYMMETRIC
-    for (int l = num_levels - 1; l > 0; --l)
+    if (symmetric)
     {
-        // interpolate back
-        P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
-        ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
-
-        // smooth at the finer level
-        if (Smoo)
+        for (int l = num_levels - 1; l > 0; --l)
         {
-            Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
-            Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
-            *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
-
+            // interpolate back
+            P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
             ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+
+            // smooth at the finer level
+            if (Smoo)
+            {
+                Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
+                Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
+                *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
+
+                ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+            }
+            *(rhsfunc_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
+
+            *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
+            SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
         }
-        *(rhsfunc_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
-        *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
-        SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
     }
-
-#else
-    // 3. assemble the final solution update
-    // final sol update (at level 0)  =
-    //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
-    for (int level = num_levels - 1; level > 0; --level)
+    else
     {
-        // tempvec[level-1] = P[level-1] * solupdate[level]
-        P_Func[level-1]->Mult(*(solupdate_lvls[level]), *(tempvec_lvls[level - 1]));
+        // 3. assemble the final solution update
+        // final sol update (at level 0)  =
+        //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
+        for (int level = num_levels - 1; level > 0; --level)
+        {
+            // tempvec[level-1] = P[level-1] * solupdate[level]
+            P_Func[level-1]->Mult(*(solupdate_lvls[level]), *(tempvec_lvls[level - 1]));
 
-        // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
-        *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
+            // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
+            *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
+        }
+
     }
-#endif
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
-//#endif
 
     if (print_level)
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()

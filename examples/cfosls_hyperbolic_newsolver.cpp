@@ -20,6 +20,10 @@
 // switches on/off usage of smoother in the new minimization solver
 #define WITH_SMOOTHER
 
+// activates a test where new solver is used as a preconditioner
+//#define USE_AS_A_PREC
+
+// activates a check for the symmetry of the new solver
 //#define CHECK_SYMMETRY
 
 // initializes sigma with exact solution
@@ -2820,6 +2824,52 @@ int main(int argc, char *argv[])
     MPI_Finalize();
     return 0;
 
+#endif
+
+
+#ifdef USE_AS_A_PREC
+    if (verbose)
+        std::cout << "Using the new solver as a preconditioner for CG \n";
+
+    int maxIter(70000);
+    double rtol(1.e-12);
+    double atol(1.e-12);
+
+    CGSolver Testsolver(MPI_COMM_WORLD);
+    Testsolver.SetAbsTol(atol);
+    Testsolver.SetRelTol(rtol);
+    Testsolver.SetMaxIter(maxIter);
+    Testsolver.SetOperator(*FunctMat_assembled);
+    Testsolver.SetPreconditioner(*NewSolver);
+    Testsolver.SetPrintLevel(0);
+
+    Vector trueX, trueRhs;
+    trueRhs = 0.0;
+    trueX = trueParticSol;
+
+    chrono.Clear();
+    chrono.Start();
+
+    Testsolver->Mult(trueRhs, trueX);
+
+    chrono.Stop();
+
+    if (verbose)
+    {
+        if (Testsolver->GetConverged())
+            std::cout << "Linear solver converged in " << Testsolver->GetNumIterations()
+                      << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
+        else
+            std::cout << "Linear solver did not converge in " << Testsolver->GetNumIterations()
+                      << " iterations. Residual norm is " << Testsolver->GetFinalNorm() << ".\n";
+        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+    }
+
+
+    NewSigmahat->Distribute(&trueX);
+
+    MPI_Finalize();
+    return 0;
 #endif
 
     chrono.Clear();
