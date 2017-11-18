@@ -18,9 +18,9 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
-#define CHECK_SYMMETRY
+//#define CHECK_SYMMETRY
 
 // initializes sigma with exact solution
 // if combined with COMPUTING_LAMBDA, it will
@@ -769,7 +769,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2730,6 +2730,22 @@ int main(int argc, char *argv[])
     Tempy = 0.0;
 
 #ifdef CHECK_SYMMETRY
+
+    Vector Vec1(Funct_mat_lvls[0]->Height());
+    Vec1.Randomize();
+    Vector Vec2(Funct_mat_lvls[0]->Height());
+    Vec2.Randomize(100);
+
+    for ( int i = 0; i < Vec1.Size(); ++i )
+    {
+        if ((*(EssBdrDofs_R[0][0]))[i] != 0 )
+        {
+            Vec1[i] = 0.0;
+            Vec2[i] = 0.0;
+        }
+    }
+
+    /*
     Vector VecRand1(Divfree_mat_lvls[0]->Width());
     VecRand1.Randomize();
     Vector VecRand2(Divfree_mat_lvls[0]->Width());
@@ -2764,6 +2780,7 @@ int main(int argc, char *argv[])
 
     MFEM_ASSERT(VecCheck1.Norml2() / sqrt (VecCheck1.Size()) < 1.0e-14, "VecCheck1 is not divergence free");
     MFEM_ASSERT(VecCheck2.Norml2() / sqrt (VecCheck2.Size()) < 1.0e-14, "VecCheck2 is not divergence free");
+    */
 
     Vector VecDiff(Vec1.Size());
     VecDiff = Vec1;
@@ -2776,6 +2793,7 @@ int main(int argc, char *argv[])
     //VecDiff.Print();
     std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
 
+    NewSolver.SetAsPreconditioner();
     NewSolver.SetMaxIter(1);
 
     NewSolver.Mult(Vec1, Tempy);
@@ -2807,8 +2825,10 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    //NewSolver.Mult(Tempx, Tempy);
-    NewSolver.Mult(ParticSol, Tempy);
+    Vector NewRhs(Tempy.Size());
+    NewRhs = 0.0;
+    NewSolver.SetInitialGuess(ParticSol);
+    NewSolver.Mult(NewRhs, Tempy);
 
     *NewSigmahat = Tempy;
 

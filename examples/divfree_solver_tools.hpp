@@ -842,15 +842,19 @@ private:
     // if true, coarsened operators will be constructed from Funct_lvls[0]
     // and Constr_levels[0]; else, the entire hierarchy of coarsened operators
     // must be provided in the constructor call of the solver
-    bool construct_coarseops;
+    const bool construct_coarseops;
 
     // if 0, relative change for consecutive iterations is checked
     // if 1, relative value is checked
-    int stopcriteria_type;
+    mutable int stopcriteria_type;
 
     // a flag which indicates whether the solver setup was called
     // before trying to solve anything
     mutable bool setup_finished;
+
+    // makes changes if the solver is used as a preconditioner
+    // FIXME:
+    mutable bool preconditioner_mode;
 protected:
     int num_levels;
 
@@ -949,11 +953,20 @@ protected:
     mutable BlockVector * coarsetrueRhs;
     mutable IterativeSolver * coarseSolver;
 
-    // temporary variables for casting (sigma,s) as vectors into proper block vectors
+    // viewers for casting (sigma,s) as vectors into proper block vectors
+    // vectors come from the Mult() call's arguments
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
+    // righthand side of the system as a block vector
+    mutable BlockVector* rhsblock;
 
-    // stores a valid initial guess for the solver
+    // stores the initial guess for the solver
+    // which satisfies the divergence contraint
+    // if not specified in the constructor.
+    // it is 0 by default
+    mutable BlockVector* init_guess;
+
+    // stores a particular soluition for the solver
     // which satisfies the divergence contraint
     // (*) computed in SetUpSolver()
     mutable BlockVector* part_solution;
@@ -1034,7 +1047,7 @@ protected:
                                  BlockVector& particular_solution) const;
 
     // main solver iteration routine
-    void Solve(const BlockVector &previous_sol, BlockVector &next_sol) const;
+    void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
     // constructor with a smoother
@@ -1065,18 +1078,28 @@ public:
     const Vector* ParticularSolution() const;
 
     // external calling routine (as in any IterativeSolver) which takes care of convergence
-    virtual void Mult(const Vector & x, Vector & y) const;
+    virtual void Mult(const Vector & x, Vector & y) const override;
 
     // existence of this method is required by the (abstract) base class Solver
-    virtual void SetOperator(const Operator &op){}
+    virtual void SetOperator(const Operator &op) override{}
 
     bool StoppingCriteria(int type, double value_curr, double value_prev, double value_scalefactor,
                           double stop_tol, bool monotone_check = true, char const * name = NULL,
                           bool print = false) const;
 
-    int GetStopCriteriaType () {return stopcriteria_type;}
-    void SetStopCriteriaType (int StopCriteria_Type) {stopcriteria_type = StopCriteria_Type;}
+    int GetStopCriteriaType () {return stopcriteria_type;} const
+    void SetStopCriteriaType (int StopCriteria_Type) const {stopcriteria_type = StopCriteria_Type;}
+
+    void SetAsPreconditioner() const {preconditioner_mode = true;}
+
+    void SetInitialGuess(Vector& InitGuess) const;
 };
+
+void BaseGeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
+{
+    init_guess->Update(InitGuess.GetData(), block_offsets);
+}
+
 
 const Vector* BaseGeneralMinConstrSolver::ParticularSolution() const
 {
@@ -1091,10 +1114,8 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
                                                   bool print) const
 {
     if (monotone_check)
-    {
         if (value_curr > value_prev)
             std::cout << "criteria: " << name << " is increasing! \n";
-    }
 
     switch(type)
     {
@@ -1206,7 +1227,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     workfvec = new Vector(ConstrOp_lvls[0]->Height());
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
+    rhsblock = new BlockVector(block_offsets);
     part_solution = new BlockVector(block_offsets);
+    init_guess = new BlockVector(block_offsets);
     update = new BlockVector(block_offsets);
 
     Funct_lvls.SetSize(num_levels);
@@ -1247,6 +1270,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     solupdate_prevmgnorm = 0.0;
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
+
+    preconditioner_mode = false;
 }
 
 void BaseGeneralMinConstrSolver::SetUpSolver() const
@@ -1320,11 +1345,11 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         std::cout << "Solver setup completed \n";
 }
 
-void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initial_guess,
+void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start_guess,
                                                          BlockVector& particular_solution) const
 {
     // set particular solution to initial guess (and then update it later)
-    particular_solution = initial_guess;
+    particular_solution = start_guess;
 
 #ifdef COMPUTING_LAMBDA
     /*
@@ -1335,7 +1360,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
 #endif
 
     // 0. Compute rhs in the functional for the finest level
-    ComputeRhsFunc(0, initial_guess, *(rhsfunc_lvls[0]));
+    ComputeRhsFunc(0, start_guess, *(rhsfunc_lvls[0]));
 
     *Qlminus1_f = *rhs_constr;
 
@@ -1395,10 +1420,11 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
-    MFEM_ASSERT(CheckConstrRes(particular_solution.GetBlock(0), *(Constr_lvls[0]),
-                &ConstrRhs, "after all levels update"),"");
-    MFEM_ASSERT(CheckBdrError(particular_solution.GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+    // redundant checks, look in SetUpSolver()
+    //MFEM_ASSERT(CheckConstrRes(particular_solution.GetBlock(0), *(Constr_lvls[0]),
+                //&ConstrRhs, "after all levels update"),"");
+    //MFEM_ASSERT(CheckBdrError(particular_solution.GetBlock(0),
+                              //bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
     // computing some numbers for stopping criterium
     if (print_level || stopcriteria_type == 0)
@@ -1419,7 +1445,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& initi
 }
 
 
-// The top-level wrapper for the solver
+// The top-level wrapper for the solver which overrides Operator::Mult()
 void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
@@ -1428,20 +1454,38 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     current_iteration = 0;
     converged = 0;
 
+    // FIXME: notational mess:
+    // yblock is essentially the output y
+    // while xblock is the iterate
+    // and rhsblock is the input x
+
+    // rhsblock = x
+    rhsblock->Update(x.GetData(), block_offsets);
+    // y will be accessed through yblock as its view
+    yblock->Update(y.GetData(), block_offsets);
+
+    if (preconditioner_mode)
+        *init_guess = 0.0;
+
+    // xblock is the initial guess
+    *xblock = *init_guess;
+
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
-        xblock->Update(x.GetData(), block_offsets);
+        if (!preconditioner_mode)
+        {
+            MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "before the iteration"),"");
+            MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+        }
 #ifdef CHECK_SYMMETRY
-        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), NULL, "before the iteration"),"");
-#else
-        MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "before the iteration"),"");
+        if (preconditioner_mode)
+            MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), NULL, "before the iteration"),"");
 #endif
-        yblock->Update(y.GetData(), block_offsets);
 
-        Solve(*xblock, *yblock);
+        Solve(*rhsblock, *xblock, *yblock);
 
         // monitoring convergence
         StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
@@ -1538,13 +1582,16 @@ void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const Block
 // Computes one iteration of the new solver
 // Input: previous_sol (and all the setup)
 // Output: next_sol
-void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVector& next_sol) const
+void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
+                                       const BlockVector& previous_sol, BlockVector& next_sol) const
 {
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
+#ifndef CHECK_SYMMETRY
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
                               bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+#endif
 
     //if (current_iteration > 0)
         //CheckFunctValue(comm, *(Funct_lvls[0]), next_sol, "for next_sol at the beginning of iteration: ", print_level);
@@ -1557,7 +1604,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 #endif
 
     next_sol = previous_sol;
-    ComputeRhsFunc(0, previous_sol, *(rhsfunc_lvls[0]));
+    ComputeUpdatedLvlRhsFunc(0, righthand_side, previous_sol, *(rhsfunc_lvls[0]));
 
 #ifdef CHECK_LOCALSOLVE_SYMMETRY
     BlockVector Vec1(block_offsets);
@@ -1585,7 +1632,10 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 #endif
 
 
+    /*
+     * some simplified symmetry check for a part of the solver
 #ifdef SYMMETRIC
+
     int l = 0;
     *(solupdate_lvls[l]) = 0.0;
 
@@ -1598,6 +1648,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 
     next_sol += *(solupdate_lvls[0]);
 #else
+    */
+
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1637,25 +1689,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 #ifdef SYMMETRIC
     for (int l = num_levels - 1; l > 0; --l)
     {
-        /*
         // interpolate back
         P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
-
-        ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(rhsfunc_lvls[l - 1]));
-
-        SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(tempvec2_lvls[l - 1]));
-
-        *(tempvec_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
-
-        //ComputeRhsFunc(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
-        //*(tempvec2_lvls[l - 1]) *= -1.0;
-        //*(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
-
-        *(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
-        * */
-
-        /*
-        // update righthand side
         ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
 
         // smooth at the finer level
@@ -1665,23 +1700,12 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
             Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
             *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
-            // update righthand side
             ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
         }
+        *(rhsfunc_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
         *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
-
-        // solve at the finer level
-        SolveLocalProblems(l - 1, *(tempvec2_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
-        */
-
-        // interpolate back
-        //P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
-        //*(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
-
-        //ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(solupdate_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
         SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
-
     }
 
 #else
@@ -1700,17 +1724,21 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& previous_sol, BlockVec
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     next_sol += *(solupdate_lvls[0]);
-#endif
+//#endif
 
     if (print_level)
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
+
+    if (!preconditioner_mode && print_level)
+    {
+        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "after all levels update"),"");
+        MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+    }
+
 #ifdef CHECK_SYMMETRY
     MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), NULL, "after all levels update"),"");
-#else
-    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "after all levels update"),"");
 #endif
-    MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
     // some monitoring service calls
     if (print_level || stopcriteria_type == 0)
