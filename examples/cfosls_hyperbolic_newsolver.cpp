@@ -773,7 +773,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2809,10 +2809,11 @@ int main(int argc, char *argv[])
 
 
 #ifdef USE_AS_A_PREC
-    /*
-    // doesn't work sinc CG doesn't respect the subspace where we are solving
     if (verbose)
-        std::cout << "Using the new solver as a preconditioner for CG for Msigma = 0 \n";
+        std::cout << "Using the new solver as a preconditioner for CG for the correction \n";
+
+    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
+    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
 
     ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
     ConstantCoefficient zerotest(.0);
@@ -2835,7 +2836,7 @@ int main(int argc, char *argv[])
     fform->ParallelAssemble(trueRhstest);
 
 
-    int maxIter_cg(70000);
+    int maxIter_cg(20);
     double rtol_cg(1.e-12);
     double atol_cg(1.e-12);
 
@@ -2844,10 +2845,16 @@ int main(int argc, char *argv[])
     Testsolver.SetRelTol(rtol_cg);
     Testsolver.SetMaxIter(maxIter_cg);
     Testsolver.SetOperator(*Atest);
-    //Testsolver.SetPreconditioner(NewSolver);
-    Testsolver.SetPrintLevel(0);
+    Testsolver.SetPrintLevel(1);
 
-    trueXtest = trueParticSol;
+    NewSolver.SetAsPreconditioner(true);
+    NewSolver.SetMaxIter(2);
+    Testsolver.SetPreconditioner(NewSolver);
+
+    trueXtest = 0.0;
+    // trueRhstest = - M * particular solution, on true dofs
+    Atest->Mult(trueParticSol, trueRhstest);
+    trueRhstest *= -1.0;
 
     chrono.Clear();
     chrono.Start();
@@ -2866,8 +2873,11 @@ int main(int argc, char *argv[])
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
-    */
 
+    NewSigmahat->Distribute(trueXtest);
+    *NewSigmahat += trueParticSol;
+
+    /*
 #ifdef OLD_CODE
 
     if (verbose)
@@ -2963,9 +2973,6 @@ int main(int argc, char *argv[])
     solvertest->SetPreconditioner(*prectest);
     solvertest->SetPrintLevel(1);
 
-    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
-    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
-
     trueXtest = 0.0;
     trueXtest.GetBlock(0) = trueParticSol;
 
@@ -2993,6 +3000,7 @@ int main(int argc, char *argv[])
     *NewSigmahat = 0.0;
     std::cout << "OLD_CODE must be defined for using the new solver as a preconditioner \n";
 #endif
+    */
 
     {
         int order_quad = max(2, 2*feorder+1);

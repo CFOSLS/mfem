@@ -1143,6 +1143,7 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
                                                   bool monotone_check, char const * name,
                                                   bool print) const
 {
+    bool already_printed = false;
     if (monotone_check)
         if (value_curr > value_prev)
         {
@@ -1151,13 +1152,14 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
             std::cout << "previous " << name << ": " << value_prev << "\n";
             std::cout << "rel change = " << (value_prev - value_curr) / value_scalefactor
                       << " (rel.tol = " << stop_tol << ")\n";
+            already_printed = true;
         }
 
     switch(type)
     {
     case 0:
     {
-        if (print)
+        if (print && !already_printed)
         {
 
             std::cout << "current " << name << ": " << value_curr << "\n";
@@ -1175,7 +1177,7 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
     case 1:
     case 2:
     {
-        if (print_level)
+        if (print_level && !already_printed)
         {
 
             std::cout << "current " << name << ": " << value_curr << "\n";
@@ -1542,12 +1544,13 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "before the iteration"),"");
             MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
         }
-#ifdef CHECK_SPDSOLVER
-        if (preconditioner_mode)
+        else
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *(Constr_lvls[0]), NULL, "before the iteration"),"");
-#endif
 
         Solve(*rhsblock, *xblock, *yblock);
+
+        if (i == 0 && preconditioner_mode)
+            funct_firstnorm = funct_currnorm;
 
         // monitoring convergence
         bool monotone_check = (i != 0);
@@ -1759,15 +1762,16 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
-    if (!preconditioner_mode && print_level)
+    if (print_level)
     {
-        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "after all levels update"),"");
-        MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+        if (!preconditioner_mode)
+        {
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), &ConstrRhs, "after all levels update"),"");
+            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
+        }
+        else
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), NULL, "after all levels update"),"");
     }
-
-#ifdef CHECK_SPDSOLVER
-    MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *(Constr_lvls[0]), NULL, "after all levels update"),"");
-#endif
 
     // some monitoring service calls
     if (print_level || stopcriteria_type == 0)
