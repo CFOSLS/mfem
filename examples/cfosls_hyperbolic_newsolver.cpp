@@ -24,7 +24,7 @@
 //#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
-//#define CHECK_SYMMETRY
+//#define CHECK_SPDSOLVER
 
 // initializes sigma with exact solution
 // if combined with COMPUTING_LAMBDA, it will
@@ -773,7 +773,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2484,11 +2484,14 @@ int main(int argc, char *argv[])
     NewSmoother.SetAbsTol(smooth_abstol);//(1.0e-10);//(new_abstol);
     NewSmoother.SetRelTol(smooth_reltol);//(1.0e-10);//(new_reltol);
     NewSmoother.SetMaxIterInt(20000);
+    NewSmoother.SetPrintLevel(0);
 
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
                    Proj_Hcurl, Dof_TrueDof_Hcurl,
                    EssBdrDofs_Hcurl);
-    NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
+    //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
+    NewGSSmoother.SetSweepsNumber(5);
+    NewGSSmoother.SetPrintLevel(0);
 
     if (verbose)
         std::cout << "Number of smoothing steps: " << NewGSSmoother.GetSweepsNumber() << "\n";
@@ -2683,20 +2686,21 @@ int main(int argc, char *argv[])
 #endif
                      Smoother, higher_order, construct_coarseops);
 
-    double newsolver_abstol = 1.0e-12;
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)
     {
-        std::cout << "newsolver_abstol = " << newsolver_abstol << "\n";
         std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
     }
 
-    NewSolver.SetAbsTol(newsolver_abstol);
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(1);
+
+    // checking that for unsymmetric version the symmetry check does
+    // provide the negative answer
+    //NewSolver.SetUnSymmetric();
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
@@ -2733,12 +2737,12 @@ int main(int argc, char *argv[])
     Vector Tempy(ParticSol.Size());
     Tempy = 0.0;
 
-#ifdef CHECK_SYMMETRY
+#ifdef CHECK_SPDSOLVER
 
     Vector Vec1(Funct_mat_lvls[0]->Height());
-    Vec1.Randomize();
+    Vec1.Randomize(2000);
     Vector Vec2(Funct_mat_lvls[0]->Height());
-    Vec2.Randomize(100);
+    Vec2.Randomize(-39);
 
     for ( int i = 0; i < Vec1.Size(); ++i )
     {
@@ -2748,43 +2752,6 @@ int main(int argc, char *argv[])
             Vec2[i] = 0.0;
         }
     }
-
-    /*
-    Vector VecRand1(Divfree_mat_lvls[0]->Width());
-    VecRand1.Randomize();
-    Vector VecRand2(Divfree_mat_lvls[0]->Width());
-    VecRand2.Randomize(100);
-    for ( int i = 0; i < VecRand1.Size(); ++i )
-    {
-        if ((*(EssBdrDofs_Hcurl[0]))[i] != 0 )
-        {
-            VecRand1[i] = 0.0;
-            VecRand2[i] = 0.0;
-        }
-    }
-    Vector Vec1(Divfree_mat_lvls[0]->Height());
-    Vector Vec2(Divfree_mat_lvls[0]->Height());
-    Divfree_mat_lvls[0]->Mult(VecRand1, Vec1);
-    Divfree_mat_lvls[0]->Mult(VecRand2, Vec2);
-
-    // checing that Vec1 and Vec2 are divergence-free
-    Vector VecCheck1(Constraint_mat_lvls[0]->Height());
-    Vector VecCheck2(Constraint_mat_lvls[0]->Height());
-    Constraint_mat_lvls[0]->Mult(Vec1, VecCheck1);
-    Constraint_mat_lvls[0]->Mult(Vec2, VecCheck2);
-
-    for ( int i = 0; i < Vec1.Size(); ++i )
-    {
-        if ((*(EssBdrDofs_R[0][0]))[i] != 0 )
-        {
-            Vec1[i] = 0.0;
-            Vec2[i] = 0.0;
-        }
-    }
-
-    MFEM_ASSERT(VecCheck1.Norml2() / sqrt (VecCheck1.Size()) < 1.0e-14, "VecCheck1 is not divergence free");
-    MFEM_ASSERT(VecCheck2.Norml2() / sqrt (VecCheck2.Size()) < 1.0e-14, "VecCheck2 is not divergence free");
-    */
 
     Vector VecDiff(Vec1.Size());
     VecDiff = Vec1;
@@ -2797,15 +2764,17 @@ int main(int argc, char *argv[])
     //VecDiff.Print();
     std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
 
-    NewSolver.SetAsPreconditioner();
+    NewSolver.SetAsPreconditioner(true);
     NewSolver.SetMaxIter(1);
 
     NewSolver.Mult(Vec1, Tempy);
     double scal1 = Tempy * Vec2;
+    double scal3 = Tempy * Vec1;
     //std::cout << "A Vec1 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
 
     NewSolver.Mult(Vec2, Tempy);
     double scal2 = Tempy * Vec1;
+    double scal4 = Tempy * Vec2;
     //std::cout << "A Vec2 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
 
     std::cout << "scal1 = " << scal1 << "\n";
@@ -2821,6 +2790,18 @@ int main(int argc, char *argv[])
         std::cout << "Solver was symmetric on the given vectors: dot product = " << scal1 << "\n";
     }
 
+    std::cout << "scal3 = " << scal3 << "\n";
+    std::cout << "scal4 = " << scal4 << "\n";
+
+    if (scal3 < 0 || scal4 < 0)
+    {
+        std::cout << "The operator (new solver) is not s.p.d. \n";
+    }
+    else
+    {
+        std::cout << "The solver is s.p.d. on the two random vectors: (Av,v) > 0 \n";
+    }
+
     MPI_Finalize();
     return 0;
 
@@ -2828,45 +2809,224 @@ int main(int argc, char *argv[])
 
 
 #ifdef USE_AS_A_PREC
+    /*
+    // doesn't work sinc CG doesn't respect the subspace where we are solving
     if (verbose)
-        std::cout << "Using the new solver as a preconditioner for CG \n";
+        std::cout << "Using the new solver as a preconditioner for CG for Msigma = 0 \n";
 
-    int maxIter(70000);
-    double rtol(1.e-12);
-    double atol(1.e-12);
+    ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
+    ConstantCoefficient zerotest(.0);
+    fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zerotest));
+    fform->Assemble();
+
+
+    ParBilinearForm *Ablocktest(new ParBilinearForm(R_space_lvls[0]));
+    HypreParMatrix *Atest;
+    Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+    Ablocktest->Assemble();
+    Ablocktest->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform);
+    Ablocktest->Finalize();
+    Atest = Ablocktest->ParallelAssemble();
+
+    Vector trueXtest(Atest->Width());
+    Vector trueRhstest(Atest->Height());
+    trueRhstest = 0.0;
+
+    fform->ParallelAssemble(trueRhstest);
+
+
+    int maxIter_cg(70000);
+    double rtol_cg(1.e-12);
+    double atol_cg(1.e-12);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
-    Testsolver.SetAbsTol(atol);
-    Testsolver.SetRelTol(rtol);
-    Testsolver.SetMaxIter(maxIter);
-    Testsolver.SetOperator(*FunctMat_assembled);
-    Testsolver.SetPreconditioner(*NewSolver);
+    Testsolver.SetAbsTol(atol_cg);
+    Testsolver.SetRelTol(rtol_cg);
+    Testsolver.SetMaxIter(maxIter_cg);
+    Testsolver.SetOperator(*Atest);
+    //Testsolver.SetPreconditioner(NewSolver);
     Testsolver.SetPrintLevel(0);
 
-    Vector trueX, trueRhs;
-    trueRhs = 0.0;
-    trueX = trueParticSol;
+    trueXtest = trueParticSol;
 
     chrono.Clear();
     chrono.Start();
 
-    Testsolver->Mult(trueRhs, trueX);
+    Testsolver.Mult(trueRhstest, trueXtest);
 
     chrono.Stop();
 
     if (verbose)
     {
-        if (Testsolver->GetConverged())
-            std::cout << "Linear solver converged in " << Testsolver->GetNumIterations()
-                      << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
+        if (Testsolver.GetConverged())
+            std::cout << "Linear solver converged in " << Testsolver.GetNumIterations()
+                      << " iterations with a residual norm of " << Testsolver.GetFinalNorm() << ".\n";
         else
-            std::cout << "Linear solver did not converge in " << Testsolver->GetNumIterations()
-                      << " iterations. Residual norm is " << Testsolver->GetFinalNorm() << ".\n";
+            std::cout << "Linear solver did not converge in " << Testsolver.GetNumIterations()
+                      << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
+    */
+
+#ifdef OLD_CODE
+
+    if (verbose)
+        std::cout << "Using the new solver as a preconditioner for CG applied"
+                     " to a saddle point problem for sigma and lambda \n";
+
+    Array<int> block_Offsetstest(numblocks + 2); // number of variables + 1
+    block_Offsetstest[0] = 0;
+    block_Offsetstest[1] = R_space_lvls[0]->GetVSize();
+    block_Offsetstest[2] = W_space_lvls[0]->GetVSize();
+    block_Offsetstest.PartialSum();
+
+    Array<int> block_trueOffsetstest(numblocks + 2); // number of variables + 1
+    block_trueOffsetstest[0] = 0;
+    block_trueOffsetstest[1] = R_space_lvls[0]->TrueVSize();
+    block_trueOffsetstest[2] = W_space_lvls[0]->TrueVSize();
+    block_trueOffsetstest.PartialSum();
+
+    BlockVector trueXtest(block_trueOffsetstest), trueRhstest(block_trueOffsetstest);
+
+    ConstantCoefficient zerostest(.0);
+
+    ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
+    fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zerostest));
+    fform->Assemble();
+
+    ParLinearForm *gformtest;
+    gformtest = new ParLinearForm(W_space_lvls[0]);
+    gformtest->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+    gformtest->Assemble();
+
+    ParBilinearForm *Ablock(new ParBilinearForm(R_space));
+    HypreParMatrix *Atest;
+    Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+    Ablock->Assemble();
+    Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform);
+    Ablock->Finalize();
+    Atest = Ablock->ParallelAssemble();
+
+    HypreParMatrix *D;
+    HypreParMatrix *DT;
+
+    ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]));
+    Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+    Dblock->Assemble();
+    Dblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *gformtest);
+    Dblock->Finalize();
+    D = Dblock->ParallelAssemble();
+    DT = D->Transpose();
+
+    fform->ParallelAssemble(trueRhstest.GetBlock(0));
+    gformtest->ParallelAssemble(trueRhstest.GetBlock(1));
+
+    Solver *prectest;
+    prectest = new BlockDiagonalPreconditioner(block_trueOffsetstest);
+    NewSolver.SetAsPreconditioner(true);
+    NewSolver.SetPrintLevel(1);
+    ((BlockDiagonalPreconditioner*)prectest)->SetDiagonalBlock(0, &NewSolver);
+
+    HypreParMatrix *Schur;
+    {
+        HypreParMatrix *AinvDt = D->Transpose();
+        HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, Atest->GetGlobalNumRows(),
+                                             Atest->GetRowStarts());
+
+        Atest->GetDiag(*Ad);
+        AinvDt->InvScaleRows(*Ad);
+        Schur = ParMult(D, AinvDt);
+    }
+
+    Solver * precS;
+    precS = new HypreBoomerAMG(*Schur);
+    ((HypreBoomerAMG *)precS)->SetPrintLevel(0);
+    ((HypreBoomerAMG *)precS)->iterative_mode = false;
+    ((BlockDiagonalPreconditioner*)prectest)->SetDiagonalBlock(1, precS);
 
 
-    NewSigmahat->Distribute(&trueX);
+    BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsetstest);
+    CFOSLSop->SetBlock(0,0, Atest);
+    CFOSLSop->SetBlock(0,1, DT);
+    CFOSLSop->SetBlock(1,0, D);
+
+    IterativeSolver * solvertest;
+    solvertest = new CGSolver(comm);
+
+    solvertest->SetAbsTol(atol);
+    solvertest->SetRelTol(rtol);
+    solvertest->SetMaxIter(max_num_iter);
+    solvertest->SetOperator(*MainOp);
+
+    solvertest->SetPrintLevel(0);
+    solvertest->SetOperator(*CFOSLSop);
+    solvertest->SetPreconditioner(*prectest);
+    solvertest->SetPrintLevel(1);
+
+    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
+    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
+
+    trueXtest = 0.0;
+    trueXtest.GetBlock(0) = trueParticSol;
+
+    chrono.Clear();
+    chrono.Start();
+
+    solvertest->Mult(trueRhstest, trueXtest);
+
+    chrono.Stop();
+
+    NewSigmahat->Distribute(&(trueXtest.GetBlock(0)));
+
+
+    if (verbose)
+    {
+        if (solvertest->GetConverged())
+            std::cout << "Linear solver converged in " << solvertest->GetNumIterations()
+                      << " iterations with a residual norm of " << solvertest->GetFinalNorm() << ".\n";
+        else
+            std::cout << "Linear solver did not converge in " << solvertest->GetNumIterations()
+                      << " iterations. Residual norm is " << solvertest->GetFinalNorm() << ".\n";
+        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+    }
+#else
+    *NewSigmahat = 0.0;
+    std::cout << "OLD_CODE must be defined for using the new solver as a preconditioner \n";
+#endif
+
+    {
+        int order_quad = max(2, 2*feorder+1);
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i = 0; i < Geometry::NumGeom; ++i)
+        {
+            irs[i] = &(IntRules.Get(i, order_quad));
+        }
+
+        double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*(Mytest.sigma), irs);
+        if (verbose)
+        {
+            if ( norm_sigma > MYZEROTOL )
+                cout << "|| new sigma_h - sigma_ex || / || sigma_ex || = " << err_newsigmahat / norm_sigma << endl;
+            else
+                cout << "|| new sigma_h || = " << err_newsigmahat << " (sigma_ex = 0)" << endl;
+        }
+
+        DiscreteLinearOperator Div(R_space, W_space);
+        Div.AddDomainInterpolator(new DivergenceInterpolator());
+        ParGridFunction DivSigma(W_space);
+        Div.Assemble();
+        Div.Mult(*NewSigmahat, DivSigma);
+
+        double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
+        double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+
+        if (verbose)
+        {
+            cout << "|| div (new sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                      << err_div/norm_div  << "\n";
+        }
+    }
 
     MPI_Finalize();
     return 0;
