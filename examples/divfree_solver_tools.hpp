@@ -8,7 +8,7 @@ using std::unique_ptr;
 // activates some additional checks
 //#define DEBUG_INFO
 
-// FIXME: Cehck the computation of the MG norm, is it called for correct arguments
+// FIXME: Check the computation of the MG norm, is it called for correct arguments
 // FIXME: For now it is obviously not since rhsfunc[0] is changed during the backward (upward) loop
 
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
@@ -417,6 +417,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
         }
         else
         {
+            MFEM_ABORT("Case relax_all_dofs = flse was not tested \n");
             CTMC_global_diag_lvls[level] = new Vector();
             CTMC_global_lvls[level]->GetDiag(*(CTMC_global_diag_lvls[level]));
 
@@ -850,7 +851,8 @@ private:
     mutable bool setup_finished;
 
     // makes changes if the solver is used as a preconditioner
-    // FIXME:
+    // changes MFEM_ASSERT checks for residual constraint
+    // and sets init_guess to zero in Mult()
     mutable bool preconditioner_mode;
 
     // defines if the solver is symmetrized (default is yes)
@@ -939,8 +941,6 @@ protected:
 
 
     // internal variables
-    // FIXME: is it a good practice? should they be mutable?
-    // Have to use pointers everywhere because Solver::Mult() must not change the solver data members
     mutable Array<SparseMatrix*> AE_edofs_L2;
     mutable Array<BlockMatrix*> AE_eintdofs_Func; // relation between AEs and internal (w.r.t to AEs) fine-grid dofs
 
@@ -950,10 +950,10 @@ protected:
     mutable Array<SparseMatrix*> Constr_lvls;
 
     // storage for prerequisites of the coarsest level problem: offsets, matrix and preconditoner
-    mutable Array<int>* coarse_offsets;
+    mutable Array<int> coarse_offsets;
     mutable BlockOperator* coarse_matrix;
     mutable BlockDiagonalPreconditioner * coarse_prec;
-    mutable Array<int>* coarse_rhsfunc_offsets;
+    mutable Array<int> coarse_rhsfunc_offsets;
     mutable BlockVector * coarse_rhsfunc;
     mutable BlockVector * coarsetrueX;
     mutable BlockVector * coarsetrueRhs;
@@ -1272,6 +1272,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     xblock_truedofs = new BlockVector(block_trueoffsets);
     yblock_truedofs = new BlockVector(block_trueoffsets);
 
+    coarse_rhsfunc_offsets.SetSize(numblocks + 1);
+    coarse_offsets.SetSize(numblocks + 2);
+
     tempvec_lvls.SetSize(num_levels);
     tempvec_lvls[0] = new BlockVector(block_offsets);
     tempvec2_lvls.SetSize(num_levels);
@@ -1428,7 +1431,8 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
     // 2. setup and solve the coarse problem
     *rhs_constr = *Qlminus1_f;
 
-    // needs to have coarse level rhsfunc_lvls[num_levels-1] set already before the call
+    // imposes boundary conditions and assembles coarsest level's
+    // righthand side (from rhsfunc) on true dofs
     SetUpCoarsestRhsFunc();
 
     // 2.5 solve coarse problem
@@ -1460,16 +1464,16 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
                               //bdrdata_finest.GetBlock(0), *(essbdrdofs_Func[0][0])), "");
 
     // computing some numbers for stopping criterium
-    if (print_level || stopcriteria_type == 0)
+    //if (print_level || stopcriteria_type == 0)
         funct_firstnorm = CheckFunctValue(comm, *(Funct_lvls[0]), particular_solution,
                 "for the particular solution: ", print_level);
 
-    if (print_level || stopcriteria_type == 1)
+    //if (print_level || stopcriteria_type == 1)
         sol_firstitnorm = ComputeMPIVecNorm(comm, particular_solution,
                 "for the particular solution", print_level);
 
-    if (print_level || stopcriteria_type == 2)
-        solupdate_firstmgnorm = ComputeMPIDotProduct(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
+    //if (print_level || stopcriteria_type == 2)
+        //solupdate_firstmgnorm = ComputeMPIDotProduct(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
 
     // 5. restore sizes of righthand side vectors for the constraint
     // which were changed during transfer between levels
@@ -1527,8 +1531,12 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         // monitoring convergence
         bool monotone_check = (i != 0);
-        StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                         monotone_check, "functional", print_level);
+        if (i == 0)
+            StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                             monotone_check, "functional", print_level);
+        else
+            StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                             monotone_check, "functional", print_level);
         StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
                          sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
         StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
@@ -1538,7 +1546,11 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         switch(stopcriteria_type)
         {
         case 0:
-            stopped = StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+            if (i == 0)
+                stopped = StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                                                   false, "functional", 0);
+            else
+                stopped = StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
                                                    false, "functional", 0);
             break;
         case 1:
@@ -1677,9 +1689,10 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     } // end of loop over finer levels
 
-    // BOTTOM: at the coarest level
+    // BOTTOM: at the coarsest level
     // 2.5 solve coarse problem
-    // needs to have coarse level rhs in the func already set before the call
+    // imposes bondary conditions and assembles the coarsests level's
+    // righthand side  (from rhsfunc) on true dofs
     SetUpCoarsestRhsFunc();
 
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels - 1]));
@@ -1689,7 +1702,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
         for (int l = num_levels - 1; l > 0; --l)
         {
-            // interpolate back
+            // interpolate back to the finer level
             P_Func[l - 1]->Mult(*(solupdate_lvls[l]), *(tempvec_lvls[l - 1]));
             ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
 
@@ -1698,14 +1711,14 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             {
                 Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
                 Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
-                *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
-                ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
+                ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec2_lvls[l - 1]), *(tempvec_lvls[l - 1]) );
             }
-            *(rhsfunc_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
-            *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
-            SolveLocalProblems(l - 1, *(rhsfunc_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
+            // update the solution at thge finer level with two
+            // corrections: one after smoothing and one after local solve
+            *(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
+            SolveLocalProblems(l - 1, *(tempvec_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
         }
 
     }
@@ -1715,13 +1728,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // final sol update (at level 0)  =
         //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
         for (int level = num_levels - 1; level > 0; --level)
-        {
-            // tempvec[level-1] = P[level-1] * solupdate[level]
-            P_Func[level-1]->Mult(*(solupdate_lvls[level]), *(tempvec_lvls[level - 1]));
-
             // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
-            *(solupdate_lvls[level - 1]) += *(tempvec_lvls[level - 1]);
-        }
+            P_Func[level - 1]->AddMult(*(solupdate_lvls[level]), *(solupdate_lvls[level - 1]), 1.0 );
 
     }
 
@@ -1750,7 +1758,10 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         solupdate_currnorm = ComputeMPIVecNorm(comm, *(solupdate_lvls[0]), "of the update: ", print_level);
 
     if (print_level || stopcriteria_type == 2)
-        solupdate_currmgnorm = ComputeMPIDotProduct(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0]));
+        solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *(solupdate_lvls[0]), *(rhsfunc_lvls[0])));
+
+    if (current_iteration == 0)
+        solupdate_firstmgnorm = solupdate_currmgnorm;
 
     ++current_iteration;
 
@@ -2131,14 +2142,14 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestRhsFunc() const
 {
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> * temp = essbdrdofs_Func[blk][num_levels-1];
+        const Array<int> * temp = essbdrdofs_Func[blk][num_levels - 1];
         for ( int dof = 0; dof < temp->Size(); ++dof)
             if ( (*temp)[dof] != 0)
             {
                 rhsfunc_lvls[num_levels-1]->GetBlock(blk)[dof] = 0.0;
             }
 
-        dof_trueDof_Func_lvls[num_levels-1][blk]->MultTranspose(rhsfunc_lvls[num_levels-1]->GetBlock(blk),
+        dof_trueDof_Func_lvls[num_levels-1][blk]->MultTranspose(rhsfunc_lvls[num_levels - 1]->GetBlock(blk),
                 coarse_rhsfunc->GetBlock(blk));
     }
 
@@ -2192,30 +2203,28 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
         Funct_global[blk]->CopyColStarts();
     }
 
-    coarse_offsets = new Array<int>(numblocks + 2);
-    (*coarse_offsets)[0] = 0;
+    coarse_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
-        (*coarse_offsets)[blk + 1] = Funct_global[blk]->Height();
-    (*coarse_offsets)[numblocks + 1] = Constr_global->Height();
-    coarse_offsets->PartialSum();
+        coarse_offsets[blk + 1] = Funct_global[blk]->Height();
+    coarse_offsets[numblocks + 1] = Constr_global->Height();
+    coarse_offsets.PartialSum();
 
-    coarse_rhsfunc_offsets = new Array<int>(numblocks + 1);
-    (*coarse_rhsfunc_offsets)[0] = 0;
+    coarse_rhsfunc_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
-        (*coarse_rhsfunc_offsets)[blk + 1] = Funct_global[blk]->Height();
-    coarse_rhsfunc_offsets->PartialSum();
+        coarse_rhsfunc_offsets[blk + 1] = Funct_global[blk]->Height();
+    coarse_rhsfunc_offsets.PartialSum();
 
-    coarse_rhsfunc = new BlockVector(*coarse_rhsfunc_offsets);
+    coarse_rhsfunc = new BlockVector(coarse_rhsfunc_offsets);
 
-    coarse_matrix = new BlockOperator(*coarse_offsets);
+    coarse_matrix = new BlockOperator(coarse_offsets);
     for ( int blk = 0; blk < numblocks; ++blk)
         coarse_matrix->SetBlock(blk, blk, Funct_global[blk]);
     coarse_matrix->SetBlock(0, numblocks, ConstrT_global);
     coarse_matrix->SetBlock(numblocks, 0, Constr_global);
 
     // coarse solution and righthand side vectors
-    coarsetrueX = new BlockVector(*coarse_offsets);
-    coarsetrueRhs = new BlockVector(*coarse_offsets);
+    coarsetrueX = new BlockVector(coarse_offsets);
+    coarsetrueRhs = new BlockVector(coarse_offsets);
 
     // preconditioner for the coarse problem
 
@@ -2239,7 +2248,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     invSchur->SetPrintLevel(0);
     invSchur->iterative_mode = false;
 
-    coarse_prec = new BlockDiagonalPreconditioner(*coarse_offsets);
+    coarse_prec = new BlockDiagonalPreconditioner(coarse_offsets);
     for ( int blk = 0; blk < numblocks; ++blk)
         coarse_prec->SetDiagonalBlock(0, Funct_prec[blk]);
     coarse_prec->SetDiagonalBlock(numblocks, invSchur);
