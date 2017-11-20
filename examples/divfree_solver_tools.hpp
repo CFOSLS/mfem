@@ -862,11 +862,16 @@ private:
     mutable double rel_tol;
     mutable int max_iter;
     mutable int converged;
+
 protected:
     int num_levels;
 
     // iteration counter (solver behavior is different for the first iteration)
     mutable int current_iteration;
+
+    // if true, local problems' matrices are computed in SolveLocalProblems()
+    // but in the future one can compute them only once and reuse afterwards
+    mutable Array<bool> compute_AEproblem_matrices;
 
     // stores the functional values on the consecutive iterations
     // (needed for a variant of stopping criteria, type = 0)
@@ -1039,16 +1044,24 @@ protected:
 
     // These are the main differences between possible inheriting classes
     // since they define the way how the local problems are solved
-    virtual void SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
+    virtual void SolveLocalProblem(int level, int AE, std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol,
                                    bool is_degenerate) const = 0;
+
     virtual void SolveCoarseProblem(BlockVector &coarserhs_func, Vector* rhs_constr,
                                     BlockVector& sol_coarse) const = 0;
 
     // constructs hierarchy of all objects requires
     // if necessary, builds the particular solution which satisfies
     // the given contraint and sets it as the initial iterate.
+    // at each finer level also computes factorization of the local problems
+    // matrices and stores them
     void SetUpSolver() const;
+
+    // an optional routine which can save LU factors for the local problems
+    // solved at finer levels if needed. Should be redefined in the inheriting
+    // classes in order to speed up iterations
+    virtual void SaveLocalLUFactors(int level) const {}
 
     // finds a particular solution (like the first iteration of the previous
     // version of the solver)
@@ -1308,6 +1321,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     solupdate_prevmgnorm = 0.0;
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
+
+    compute_AEproblem_matrices.SetSize(numblocks + 1);
+    compute_AEproblem_matrices = true;
 }
 
 void BaseGeneralMinConstrSolver::SetUpSolver() const
@@ -1328,6 +1344,10 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     {
         //sets up the current level and prepares operators for the next one
         SetUpFinerLvl(l);
+
+        // (optionally) saves some data related to the local problems at the
+        // current level
+        SaveLocalLUFactors(l);
 
         // if smoother is present, sets up the smoother's internal data
         if (Smoo)
@@ -1689,8 +1709,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     } // end of loop over finer levels
 
-    // BOTTOM: at the coarsest level
-    // 2.5 solve coarse problem
+    // BOTTOM: solve the global problem at the coarsest level
     // imposes bondary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
     SetUpCoarsestRhsFunc();
@@ -1698,7 +1717,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *(solupdate_lvls[num_levels - 1]));
 
     // UPWARD loop: from coarsest to finest
-    if (symmetric)
+    if (symmetric) // then also smoothing and solving local problems on the way up
     {
         for (int l = num_levels - 1; l > 0; --l)
         {
@@ -1722,9 +1741,9 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
 
     }
-    else
+    else // then simply interpolating and adding updates
     {
-        // 3. assemble the final solution update
+        // assemble the final solution update from all levels
         // final sol update (at level 0)  =
         //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
         for (int level = num_levels - 1; level > 0; --level)
@@ -1733,7 +1752,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     }
 
-    // 4. update the global iterate by the computed update (interpolated to the finest level)
+    // 4. update the global iterate by the resulting update at the finest level
     next_sol += *(solupdate_lvls[0]);
 
     if (print_level)
@@ -2039,36 +2058,35 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
     return res;
 }
 
+
+// FIXME: Maybe, local matrices can also be stored as an improvement?
 void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlrhs_func,
                                                     Vector* rhs_constr, BlockVector& sol_update) const
 {
-    // FIXME: factorization can be done only during the first solver iterate, then stored and re-used
-    //DenseMatrix sub_A;
     DenseMatrix sub_Constr;
     Vector sub_rhsconstr;
     Array<int> sub_Func_offsets(numblocks + 1);
 
-    //SparseMatrix A_fine = Funct_lvls[0]->GetBlock(0,0);
-    //SparseMatrix B_fine = Constr;
-    const SparseMatrix * Constr_fine;
-    Constr_fine = Constr_lvls[level];
-
-    const BlockMatrix * Funct_fine;
-    Funct_fine = Funct_lvls[level];
-
-    // loop over all AE, solving a local problem in each AE
+    const SparseMatrix * Constr_lvl = Constr_lvls[level];
+    const BlockMatrix * Funct_lvl = Funct_lvls[level];
+    const SparseMatrix * FunctBlk;
     std::vector<DenseMatrix> LocalAE_Matrices(numblocks);
     std::vector<Array<int>*> Local_inds(numblocks);
+
+    // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2[level]->Height();
     for( int AE = 0; AE < nAE; ++AE)
     {
+
         //std::cout << "AE = " << AE << "\n";
         bool is_degenerate = true;
         sub_Func_offsets[0] = 0;
         for ( int blk = 0; blk < numblocks; ++blk )
         {
             //std::cout << "blk = " << blk << "\n";
-            SparseMatrix FunctBlk = Funct_fine->GetBlock(blk,blk);
+            if (compute_AEproblem_matrices[blk])
+                FunctBlk = &(Funct_lvl->GetBlock(blk,blk));
+
             SparseMatrix AE_eintdofsBlk = AE_eintdofs_Func[level]->GetBlock(blk,blk);
             Array<int> tempview_inds(AE_eintdofsBlk.GetRowColumns(AE), AE_eintdofsBlk.RowSize(AE));
             //tempview_inds.Print();
@@ -2080,8 +2098,11 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
             if (blk == 0) // sigma block
             {
                 Array<int> Wtmp_j(AE_edofs_L2[level]->GetRowColumns(AE), AE_edofs_L2[level]->RowSize(AE));
-                sub_Constr.SetSize(Wtmp_j.Size(), Local_inds[blk]->Size());
-                Constr_fine->GetSubMatrix(Wtmp_j, *Local_inds[blk], sub_Constr);
+                if (compute_AEproblem_matrices[numblocks])
+                {
+                    sub_Constr.SetSize(Wtmp_j.Size(), Local_inds[blk]->Size());
+                    Constr_lvl->GetSubMatrix(Wtmp_j, *Local_inds[blk], sub_Constr);
+                }
 
                 if (rhs_constr)
                     rhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
@@ -2104,12 +2125,15 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
                 }
             }
 
+            if (compute_AEproblem_matrices[blk])
+            {
+                // Setting size of Dense Matrices
+                LocalAE_Matrices[blk].SetSize(Local_inds[blk]->Size());
 
-            // Setting size of Dense Matrices
-            LocalAE_Matrices[blk].SetSize(Local_inds[blk]->Size());
+                // Obtaining submatrices:
+                FunctBlk->GetSubMatrix(*Local_inds[blk], *Local_inds[blk], LocalAE_Matrices[blk]);
 
-            // Obtaining submatrices:
-            FunctBlk.GetSubMatrix(*Local_inds[blk], *Local_inds[blk], LocalAE_Matrices[blk]);
+            } // end of the block for non-optimized version
 
         } // end of loop over all blocks
 
@@ -2123,8 +2147,9 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
 
-        // Solving local problem at the agglomerate element AE:
-        SolveLocalProblem(LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr, sol_loc, is_degenerate);
+        // solving local problem at the agglomerate element AE
+        SolveLocalProblem(level, AE, LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr,
+                          sol_loc, is_degenerate);
 
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
@@ -2279,10 +2304,25 @@ void BaseGeneralMinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func,
 class MinConstrSolver : public BaseGeneralMinConstrSolver
 {
 protected:
-    virtual void SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
-                                   BlockVector &G, Vector& F, BlockVector &sol, bool is_degenerate) const;
+    mutable bool optimized_localsolve;
+
+    // LUfactors_lvls[l] stores for level l (except the coarsest) LU factors of the local
+    // problems' matrices for each agglomerate (2 per agglomerate)
+    mutable std::vector< std::vector<std::vector<DenseMatrixInverse* > > > LUfactors_lvls;
+
+    virtual void SolveLocalProblem(int level, int AE, std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
+                                   BlockVector &G, Vector& F, BlockVector &sol, bool is_degenerate) const override;
+
+    // Optimized version of SolveLocalProblem where LU factors for the local
+    // problem's matrices were computed during the setup via SaveLocalLUFactors()
+    void SolveLocalProblemOpt(DenseMatrixInverse * inv_A, DenseMatrixInverse * inv_Schur,
+                                               std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B, BlockVector &G,
+                                               Vector& F, BlockVector &sol, bool is_degenerate) const;
+
     virtual void SolveCoarseProblem(BlockVector& coarserhs_func,
-                                    Vector *coarserhs_constr, BlockVector& sol_coarse) const;
+                                    Vector *coarserhs_constr, BlockVector& sol_coarse) const override;
+
+    void SaveLocalLUFactors(int l) const override;
 public:
     // constructor with a smoother
     MinConstrSolver(int NumLevels, const Array< SparseMatrix*> &AE_to_e,
@@ -2315,6 +2355,8 @@ public:
         {
             MFEM_ASSERT(numblocks == 1, "MinConstrSolver is designed for the formulation with"
                                     " sigma only but more blocks are present!");
+            optimized_localsolve = true;
+            LUfactors_lvls.resize(num_levels - 1);
             SetUpSolver();
         }
 
@@ -2324,6 +2366,92 @@ public:
 
 };
 
+void MinConstrSolver::SaveLocalLUFactors(int l) const
+{
+    if (!optimized_localsolve)
+        return;
+
+    int nAE = AE_edofs_L2[l]->Height();
+    LUfactors_lvls[l].resize(nAE);
+
+    DenseMatrix sub_Constr;
+    DenseMatrix sub_Func;
+
+    const SparseMatrix * Constr_fine = Constr_lvls[l];
+    const SparseMatrix * Funct_fine = &(Funct_lvls[l]->GetBlock(0,0));
+
+    SparseMatrix * AE_eintdofs = &(AE_eintdofs_Func[l]->GetBlock(0,0));
+
+    // loop over all AE, computing and saving factorization
+    // of local saddle point matrices in each AE
+    for( int AE = 0; AE < nAE; ++AE)
+    {
+        // for each AE we will store A^(-1) and Schur^(-1)
+        LUfactors_lvls[l][AE].resize(2);
+
+        //std::cout << "AE = " << AE << "\n";
+        bool is_degenerate = true;
+
+        //Array<int> tempview_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
+        //Local_inds = new Array<int>;
+        //tempview_inds.Copy(Local_inds[0]);
+        Array<int> Local_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
+
+        Array<int> Wtmp_j(AE_edofs_L2[l]->GetRowColumns(AE), AE_edofs_L2[l]->RowSize(AE));
+        sub_Constr.SetSize(Wtmp_j.Size(), Local_inds.Size());
+        Constr_fine->GetSubMatrix(Wtmp_j, Local_inds, sub_Constr);
+
+        for (int i = 0; i < Local_inds.Size(); ++i)
+        {
+            if ( (*(bdrdofs_Func[0][l]))[Local_inds[i]] != 0 &&
+                 (*(essbdrdofs_Func[0][l]))[Local_inds[i]] == 0)
+            {
+                //std::cout << "then local problem is non-degenerate \n";
+                is_degenerate = false;
+                break;
+            }
+        }
+
+        // Setting size of Dense Matrices
+        sub_Func.SetSize(Local_inds.Size());
+
+        // Obtaining submatrices:
+        Funct_fine->GetSubMatrix(Local_inds, Local_inds, sub_Func);
+
+        LUfactors_lvls[l][AE][0] = new DenseMatrixInverse(sub_Func);
+
+        DenseMatrix sub_ConstrT(sub_Constr.Width(), sub_Constr.Height());
+        sub_ConstrT.Transpose(sub_Constr);
+
+        DenseMatrix invABT;
+        LUfactors_lvls[l][AE][0]->Mult(sub_ConstrT, invABT);
+
+        // Schur = BinvABT
+        DenseMatrix Schur(sub_Constr.Height(), invABT.Width());
+        mfem::Mult(sub_Constr, invABT, Schur);
+
+        // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
+        if (is_degenerate)
+        {
+            Schur.SetRow(0,0);
+            Schur.SetCol(0,0);
+            Schur(0,0) = 1.;
+        }
+
+        //Schur.Print();
+        LUfactors_lvls[l][AE][1] = new DenseMatrixInverse(Schur);
+
+    } // end of loop over AEs
+
+    // once and for all levels switching to optimized local solve options
+    if (l == 0)
+    {
+        optimized_localsolve = true;
+        compute_AEproblem_matrices = false;
+        compute_AEproblem_matrices[numblocks] = true;
+    }
+}
+
 // Solves a local linear system of the form
 // [ A  BT ] [ sig ] = [ G ]
 // [ B  0  ] [ lam ] = [ F ]
@@ -2331,42 +2459,87 @@ public:
 // lambda = inv (BinvABT) * ( B * invA * G - F )
 // sig = invA * (G - BT * lambda) = invA * G - invA * BT * lambda
 // sig is actually saved as sol.GetBlock(0) in the end
-void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
+void MinConstrSolver::SolveLocalProblem(int level, int AE, std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
                                         BlockVector &G, Vector& F, BlockVector &sol, bool is_degenerate) const
 {
-    // FIXME: rewrite the routine
-
-    // creating a Schur complement matrix Binv(A)BT
-    //std::cout << "Inverting A: \n";
-    //FunctBlks[0].Print();
-    DenseMatrixInverse inv_A(FunctBlks[0]);
-
-    // invAG = invA * G
-    Vector invAG;
-    inv_A.Mult(G, invAG);
-
-    DenseMatrix BT(B.Width(), B.Height());
-    BT.Transpose(B);
-
-    DenseMatrix invABT;
-    inv_A.Mult(BT, invABT);
-
-    // Schur = BinvABT
-    DenseMatrix Schur(B.Height(), invABT.Width());
-    mfem::Mult(B, invABT, Schur);
-
-    //std::cout << "Inverting Schur: \n";
-
-    // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
-    if (is_degenerate)
+    if (optimized_localsolve)
     {
-        Schur.SetRow(0,0);
-        Schur.SetCol(0,0);
-        Schur(0,0) = 1.;
+        DenseMatrixInverse * inv_A = LUfactors_lvls[level][AE][0];
+        DenseMatrixInverse * inv_Schur = LUfactors_lvls[level][AE][1];
+        SolveLocalProblemOpt(inv_A, inv_Schur, FunctBlks, B, G, F, sol, is_degenerate);
+    }
+    else
+    {
+        // FIXME: rewrite the routine
+        // creating a Schur complement matrix Binv(A)BT
+        //std::cout << "Inverting A: \n";
+        //FunctBlks[0].Print();
+        DenseMatrixInverse inv_A(FunctBlks[0]);
+
+        // invAG = invA * G
+        Vector invAG;
+        inv_A.Mult(G, invAG);
+
+        DenseMatrix BT(B.Width(), B.Height());
+        BT.Transpose(B);
+
+        DenseMatrix invABT;
+        inv_A.Mult(BT, invABT);
+
+        // Schur = BinvABT
+        DenseMatrix Schur(B.Height(), invABT.Width());
+        mfem::Mult(B, invABT, Schur);
+
+        //std::cout << "Inverting Schur: \n";
+
+        // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
+        if (is_degenerate)
+        {
+            Schur.SetRow(0,0);
+            Schur.SetCol(0,0);
+            Schur(0,0) = 1.;
+        }
+
+        //Schur.Print();
+        DenseMatrixInverse inv_Schur(Schur);
+
+        // temp = ( B * invA * G - F )
+        Vector temp(B.Height());
+        B.Mult(invAG, temp);
+        temp -= F;
+
+        if (is_degenerate)
+        {
+            temp(0) = 0;
+        }
+
+        // lambda = inv(BinvABT) * ( B * invA * G - F )
+        Vector lambda(inv_Schur.Height());
+        inv_Schur.Mult(temp, lambda);
+
+        // temp2 = (G - BT * lambda)
+        Vector temp2(B.Width());
+        B.MultTranspose(lambda,temp2);
+        temp2 *= -1;
+        temp2 += G;
+
+        // sig = invA * temp2 = invA * (G - BT * lambda)
+        inv_A.Mult(temp2, sol.GetBlock(0));
     }
 
-    //Schur.Print();
-    DenseMatrixInverse inv_Schur(Schur);
+    return;
+}
+
+
+// Optimized version of SolveLocalProblem where LU factors for the local
+// problem's matrices were computed during the setup via SaveLocalLUFactors()
+void MinConstrSolver::SolveLocalProblemOpt(DenseMatrixInverse * inv_A, DenseMatrixInverse * inv_Schur,
+                                           std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B, BlockVector &G,
+                                           Vector& F, BlockVector &sol, bool is_degenerate) const
+{
+    // invAG = invA * G
+    Vector invAG;
+    inv_A->Mult(G, invAG);
 
     // temp = ( B * invA * G - F )
     Vector temp(B.Height());
@@ -2374,13 +2547,11 @@ void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, Den
     temp -= F;
 
     if (is_degenerate)
-    {
         temp(0) = 0;
-    }
 
     // lambda = inv(BinvABT) * ( B * invA * G - F )
-    Vector lambda(inv_Schur.Height());
-    inv_Schur.Mult(temp, lambda);
+    Vector lambda(B.Height());
+    inv_Schur->Mult(temp, lambda);
 
     // temp2 = (G - BT * lambda)
     Vector temp2(B.Width());
@@ -2389,10 +2560,9 @@ void MinConstrSolver::SolveLocalProblem(std::vector<DenseMatrix> &FunctBlks, Den
     temp2 += G;
 
     // sig = invA * temp2 = invA * (G - BT * lambda)
-    inv_A.Mult(temp2, sol.GetBlock(0));
-
-    return;
+    inv_A->Mult(temp2, sol.GetBlock(0));
 }
+
 
 void MinConstrSolver::SolveCoarseProblem(BlockVector& coarserhs_func, Vector* coarserhs_constr,
                                          BlockVector& sol_coarse) const
