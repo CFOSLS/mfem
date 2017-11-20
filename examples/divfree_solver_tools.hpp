@@ -1588,7 +1588,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             MFEM_ABORT("Unknown stopping criteria type \n");
         }
 
-        if (i > 0 && stopped)
+        if (stopped)
         {
             converged = 1;
             itnum = i;
@@ -1733,14 +1733,15 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             {
                 Smoo->ComputeRhsLevel(l - 1, *(tempvec2_lvls[l - 1]));
                 Smoo->MultLevel(l - 1, *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]));
+                *(tempvec_lvls[l - 1]) = *(tempvec2_lvls[l - 1]);
 
-                ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec2_lvls[l - 1]), *(tempvec_lvls[l - 1]) );
+                ComputeUpdatedLvlRhsFunc(l - 1, *(rhsfunc_lvls[l - 1]), *(tempvec_lvls[l - 1]), *(tempvec2_lvls[l - 1]) );
             }
 
             // update the solution at thge finer level with two
             // corrections: one after smoothing and one after local solve
-            *(solupdate_lvls[l - 1]) += *(tempvec2_lvls[l - 1]);
-            SolveLocalProblems(l - 1, *(tempvec_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
+            *(solupdate_lvls[l - 1]) += *(tempvec_lvls[l - 1]);
+            SolveLocalProblems(l - 1, *(tempvec2_lvls[l - 1]), NULL, *(solupdate_lvls[l - 1]));
         }
 
     }

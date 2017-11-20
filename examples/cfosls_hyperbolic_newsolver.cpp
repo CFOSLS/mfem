@@ -2686,7 +2686,7 @@ int main(int argc, char *argv[])
 #endif
                      Smoother, higher_order, construct_coarseops);
 
-    double newsolver_reltol = 1.0e-6;
+    double newsolver_reltol = 1.0e-8;
 
     if (verbose)
     {
@@ -2696,7 +2696,7 @@ int main(int argc, char *argv[])
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
-    NewSolver.SetStopCriteriaType(1);
+    NewSolver.SetStopCriteriaType(0);
 
     // checking that for unsymmetric version the symmetry check does
     // provide the negative answer
