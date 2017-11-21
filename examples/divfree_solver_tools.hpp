@@ -8,10 +8,11 @@ using std::unique_ptr;
 // activates some additional checks
 //#define DEBUG_INFO
 
+// FIXME: MG norm is computed incorrectly since rhsfunc[0] is changed after
+// FIXME: the smoothing at level 0 in downward loop
 // FIXME: Now the parallel version is working incorrectly, different from serial
 // FIXME: Serial version with smoother, even when not as a preconditioner,
-// for some iterations increases the functional unlike the version with
-// no smoother
+// FIXME: for some iterations increases the functional unlike the version with no smoother
 
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
 {
@@ -105,6 +106,167 @@ bool CheckBdrError (const Vector& SigCandidate, const Vector& Given_bdrdata, con
         //std::cout << "CheckBdrError: boundary values are correct \n";
 
     return passed;
+}
+
+class CGSolverPrecRes : public CGSolver
+{
+public:
+   CGSolverPrecRes() { }
+
+#ifdef MFEM_USE_MPI
+   CGSolverPrecRes(MPI_Comm _comm) : CGSolver(_comm) { }
+#endif
+
+   virtual void Mult(const Vector &b, Vector &x) const override;
+};
+
+void CGSolverPrecRes::Mult(const Vector &b, Vector &x) const
+{
+    int i;
+    double r0, den, nom, nom0, betanom, alpha, beta;
+
+    if (iterative_mode)
+    {
+       oper->Mult(x, r);
+       subtract(b, r, r); // r = b - A x
+    }
+    else
+    {
+       r = b;
+       x = 0.0;
+    }
+
+    if (prec)
+    {
+       prec->Mult(r, z); // z = B r
+       d = z;
+    }
+    else
+    {
+       d = r;
+    }
+    nom0 = nom = Dot(d, r);
+    MFEM_ASSERT(IsFinite(nom), "nom = " << nom);
+
+    if (print_level == 1 || print_level == 3)
+    {
+       cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+            << nom << (print_level == 3 ? " ...\n" : "\n");
+    }
+
+    r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol);
+    if (nom <= r0)
+    {
+       converged = 1;
+       final_iter = 0;
+       final_norm = sqrt(nom);
+       return;
+    }
+
+    oper->Mult(d, z);  // z = A d
+    den = Dot(z, d);
+    MFEM_ASSERT(IsFinite(den), "den = " << den);
+
+    if (print_level >= 0 && den < 0.0)
+    {
+       cout << "Negative denominator in step 0 of PCG: " << den << '\n';
+    }
+
+    if (den == 0.0)
+    {
+       converged = 0;
+       final_iter = 0;
+       final_norm = sqrt(nom);
+       return;
+    }
+
+    // start iteration
+    converged = 0;
+    final_iter = max_iter;
+    for (i = 1; true; )
+    {
+       alpha = nom/den;
+       add(x,  alpha, d, x);     //  x = x + alpha d
+       add(r, -alpha, z, r);     //  r = r - alpha A d
+
+       if (prec)
+       {
+          prec->Mult(r, z);      //  z = B r
+          betanom = Dot(r, z);
+       }
+       else
+       {
+          betanom = Dot(r, r);
+       }
+       MFEM_ASSERT(IsFinite(betanom), "betanom = " << betanom);
+
+       if (print_level == 1)
+       {
+          cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+               << betanom << '\n';
+       }
+
+       if (betanom < r0)
+       {
+          if (print_level == 2)
+          {
+             cout << "Number of PCG iterations: " << i << '\n';
+          }
+          else if (print_level == 3)
+          {
+             cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+                  << betanom << '\n';
+          }
+          converged = 1;
+          final_iter = i;
+          break;
+       }
+
+       if (++i > max_iter)
+       {
+          break;
+       }
+
+       beta = betanom/nom;
+       if (prec)
+       {
+          add(z, beta, d, d);   //  d = z + beta d
+       }
+       else
+       {
+          add(r, beta, d, d);
+       }
+       oper->Mult(d, z);       //  z = A d
+       den = Dot(d, z);
+       MFEM_ASSERT(IsFinite(den), "den = " << den);
+       if (den <= 0.0)
+       {
+          if (print_level >= 0 && Dot(d, d) > 0.0)
+             cout << "PCG: The operator is not positive definite. (Ad, d) = "
+                  << den << '\n';
+       }
+       nom = betanom;
+    }
+    if (print_level >= 0 && !converged)
+    {
+       if (print_level != 1)
+       {
+          if (print_level != 3)
+          {
+             cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+                  << nom0 << " ...\n";
+          }
+          cout << "   Iteration : " << setw(3) << final_iter << "  (B r, r) = "
+               << betanom << '\n';
+       }
+       cout << "PCG: No convergence!" << '\n';
+    }
+    if (print_level >= 1 || (print_level >= 0 && !converged))
+    {
+       cout << "Average reduction factor = "
+            << pow (betanom/nom0, 0.5/final_iter) << '\n';
+    }
+    final_norm = sqrt(betanom);
 }
 
 class MultilevelSmoother : public Operator
@@ -523,10 +685,18 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
         // computing the solution update in the H(div)_h space
         // in two steps:
 
-        // 1. out = Curlh_l * temp_l = Curlh_l * x_l
-        Curlh_lvls[level]->Mult( *(tempvec_lvls[level]), out_lvl);
-        // 2. out_lvl = in_lvl + Curlh_l * x_l
-        out_lvl += in_lvl;
+
+        if (out_lvl.GetData() == in_lvl.GetData())
+        {
+            mfem_error("Error: out_lvl and in_lvl can't point to the same datas \n");
+        }
+        else
+        {
+            // 1. out = Curlh_l * temp_l = Curlh_l * x_l
+            Curlh_lvls[level]->Mult( *(tempvec_lvls[level]), out_lvl);
+            // 2. out_lvl = in_lvl + Curlh_l * x_l
+            out_lvl += in_lvl;
+        }
 
     }
     else
@@ -825,10 +995,10 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     //PCG(*matrix_shortcut, *prec_shortcut, *(truerhs_lvls[level]), *(truex_lvls[level]), 0, maxIter, rtol, atol );
 
     CGSolver solver(MPI_COMM_WORLD);
-    solver.SetAbsTol(abs_tol);
-    solver.SetRelTol(rel_tol);
-    //solver.SetAbsTol(sqrt(atol));
-    //solver.SetRelTol(sqrt(rtol));
+    //solver.SetAbsTol(abs_tol);
+    //solver.SetRelTol(rel_tol);
+    solver.SetAbsTol(sqrt(abs_tol));
+    solver.SetRelTol(sqrt(rel_tol));
     solver.SetMaxIter(max_iter_internal);
     solver.SetOperator(*matrix_shortcut);
     solver.SetPreconditioner(*prec_shortcut);
@@ -854,7 +1024,6 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     out_lvl += in_lvl;
 }
 
-// TODO: Check the symmetrization
 // TODO: Add blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
@@ -1608,10 +1777,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         else
             StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
                              monotone_check, "functional", print_level);
-        StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
-                         sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
-        StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
-                         solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level);
+        //StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
+                         //sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
+        //StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
+                         //solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level);
 
         bool stopped;
         switch(stopcriteria_type)
@@ -1740,7 +1909,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         *(solupdate_lvls[l]) = 0.0;
 
         // solve local problems at level l
-        // FIXME: all factors of local matrices can be stored after the first solver iteration
         SolveLocalProblems(l, *(rhsfunc_lvls[l]), NULL, *(solupdate_lvls[l]));
         ComputeUpdatedLvlRhsFunc(l, *(rhsfunc_lvls[l]), *(solupdate_lvls[l]), *(tempvec_lvls[l]) );
 
@@ -1761,7 +1929,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     } // end of loop over finer levels
 
     // BOTTOM: solve the global problem at the coarsest level
-    // imposes bondary conditions and assembles the coarsests level's
+    // imposes boundary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
     SetUpCoarsestRhsFunc();
 
@@ -2333,8 +2501,8 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
 
     // coarse solver
     int maxIter(20000);
-    double rtol(1.e-14);
-    double atol(1.e-14);
+    double rtol(1.e-18);
+    double atol(1.e-18);
 
     coarseSolver = new MINRESSolver(MPI_COMM_WORLD);
     coarseSolver->SetAbsTol(atol);
@@ -2410,6 +2578,7 @@ public:
                                     " sigma only but more blocks are present!");
             optimized_localsolve = true;
             LUfactors_lvls.resize(num_levels - 1);
+            SetPrintLevel(1);
             SetUpSolver();
         }
 

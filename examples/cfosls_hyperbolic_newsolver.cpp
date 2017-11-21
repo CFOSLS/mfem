@@ -18,13 +18,13 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
-//#define CHECK_SPDSOLVER
+#define CHECK_SPDSOLVER
 
 // initializes sigma with exact solution
 // if combined with COMPUTING_LAMBDA, it will
@@ -2469,6 +2469,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
 
+    /*
     double smooth_abstol = 1.0e-12;
     double smooth_reltol = 1.0e-12;
 
@@ -2485,6 +2486,7 @@ int main(int argc, char *argv[])
     NewSmoother.SetRelTol(smooth_reltol);//(1.0e-10);//(new_reltol);
     NewSmoother.SetMaxIterInt(20000);
     NewSmoother.SetPrintLevel(0);
+    */
 
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
                    Proj_Hcurl, Dof_TrueDof_Hcurl,
@@ -2698,10 +2700,6 @@ int main(int argc, char *argv[])
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
 
-    // checking that for unsymmetric version the symmetry check does
-    // provide the negative answer
-    //NewSolver.SetUnSymmetric();
-
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
     Vector tempp(sigma_exact_finest->Size());
@@ -2739,6 +2737,10 @@ int main(int argc, char *argv[])
 
 #ifdef CHECK_SPDSOLVER
 
+    // checking that for unsymmetric version the symmetry check does
+    // provide the negative answer
+    //NewSolver.SetUnSymmetric();
+
     Vector Vec1(Funct_mat_lvls[0]->Height());
     Vec1.Randomize(2000);
     Vector Vec2(Funct_mat_lvls[0]->Height());
@@ -2765,7 +2767,7 @@ int main(int argc, char *argv[])
     std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
 
     NewSolver.SetAsPreconditioner(true);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(5);
 
     NewSolver.Mult(Vec1, Tempy);
     double scal1 = Tempy * Vec2;
@@ -2784,6 +2786,7 @@ int main(int argc, char *argv[])
     {
         std::cout << "Solver is not symmetric on two random vectors: \n";
         std::cout << "vec2 * (A * vec1) = " << scal1 << " != " << scal2 << " = vec1 * (A * vec2)" << "\n";
+        std::cout << "difference = " << scal1 - scal2 << "\n";
     }
     else
     {
@@ -2836,13 +2839,15 @@ int main(int argc, char *argv[])
     fform->ParallelAssemble(trueRhstest);
 
 
-    int maxIter_cg(20);
-    double rtol_cg(1.e-12);
-    double atol_cg(1.e-12);
+    int maxIter_cg(100);
+    //double rtol_cg(1.e-12);
+    //double atol_cg(1.e-12);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
-    Testsolver.SetAbsTol(atol_cg);
-    Testsolver.SetRelTol(rtol_cg);
+    Testsolver.SetAbsTol(atol);
+    Testsolver.SetRelTol(rtol);
+    //Testsolver.SetAbsTol(sqrt(atol_cg));
+    //Testsolver.SetRelTol(sqrt(rtol_cg));
     Testsolver.SetMaxIter(maxIter_cg);
     Testsolver.SetOperator(*Atest);
     Testsolver.SetPrintLevel(1);
