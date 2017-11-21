@@ -1385,7 +1385,7 @@ int main(int argc, char *argv[])
 #ifdef NEW_STUFF
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space);
-    sigma_exact_finest->ProjectCoefficient(*(Mytest.sigma));
+    sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
 #endif
     //if(dim==3) pmesh->ReorientTetMesh();
 
@@ -1567,7 +1567,7 @@ int main(int argc, char *argv[])
             HypreParVector *Rhs;
 
             sigma_exact = new ParGridFunction(R_space);
-            sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+            sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
             gform = new ParLinearForm(W_space);
             gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
@@ -1611,7 +1611,7 @@ int main(int argc, char *argv[])
     {
         if (verbose)
             std::cout << "Using exact sigma minus curl of a given function from H(curl,0) (in 3D) as a particular solution \n";
-        Sigmahat->ProjectCoefficient(*(Mytest.sigmahat));
+        Sigmahat->ProjectCoefficient(*Mytest.sigmahat);
     }
     if (verbose)
         cout<<"Particular solution found in "<< chrono.RealTime() <<" seconds.\n";
@@ -1619,14 +1619,14 @@ int main(int argc, char *argv[])
 
     // the div-free part
     ParGridFunction *u_exact = new ParGridFunction(C_space);
-    u_exact->ProjectCoefficient(*(Mytest.divfreepart));
+    u_exact->ProjectCoefficient(*Mytest.divfreepart);
 
     ParGridFunction *S_exact;
     S_exact = new ParGridFunction(S_space);
-    S_exact->ProjectCoefficient(*(Mytest.scalarS));
+    S_exact->ProjectCoefficient(*Mytest.scalarS);
 
     ParGridFunction * sigma_exact = new ParGridFunction(R_space);
-    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+    sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
     if (withDiv)
         xblks.GetBlock(0) = 0.0;
@@ -1681,7 +1681,7 @@ int main(int argc, char *argv[])
         //Mblock->AddDomainIntegrator(new DivDivIntegrator); //only for debugging, delete this
     }
     else // no S, hence we need the matrix weight
-        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.Ktilda)));
+        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
     Mblock->Assemble();
     Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Finalize();
@@ -1954,8 +1954,8 @@ int main(int argc, char *argv[])
 
     if (!withDiv)
     {
-        err_u = u->ComputeL2Error(*(Mytest.divfreepart), irs);
-        norm_u = ComputeGlobalLpNorm(2, *(Mytest.divfreepart), *pmesh, irs);
+        err_u = u->ComputeL2Error(*Mytest.divfreepart, irs);
+        norm_u = ComputeGlobalLpNorm(2, *Mytest.divfreepart, *pmesh, irs);
 
         if (verbose)
         {
@@ -1984,10 +1984,10 @@ int main(int argc, char *argv[])
     if (!withDiv)
     {
         opdivfreepart_exact = new ParGridFunction(R_space);
-        opdivfreepart_exact->ProjectCoefficient(*(Mytest.opdivfreepart));
+        opdivfreepart_exact->ProjectCoefficient(*Mytest.opdivfreepart);
 
-        err_opdivfreepart = opdivfreepart->ComputeL2Error(*(Mytest.opdivfreepart), irs);
-        norm_opdivfreepart = ComputeGlobalLpNorm(2, *(Mytest.opdivfreepart), *pmesh, irs);
+        err_opdivfreepart = opdivfreepart->ComputeL2Error(*Mytest.opdivfreepart, irs);
+        norm_opdivfreepart = ComputeGlobalLpNorm(2, *Mytest.opdivfreepart, *pmesh, irs);
 
         if (verbose)
         {
@@ -2041,18 +2041,18 @@ int main(int argc, char *argv[])
     else // no S, then we compute S from sigma
     {
         // temporary for checking the computation of S below
-        //sigma->ProjectCoefficient(*(Mytest.sigma));
+        //sigma->ProjectCoefficient(*Mytest.sigma);
 
         S = new ParGridFunction(S_space);
 
         ParBilinearForm *Cblock(new ParBilinearForm(S_space));
-        Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+        Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
         Cblock->Assemble();
         Cblock->Finalize();
         HypreParMatrix * C = Cblock->ParallelAssemble();
 
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space, S_space));
-        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
         Bblock->Assemble();
         Bblock->Finalize();
         HypreParMatrix * B = Bblock->ParallelAssemble();
@@ -2069,8 +2069,8 @@ int main(int argc, char *argv[])
 
     }
 
-    double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
-    double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+    double err_sigma = sigma->ComputeL2Error(*Mytest.sigma, irs);
+    double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
 
     if (verbose)
         cout << "sigma_h = sigma_hat + div-free part, div-free part = curl u_h \n";
@@ -2084,7 +2084,7 @@ int main(int argc, char *argv[])
     }
 
     /*
-    double err_sigmahat = Sigmahat->ComputeL2Error(*(Mytest.sigma), irs);
+    double err_sigmahat = Sigmahat->ComputeL2Error(*Mytest.sigma, irs);
     if (verbose && !withDiv)
         if ( norm_sigma > MYZEROTOL )
             cout << "|| sigma_hat - sigma_ex || / || sigma_ex || = " << err_sigmahat / norm_sigma << endl;
@@ -2098,8 +2098,8 @@ int main(int argc, char *argv[])
     Div.Assemble();
     Div.Mult(*sigma, DivSigma);
 
-    double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-    double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+    double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+    double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
 
     if (verbose)
     {
@@ -2118,10 +2118,10 @@ int main(int argc, char *argv[])
     //if (withS)
     {
         S_exact = new ParGridFunction(S_space);
-        S_exact->ProjectCoefficient(*(Mytest.scalarS));
+        S_exact->ProjectCoefficient(*Mytest.scalarS);
 
-        double err_S = S->ComputeL2Error(*(Mytest.scalarS), irs);
-        norm_S = ComputeGlobalLpNorm(2, *(Mytest.scalarS), *pmesh, irs);
+        double err_S = S->ComputeL2Error(*Mytest.scalarS, irs);
+        norm_S = ComputeGlobalLpNorm(2, *Mytest.scalarS, *pmesh, irs);
         if (verbose)
         {
             if ( norm_S > MYZEROTOL )
@@ -2239,7 +2239,7 @@ int main(int argc, char *argv[])
 
     if(verbose && !withDiv)
     {
-        double projection_error_u = u_exact->ComputeL2Error(*(Mytest.divfreepart), irs);
+        double projection_error_u = u_exact->ComputeL2Error(*Mytest.divfreepart, irs);
         if ( norm_u > MYZEROTOL )
         {
             //std::cout << "Debug: || u_ex || = " << norm_u << "\n";
@@ -2250,7 +2250,7 @@ int main(int argc, char *argv[])
             cout << "|| Pi_h u_ex || = " << projection_error_u << " (u_ex = 0) \n ";
     }
 
-    double projection_error_sigma = sigma_exact->ComputeL2Error(*(Mytest.sigma), irs);
+    double projection_error_sigma = sigma_exact->ComputeL2Error(*Mytest.sigma, irs);
 
     if(verbose)
     {
@@ -2264,7 +2264,7 @@ int main(int argc, char *argv[])
 
     //if (withS)
     {
-        double projection_error_S = S_exact->ComputeL2Error(*(Mytest.scalarS), irs);
+        double projection_error_S = S_exact->ComputeL2Error(*Mytest.scalarS, irs);
 
         if(verbose)
         {
@@ -2309,7 +2309,7 @@ int main(int argc, char *argv[])
         Transport_test_divfree Mytest(nDimensions, numsol, numcurl);
 
         ParGridFunction * sigma_exact = new ParGridFunction(R_space);
-        sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+        sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
         x_special.GetBlock(0) = *sigma_exact;
 
@@ -2415,8 +2415,8 @@ int main(int argc, char *argv[])
             irs[i] = &(IntRules.Get(i, order_quad));
         }
 
-        double err_sigma = sigma_special->ComputeL2Error(*(Mytest.sigma), irs);
-        double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+        double err_sigma = sigma_special->ComputeL2Error(*Mytest.sigma, irs);
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
 
         if (verbose)
             cout << "sigma_h = sigma_hat + div-free part, div-free part = curl u_h \n";
@@ -2435,8 +2435,8 @@ int main(int argc, char *argv[])
         Div.Assemble();
         Div.Mult(*sigma_special, DivSigma);
 
-        double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-        double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
 
         if (verbose)
         {
@@ -3016,8 +3016,8 @@ int main(int argc, char *argv[])
             irs[i] = &(IntRules.Get(i, order_quad));
         }
 
-        double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
-        double err_newsigmahat = NewSigmahat->ComputeL2Error(*(Mytest.sigma), irs);
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
         if (verbose)
         {
             if ( norm_sigma > MYZEROTOL )
@@ -3032,8 +3032,8 @@ int main(int argc, char *argv[])
         Div.Assemble();
         Div.Mult(*NewSigmahat, DivSigma);
 
-        double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-        double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
 
         if (verbose)
         {
@@ -3082,8 +3082,8 @@ int main(int argc, char *argv[])
             irs[i] = &(IntRules.Get(i, order_quad));
         }
 
-        double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
-        double err_newsigmahat = NewSigmahat->ComputeL2Error(*(Mytest.sigma), irs);
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
         if (verbose)
         {
             if ( norm_sigma > MYZEROTOL )
@@ -3098,8 +3098,8 @@ int main(int argc, char *argv[])
         Div.Assemble();
         Div.Mult(*NewSigmahat, DivSigma);
 
-        double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-        double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
 
         if (verbose)
         {
@@ -3145,8 +3145,8 @@ int main(int argc, char *argv[])
                 irs[i] = &(IntRules.Get(i, order_quad));
             }
 
-            double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
-            double err_newsigmahat = NewSigmahat->ComputeL2Error(*(Mytest.sigma), irs);
+            double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
+            double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
             if (verbose)
             {
                 if ( norm_sigma > MYZEROTOL )
@@ -3161,8 +3161,8 @@ int main(int argc, char *argv[])
             Div.Assemble();
             Div.Mult(*NewSigmahat, DivSigma);
 
-            double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-            double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+            double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+            double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
 
             if (verbose)
             {
