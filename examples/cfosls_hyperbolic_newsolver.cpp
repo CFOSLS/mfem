@@ -18,13 +18,13 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
-#define CHECK_SPDSOLVER
+//#define CHECK_SPDSOLVER
 
 // initializes sigma with exact solution
 // if combined with COMPUTING_LAMBDA, it will
@@ -1296,9 +1296,9 @@ int main(int argc, char *argv[])
         C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
 
         // getting boundary and essential boundary dofs
-        R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *(BdrDofs_R[0][l]));
-        R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_R[0][l]));
-        C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *(EssBdrDofs_Hcurl[l]));
+        R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_R[0][l]);
+        R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_R[0][l]);
+        C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
 
         // getting operators at level l
         // curl or divskew operator from C_space into R_space
@@ -1321,10 +1321,10 @@ int main(int argc, char *argv[])
         Funct_mat_offsets_lvls[l]->SetSize(2);
         //SparseMatrix Aloc = Ablock->SpMat();
         //Array<int> offsets(2);
-        (*(Funct_mat_offsets_lvls[l]))[0] = 0;
-        (*(Funct_mat_offsets_lvls[l]))[1] = Ablock->Height();
+        (*Funct_mat_offsets_lvls[l])[0] = 0;
+        (*Funct_mat_offsets_lvls[l])[1] = Ablock->Height();
 
-        Funct_mat_lvls[l] = new BlockMatrix(*(Funct_mat_offsets_lvls[l]));
+        Funct_mat_lvls[l] = new BlockMatrix(*Funct_mat_offsets_lvls[l]);
         Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
 
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
@@ -1369,7 +1369,7 @@ int main(int argc, char *argv[])
             if (prec_is_MG)
             {
                 HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
-                        LeftDiagMult( *(Proj_Hcurl[l]),  C_space_lvls[l]->GetDofOffsets());
+                        LeftDiagMult( *Proj_Hcurl[l],  C_space_lvls[l]->GetDofOffsets());
                 P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl[l]->Transpose(), P_C_coarser_d_td);
                 P_C[num_levels - 2 - l]->CopyColStarts();
                 P_C[num_levels - 2 - l]->CopyRowStarts();
@@ -1544,7 +1544,7 @@ int main(int argc, char *argv[])
                           Dof_TrueDof_Func_lvls[num_levels - 1][0],
                           Dof_TrueDof_L2_lvls[num_levels - 1],
                           sigmahat_pau,
-                          *(EssBdrDofs_R[0][num_levels - 1]));
+                          *EssBdrDofs_R[0][num_levels - 1]);
 
     #ifdef MFEM_DEBUG
             Vector sth(F_fine.Size());
@@ -2569,14 +2569,14 @@ int main(int argc, char *argv[])
     for (int i = 0; i < sigma_exact_finest->Size(); ++i )
     {
         // just setting Xinit to store correct boundary values at essential boundary
-        if ( (*(EssBdrDofs_R[0][0]))[i] != 0)
+        if ( (*EssBdrDofs_R[0][0])[i] != 0)
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
 
         //probably doing something better than just essential boundary values
 #ifdef EXACTSOLH_INIT
     #ifdef COMPUTING_LAMBDA
         Xinit.GetBlock(0)[i] = (*sigma_special)[i];
-        if ( fabs ((*sigma_special)[i] - (*sigma_exact_finest)[i]) > 1.0e-10 && (*(EssBdrDofs_R[0][0]))[i] != 0)
+        if ( fabs ((*sigma_special)[i] - (*sigma_exact_finest)[i]) > 1.0e-10 && (*EssBdrDofs_R[0][0])[i] != 0)
             std::cout << "Weird! Mismatching essential boundary values for sigma_h,exact and sigma_exact,h \n";
     #else
         //Xinit.GetBlock(0)[i] = sigmahat_pau[i];
@@ -2617,9 +2617,9 @@ int main(int argc, char *argv[])
         if ( value > 1.0e-6 && value < 1.0e-4 )
         {
             std::cout << "i = " << i << "between 1.0e-4 and 1.0e-6, val = " << value << "\n";
-            if ( (*(EssBdrDofs_R[0][0]))[i] != 0 )
+            if ( (*EssBdrDofs_R[0][0])[i] != 0 )
                 std::cout << "It belongs to the essential boundary! \n";
-            else if ( (*(BdrDofs_R[0][0]))[i] != 0 )
+            else if ( (*BdrDofs_R[0][0])[i] != 0 )
                 std::cout << "It belongs to the nonessential boundary! \n";
         }
     }
@@ -2748,7 +2748,7 @@ int main(int argc, char *argv[])
 
     for ( int i = 0; i < Vec1.Size(); ++i )
     {
-        if ((*(EssBdrDofs_R[0][0]))[i] != 0 )
+        if ((*EssBdrDofs_R[0][0])[i] != 0 )
         {
             Vec1[i] = 0.0;
             Vec2[i] = 0.0;
@@ -3059,7 +3059,7 @@ int main(int argc, char *argv[])
     double max_bdr_error = 0;
     for ( int dof = 0; dof < Xinit.Size(); ++dof)
     {
-        if ( (*(EssBdrDofs_R[0][0]))[dof] != 0.0)
+        if ( (*EssBdrDofs_R[0][0])[dof] != 0.0)
         {
             //std::cout << "ess dof index: " << dof << "\n";
             double bdr_error_dof = fabs(Xinit[dof] - (*NewSigmahat)[dof]);
@@ -3122,7 +3122,7 @@ int main(int argc, char *argv[])
         double max_bdr_error = 0;
         for ( int dof = 0; dof < Xinit.Size(); ++dof)
         {
-            if ( (*(EssBdrDofs_R[0][0]))[dof] != 0.0)
+            if ( (*EssBdrDofs_R[0][0])[dof] != 0.0)
             {
                 //std::cout << "ess dof index: " << dof << "\n";
                 double bdr_error_dof = fabs(Xinit[dof] - (*NewSigmahat)[dof]);
