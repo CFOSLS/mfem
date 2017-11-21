@@ -5,6 +5,8 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+#define DEBUGGING
+
 // activates some additional checks
 //#define DEBUG_INFO
 
@@ -1882,6 +1884,10 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
 #endif
 
+#ifdef DEBUGGING
+    CheckFunctValue(comm, *Funct_lvls[0], previous_sol, "at the beginning of Solve(): ", print_level);
+#endif
+
     //if (current_iteration > 0)
         //CheckFunctValue(comm, *Funct_lvls[0], next_sol, "for next_sol at the beginning of iteration: ", print_level);
 #ifdef COMPUTING_LAMBDA
@@ -1929,6 +1935,31 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *solupdate_lvls[num_levels - 1]);
 
+
+#ifdef DEBUGGING
+    Vector tempr_coarse(solupdate_lvls[1]->GetBlock(0).Size());
+    tempr_coarse = *solupdate_lvls[num_levels - 1];
+
+    Vector tempr2(solupdate_lvls[0]->GetBlock(0).Size());
+    P_Func[0]->Mult(tempr_coarse, tempr2);
+
+    Vector tempr6(solupdate_lvls[0]->GetBlock(0).Size());
+    tempr6 = solupdate_lvls[0]->GetBlock(0);
+
+    BlockVector tempr3(block_offsets);
+    tempr3 = next_sol;
+    tempr3.GetBlock(0) += tempr6;
+    CheckFunctValue(comm, *Funct_lvls[0], tempr3, "after the downward loop without coarsest level: ", print_level);
+
+    tempr3.GetBlock(0) += tempr2;
+    CheckFunctValue(comm, *Funct_lvls[0], tempr3, "after the downward loop plus coarsest level: ", print_level);
+
+    BlockVector tempr4(block_offsets);
+    ComputeRhsFunc(0, tempr3, tempr4);
+
+    BlockVector tempr7(block_offsets);
+#endif
+
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
     {
@@ -1938,19 +1969,62 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             P_Func[l - 1]->Mult(*solupdate_lvls[l], *tempvec_lvls[l - 1]);
             ComputeUpdatedLvlRhsFunc(l - 1, *rhsfunc_lvls[l - 1], *tempvec_lvls[l - 1], *tempvec2_lvls[l - 1] );
 
+#ifdef DEBUGGING
+            tempr4 -= *tempvec2_lvls[0];
+            ComputeMPIVecNorm(comm, tempr4, "checking some residual", print_level);
+
+            BlockVector temp(block_offsets);
+            temp = tempr3;
+            temp -= *solupdate_lvls[0];
+            temp -= *tempvec_lvls[0];
+            temp -= previous_sol;
+            ComputeMPIVecNorm(comm, temp, "checking some solution diff", print_level);
+
+            BlockVector temp2(block_offsets);
+            BlockVector temp3(block_offsets);
+#endif
             // smooth at the finer level
             if (Smoo)
             {
                 Smoo->ComputeRhsLevel(l - 1, *tempvec2_lvls[l - 1]);
                 Smoo->MultLevel(l - 1, *tempvec_lvls[l - 1], *tempvec2_lvls[l - 1]);
+
+#ifdef DEBUGGING
+                temp2 = tempr3;
+                temp2 -= *tempvec_lvls[0];
+
+                tempr7 = *tempvec2_lvls[0];
+#endif
+
                 *tempvec_lvls[l - 1] = *tempvec2_lvls[l - 1];
 
+#ifdef DEBUGGING
+                temp2 += *tempvec_lvls[0];
+                CheckFunctValue(comm, *Funct_lvls[0], temp2, "after the downward loop plus coarsest level plus post-smooth: ", print_level);
+
+#endif
                 ComputeUpdatedLvlRhsFunc(l - 1, *rhsfunc_lvls[l - 1], *tempvec_lvls[l - 1], *tempvec2_lvls[l - 1] );
+#ifdef DEBUGGING
+                ComputeRhsFunc(0, temp2, temp3);
+                temp3 -= *tempvec2_lvls[0];
+
+                ComputeMPIVecNorm(comm, temp3, "checking some other residual", print_level);
+#endif
             }
 
-            // update the solution at thge finer level with two
+            // update the solution at the finer level with two
             // corrections: one after smoothing and one after local solve
             *solupdate_lvls[l - 1] += *tempvec_lvls[l - 1];
+
+#ifdef DEBUGGING
+            BlockVector temp4(block_offsets);
+            temp4 = temp2;
+            temp4 -= previous_sol;
+            temp4 -= *solupdate_lvls[0];
+
+            ComputeMPIVecNorm(comm, temp4, "checking some other solution diff", print_level);
+#endif
+
             SolveLocalProblems(l - 1, *tempvec2_lvls[l - 1], NULL, *solupdate_lvls[l - 1]);
         }
 
@@ -1965,6 +2039,18 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             P_Func[level - 1]->AddMult(*solupdate_lvls[level], *solupdate_lvls[level - 1], 1.0 );
 
     }
+
+#ifdef DEBUGGING
+    BlockVector tempr5(block_offsets);
+    tempr5 = 0.0;
+    SolveLocalProblems(0, *tempvec2_lvls[0], NULL, tempr5);
+
+    tempr3 = next_sol;
+    tempr3 += tempr6;
+    tempr3 += tempr7;
+    tempr3 += tempr5;
+    CheckFunctValue(comm, *Funct_lvls[0], tempr3, "after the V cycle in debugging mode: ", print_level);
+#endif
 
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *solupdate_lvls[0];
@@ -2498,7 +2584,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     double rtol(1.e-18);
     double atol(1.e-18);
 
-    coarseSolver = new MINRESSolver(MPI_COMM_WORLD);
+    coarseSolver = new CGSolver(MPI_COMM_WORLD);
     coarseSolver->SetAbsTol(atol);
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
@@ -2581,6 +2667,8 @@ public:
     { BaseGeneralMinConstrSolver::Mult(x,y); }
 
     virtual void PrintAllOptions() const override;
+
+    void SetOptimizedLocalSolve(bool flag) {optimized_localsolve = flag;}
 };
 
 void MinConstrSolver::PrintAllOptions() const

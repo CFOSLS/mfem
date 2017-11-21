@@ -21,7 +21,7 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -2699,7 +2699,7 @@ int main(int argc, char *argv[])
     NewSolver.SetMaxIter(300);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
-
+    NewSolver.SetOptimizedLocalSolve(true);
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
     Vector tempp(sigma_exact_finest->Size());
