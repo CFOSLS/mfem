@@ -21,7 +21,7 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -2686,7 +2686,7 @@ int main(int argc, char *argv[])
 #endif
                      Smoother, higher_order, construct_coarseops);
 
-    double newsolver_reltol = 1.0e-8;
+    double newsolver_reltol = 1.0e-12;
 
     if (verbose)
     {
@@ -2849,6 +2849,7 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetMaxIter(2);
+    NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);
 
     trueXtest = 0.0;

@@ -8,8 +8,10 @@ using std::unique_ptr;
 // activates some additional checks
 //#define DEBUG_INFO
 
-// FIXME: Check the computation of the MG norm, is it called for correct arguments
-// FIXME: For now it is obviously not since rhsfunc[0] is changed during the backward (upward) loop
+// FIXME: Now the parallel version is working incorrectly, different from serial
+// FIXME: Serial version with smoother, even when not as a preconditioner,
+// for some iterations increases the functional unlike the version with
+// no smoother
 
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
 {
@@ -144,7 +146,17 @@ public:
     // getters
     int GetNumLevels() {return num_levels;}
     int GetPrintLevel() const { return print_level;}
+
+    virtual void PrintAllOptions() const;
 };
+
+void MultilevelSmoother::PrintAllOptions() const
+{
+    std::cout << "Multilevel smoother base options: \n";
+    std::cout << "num_levels: " << num_levels << "\n";
+    std::cout << "print_level: " << print_level << "\n";
+    std::cout << "\n";
+}
 
 void MultilevelSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
                                        const SparseMatrix* Proj_lvl, const HypreParMatrix *D_tD_lvl)
@@ -262,7 +274,20 @@ public:
     int GetSweepsNumber() const {return sweeps_num;}
     void SetSweepsNumber(int Number_of_sweeps) {sweeps_num = Number_of_sweeps;}
     void SetDofsToRelax(bool Relax_all_dofs) {relax_all_dofs = Relax_all_dofs;}
+
+    void PrintAllOptions() const override;
 };
+
+void HCurlGSSmoother::PrintAllOptions() const
+{
+    MultilevelSmoother::PrintAllOptions();
+    std::cout << "HcurlGSS smoother options: \n";
+    std::cout << "construct_curls: " << construct_curls << "\n";
+    std::cout << "relax_all_dofs:" << relax_all_dofs << "\n";
+    std::cout << "sweeps_num: " << sweeps_num << "\n";
+    std::cout << "\n";
+}
+
 
 HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & Discrete_Curls_lvls,
                               const Array< SparseMatrix*>& Proj_lvls,
@@ -410,7 +435,8 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
 
         if (relax_all_dofs)
         {
-            Smoothers_lvls[level] = new HypreSmoother(*(CTMC_global_lvls[level]), HypreSmoother::Type::GS, sweeps_num);
+            Smoothers_lvls[level] = new HypreSmoother(*(CTMC_global_lvls[level]),
+                                                      HypreSmoother::Type::GS, sweeps_num);
 
             truerhs_lvls[level] = new Vector(CTMC_global_lvls[level]->Height());
             truex_lvls[level] = new Vector(CTMC_global_lvls[level]->Height());
@@ -1123,7 +1149,29 @@ public:
     void SetRelTol(double RelTol) const {rel_tol = RelTol;}
     void SetMaxIter(int MaxIter) const {max_iter = MaxIter;}
     void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
+
+    virtual void PrintAllOptions() const;
 };
+
+void BaseGeneralMinConstrSolver::PrintAllOptions() const
+{
+    std::cout << "Base options: \n";
+    std::cout << "num_levels: " << num_levels << "\n";
+    std::cout << "numblocks:" << numblocks << "\n";
+    std::cout << "construct_coarseops: " << construct_coarseops << "\n";
+    std::cout << "higher_order: " << higher_order << "\n";
+    std::cout << "setup_finished: " << setup_finished << "\n";
+    std::cout << "symmetric: " << symmetric << "\n";
+    std::cout << "print_level: " << print_level << "\n";
+    std::cout << "preconditioner_mode: " << preconditioner_mode << "\n";
+    std::cout << "stop_criteria_type: " << stopcriteria_type << "\n";
+    std::cout << "rel_tol: " << rel_tol << "\n";
+    std::cout << "max_iter: " <<  max_iter << "\n";
+    std::cout << "\n";
+
+    if (Smoo)
+        Smoo->PrintAllOptions();
+}
 
 void BaseGeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
 {
@@ -2366,10 +2414,19 @@ public:
         }
 
 
-    virtual void Mult(const Vector & x, Vector & y) const
+    virtual void Mult(const Vector & x, Vector & y) const override
     { BaseGeneralMinConstrSolver::Mult(x,y); }
 
+    virtual void PrintAllOptions() const override;
 };
+
+void MinConstrSolver::PrintAllOptions() const
+{
+    BaseGeneralMinConstrSolver::PrintAllOptions();
+    std::cout << "Additional options: \n";
+    std::cout << "optimized_localsolve: " << optimized_localsolve << "\n";
+    std::cout << "\n";
+}
 
 void MinConstrSolver::SaveLocalLUFactors(int l) const
 {
