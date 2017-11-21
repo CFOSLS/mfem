@@ -21,7 +21,7 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -935,7 +935,7 @@ int main(int argc, char *argv[])
     //DEFAULTED LINEAR SOLVER OPTIONS
     int max_num_iter = 150000;
     double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-14;//1e-9;//1e-12;
+    double atol = 1e-12;//1e-9;//1e-12;
 
     Mesh *mesh = NULL;
 
@@ -1911,8 +1911,8 @@ int main(int argc, char *argv[])
     //if (verbose)
         //cout << "Linear solver: MINRES \n";
 
-    solver->SetAbsTol(atol);
-    solver->SetRelTol(rtol);
+    solver->SetAbsTol(sqrt(atol));
+    solver->SetRelTol(sqrt(rtol));
     solver->SetMaxIter(max_num_iter);
     solver->SetOperator(*MainOp);
 
@@ -2696,9 +2696,9 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(300);
+    NewSolver.SetMaxIter(10);
     NewSolver.SetPrintLevel(1);
-    NewSolver.SetStopCriteriaType(0);
+    NewSolver.SetStopCriteriaType(2);
     NewSolver.SetOptimizedLocalSolve(true);
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
@@ -2838,22 +2838,21 @@ int main(int argc, char *argv[])
 
     fform->ParallelAssemble(trueRhstest);
 
-
-    int maxIter_cg(100);
-    //double rtol_cg(1.e-12);
-    //double atol_cg(1.e-12);
+    int maxIter_cg(50);
+    double rtol_cg(1.e-12);
+    double atol_cg(1.e-12);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
-    Testsolver.SetAbsTol(atol);
-    Testsolver.SetRelTol(rtol);
-    //Testsolver.SetAbsTol(sqrt(atol_cg));
-    //Testsolver.SetRelTol(sqrt(rtol_cg));
+    //Testsolver.SetAbsTol(atol);
+    //Testsolver.SetRelTol(rtol);
+    Testsolver.SetAbsTol(sqrt(atol_cg));
+    Testsolver.SetRelTol(sqrt(rtol_cg));
     Testsolver.SetMaxIter(maxIter_cg);
     Testsolver.SetOperator(*Atest);
     Testsolver.SetPrintLevel(1);
 
     NewSolver.SetAsPreconditioner(true);
-    NewSolver.SetMaxIter(2);
+    NewSolver.SetMaxIter(1);
     NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);
 

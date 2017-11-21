@@ -5,7 +5,7 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-#define DEBUGGING
+//#define DEBUGGING
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -13,9 +13,9 @@ using std::unique_ptr;
 // FIXME: MG norm is computed incorrectly since rhsfunc[0] is changed after
 // FIXME: the smoothing at level 0 in downward loop
 // FIXME: Now the parallel version is working incorrectly, different from serial
-// FIXME: Serial version with smoother, even when not as a preconditioner,
-// FIXME: for some iterations increases the functional unlike the version with no smoother
 
+// Checking routines used for debugging
+// Vector dot product assembled over MPI
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
 {
     MFEM_ASSERT(vec1.Size() == vec2.Size(), "Sizes mismatch in ComputeMPIDotProduct()!");
@@ -24,14 +24,17 @@ double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec
     int global_size = 0;
     MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
 
-    double local_normsq = fabs(vec1 * vec2);
+    double local_dotprod = vec1 * vec2;
     double global_norm = 0;
-    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    MPI_Allreduce(&local_dotprod, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    if (global_norm < 0)
+        std::cout << "MG norm is not a norm: dot product less than zero! \n";
     global_norm = sqrt (global_norm / global_size);
 
     return global_norm;
 }
 
+// Vector norm assembled over MPI
 double ComputeMPIVecNorm(MPI_Comm comm, const Vector& bvec, char const * string, bool print)
 {
     int local_size = bvec.Size();
@@ -48,13 +51,12 @@ double ComputeMPIVecNorm(MPI_Comm comm, const Vector& bvec, char const * string,
     return global_norm;
 }
 
-// Checking routines used for debugging
 // Computes and prints the norm of || Funct * y ||_2,h, or sum of those over all processes
 double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const BlockVector& yblock, char const * string, bool print)
 {
     BlockVector res(Funct.ColOffsets());
     Funct.Mult(yblock, res);
-    double local_func_norm = res.Norml2() / sqrt (res.Size());
+    double local_func_norm = yblock * res / sqrt (res.Size());
     double global_func_norm = 0;
     MPI_Allreduce(&local_func_norm, &global_func_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
     if (print)
@@ -1364,7 +1366,7 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
 {
     bool already_printed = false;
     if (monotone_check)
-        if (value_curr > value_prev)
+        if (value_curr > value_prev && fabs(value_prev - value_curr) / value_scalefactor > 1.0e-10 )
         {
             std::cout << "criteria: " << name << " is increasing! \n";
             std::cout << "current " << name << ": " << value_curr << "\n";
@@ -1396,7 +1398,7 @@ bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, d
     case 1:
     case 2:
     {
-        if (print_level && !already_printed)
+        if (print && !already_printed)
         {
 
             std::cout << "current " << name << ": " << value_curr << "\n";
@@ -1707,9 +1709,6 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
         sol_firstitnorm = ComputeMPIVecNorm(comm, particular_solution,
                 "for the particular solution", print_level);
 
-    //if (print_level || stopcriteria_type == 2)
-        //solupdate_firstmgnorm = ComputeMPIDotProduct(comm, *solupdate_lvls[0], *rhsfunc_lvls[0]);
-
     // 5. restore sizes of righthand side vectors for the constraint
     // which were changed during transfer between levels
     rhs_constr->SetSize(ConstrRhs.Size());
@@ -1717,7 +1716,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
 }
 
 
-// The top-level wrapper for the solver which overrides Operator::Mult()
+// The top-level wrapper for the solver which overrides Solver::Mult()
 void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
@@ -1731,15 +1730,14 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     // while xblock is the iterate
     // and rhsblock is the input x
 
-    // rhsblock = x, but on dofs, using xblock_truedoffs as a viewer for x
+    // x will be accessed through xblock_truedofs as its view
     xblock_truedofs->Update(x.GetData(), block_trueoffsets);
+    // y will be accessed through yblock_truedofs as its view
+    yblock_truedofs->Update(y.GetData(), block_trueoffsets);
+
+    // rhsblock = x, but on dofs
     for (int blk = 0; blk < numblocks; ++blk)
         dof_trueDof_Func_lvls[0][blk]->Mult(xblock_truedofs->GetBlock(blk), rhsblock->GetBlock(blk));
-    //rhsblock->Update(x.GetData(), block_offsets); works inly in serial
-
-    // y will be accessed through yblock as its view
-    yblock_truedofs->Update(y.GetData(), block_trueoffsets);
-    // yblock->Update(y.GetData(), block_offsets); works only in serial
 
     if (preconditioner_mode)
         *init_guess = 0.0;
@@ -1762,25 +1760,30 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         Solve(*rhsblock, *xblock, *yblock);
 
-        if (i == 0 && preconditioner_mode)
-            funct_firstnorm = funct_currnorm;
+        //if (i == 0 && preconditioner_mode)
+            //funct_firstnorm = funct_currnorm;
 
         // monitoring convergence
         bool monotone_check = (i != 0);
-        if (i == 0)
-            StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                             monotone_check, "functional", print_level);
-        else
-            StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                             monotone_check, "functional", print_level);
-        //StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
-                         //sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
-        //StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
-                         //solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level);
+        if (!preconditioner_mode)
+        {
+            if (i == 0)
+                StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                                 monotone_check, "functional", print_level);
+            else
+                StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                                 monotone_check, "functional", print_level);
+
+            StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
+                             sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
+        }
+        StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
+                         solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level);
 
         bool stopped;
         switch(stopcriteria_type)
         {
+        /*
         case 0:
             if (i == 0)
                 stopped = StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
@@ -1793,9 +1796,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             stopped = StoppingCriteria(1, solupdate_currnorm, solupdate_prevnorm,
                                        sol_firstitnorm,  rel_tol, monotone_check, "sol_update", 0);
             break;
+        */
         case 2:
             stopped = StoppingCriteria(2, solupdate_currmgnorm, solupdate_prevmgnorm,
-                                       solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ");
+                                       solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", 0);
             break;
         default:
             MFEM_ABORT("Unknown stopping criteria type \n");
@@ -1923,6 +1927,9 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         *rhsfunc_lvls[l] = *tempvec_lvls[l];
 
+#ifdef DEBUGGING
+#endif
+
         // projecting rhs from the functional to the next (coarser) level
         ProjectFinerFuncToCoarser(l, *rhsfunc_lvls[l], *rhsfunc_lvls[l + 1]);
 
@@ -1935,8 +1942,20 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *solupdate_lvls[num_levels - 1]);
 
-
 #ifdef DEBUGGING
+    BlockVector deleteit(block_offsets);
+    deleteit = *solupdate_lvls[0];
+    deleteit += previous_sol;
+    CheckFunctValue(comm, *Funct_lvls[0], deleteit, "after the downward loop without coarsest level, solupdate[0]: ", print_level);
+
+    BlockVector deleteit2(block_offsets);
+    ComputeRhsFunc(0, deleteit, deleteit2);
+    deleteit2 -= *rhsfunc_lvls[0];
+    ComputeMPIVecNorm(comm, deleteit2, "checking some residual before coarsest level solve", print_level);
+
+    MFEM_ASSERT(CheckBdrError(deleteit.GetBlock(0), bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+    //MFEM_ASSERT(CheckBdrError(rhsfunc_lvls[0]->GetBlock(0), bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+
     Vector tempr_coarse(solupdate_lvls[1]->GetBlock(0).Size());
     tempr_coarse = *solupdate_lvls[num_levels - 1];
 
@@ -2055,12 +2074,13 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *solupdate_lvls[0];
 
-    if (print_level)
-        std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
-                 / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
+
 
     if (print_level)
     {
+        //std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
+                 /// sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
+
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], &ConstrRhs, "after all levels update"),"");
@@ -2071,14 +2091,23 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     }
 
     // some monitoring service calls
-    if (print_level || stopcriteria_type == 0)
-        funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], next_sol, "at the end of iteration: ", print_level);
+    if (!preconditioner_mode)
+        if (print_level || stopcriteria_type == 0)
+            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], next_sol, "at the end of iteration: ", print_level);
 
-    if (print_level || stopcriteria_type == 1)
-        solupdate_currnorm = ComputeMPIVecNorm(comm, *solupdate_lvls[0], "of the update: ", print_level);
+    if (!preconditioner_mode)
+        if (print_level || stopcriteria_type == 1)
+            solupdate_currnorm = ComputeMPIVecNorm(comm, *solupdate_lvls[0], "of the update: ", print_level);
 
     if (print_level || stopcriteria_type == 2)
-        solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *solupdate_lvls[0], *rhsfunc_lvls[0]));
+        if (!preconditioner_mode)
+        {
+            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *solupdate_lvls[0], *rhsfunc_lvls[0]));
+        }
+        else
+        {
+            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, next_sol, righthand_side));
+        }
 
     if (current_iteration == 0)
         solupdate_firstmgnorm = solupdate_currmgnorm;
@@ -2584,7 +2613,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     double rtol(1.e-18);
     double atol(1.e-18);
 
-    coarseSolver = new CGSolver(MPI_COMM_WORLD);
+    coarseSolver = new MINRESSolver(MPI_COMM_WORLD);
     coarseSolver->SetAbsTol(atol);
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
