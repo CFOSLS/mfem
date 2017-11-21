@@ -21,7 +21,7 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -1384,7 +1384,7 @@ int main(int argc, char *argv[])
 
 #ifdef NEW_STUFF
     ParGridFunction * sigma_exact_finest;
-    sigma_exact_finest = new ParGridFunction(R_space);
+    sigma_exact_finest = new ParGridFunction(R_space_lvls[0]);
     sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
 #endif
     //if(dim==3) pmesh->ReorientTetMesh();
@@ -2688,7 +2688,7 @@ int main(int argc, char *argv[])
 #endif
                      Smoother, higher_order, construct_coarseops);
 
-    double newsolver_reltol = 1.0e-12;
+    double newsolver_reltol = 1.0e-6;
 
     if (verbose)
     {
@@ -2696,11 +2696,14 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(10);
+    NewSolver.SetMaxIter(1);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(2);
     NewSolver.SetOptimizedLocalSolve(true);
+
     Vector ParticSol(*(NewSolver.ParticularSolution()));
+    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
+    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
 
     Vector tempp(sigma_exact_finest->Size());
     tempp = *sigma_exact_finest;
@@ -2727,7 +2730,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "\nCalling the new multilevel solver for the first iteration \n";
 
-    ParGridFunction * NewSigmahat = new ParGridFunction(R_space);
+    ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
 
     //Vector Tempx(sigma_exact_finest->Size());
     //Tempx = 0.0;
@@ -2815,8 +2818,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Using the new solver as a preconditioner for CG for the correction \n";
 
-    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
-    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
 
     ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
     ConstantCoefficient zerotest(.0);
@@ -2838,21 +2839,17 @@ int main(int argc, char *argv[])
 
     fform->ParallelAssemble(trueRhstest);
 
-    int maxIter_cg(50);
-    double rtol_cg(1.e-12);
-    double atol_cg(1.e-12);
+    int TestmaxIter(50);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
-    //Testsolver.SetAbsTol(atol);
-    //Testsolver.SetRelTol(rtol);
-    Testsolver.SetAbsTol(sqrt(atol_cg));
-    Testsolver.SetRelTol(sqrt(rtol_cg));
-    Testsolver.SetMaxIter(maxIter_cg);
+    Testsolver.SetAbsTol(sqrt(atol));
+    Testsolver.SetRelTol(sqrt(rtol));
+    Testsolver.SetMaxIter(TestmaxIter);
     Testsolver.SetOperator(*Atest);
     Testsolver.SetPrintLevel(1);
 
     NewSolver.SetAsPreconditioner(true);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetPrintLevel(0);
     NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);
 
@@ -2879,8 +2876,8 @@ int main(int argc, char *argv[])
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
 
+    trueXtest += trueParticSol;
     NewSigmahat->Distribute(trueXtest);
-    *NewSigmahat += trueParticSol;
 
     /*
 #ifdef OLD_CODE
@@ -3048,12 +3045,111 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    Vector NewRhs(Tempy.Size());
+    Vector NewRhs(trueParticSol.Size());
     NewRhs = 0.0;
-    NewSolver.SetInitialGuess(ParticSol);
-    NewSolver.Mult(NewRhs, Tempy);
+    Vector NewX(NewRhs.Size());
+    NewX = 0.0;
 
-    *NewSigmahat = Tempy;
+    NewSolver.SetInitialGuess(ParticSol);
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    NewSolver.Mult(NewRhs, NewX);
+
+    /*
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
+        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
+        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
+    }
+    MPI_Barrier(comm);
+    */
+
+    //NewX = 1.0;
+
+    //NewSigmahat->Distribute(&NewX);
+
+    NewX = 0.001;
+
+    //Vector temp(NewX.Size());
+    //temp = 0.002;
+    //sigma_exact_finest->Distribute(&temp);
+
+    Vector trueexact(NewX.Size());
+    //trueexact = *(sigma_exact_finest->GetTrueDofs());
+    trueexact = NewX;
+    //sigma_exact_finest->ParallelAssemble(trueexact);
+
+    //if (myid == 0)
+        //sigma_exact_finest->Print(std::cout,1);
+
+    Vector error(NewX.Size());
+    error = 0.0;
+    //error = NewX;
+    error -= trueexact;
+    //error = 1.0;
+
+    int local_size = error.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "myid = 0 \n";
+        std::cout << "local_size = " << local_size << "\n";
+        std::cout << "global_size = " << global_size << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "myid = 1 \n";
+        std::cout << "local_size = " << local_size << "\n";
+        std::cout << "global_size = " << global_size << "\n";
+    }
+    MPI_Barrier(comm);
+
+    double local_normsq = error * error;
+    double global_norm = 0.0;
+    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm = sqrt (global_norm / global_size);
+
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "myid = 0 \n";
+        std::cout << "local_normsq = " << local_normsq << "\n";
+        std::cout << "global_norm = " << global_norm << "\n";
+        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "myid = 1 \n";
+        std::cout << "local_normsq = " << local_normsq << "\n";
+        std::cout << "global_norm = " << global_norm << "\n";
+        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+    }
+    MPI_Barrier(comm);
+
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+
+    if (verbose)
+        std::cout << "error norm special = " << global_norm << "\n";
+
+    MPI_Finalize();
+    return 0;
+
+    //*NewSigmahat = 1.0;
+
+    std::cout << "Solution computed via the new solver \n";
 
     double max_bdr_error = 0;
     for ( int dof = 0; dof < Xinit.Size(); ++dof)
@@ -3106,124 +3202,6 @@ int main(int argc, char *argv[])
                       << err_div/norm_div  << "\n";
         }
     }
-
-    /*
-    // doing a fixed number of iterations of the new solver
-    int ntestiter = 10;
-    for (int i = 0; i < ntestiter; ++i)
-    {
-        NewSolver.Mult(Tempx, Tempy);
-
-        Tempx = Tempy;
-
-        *NewSigmahat = Tempx;
-
-        double max_bdr_error = 0;
-        for ( int dof = 0; dof < Xinit.Size(); ++dof)
-        {
-            if ( (*EssBdrDofs_R[0][0])[dof] != 0.0)
-            {
-                //std::cout << "ess dof index: " << dof << "\n";
-                double bdr_error_dof = fabs(Xinit[dof] - (*NewSigmahat)[dof]);
-                if ( bdr_error_dof > max_bdr_error )
-                    max_bdr_error = bdr_error_dof;
-            }
-        }
-
-        if (max_bdr_error > 1.0e-14)
-            std::cout << "Error, boundary values for the solution are wrong:"
-                         " max_bdr_error = " << max_bdr_error << "\n";
-        //else
-            //std::cout << "After iter " << i << " of the new solver bdr values at ess bdr are correct \n";
-
-        {
-            int order_quad = max(2, 2*feorder+1);
-            const IntegrationRule *irs[Geometry::NumGeom];
-            for (int i = 0; i < Geometry::NumGeom; ++i)
-            {
-                irs[i] = &(IntRules.Get(i, order_quad));
-            }
-
-            double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
-            double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
-            if (verbose)
-            {
-                if ( norm_sigma > MYZEROTOL )
-                    cout << "|| new sigma_h - sigma_ex || / || sigma_ex || = " << err_newsigmahat / norm_sigma << endl;
-                else
-                    cout << "|| new sigma_h || = " << err_newsigmahat << " (sigma_ex = 0)" << endl;
-            }
-
-            DiscreteLinearOperator Div(R_space, W_space);
-            Div.AddDomainInterpolator(new DivergenceInterpolator());
-            ParGridFunction DivSigma(W_space);
-            Div.Assemble();
-            Div.Mult(*NewSigmahat, DivSigma);
-
-            double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-            double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
-
-            if (verbose)
-            {
-                cout << "|| div (new sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                          << err_div/norm_div  << "\n";
-            }
-        }
-
-        if (i == ntestiter - 1)
-        {
-            char vishost[] = "localhost";
-            int  visport   = 19916;
-
-            socketstream sigmaex_sock(vishost, visport);
-            sigmaex_sock << "parallel " << num_procs << " " << myid << "\n";
-            sigmaex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            sigmaex_sock << "solution\n" << *pmesh << *sigma_exact_finest
-                     << "window_title 'sigma_ex'" << endl;
-
-            socketstream sigmah_sock(vishost, visport);
-            sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
-            sigmah_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            sigmah_sock << "solution\n" << *pmesh << *NewSigmahat
-                     << "window_title 'new sigma_h'" << endl;
-
-            *sigma_exact_finest -= *NewSigmahat;
-
-            ofstream ofs("newsolver_sol_error.txt");
-            sigma_exact_finest->Print(ofs,1);
-
-            socketstream sigmadiff_sock(vishost, visport);
-            sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
-            sigmadiff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact_finest
-                     << "window_title 'sigma_ex - new sigma_h'" << endl;
-
-#ifdef COMPUTING_LAMBDA
-            socketstream sigmadiff2_sock(vishost, visport);
-            sigmadiff2_sock << "parallel " << num_procs << " " << myid << "\n";
-            sigmadiff2_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            ParGridFunction * tempdiff = new ParGridFunction(R_space);
-            *tempdiff = *sigma_special;
-            *tempdiff -= *NewSigmahat;
-            sigmadiff2_sock << "solution\n" << *pmesh << *tempdiff
-                     << "window_title 'sigma_h - new sigma_h'" << endl;
-#endif
-        }
-
-        if (verbose)
-            std::cout << "\n";
-    }
-
-    chrono.Stop();
-
-    if (verbose)
-        std::cout << ntestiter << " iteration(s) of the new solver was(were) done in " << chrono.RealTime() << " seconds.\n";
-
-    */
 
     chrono.Stop();
 

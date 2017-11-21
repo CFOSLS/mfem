@@ -5,6 +5,8 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+//#define PARDEBUG
+
 //#define DEBUGGING
 
 // activates some additional checks
@@ -110,167 +112,6 @@ bool CheckBdrError (const Vector& SigCandidate, const Vector& Given_bdrdata, con
         //std::cout << "CheckBdrError: boundary values are correct \n";
 
     return passed;
-}
-
-class CGSolverPrecRes : public CGSolver
-{
-public:
-   CGSolverPrecRes() { }
-
-#ifdef MFEM_USE_MPI
-   CGSolverPrecRes(MPI_Comm _comm) : CGSolver(_comm) { }
-#endif
-
-   virtual void Mult(const Vector &b, Vector &x) const override;
-};
-
-void CGSolverPrecRes::Mult(const Vector &b, Vector &x) const
-{
-    int i;
-    double r0, den, nom, nom0, betanom, alpha, beta;
-
-    if (iterative_mode)
-    {
-       oper->Mult(x, r);
-       subtract(b, r, r); // r = b - A x
-    }
-    else
-    {
-       r = b;
-       x = 0.0;
-    }
-
-    if (prec)
-    {
-       prec->Mult(r, z); // z = B r
-       d = z;
-    }
-    else
-    {
-       d = r;
-    }
-    nom0 = nom = Dot(d, r);
-    MFEM_ASSERT(IsFinite(nom), "nom = " << nom);
-
-    if (print_level == 1 || print_level == 3)
-    {
-       cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
-            << nom << (print_level == 3 ? " ...\n" : "\n");
-    }
-
-    r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol);
-    if (nom <= r0)
-    {
-       converged = 1;
-       final_iter = 0;
-       final_norm = sqrt(nom);
-       return;
-    }
-
-    oper->Mult(d, z);  // z = A d
-    den = Dot(z, d);
-    MFEM_ASSERT(IsFinite(den), "den = " << den);
-
-    if (print_level >= 0 && den < 0.0)
-    {
-       cout << "Negative denominator in step 0 of PCG: " << den << '\n';
-    }
-
-    if (den == 0.0)
-    {
-       converged = 0;
-       final_iter = 0;
-       final_norm = sqrt(nom);
-       return;
-    }
-
-    // start iteration
-    converged = 0;
-    final_iter = max_iter;
-    for (i = 1; true; )
-    {
-       alpha = nom/den;
-       add(x,  alpha, d, x);     //  x = x + alpha d
-       add(r, -alpha, z, r);     //  r = r - alpha A d
-
-       if (prec)
-       {
-          prec->Mult(r, z);      //  z = B r
-          betanom = Dot(r, z);
-       }
-       else
-       {
-          betanom = Dot(r, r);
-       }
-       MFEM_ASSERT(IsFinite(betanom), "betanom = " << betanom);
-
-       if (print_level == 1)
-       {
-          cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
-               << betanom << '\n';
-       }
-
-       if (betanom < r0)
-       {
-          if (print_level == 2)
-          {
-             cout << "Number of PCG iterations: " << i << '\n';
-          }
-          else if (print_level == 3)
-          {
-             cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
-                  << betanom << '\n';
-          }
-          converged = 1;
-          final_iter = i;
-          break;
-       }
-
-       if (++i > max_iter)
-       {
-          break;
-       }
-
-       beta = betanom/nom;
-       if (prec)
-       {
-          add(z, beta, d, d);   //  d = z + beta d
-       }
-       else
-       {
-          add(r, beta, d, d);
-       }
-       oper->Mult(d, z);       //  z = A d
-       den = Dot(d, z);
-       MFEM_ASSERT(IsFinite(den), "den = " << den);
-       if (den <= 0.0)
-       {
-          if (print_level >= 0 && Dot(d, d) > 0.0)
-             cout << "PCG: The operator is not positive definite. (Ad, d) = "
-                  << den << '\n';
-       }
-       nom = betanom;
-    }
-    if (print_level >= 0 && !converged)
-    {
-       if (print_level != 1)
-       {
-          if (print_level != 3)
-          {
-             cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
-                  << nom0 << " ...\n";
-          }
-          cout << "   Iteration : " << setw(3) << final_iter << "  (B r, r) = "
-               << betanom << '\n';
-       }
-       cout << "PCG: No convergence!" << '\n';
-    }
-    if (print_level >= 1 || (print_level >= 0 && !converged))
-    {
-       cout << "Average reduction factor = "
-            << pow (betanom/nom0, 0.5/final_iter) << '\n';
-    }
-    final_norm = sqrt(betanom);
 }
 
 class MultilevelSmoother : public Operator
@@ -1311,7 +1152,8 @@ public:
     int GetStopCriteriaType () {return stopcriteria_type;} const
     void SetStopCriteriaType (int StopCriteria_Type) const {stopcriteria_type = StopCriteria_Type;}
 
-    void SetAsPreconditioner(bool yes_or_no) const {preconditioner_mode = yes_or_no;}
+    void SetAsPreconditioner(bool yes_or_no) const
+    {preconditioner_mode = yes_or_no; if(preconditioner_mode) SetMaxIter(1); }
     bool IsSymmetric() const {return symmetric;}
     void SetSymmetric() const {symmetric = true;}
     void SetUnSymmetric() const {symmetric = false;}
@@ -1614,7 +1456,8 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
                 &ConstrRhs, "for the initial guess"),"");
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]),
+                              "for the particular solution");
 
     // in the end, part_solution is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
@@ -1696,16 +1539,16 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
     // 4. update the global iterate by the computed update (interpolated to the finest level)
     particular_solution += *solupdate_lvls[0];
 
-    if (print_level)
+    if (print_level > 10)
         std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
     // computing some numbers for stopping criterium
-    //if (print_level || stopcriteria_type == 0)
+    if (print_level)
         funct_firstnorm = CheckFunctValue(comm, *Funct_lvls[0], particular_solution,
                 "for the particular solution: ", print_level);
 
-    //if (print_level || stopcriteria_type == 1)
+    if (print_level)
         sol_firstitnorm = ComputeMPIVecNorm(comm, particular_solution,
                 "for the particular solution", print_level);
 
@@ -1745,6 +1588,13 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     // xblock is the initial guess
     *xblock = *init_guess;
 
+#ifdef PARDEBUG
+    *yblock = 1.0;//*xblock;
+    for (int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
+    return;
+#endif
+
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
@@ -1752,8 +1602,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs, "before the iteration"),"");
-            MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0), bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+            MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+                                       "before the iteration"),"");
+            MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0), bdrdata_finest.GetBlock(0),
+                                      *essbdrdofs_Func[0][0]), "before the iteration");
         }
         else
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
@@ -1783,7 +1635,6 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         bool stopped;
         switch(stopcriteria_type)
         {
-        /*
         case 0:
             if (i == 0)
                 stopped = StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
@@ -1796,7 +1647,6 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             stopped = StoppingCriteria(1, solupdate_currnorm, solupdate_prevnorm,
                                        sol_firstitnorm,  rel_tol, monotone_check, "sol_update", 0);
             break;
-        */
         case 2:
             stopped = StoppingCriteria(2, solupdate_currmgnorm, solupdate_prevmgnorm,
                                        solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", 0);
@@ -1824,6 +1674,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             solupdate_prevmgnorm = solupdate_currmgnorm;
 
             // resetting the input and output vectors for the next iteration
+
             *xblock = *yblock;
         }
 
@@ -1885,7 +1736,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
 #ifndef CHECK_SPDSOLVER
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "at the start of Solve()");
 #endif
 
 #ifdef DEBUGGING
@@ -2083,21 +1934,26 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], &ConstrRhs, "after all levels update"),"");
-            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "");
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+                                        "after all levels update"),"");
+            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0),
+                                      *essbdrdofs_Func[0][0]), "after all levels update");
         }
         else
-            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], NULL, "after all levels update"),"");
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], NULL,
+                                        "after all levels update"),"");
     }
 
     // some monitoring service calls
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
-            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], next_sol, "at the end of iteration: ", print_level);
+            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], next_sol,
+                                             "at the end of iteration: ", print_level);
 
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 1)
-            solupdate_currnorm = ComputeMPIVecNorm(comm, *solupdate_lvls[0], "of the update: ", print_level);
+            solupdate_currnorm = ComputeMPIVecNorm(comm, *solupdate_lvls[0],
+                                                    "of the update: ", print_level);
 
     if (print_level || stopcriteria_type == 2)
         if (!preconditioner_mode)
