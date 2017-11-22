@@ -2696,9 +2696,9 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(20);
     NewSolver.SetPrintLevel(1);
-    NewSolver.SetStopCriteriaType(2);
+    NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
@@ -3055,6 +3055,7 @@ int main(int argc, char *argv[])
     NewSolver.Mult(NewRhs, NewX);
 
 
+
     /*
     MPI_Barrier(comm);
     if (myid == 0)
@@ -3071,11 +3072,13 @@ int main(int argc, char *argv[])
     MPI_Barrier(comm);
     */
 
+    /*
+
     //NewX = 1.0;
 
     //NewSigmahat->Distribute(&NewX);
 
-    //NewX = 0.001;
+    //NewX = 0.002;
 
     Vector temp(NewX.Size());
     temp = 0.002;
@@ -3097,8 +3100,8 @@ int main(int argc, char *argv[])
 
     Vector error(NewX.Size());
     error = 0.0;
-    //error = NewX;
-    error -= trueexact;
+    error = NewX;
+    //error -= trueexact;
     //error = 1.0;
 
     int local_size = error.Size();
@@ -3155,6 +3158,9 @@ int main(int argc, char *argv[])
     return 0;
 
     //*NewSigmahat = 1.0;
+    */
+
+    NewSigmahat->Distribute(&NewX);
 
     std::cout << "Solution computed via the new solver \n";
 

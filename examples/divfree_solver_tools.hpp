@@ -5,16 +5,23 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-#define PARDEBUG
+//#define PARDEBUG
 
 //#define DEBUGGING
 
 // activates some additional checks
 //#define DEBUG_INFO
 
-// FIXME: MG norm is computed incorrectly since rhsfunc[0] is changed after
-// FIXME: the smoothing at level 0 in downward loop
+// FIXME: Is MG norm computed correctly?
+
 // FIXME: Now the parallel version is working incorrectly, different from serial
+// FIXME: Rewrite the local problems solver part so that it acts on true dofs
+// FIXME: And make all the internals except local problems solve on true dofs
+
+// FIXME: Add switching on/off the local problems solve as an option for the solver
+
+// FIXME: Maybe, it is better to implement a multigrid class more general than Chak did
+// FIXME: and describe the new solver as a multigrid with a specific settings (smoothers)?
 
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
@@ -53,7 +60,7 @@ double ComputeMPIVecNorm(MPI_Comm comm, const Vector& bvec, char const * string,
     return global_norm;
 }
 
-// Computes and prints the norm of || Funct * y ||_2,h, or sum of those over all processes
+// Computes and prints the norm of ( Funct * y, y )_2,h, assembled over all processes
 double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const BlockVector& yblock, char const * string, bool print)
 {
     BlockVector res(Funct.ColOffsets());
@@ -190,9 +197,16 @@ void MultilevelSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
                  " class but must have been redefined \n";
 }
 
+// ~ Non-overlapping Schwarz smoother based on agglomerated elements
+// which provides zeros at the interfaces in the output
+class LocalProblemSmoother : public MultilevelSmoother
+{
+
+};
+
 class HCurlGSSmoother : public MultilevelSmoother
 {
-    using MultilevelSmoother::SetUpSmoother;
+    //using MultilevelSmoother::SetUpSmoother;
 private:
     // number of GS sweeps
     int sweeps_num;
@@ -1592,11 +1606,19 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     std::cout << "PARDEBUG 0 \n";
     *yblock_truedofs = 0.002;
     for (int blk = 0; blk < numblocks; ++blk)
+    {
+        //SparseMatrix tempdiag;
+        //dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
+        //tempdiag.Mult(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
+
         dof_trueDof_Func_lvls[0][blk]->Mult(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
-    double debug_norm = yblock->GetBlock(0).Norml2() / sqrt (yblock->GetBlock(0).Size());
-    std::cout << "debug norm = " << debug_norm << "\n";
+    }
+    //double debug_norm = yblock->GetBlock(0).Norml2() / sqrt (yblock->GetBlock(0).Size());
+    //std::cout << "debug norm = " << debug_norm << "\n";
     for (int blk = 0; blk < numblocks; ++blk)
+    {
         dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
+    }
     return;
 #endif
 
@@ -1687,7 +1709,13 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
     // getting final output vector y on true dofs from yblock on dofs
     for (int blk = 0; blk < numblocks; ++blk)
+    {
+        //SparseMatrix tempdiag;
+        //dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
+        //tempdiag.MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
+
         dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
+    }
 
     // describing the reason for the stop:
     if (print_level)
