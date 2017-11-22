@@ -5,7 +5,7 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-//#define PARDEBUG
+#define PARDEBUG
 
 //#define DEBUGGING
 
@@ -1589,7 +1589,12 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     *xblock = *init_guess;
 
 #ifdef PARDEBUG
-    *yblock = 1.0;//*xblock;
+    std::cout << "PARDEBUG 0 \n";
+    *yblock_truedofs = 0.002;
+    for (int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[0][blk]->Mult(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
+    double debug_norm = yblock->GetBlock(0).Norml2() / sqrt (yblock->GetBlock(0).Size());
+    std::cout << "debug norm = " << debug_norm << "\n";
     for (int blk = 0; blk < numblocks; ++blk)
         dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
     return;
@@ -1733,6 +1738,16 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 {
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
+
+#ifdef PARDEBUG
+    std::cout << "PARDEBUG 1 \n";
+    BlockVector tmp(block_trueoffsets);
+    tmp = 1.0;
+    for (int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[0][blk]->Mult(tmp.GetBlock(blk), next_sol.GetBlock(blk));
+    return;
+#endif
+
 
 #ifndef CHECK_SPDSOLVER
     MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),

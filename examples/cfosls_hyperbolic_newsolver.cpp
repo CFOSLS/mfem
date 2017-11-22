@@ -3054,6 +3054,7 @@ int main(int argc, char *argv[])
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
     NewSolver.Mult(NewRhs, NewX);
 
+
     /*
     MPI_Barrier(comm);
     if (myid == 0)
@@ -3074,19 +3075,25 @@ int main(int argc, char *argv[])
 
     //NewSigmahat->Distribute(&NewX);
 
-    NewX = 0.001;
+    //NewX = 0.001;
 
-    //Vector temp(NewX.Size());
-    //temp = 0.002;
-    //sigma_exact_finest->Distribute(&temp);
+    Vector temp(NewX.Size());
+    temp = 0.002;
+    sigma_exact_finest->Distribute(&temp);
+
+    double debugg_norm = sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size());
+    std::cout << "debugg norm outside = " << debugg_norm << "\n";
 
     Vector trueexact(NewX.Size());
     //trueexact = *(sigma_exact_finest->GetTrueDofs());
     trueexact = NewX;
     //sigma_exact_finest->ParallelAssemble(trueexact);
+    sigma_exact_finest->ParallelProject(trueexact);
 
     //if (myid == 0)
         //sigma_exact_finest->Print(std::cout,1);
+
+    //NewX.Print();
 
     Vector error(NewX.Size());
     error = 0.0;
