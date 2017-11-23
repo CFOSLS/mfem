@@ -5,6 +5,9 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+
+#define TRUEDOFTRY
+
 //#define PARDEBUG
 
 //#define DEBUGGING
@@ -22,6 +25,20 @@ using std::unique_ptr;
 
 // FIXME: Maybe, it is better to implement a multigrid class more general than Chak did
 // FIXME: and describe the new solver as a multigrid with a specific settings (smoothers)?
+
+void CompareTrueVecwithVec (const HypreParMatrix * d_td, const Vector &TrueVec, const Vector& Vec, Vector& TempVec)
+{
+    d_td->Mult(TrueVec, TempVec);
+
+    Vector tmp(Vec.Size());
+    tmp = Vec;
+    tmp -= TempVec;
+
+    std::cout << "diff norm = " << tmp.Norml2();
+    std::cout << flush;
+}
+
+
 
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
@@ -560,44 +577,7 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     }
     else
     {
-        MFEM_ABORT ("HCurlGSSmoother::MultLevel(): This case was not implemented yet!");
-
-        // setting truvec_lvl = in_lvl on true dofs
-        d_td_lvls[level]->MultTranspose(in_lvl, *truevec_lvls[level]);
-
-
-        Array<int> * temp = essbdrtruedofs_lvls[level];
-        // performing given number of GS sweeps
-        // truex += iterative sum over all dofs of GS update for each sweep
-        // computing everything on true dofs
-        for ( int sweep = 0; sweep < sweeps_num; ++sweep)
-        {
-            // looping over all dofs, making a one-entry update for each non-eliminated dof
-            for ( int tdof = 0; tdof < temp->Size(); ++tdof)
-            {
-                if ( (*temp)[tdof] == 0) // tdof is not at the essential true-boundary
-                {
-                    // computing truevec3 = CT * M truevec(current iterate)
-                    CTM_global_lvls[level]->Mult(*truevec_lvls[level], *truevec3_lvls[level]);
-
-                    // computing update scaling factor
-                    double coeff_tdof = - (*truevec3_lvls[level])[tdof] /
-                            (*CTMC_global_diag_lvls[level])[tdof];
-
-                    // setting truevec3 = basis ort associated with tdof
-                    *truevec3_lvls[level] = 0.0;
-                    (*truevec3_lvls[level])[tdof] = 1.0;
-
-                    // making the final update for this dof
-                    // truevec = truevec - coeff_tdof * C * basis_ort_tdof
-                    Curlh_global_lvls[level]->Mult(coeff_tdof, *truevec2_lvls[level], 1.0, *truevec_lvls[level]);
-                }
-            } // end of loop over dofs
-        }
-
-
-        // temp_l = truex_l, but on dofs
-        d_td_lvls[level]->Mult(*truevec_lvls[level], out_lvl);
+        MFEM_ABORT ("HCurlGSSmoother::MultLevel(): This case was not implemented!");
     }
 
 }
@@ -883,7 +863,7 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     out_lvl += in_lvl;
 }
 
-// TODO: Add blas and lapack versions for solving local problems
+// TODO: Add as an option using blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
 
@@ -1022,16 +1002,20 @@ protected:
     // vectors come from the Mult() call's arguments (on dofs!)
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
+    // righthand side of the system as a block vector
+    mutable BlockVector* rhsblock;
+
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
     mutable BlockVector* yblock_truedofs;
-    // righthand side of the system as a block vector
-    mutable BlockVector* rhsblock;
+    mutable BlockVector* tempblock_truedofs;
+
 
     // stores the initial guess for the solver
     // which satisfies the divergence contraint
     // if not specified in the constructor.
     // it is 0 by default
+    // Muts be defined on true dofs
     mutable BlockVector* init_guess;
 
     // stores a particular soluition for the solver
@@ -1046,6 +1030,7 @@ protected:
 
     // used for storing solution updates at all levels
     mutable Array<BlockVector*> solupdate_lvls;
+    mutable Array<BlockVector*> truesolupdate_lvls;
 
     // temporary storage for blockvectors related to the considered functional at all levels
     // initialized in the constructor (partly) and in SetUpSolver()
@@ -1053,6 +1038,11 @@ protected:
     mutable Array<BlockVector*> tempvec_lvls;
     mutable Array<BlockVector*> tempvec2_lvls;
     mutable Array<BlockVector*> rhsfunc_lvls;
+
+    mutable Array<BlockVector*> truetempvec_lvls;
+
+
+    mutable Array<BlockVector*> trueresfunc_lvls;
 
 protected:
     BlockMatrix* Get_AE_eintdofs(int level, BlockMatrix& el_to_dofs,
@@ -1068,6 +1058,7 @@ protected:
     // rhs computation more complicated than just a simple matvec.
     // Computes rhs_func_l = - Funct_l * x_l in this base class
     virtual void ComputeRhsFunc(int l, const BlockVector& x_l, BlockVector& rhs_l) const;
+    virtual void ComputeTrueResFunc(int l, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
     // Should be called only during the first solver iterate (since it must be 0 at the next)
@@ -1090,6 +1081,7 @@ protected:
     // Routine is used to update righthand side before and after the smoother call
     void ComputeUpdatedLvlRhsFunc(int level, const BlockVector& rhs_l,
                                   const BlockVector& solupd_l, BlockVector& out_l) const;
+    void ComputeUpdatedLvlTrueResFunc(int level, const BlockVector& rhs_l,  const BlockVector& solupd_l, BlockVector& out_l) const;
 
     // General routine which goes over all AEs at finer level and calls formulation-specific
     // routine SolveLocalProblem at each finer level
@@ -1202,9 +1194,10 @@ void BaseGeneralMinConstrSolver::PrintAllOptions() const
         Smoo->PrintAllOptions();
 }
 
+// The input must be defined on true dofs
 void BaseGeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
 {
-    init_guess->Update(InitGuess.GetData(), block_offsets);
+    init_guess->Update(InitGuess.GetData(), block_trueoffsets);
 }
 
 
@@ -1344,7 +1337,6 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     yblock = new BlockVector(block_offsets);
     rhsblock = new BlockVector(block_offsets);
     part_solution = new BlockVector(block_offsets);
-    init_guess = new BlockVector(block_offsets);
     update = new BlockVector(block_offsets);
 
     Funct_lvls.SetSize(num_levels);
@@ -1363,6 +1355,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 
     xblock_truedofs = new BlockVector(block_trueoffsets);
     yblock_truedofs = new BlockVector(block_trueoffsets);
+    tempblock_truedofs = new BlockVector(block_trueoffsets);
 
     coarse_rhsfunc_offsets.SetSize(numblocks + 1);
     coarse_offsets.SetSize(numblocks + 2);
@@ -1375,8 +1368,15 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     rhsfunc_lvls[0] = new BlockVector(block_offsets);
     solupdate_lvls.SetSize(num_levels);
     solupdate_lvls[0] = new BlockVector(block_offsets);
+    truesolupdate_lvls.SetSize(num_levels);
+    truesolupdate_lvls[0] = new BlockVector(block_trueoffsets);
 
-    // cann't this be replaced by Smoo(Smoother) in the init. list?
+    truetempvec_lvls.SetSize(num_levels);
+    truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
+    trueresfunc_lvls.SetSize(num_levels);
+    trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
+
+    // can't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
         Smoo = Smoother;
     else
@@ -1403,6 +1403,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 
     compute_AEproblem_matrices.SetSize(numblocks + 1);
     compute_AEproblem_matrices = true;
+
+    init_guess = new BlockVector(block_trueoffsets);
 }
 
 void BaseGeneralMinConstrSolver::SetUpSolver() const
@@ -1574,6 +1576,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
 
 
 // The top-level wrapper for the solver which overrides Solver::Mult()
+// Works on true dof vectors
 void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
@@ -1592,15 +1595,11 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     // y will be accessed through yblock_truedofs as its view
     yblock_truedofs->Update(y.GetData(), block_trueoffsets);
 
-    // rhsblock = x, but on dofs
-    for (int blk = 0; blk < numblocks; ++blk)
-        dof_trueDof_Func_lvls[0][blk]->Mult(xblock_truedofs->GetBlock(blk), rhsblock->GetBlock(blk));
-
     if (preconditioner_mode)
         *init_guess = 0.0;
 
     // xblock is the initial guess
-    *xblock = *init_guess;
+    *tempblock_truedofs = *init_guess;
 
 #ifdef PARDEBUG
     std::cout << "PARDEBUG 0 \n";
@@ -1637,7 +1636,11 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         else
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
 
-        Solve(*rhsblock, *xblock, *yblock);
+        Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
+
+#ifdef TRUEDOFTRY
+        return;
+#endif
 
         //if (i == 0 && preconditioner_mode)
             //funct_firstnorm = funct_currnorm;
@@ -1702,20 +1705,10 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
             // resetting the input and output vectors for the next iteration
 
-            *xblock = *yblock;
+            *tempblock_truedofs = *yblock_truedofs;
         }
 
     } // end of main iterative loop
-
-    // getting final output vector y on true dofs from yblock on dofs
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        //SparseMatrix tempdiag;
-        //dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
-        //tempdiag.MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
-
-        dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), yblock_truedofs->GetBlock(blk));
-    }
 
     // describing the reason for the stop:
     if (print_level)
@@ -1738,6 +1731,26 @@ void BaseGeneralMinConstrSolver::ComputeRhsFunc(int l, const BlockVector& x_l, B
     rhs_l *= -1.0;
 }
 
+// The same as ComputeRhsFun but on true dofs
+void BaseGeneralMinConstrSolver::ComputeTrueResFunc(int l, const BlockVector& x_l, BlockVector &rhs_l) const
+{
+    BlockVector temp1(block_offsets);
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->Mult(x_l.GetBlock(blk), temp1.GetBlock(blk));
+    }
+
+    BlockVector temp2(block_offsets);
+    Funct_lvls[l]->Mult(temp1, temp2);
+
+    temp2 *= -1.0;
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->MultTranspose(temp2.GetBlock(blk), rhs_l.GetBlock(blk));
+    }
+}
+
 // Simply applies a P_l^T which transfers the given blockvector to the (one-level) coarser space
 // FIXME: one-liner?
 void BaseGeneralMinConstrSolver::ProjectFinerFuncToCoarser(int level,
@@ -1758,14 +1771,36 @@ void BaseGeneralMinConstrSolver::ComputeUpdatedLvlRhsFunc(int level, const Block
     out_l += rhs_l;
 }
 
+// Computes out_l as an updated rhs in the functional part for the given level
+//      out_l :=  rhs_l - M_l sol_l
+// the same as ComputeUpdatedLvlRhsFunc but on true dofs
+void BaseGeneralMinConstrSolver::ComputeUpdatedLvlTrueResFunc(int level, const BlockVector& rhs_l,
+                                                          const BlockVector& solupd_l, BlockVector& out_l) const
+{
+    // out_l = - M_l * solupd_l
+    ComputeTrueResFunc(level, solupd_l, out_l);
+
+    // out_l = rhs_l - M_l * solupd_l
+    out_l += rhs_l;
+}
+
+
 // Computes one iteration of the new solver
 // Input: previous_sol (and all the setup)
 // Output: next_sol
+// on true dofs
 void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                        const BlockVector& previous_sol, BlockVector& next_sol) const
 {
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
+
+    //casting righthand side and previous solution into dofs representation rhsblock and xblock
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->Mult(righthand_side.GetBlock(blk), rhsblock->GetBlock(blk));
+        dof_trueDof_Func_lvls[0][blk]->Mult(previous_sol.GetBlock(blk), xblock->GetBlock(blk));
+    }
 
 #ifdef PARDEBUG
     std::cout << "PARDEBUG 1 \n";
@@ -1778,12 +1813,12 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
 
 #ifndef CHECK_SPDSOLVER
-    MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
+    MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "at the start of Solve()");
 #endif
 
 #ifdef DEBUGGING
-    CheckFunctValue(comm, *Funct_lvls[0], previous_sol, "at the beginning of Solve(): ", print_level);
+    CheckFunctValue(comm, *Funct_lvls[0], *xblock, "at the beginning of Solve(): ", print_level);
 #endif
 
     //if (current_iteration > 0)
@@ -1796,8 +1831,47 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     */
 #endif
 
-    next_sol = previous_sol;
-    ComputeUpdatedLvlRhsFunc(0, righthand_side, previous_sol, *rhsfunc_lvls[0]);
+    *yblock = *xblock;
+
+    /*
+#ifdef TRUEDOFTRY
+    *yblock = 1.0;
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        SparseMatrix dtddiag;
+        dof_trueDof_Func_lvls[0][blk]->GetDiag(dtddiag);
+        dtddiag.MultTranspose(yblock->GetBlock(blk), next_sol.GetBlock(blk));
+    }
+    return;
+#endif
+*/
+
+    ComputeUpdatedLvlRhsFunc(0, *rhsblock, *xblock, *rhsfunc_lvls[0]);
+#ifdef TRUEDOFTRY
+    ComputeUpdatedLvlTrueResFunc(0, righthand_side, previous_sol, *trueresfunc_lvls[0]);
+#endif
+
+#ifdef TRUEDOFTRY
+    /*
+    *yblock = *rhsfunc_lvls[0];
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        SparseMatrix dtddiag;
+        dof_trueDof_Func_lvls[0][blk]->GetDiag(dtddiag);
+        dtddiag.MultTranspose(yblock->GetBlock(blk), next_sol.GetBlock(blk));
+    }
+    */
+
+    CompareTrueVecwithVec(dof_trueDof_Func_lvls[0][0], previous_sol.GetBlock(0), xblock->GetBlock(0), tempvec_lvls[0]->GetBlock(0));
+    MPI_Barrier(comm);
+    CompareTrueVecwithVec(dof_trueDof_Func_lvls[0][0], righthand_side.GetBlock(0), rhsblock->GetBlock(0), tempvec_lvls[0]->GetBlock(0));
+    MPI_Barrier(comm);
+    CompareTrueVecwithVec(dof_trueDof_Func_lvls[0][0], trueresfunc_lvls[0]->GetBlock(0), rhsfunc_lvls[0]->GetBlock(0), tempvec_lvls[0]->GetBlock(0));
+    MPI_Barrier(comm);
+
+    next_sol = *trueresfunc_lvls[0];
+    return;
+#endif
 
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
@@ -1805,10 +1879,19 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
         // solution updates will always satisfy homogeneous essential boundary conditions
         *solupdate_lvls[l] = 0.0;
+        *truesolupdate_lvls[l] = 0.0;
 
         // solve local problems at level l
         SolveLocalProblems(l, *rhsfunc_lvls[l], NULL, *solupdate_lvls[l]);
         ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
+
+#ifdef TRUEDOFTRY
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            dof_trueDof_Func_lvls[0][blk]->MultTranspose(solupdate_lvls[l]->GetBlock(blk), truesolupdate_lvls[l]->GetBlock(blk));
+        }
+        ComputeUpdatedLvlRhsFunc(l, *trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+#endif
 
         // smooth
         if (Smoo)
@@ -1819,14 +1902,26 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
         }
 
+#ifdef TRUEDOFTRY
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            dof_trueDof_Func_lvls[0][blk]->MultTranspose(solupdate_lvls[l]->GetBlock(blk), truesolupdate_lvls[l]->GetBlock(blk));
+        }
+        ComputeUpdatedLvlRhsFunc(l, *trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+#endif
+
         *rhsfunc_lvls[l] = *tempvec_lvls[l];
 
-#ifdef DEBUGGING
+#ifdef TRUEDOFTRY
+        *trueresfunc_lvls[l] = *truetempvec_lvls[l];
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            dof_trueDof_Func_lvls[0][blk]->Mult(trueresfunc_lvls[l]->GetBlock(blk), *rhsfunc_lvls[l]);
+        }
 #endif
 
         // projecting rhs from the functional to the next (coarser) level
         ProjectFinerFuncToCoarser(l, *rhsfunc_lvls[l], *rhsfunc_lvls[l + 1]);
-
     } // end of loop over finer levels
 
     // BOTTOM: solve the global problem at the coarsest level
@@ -1966,7 +2061,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
     // 4. update the global iterate by the resulting update at the finest level
-    next_sol += *solupdate_lvls[0];
+    *yblock += *solupdate_lvls[0];
 
 
 
@@ -1977,20 +2072,20 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+            MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                         "after all levels update"),"");
-            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_finest.GetBlock(0),
+            MFEM_ASSERT(CheckBdrError(yblock->GetBlock(0), bdrdata_finest.GetBlock(0),
                                       *essbdrdofs_Func[0][0]), "after all levels update");
         }
         else
-            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_lvls[0], NULL,
+            MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], NULL,
                                         "after all levels update"),"");
     }
 
     // some monitoring service calls
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
-            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], next_sol,
+            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], *yblock,
                                              "at the end of iteration: ", print_level);
 
     if (!preconditioner_mode)
@@ -2001,15 +2096,22 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (print_level || stopcriteria_type == 2)
         if (!preconditioner_mode)
         {
+            ComputeUpdatedLvlRhsFunc(0, *rhsblock, *xblock, *rhsfunc_lvls[0]);
             solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *solupdate_lvls[0], *rhsfunc_lvls[0]));
         }
         else
         {
-            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, next_sol, righthand_side));
+            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *yblock, *rhsblock));
         }
 
     if (current_iteration == 0)
         solupdate_firstmgnorm = solupdate_currmgnorm;
+
+    // casting yblock (defined on dofs) into the next_sol (on true dofs)
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), next_sol.GetBlock(blk));
+    }
 
     ++current_iteration;
 

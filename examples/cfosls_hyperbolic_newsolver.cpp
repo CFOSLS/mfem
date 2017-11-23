@@ -2696,14 +2696,17 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(20);
+    NewSolver.SetMaxIter(1);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
     Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
-    Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
+    ParGridFunction * partsol = new ParGridFunction(R_space_lvls[0]);
+    *partsol = ParticSol;
+    partsol->ParallelAssemble(trueParticSol);
+    // Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
 
     Vector tempp(sigma_exact_finest->Size());
     tempp = *sigma_exact_finest;
@@ -3050,8 +3053,9 @@ int main(int argc, char *argv[])
     Vector NewX(NewRhs.Size());
     NewX = 0.0;
 
-    NewSolver.SetInitialGuess(ParticSol);
+    NewSolver.SetInitialGuess(trueParticSol);
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+
     NewSolver.Mult(NewRhs, NewX);
 
 
@@ -3072,26 +3076,23 @@ int main(int argc, char *argv[])
     MPI_Barrier(comm);
     */
 
-    /*
-
     //NewX = 1.0;
 
     //NewSigmahat->Distribute(&NewX);
 
     //NewX = 0.002;
 
-    Vector temp(NewX.Size());
-    temp = 0.002;
-    sigma_exact_finest->Distribute(&temp);
-
-    double debugg_norm = sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size());
-    std::cout << "debugg norm outside = " << debugg_norm << "\n";
+    //Vector temp(NewX.Size());
+    //temp = 0.002;
+    //sigma_exact_finest->Distribute(&temp);
+    //double debugg_norm = sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size());
+    //std::cout << "debugg norm outside = " << debugg_norm << "\n";
 
     Vector trueexact(NewX.Size());
     //trueexact = *(sigma_exact_finest->GetTrueDofs());
     trueexact = NewX;
     //sigma_exact_finest->ParallelAssemble(trueexact);
-    sigma_exact_finest->ParallelProject(trueexact);
+    //sigma_exact_finest->ParallelProject(trueexact);
 
     //if (myid == 0)
         //sigma_exact_finest->Print(std::cout,1);
@@ -3158,7 +3159,6 @@ int main(int argc, char *argv[])
     return 0;
 
     //*NewSigmahat = 1.0;
-    */
 
     NewSigmahat->Distribute(&NewX);
 
