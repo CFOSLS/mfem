@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
    // 2. Parse command-line options.
-   const char *mesh_file = "../data/star.mesh";
+   const char *mesh_file = "../data/cube_3d_moderate.mesh";
    int order = 1;
    bool static_cond = false;
    bool visualization = 1;
@@ -115,6 +115,40 @@ int main(int argc, char *argv[])
          pmesh->UniformRefinement();
       }
    }
+
+   FiniteElementCollection * hdiv_coll = new RT_FECollection(0, 3);
+   ParFiniteElementSpace * R_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
+
+   ParBilinearForm *Ablock(new ParBilinearForm(R_space));
+   Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+   Ablock->Assemble();
+   Ablock->Finalize();
+
+   HypreParMatrix * Aglobal = Ablock->ParallelAssemble();
+
+   Vector Temptruevec1(Aglobal->Width());
+   Temptruevec1 = 0.02;
+   Vector Temptruevec2(Aglobal->Height());
+   Aglobal->Mult(Temptruevec1, Temptruevec2);
+
+   Vector error(Temptruevec2.Size());
+   error = Temptruevec2;
+
+   int local_size = error.Size();
+   int global_size = 0;
+   MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+   double local_normsq = error * error;
+   double global_norm = 0.0;
+   MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   global_norm = sqrt (global_norm / global_size);
+
+   if (myid == 0)
+       std::cout << "error norm special = " << global_norm << "\n";
+
+   MPI_Finalize();
+   return 0;
+
 
    // 6. Define a parallel finite element space on the parallel mesh. Here we
    //    use continuous Lagrange finite elements of the specified order. If

@@ -967,6 +967,7 @@ protected:
 
     // a given blockvector which satisfies essential bdr conditions
     // imposed for the initial problem
+    // on dofs
     const BlockVector& bdrdata_finest;
 
 #ifdef COMPUTING_LAMBDA
@@ -1021,6 +1022,7 @@ protected:
     // stores a particular soluition for the solver
     // which satisfies the divergence contraint
     // (*) computed in SetUpSolver()
+    // on true dofs
     mutable BlockVector* part_solution;
 
     // variable-size vectors (initialized with the finest level sizes)
@@ -1110,7 +1112,7 @@ protected:
     virtual void SaveLocalLUFactors(int level) const {}
 
     // finds a particular solution (like the first iteration of the previous
-    // version of the solver)
+    // version of the solver) and returns it as a vector on true dofs
     void FindParticularSolution( const BlockVector& initial_guess,
                                  BlockVector& particular_solution) const;
 
@@ -1205,7 +1207,7 @@ const Vector* BaseGeneralMinConstrSolver::ParticularSolution() const
 {
     MFEM_ASSERT(setup_finished, "Cannot call BaseGeneralMinConstrSolver::ParticularSolution()"
                                 " before the setup was finished \n");
-    return &(part_solution->GetBlock(0));
+    return part_solution;
 }
 
 bool BaseGeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
@@ -1336,7 +1338,6 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
     rhsblock = new BlockVector(block_offsets);
-    part_solution = new BlockVector(block_offsets);
     update = new BlockVector(block_offsets);
 
     Funct_lvls.SetSize(num_levels);
@@ -1375,6 +1376,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
+
+    part_solution = new BlockVector(block_trueoffsets);
 
     // can't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
@@ -1467,13 +1470,22 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         FindParticularSolution(bdrdata_finest, *part_solution);
     }
     else
-        *part_solution = bdrdata_finest;
+    {
+        for ( int blk = 0; blk < numblocks; ++blk)
+        {
+            SparseMatrix tempdiag;
+            dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
+            tempdiag.MultTranspose(bdrdata_finest.GetBlock(blk), part_solution->GetBlock(blk));
+        }
+        //*part_solution = bdrdata_finest; worked on dofs
+    }
 
-    MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
-                &ConstrRhs, "for the initial guess"),"");
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]),
-                              "for the particular solution");
+                              "for the initial guess");
+    // actually, is correct only for the serial run
+    MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
+                &ConstrRhs, "for the particular solution"),"");
 
     // in the end, part_solution is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
@@ -1483,12 +1495,11 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         std::cout << "Solver setup completed \n";
 }
 
+// the start_guess is on dofs
+// (*) returns particular solution as a vector on true dofs!
 void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start_guess,
                                                          BlockVector& particular_solution) const
 {
-    // set particular solution to initial guess (and then update it later)
-    particular_solution = start_guess;
-
 #ifdef COMPUTING_LAMBDA
     /*
     BlockVector sigma_special_block(block_offsets);
@@ -1499,6 +1510,22 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
 
     // 0. Compute rhs in the functional for the finest level
     ComputeRhsFunc(0, start_guess, *rhsfunc_lvls[0]);
+
+#ifdef TRUEDOFTRY
+    BlockVector consts(block_trueoffsets);
+    consts = 0.02;
+    BlockVector zeros(block_trueoffsets);
+    zeros = 0.0;
+    ComputeUpdatedLvlTrueResFunc(0, zeros, consts, *trueresfunc_lvls[0]);
+    particular_solution = *trueresfunc_lvls[0];
+    return;
+
+    //BlockVector consts(block_offsets);
+    //consts = 0.02;
+    //ComputeRhsFunc(0, consts, *rhsfunc_lvls[0]);
+    //particular_solution = *rhsfunc_lvls[0];
+    //return;
+#endif
 
     *Qlminus1_f = *rhs_constr;
 
@@ -1511,7 +1538,6 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
         ComputeLocalRhsConstr(l);
 
         // solve local problems at level l
-        // FIXME: all factors of local matrices can be stored after the first solver iteration
         SolveLocalProblems(l, *rhsfunc_lvls[l], rhs_constr, *solupdate_lvls[l]);
         ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
 
@@ -1553,19 +1579,29 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
     }
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
-    particular_solution += *solupdate_lvls[0];
+    // setting temporarily tempvec[0] is actually the particular solution on dofs
+    *tempvec_lvls[0] = *solupdate_lvls[0];
+    *tempvec_lvls[0] += start_guess;
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        SparseMatrix tempdiag;
+        dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
+        tempdiag.MultTranspose(tempvec_lvls[0]->GetBlock(blk), particular_solution.GetBlock(blk));
+    }
+    //particular_solution += *solupdate_lvls[0];
 
     if (print_level > 10)
-        std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
-                 / sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
+        std::cout << "sol_update norm: " << tempvec_lvls[0]->GetBlock(0).Norml2()
+                 / sqrt(tempvec_lvls[0]->GetBlock(0).Size()) << "\n";
 
     // computing some numbers for stopping criterium
     if (print_level)
-        funct_firstnorm = CheckFunctValue(comm, *Funct_lvls[0], particular_solution,
+        funct_firstnorm = CheckFunctValue(comm, *Funct_lvls[0], *tempvec_lvls[0],
                 "for the particular solution: ", print_level);
 
     if (print_level)
-        sol_firstitnorm = ComputeMPIVecNorm(comm, particular_solution,
+        sol_firstitnorm = ComputeMPIVecNorm(comm, *tempvec_lvls[0],
                 "for the particular solution", print_level);
 
     // 5. restore sizes of righthand side vectors for the constraint
@@ -1608,7 +1644,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     {
         //SparseMatrix tempdiag;
         //dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
-        //tempdiag.Mult(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
+        //tempdiag.MultTranspose(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
 
         dof_trueDof_Func_lvls[0][blk]->Mult(yblock_truedofs->GetBlock(blk), yblock->GetBlock(blk));
     }
@@ -1639,6 +1675,9 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
 
 #ifdef TRUEDOFTRY
+        tempblock_truedofs->Update(ParticularSolution()->GetData(), block_trueoffsets);
+
+        *yblock_truedofs = *tempblock_truedofs;
         return;
 #endif
 
@@ -1832,6 +1871,19 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
     *yblock = *xblock;
+
+#ifdef TRUEDOFTRY
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        //SparseMatrix dtddiag;
+        //dof_trueDof_Func_lvls[0][blk]->GetDiag(dtddiag);
+        //dtddiag.MultTranspose(yblock->GetBlock(blk), next_sol.GetBlock(blk));
+        //dof_trueDof_Func_lvls[0][blk]->MultTranspose(xblock->GetBlock(blk), next_sol.GetBlock(blk));
+    }
+
+    //next_sol = righthand_side;
+    return;
+#endif
 
     /*
 #ifdef TRUEDOFTRY

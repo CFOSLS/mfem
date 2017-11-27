@@ -2701,11 +2701,135 @@ int main(int argc, char *argv[])
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
+    // testing local-to-process and global matrix relation
+    if (verbose)
+        std::cout << "Testing local-to-process and global matrix relation \n";
+
+    {
+        SparseMatrix LocalShortcut = Funct_mat_lvls[0]->GetBlock(0,0);
+        /*
+        Vector Tempvec1(LocalShortcut.Width());
+        Tempvec1 = 0.02;
+        Vector Tempvec2(LocalShortcut.Height());
+        LocalShortcut.Mult(Tempvec1, Tempvec2);
+        */
+
+        ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[0]));
+        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        Ablock->Assemble();
+        Ablock->Finalize();
+        //SparseMatrix * Acheck = Ablock->LoseMat();
+
+        HypreParMatrix * Aglobal = Ablock->ParallelAssemble();
+
+        //LocalShortcut.Print();
+
+        Vector Temptruevec1(Aglobal->Width());
+        //Temptruevec1 = 0.0;
+        //if (myid == 0)
+            //Temptruevec1[1500] = 1.0;
+        Temptruevec1 = 0.02;
+        Vector Temptruevec2(Aglobal->Height());
+
+
+        /*
+        HypreParMatrix * d_td_shortcut = Dof_TrueDof_Func_lvls[0][0];
+        Vector Tempvec3(LocalShortcut.Width());
+        Dof_TrueDof_Func_lvls[0][0]->Mult(Temptruevec1, Tempvec3);
+        Vector Tempvec4(LocalShortcut.Height());
+        LocalShortcut.Mult(Tempvec3, Tempvec4);
+        //Acheck->Mult(Tempvec3, Tempvec4);
+        Dof_TrueDof_Func_lvls[0][0]->MultTranspose(Tempvec4, Temptruevec2);
+        */
+
+        Aglobal->Mult(Temptruevec1, Temptruevec2);
+
+        //Temptruevec2.Print();
+        //Temptruevec2 = 0.02;
+        //ofstream ofs("serial_correct.txt");
+        //Temptruevec2.Print(ofs,1);
+
+        /*
+        ifstream ifs(mesh_file);
+        if (!imesh)
+        {
+            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+            MPI_Finalize();
+            return -2;
+        }
+        else
+        {
+            mesh = new Mesh(imesh, 1, 1);
+            imesh.close();
+        }
+        */
+
+        Vector error(Temptruevec2.Size());
+        error = 0.0;
+        //error = NewX;
+        error = Temptruevec2;
+        //error -= trueexact;
+        //error = 1.0;
+
+        int local_size = error.Size();
+        int global_size = 0;
+        MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+        std::cout << std::flush;
+        MPI_Barrier(comm);
+        if (myid == 0)
+        {
+            std::cout << "myid = 0 \n";
+            std::cout << "local_size = " << local_size << "\n";
+            std::cout << "global_size = " << global_size << "\n";
+        }
+        MPI_Barrier(comm);
+        if (myid == 1)
+        {
+            std::cout << "myid = 1 \n";
+            std::cout << "local_size = " << local_size << "\n";
+            std::cout << "global_size = " << global_size << "\n";
+        }
+        MPI_Barrier(comm);
+
+        double local_normsq = error * error;
+        double global_norm = 0.0;
+        MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+        global_norm = sqrt (global_norm / global_size);
+
+        MPI_Barrier(comm);
+        if (myid == 0)
+        {
+            std::cout << "myid = 0 \n";
+            std::cout << "local_normsq = " << local_normsq << "\n";
+            std::cout << "global_norm = " << global_norm << "\n";
+            std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+        }
+        MPI_Barrier(comm);
+        if (myid == 1)
+        {
+            std::cout << "myid = 1 \n";
+            std::cout << "local_normsq = " << local_normsq << "\n";
+            std::cout << "global_norm = " << global_norm << "\n";
+            std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+        }
+        MPI_Barrier(comm);
+
+        std::cout << std::flush;
+        MPI_Barrier(comm);
+
+        if (verbose)
+            std::cout << "error norm special = " << global_norm << "\n";
+    }
+
+    MPI_Finalize();
+    return 0;
+
     Vector ParticSol(*(NewSolver.ParticularSolution()));
-    Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
-    ParGridFunction * partsol = new ParGridFunction(R_space_lvls[0]);
-    *partsol = ParticSol;
-    partsol->ParallelAssemble(trueParticSol);
+    //Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
+    //ParGridFunction * partsol = new ParGridFunction(R_space_lvls[0]);
+    //*partsol = ParticSol;
+    //partsol->ParallelAssemble(trueParticSol);
     // Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
 
     Vector tempp(sigma_exact_finest->Size());
@@ -3048,12 +3172,13 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    Vector NewRhs(trueParticSol.Size());
+    Vector NewRhs(ParticSol.Size());
     NewRhs = 0.0;
     Vector NewX(NewRhs.Size());
     NewX = 0.0;
 
-    NewSolver.SetInitialGuess(trueParticSol);
+    NewRhs = 0.02;
+    NewSolver.SetInitialGuess(ParticSol);
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
     NewSolver.Mult(NewRhs, NewX);
@@ -3101,7 +3226,8 @@ int main(int argc, char *argv[])
 
     Vector error(NewX.Size());
     error = 0.0;
-    error = NewX;
+    //error = NewX;
+    error = ParticSol;
     //error -= trueexact;
     //error = 1.0;
 
