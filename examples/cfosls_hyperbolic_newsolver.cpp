@@ -18,7 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -1164,8 +1164,9 @@ int main(int argc, char *argv[])
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
 
-    Array< SparseMatrix* > Proj_Hcurl(num_levels - 1);
-    Array<HypreParMatrix* > Dof_TrueDof_Hcurl(num_levels);
+    Array< SparseMatrix* > Proj_Hcurl_lvls(num_levels - 1);
+    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
+    Array<HypreParMatrix* > Dof_TrueDof_Hdiv_lvls(num_levels);
 
     std::vector<std::vector<HypreParMatrix*> > Dof_TrueDof_Func_lvls(num_levels);
     std::vector<HypreParMatrix*> Dof_TrueDof_L2_lvls(num_levels);
@@ -1337,8 +1338,9 @@ int main(int argc, char *argv[])
         Constraint_mat_lvls[l] = Bblock->LoseMat();
 
         // getting pointers to dof_truedof matrices
-        Dof_TrueDof_Hcurl[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
 
         // for all but one levels we create projection matrices between levels
@@ -1347,7 +1349,7 @@ int main(int argc, char *argv[])
         {
             C_space->Update();
             Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-            Proj_Hcurl[l] = RemoveZeroEntries(*Proj_Hcurl_local);
+            Proj_Hcurl_lvls[l] = RemoveZeroEntries(*Proj_Hcurl_local);
 
             W_space->Update();
             R_space->Update();
@@ -1376,9 +1378,9 @@ int main(int argc, char *argv[])
 
             if (prec_is_MG)
             {
-                HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
-                        LeftDiagMult( *Proj_Hcurl[l],  C_space_lvls[l]->GetDofOffsets());
-                P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl[l]->Transpose(), P_C_coarser_d_td);
+                HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl_lvls[l + 1]->
+                        LeftDiagMult( *Proj_Hcurl_lvls[l],  C_space_lvls[l]->GetDofOffsets());
+                P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl_lvls[l]->Transpose(), P_C_coarser_d_td);
                 P_C[num_levels - 2 - l]->CopyColStarts();
                 P_C[num_levels - 2 - l]->CopyRowStarts();
             }
@@ -2496,7 +2498,7 @@ int main(int argc, char *argv[])
     */
 
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
-                   Proj_Hcurl, Dof_TrueDof_Hcurl,
+                   Proj_Hcurl_lvls, Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
                    EssBdrDofs_Hcurl);
     //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
     NewGSSmoother.SetSweepsNumber(5);
