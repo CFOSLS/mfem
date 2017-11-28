@@ -18,7 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -1143,6 +1143,8 @@ int main(int argc, char *argv[])
     Array<HypreParMatrix*> P_C(par_ref_levels);
     Array<HypreParMatrix*> P_H(par_ref_levels);
 
+    Array<HypreParMatrix*> TrueP_R(par_ref_levels);
+
     Array< SparseMatrix*> P_W(ref_levels);
     Array< SparseMatrix*> P_R(ref_levels);
     Array< SparseMatrix*> Element_dofs_R(ref_levels);
@@ -1366,6 +1368,12 @@ int main(int argc, char *argv[])
             Element_dofs_W[l] = W_Element_to_dofs1;
 
             // computing projectors assembled on true dofs
+            HypreParMatrix * P_R_coarser_d_td = Dof_TrueDof_Func_lvls[l + 1][0]->
+                    LeftDiagMult( *P_R[l],  R_space_lvls[l]->GetDofOffsets());
+            TrueP_R[num_levels - 2 - l] = ParMult(Dof_TrueDof_Func_lvls[l][0]->Transpose(), P_R_coarser_d_td);
+            TrueP_R[num_levels - 2 - l]->CopyColStarts();
+            TrueP_R[num_levels - 2 - l]->CopyRowStarts();
+
             if (prec_is_MG)
             {
                 HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl[l + 1]->
@@ -1374,7 +1382,6 @@ int main(int argc, char *argv[])
                 P_C[num_levels - 2 - l]->CopyColStarts();
                 P_C[num_levels - 2 - l]->CopyRowStarts();
             }
-
         }
 
     }
@@ -2534,6 +2541,23 @@ int main(int argc, char *argv[])
     }
 
 
+    Array<BlockOperator*> TrueP_Func(ref_levels);
+    Array<int> * row_offsets_TrueP_Func = new Array<int>[num_levels - 1];
+    Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
+
+    for (int i = 0; i < num_levels - 1; ++i)
+    {
+        row_offsets_TrueP_Func[i].SetSize(2);
+        row_offsets_TrueP_Func[i][0] = 0;
+        row_offsets_TrueP_Func[i][1] = TrueP_R[i]->Height();
+        col_offsets_TrueP_Func[i].SetSize(2);
+        col_offsets_TrueP_Func[i][0] = 0;
+        col_offsets_TrueP_Func[i][1] = TrueP_R[i]->Width();
+        TrueP_Func[i] = new BlockOperator(row_offsets_TrueP_Func[i], col_offsets_TrueP_Func[i]);
+        TrueP_Func[i]->SetBlock(0,0, TrueP_R[i]);
+    }
+
+
 
     Array<SparseMatrix*> P_WT(ref_levels); //AE_e matrices
     for (int i = 0; i < ref_levels; ++i)
@@ -2681,7 +2705,7 @@ int main(int argc, char *argv[])
 
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                     P_Func, P_W, BdrDofs_R, EssBdrDofs_R,
+                     P_Func, TrueP_Func, P_W, BdrDofs_R, EssBdrDofs_R,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
@@ -2696,141 +2720,27 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(30);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
-    // testing local-to-process and global matrix relation
+    Vector ParticSol(*(NewSolver.ParticularSolution()));
+
+    /*
     if (verbose)
-        std::cout << "Testing local-to-process and global matrix relation \n";
+        std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
 
-    {
-        SparseMatrix LocalShortcut = Funct_mat_lvls[0]->GetBlock(0,0);
-        /*
-        Vector Tempvec1(LocalShortcut.Width());
-        Tempvec1 = 0.02;
-        Vector Tempvec2(LocalShortcut.Height());
-        LocalShortcut.Mult(Tempvec1, Tempvec2);
-        */
+    ParGridFunction * PartSolDofs = new ParGridFunction(R_space_lvls[0]);
+    PartSolDofs->Distribute(ParticSol);
 
-        ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[0]));
-        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
-        Ablock->Assemble();
-        Ablock->Finalize();
-        //SparseMatrix * Acheck = Ablock->LoseMat();
+    MFEM_ASSERT(CheckConstrRes(PartSolDofs, Constraint_mat_lvls[0], ConstrRhs, "in the main code for poarticular solution"), "Failure");
 
-        HypreParMatrix * Aglobal = Ablock->ParallelAssemble();
-
-        //LocalShortcut.Print();
-
-        Vector Temptruevec1(Aglobal->Width());
-        //Temptruevec1 = 0.0;
-        //if (myid == 0)
-            //Temptruevec1[1500] = 1.0;
-        Temptruevec1 = 0.02;
-        Vector Temptruevec2(Aglobal->Height());
-
-
-        /*
-        HypreParMatrix * d_td_shortcut = Dof_TrueDof_Func_lvls[0][0];
-        Vector Tempvec3(LocalShortcut.Width());
-        Dof_TrueDof_Func_lvls[0][0]->Mult(Temptruevec1, Tempvec3);
-        Vector Tempvec4(LocalShortcut.Height());
-        LocalShortcut.Mult(Tempvec3, Tempvec4);
-        //Acheck->Mult(Tempvec3, Tempvec4);
-        Dof_TrueDof_Func_lvls[0][0]->MultTranspose(Tempvec4, Temptruevec2);
-        */
-
-        Aglobal->Mult(Temptruevec1, Temptruevec2);
-
-        //Temptruevec2.Print();
-        //Temptruevec2 = 0.02;
-        //ofstream ofs("serial_correct.txt");
-        //Temptruevec2.Print(ofs,1);
-
-        /*
-        ifstream ifs(mesh_file);
-        if (!imesh)
-        {
-            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
-            MPI_Finalize();
-            return -2;
-        }
-        else
-        {
-            mesh = new Mesh(imesh, 1, 1);
-            imesh.close();
-        }
-        */
-
-        Vector error(Temptruevec2.Size());
-        error = 0.0;
-        //error = NewX;
-        error = Temptruevec2;
-        //error -= trueexact;
-        //error = 1.0;
-
-        int local_size = error.Size();
-        int global_size = 0;
-        MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
-
-        std::cout << std::flush;
-        MPI_Barrier(comm);
-        if (myid == 0)
-        {
-            std::cout << "myid = 0 \n";
-            std::cout << "local_size = " << local_size << "\n";
-            std::cout << "global_size = " << global_size << "\n";
-        }
-        MPI_Barrier(comm);
-        if (myid == 1)
-        {
-            std::cout << "myid = 1 \n";
-            std::cout << "local_size = " << local_size << "\n";
-            std::cout << "global_size = " << global_size << "\n";
-        }
-        MPI_Barrier(comm);
-
-        double local_normsq = error * error;
-        double global_norm = 0.0;
-        MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-        global_norm = sqrt (global_norm / global_size);
-
-        MPI_Barrier(comm);
-        if (myid == 0)
-        {
-            std::cout << "myid = 0 \n";
-            std::cout << "local_normsq = " << local_normsq << "\n";
-            std::cout << "global_norm = " << global_norm << "\n";
-            std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
-        }
-        MPI_Barrier(comm);
-        if (myid == 1)
-        {
-            std::cout << "myid = 1 \n";
-            std::cout << "local_normsq = " << local_normsq << "\n";
-            std::cout << "global_norm = " << global_norm << "\n";
-            std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
-        }
-        MPI_Barrier(comm);
-
-        std::cout << std::flush;
-        MPI_Barrier(comm);
-
-        if (verbose)
-            std::cout << "error norm special = " << global_norm << "\n";
-    }
-
+    if (verbose)
+        std::cout << "Success \n";
     MPI_Finalize();
     return 0;
-
-    Vector ParticSol(*(NewSolver.ParticularSolution()));
-    //Vector trueParticSol(Dof_TrueDof_Func_lvls[0][0]->Width());
-    //ParGridFunction * partsol = new ParGridFunction(R_space_lvls[0]);
-    //*partsol = ParticSol;
-    //partsol->ParallelAssemble(trueParticSol);
-    // Dof_TrueDof_Func_lvls[0][0]->MultTranspose(ParticSol, trueParticSol);
+    */
 
     Vector tempp(sigma_exact_finest->Size());
     tempp = *sigma_exact_finest;
@@ -3177,7 +3087,7 @@ int main(int argc, char *argv[])
     Vector NewX(NewRhs.Size());
     NewX = 0.0;
 
-    NewRhs = 0.02;
+    //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
@@ -3201,6 +3111,7 @@ int main(int argc, char *argv[])
     MPI_Barrier(comm);
     */
 
+    /*
     //NewX = 1.0;
 
     //NewSigmahat->Distribute(&NewX);
@@ -3283,6 +3194,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+    */
 
     //*NewSigmahat = 1.0;
 
