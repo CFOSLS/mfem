@@ -1037,6 +1037,7 @@ protected:
 
     mutable Array<Array<int>* > trueoffsets_lvls;
     mutable Array<BlockVector*> truetempvec_lvls;
+    mutable Array<BlockVector*> truetempvec2_lvls;
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
 
@@ -1372,6 +1373,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     trueoffsets_lvls[0] = &block_trueoffsets;
     truetempvec_lvls.SetSize(num_levels);
     truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
+    truetempvec2_lvls.SetSize(num_levels);
+    truetempvec2_lvls[0] = new BlockVector(block_trueoffsets);
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
 
@@ -1820,6 +1823,13 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     ComputeUpdatedLvlRhsFunc(0, *rhsblock, *xblock, *rhsfunc_lvls[0]);
     ComputeUpdatedLvlTrueResFunc(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
+    /*
+    Vector temp(rhsfunc_lvls[0]->Size());
+    temp = *rhsfunc_lvls[0];
+    temp -= *trueresfunc_lvls[0];
+    temp.Print();
+    */
+
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1830,9 +1840,16 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         // solve local problems at level l
         SolveLocalProblems(l, *rhsfunc_lvls[l], NULL, *solupdate_lvls[l]);
-        ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
-
         SolveTrueLocalProblems(l, *trueresfunc_lvls[l], NULL, *truesolupdate_lvls[l]);
+
+        /*
+        Vector temp(solupdate_lvls[l]->Size());
+        temp = *solupdate_lvls[l];
+        temp -= *truesolupdate_lvls[l];
+        temp.Print();
+        */
+
+        ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         // smooth
@@ -1861,6 +1878,18 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *solupdate_lvls[num_levels - 1]);
     SolveTrueCoarseProblem(*coarse_rhsfunc, NULL, *truesolupdate_lvls[num_levels - 1]);
 
+    /*
+    Vector temp(solupdate_lvls[0]->Size());
+    temp = *solupdate_lvls[0];
+    temp -= *truesolupdate_lvls[0];
+    temp.Print();
+
+    Vector temp(solupdate_lvls[1]->Size());
+    temp = *solupdate_lvls[1];
+    temp -= *truesolupdate_lvls[1];
+    temp.Print();
+    */
+
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
     {
@@ -1868,7 +1897,24 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             // interpolate back to the finer level
             P_Func[l - 1]->Mult(*solupdate_lvls[l], *tempvec_lvls[l - 1]);
+            TrueP_Func[l - 1]->Mult(*truesolupdate_lvls[l], *truetempvec_lvls[l - 1]);
+
+            /*
+            Vector temp(tempvec_lvls[0]->Size());
+            temp = *tempvec_lvls[0];
+            temp -= *truetempvec_lvls[0];
+            temp.Print();
+            */
+
             ComputeUpdatedLvlRhsFunc(l - 1, *rhsfunc_lvls[l - 1], *tempvec_lvls[l - 1], *tempvec2_lvls[l - 1] );
+            ComputeUpdatedLvlTrueResFunc(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
+
+            /*
+            Vector temp(tempvec2_lvls[0]->Size());
+            temp = *tempvec2_lvls[0];
+            temp -= *truetempvec2_lvls[0];
+            temp.Print();
+            */
 
             // smooth at the finer level
             if (Smoo)
@@ -1884,8 +1930,34 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             // update the solution at the finer level with two
             // corrections: one after smoothing and one after local solve
             *solupdate_lvls[l - 1] += *tempvec_lvls[l - 1];
+            *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+
+            /*
+            Vector temp0(solupdate_lvls[0]->Size());
+            temp0 = *solupdate_lvls[0];
+            temp0 -= *truesolupdate_lvls[0];
+            //temp0.Print();
+            std::cout << "temp0 norm = " << temp0.Norml2() << "\n";
+
+            Vector temp(tempvec2_lvls[0]->Size());
+            temp = *tempvec2_lvls[0];
+            temp -= *truetempvec2_lvls[0];
+            //temp.Print();
+            std::cout << "temp norm = " << temp.Norml2() << "\n";
+            */
 
             SolveLocalProblems(l - 1, *tempvec2_lvls[l - 1], NULL, *solupdate_lvls[l - 1]);
+            SolveTrueLocalProblems(l - 1, *truetempvec2_lvls[l - 1], NULL, *truesolupdate_lvls[l - 1]);
+
+            /*
+            Vector temp(solupdate_lvls[0]->Size());
+            temp = *solupdate_lvls[0];
+            temp -= *truesolupdate_lvls[0];
+            temp.Print();
+            */
+
+            //int p = 3;
+            //p = sin (p * 1.0);
         }
 
     }
@@ -1895,15 +1967,25 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // final sol update (at level 0)  =
         //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
         for (int level = num_levels - 1; level > 0; --level)
+        {
             // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
             P_Func[level - 1]->AddMult(*solupdate_lvls[level], *solupdate_lvls[level - 1], 1.0 );
+            // FIXME:
+            //TrueP_Func[level - 1]->AddMult(*truesolupdate_lvls[level], *truesolupdate_lvls[level - 1], 1.0 );
+        }
 
     }
 
     // 4. update the global iterate by the resulting update at the finest level
     *yblock += *solupdate_lvls[0];
+    next_sol += *truesolupdate_lvls[0];
 
-
+    /*
+    Vector temp(solupdate_lvls[0]->Size());
+    temp = *solupdate_lvls[0];
+    temp -= *truesolupdate_lvls[0];
+    temp.Print();
+    */
 
     if (print_level)
     {
@@ -1947,11 +2029,13 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (current_iteration == 0)
         solupdate_firstmgnorm = solupdate_currmgnorm;
 
+    /*
     // casting yblock (defined on dofs) into the next_sol (on true dofs)
     for (int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[0][blk]->MultTranspose(yblock->GetBlock(blk), next_sol.GetBlock(blk));
     }
+    */
 
     ++current_iteration;
 
@@ -2086,9 +2170,18 @@ void BaseGeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     solupdate_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
     rhsfunc_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 
-    truetempvec_lvls[lvl + 1] = new BlockVector(trueoffsets_lvls[lvl + 1]);
-    truesolupdate_lvls[lvl + 1] = new BlockVector(trueoffsets_lvls[lvl + 1]);
-    trueresfunc_lvls[lvl + 1] = new BlockVector(trueoffsets_lvls[lvl + 1]);
+    trueoffsets_lvls[lvl + 1] = new Array<int>(numblocks + 1);
+    (*trueoffsets_lvls[lvl + 1])[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        (*trueoffsets_lvls[lvl + 1])[blk + 1] = (*trueoffsets_lvls[lvl + 1])[blk] +
+                dof_trueDof_Func_lvls[lvl + 1][blk]->Height();
+    }
+
+    truetempvec_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+    truetempvec2_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+    truesolupdate_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+    trueresfunc_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
 }
 
 // Returns a pointer to a SparseMatrix which stores
@@ -2346,10 +2439,14 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
 {
     // FIXME: Get rid of temporary vectors;
     BlockVector lvlrhs_func(block_offsets);
-    BlockVector sol_update(block_offsets);
     for (int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[level][blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
+    }
+    BlockVector sol_update(block_offsets);
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[level][blk]->Mult(truesol_update.GetBlock(blk), sol_update.GetBlock(blk));
     }
 
     DenseMatrix sub_Constr;
@@ -2393,8 +2490,8 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
                     Constr_lvl->GetSubMatrix(Wtmp_j, *Local_inds[blk], sub_Constr);
                 }
 
-                if (rhs_constr)
-                    rhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
+                if (localrhs_constr)
+                    localrhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
                 else
                 {
                     sub_rhsconstr.SetSize(Wtmp_j.Size());
