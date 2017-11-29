@@ -18,6 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
+// in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
@@ -2790,12 +2791,32 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(33);
+    NewSolver.SetMaxIter(30);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
+
+    /*
+    Vector error3(ParticSol.Size());
+    error3 = ParticSol;
+
+    int local_size3 = error3.Size();
+    int global_size3 = 0;
+    MPI_Allreduce(&local_size3, &global_size3, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq3 = error3 * error3;
+    double global_norm3 = 0.0;
+    MPI_Allreduce(&local_normsq3, &global_norm3, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm3 = sqrt (global_norm3 / global_size3);
+
+    if (verbose)
+        std::cout << "error3 norm special = " << global_norm3 << "\n";
+
+    MPI_Finalize();
+    return 0;
+    */
 
     /*
     if (verbose)
@@ -3159,19 +3180,109 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+
 
     /*
+    Vector Truevec1(C_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hcurl_guy = new ParGridFunction(C_space_lvls[0]);
+    Vector ones_v(pmesh->Dimension());
+    ones_v = 1.0;
+    VectorConstantCoefficient ones_vcoeff(ones_v);
+    hcurl_guy->ProjectCoefficient(ones_vcoeff);
+    hcurl_guy->ParallelProject(Truevec1);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hcurl_guy_0.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hcurl_guy_1.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hcurl_guy_2.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hcurl_guy_3.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+
+    Vector Truevec2(R_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hdiv_guy = new ParGridFunction(R_space_lvls[0]);
+    hdiv_guy->ProjectCoefficient(ones_vcoeff);
+    hdiv_guy->ParallelProject(Truevec2);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hdiv_guy_0.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hdiv_guy_1.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hdiv_guy_2.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hdiv_guy_3.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+
+
+    //Vector error(Truevec1.Size());
+    //error = Truevec1;
+    Vector error(Truevec2.Size());
+    error = Truevec2;
+
+    int local_size = error.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq = error * error;
+    double global_norm = 0.0;
+    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm = sqrt (global_norm / global_size);
+
     if (verbose)
-        std::cout << "bdr dofs \n";
-    EssBdrDofs_R[0][1]->Print();
-    if (verbose)
-        std::cout << "bdr true dofs \n";
-    EssBdrTrueDofs_R[0][1]->Print();
+        std::cout << "error norm special = " << global_norm << "\n";
     */
 
     NewSolver.Mult(NewRhs, NewX);
 
+
+    Vector error2(NewX.Size());
+    error2 = NewX;
+
+    int local_size2 = error2.Size();
+    int global_size2 = 0;
+    MPI_Allreduce(&local_size2, &global_size2, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq2 = error2 * error2;
+    double global_norm2 = 0.0;
+    MPI_Allreduce(&local_normsq2, &global_norm2, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm2 = sqrt (global_norm2 / global_size2);
+
+    if (verbose)
+        std::cout << "error2 norm special = " << global_norm2 << "\n";
 
     /*
     MPI_Barrier(comm);

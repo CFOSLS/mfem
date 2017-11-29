@@ -1,6 +1,8 @@
 #include "mfem.hpp"
 #include "linalg/linalg.hpp"
 
+#include <iterator>
+
 using namespace mfem;
 using namespace std;
 using std::unique_ptr;
@@ -510,7 +512,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
         }
         else
         {
-            MFEM_ABORT("Case relax_all_dofs = flse was not tested \n");
+            MFEM_ABORT("Case relax_all_dofs = false was not tested \n");
             CTMC_global_diag_lvls[level] = new Vector();
             CTMC_global_lvls[level]->GetDiag(*CTMC_global_diag_lvls[level]);
 
@@ -554,12 +556,19 @@ void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
     Vector temp1(Curlh_lvls[level]->Height());
     d_td_Hdiv_lvls[level]->Mult(res_lvl.GetBlock(0), temp1);
 
+    //SparseMatrix d_td_Hdiv_diag;
+    //d_td_Hdiv_lvls[level]->GetDiag(d_td_Hdiv_diag);
+    //d_td_Hdiv_diag.Mult(res_lvl.GetBlock(0), temp1);
+
     Vector temp2(Curlh_lvls[level]->Width());
 
     // rhs_l = CT_l * res_lvl
     Curlh_lvls[level]->MultTranspose(temp1, temp2);
 
-    d_td_Hcurl_lvls[level]->MultTranspose(temp2, *truerhs_lvls[level]);
+    SparseMatrix d_td_Hcurl_diag;
+    d_td_Hcurl_lvls[level]->GetDiag(d_td_Hcurl_diag);
+    d_td_Hcurl_diag.MultTranspose(temp2, *truerhs_lvls[level]);
+    //d_td_Hcurl_lvls[level]->MultTranspose(temp2, *truerhs_lvls[level]);
 
 }
 
@@ -640,6 +649,8 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, 
     {
         // imposing boundary conditions on the righthand side
         Array<int> * temp = essbdrtruedofs_lvls[level];
+
+        //temp->Print();
         for ( int tdof = 0; tdof < temp->Size(); ++tdof)
         {
             if ( (*temp)[tdof] != 0)
@@ -648,8 +659,69 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, 
             }
         }
 
+        /*
+        int myid;
+        MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+        FILE * file;
+        if (myid == 0)
+        {
+            file = fopen("hcurl_guy_0.txt", "rt");
+            int size;
+            fscanf(file, "%d\n", &size);
+            for ( int i = 0; i < size; ++i)
+            {
+                double temp;
+                fscanf(file, "%lf\n", &temp);
+                (*truerhs_lvls[level])[i] = temp;
+            }
+            fclose(file);
+        }
+        if (myid == 1)
+        {
+            file = fopen("hcurl_guy_1.txt", "rt");
+            int size;
+            fscanf(file, "%d\n", &size);
+            for ( int i = 0; i < size; ++i)
+            {
+                double temp;
+                fscanf(file, "%lf\n", &temp);
+                (*truerhs_lvls[level])[i] = temp;
+            }
+            fclose(file);
+        }
+        if (myid == 2)
+        {
+            file = fopen("hcurl_guy_2.txt", "rt");
+            int size;
+            fscanf(file, "%d\n", &size);
+            for ( int i = 0; i < size; ++i)
+            {
+                double temp;
+                fscanf(file, "%lf\n", &temp);
+                (*truerhs_lvls[level])[i] = temp;
+            }
+            fclose(file);
+        }
+        if (myid == 3)
+        {
+            file = fopen("hcurl_guy_3.txt", "rt");
+            int size;
+            fscanf(file, "%d\n", &size);
+            for ( int i = 0; i < size; ++i)
+            {
+                double temp;
+                fscanf(file, "%lf\n", &temp);
+                (*truerhs_lvls[level])[i] = temp;
+            }
+            fclose(file);
+        }
+        */
+
         *truex_lvls[level] = 0.0;
         Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+        //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
+        //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+        //CTMC_global_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
 
         // computing the solution update in the H(div)_h space
         // in two steps:
@@ -720,6 +792,7 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, 
             */
 
             out_lvl += in_lvl;
+
         }
 
     }
@@ -1660,51 +1733,88 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
 void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start_guess,
                                                          BlockVector& particular_solution) const
 {
+    BlockVector truestart_guess(block_trueoffsets);
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        // FIXME: Decide what should be done here
+        SparseMatrix diag;
+        dof_trueDof_Func_lvls[0][blk]->GetDiag(diag);
+        diag.MultTranspose(start_guess.GetBlock(blk), truestart_guess.GetBlock(blk) );
+
+        //dof_trueDof_Func_lvls[0][blk]->MultTranspose(start_guess.GetBlock(blk), truestart_guess.GetBlock(blk));
+    }
+
+
     // 0. Compute rhs in the functional for the finest level
     ComputeRhsFunc(0, start_guess, *rhsfunc_lvls[0]);
-    for ( int blk = 0; blk < numblocks; ++blk)
-        dof_trueDof_Func_lvls[0][blk]->MultTranspose(rhsfunc_lvls[0]->GetBlock(blk), trueresfunc_lvls[0]->GetBlock(blk));
+    ComputeTrueResFunc(0, truestart_guess, *trueresfunc_lvls[0]);
 
-    dof_trueDof_L2_lvls[0]->MultTranspose(*rhs_constr, *truerhs_constr);
+    //for ( int blk = 0; blk < numblocks; ++blk)
+        //dof_trueDof_Func_lvls[0][blk]->MultTranspose(rhsfunc_lvls[0]->GetBlock(blk), trueresfunc_lvls[0]->GetBlock(blk));
+
+    //dof_trueDof_L2_lvls[0]->MultTranspose(*rhs_constr, *truerhs_constr);
     *Qlminus1_f = *rhs_constr;
-    dof_trueDof_L2_lvls[0]->MultTranspose(*rhs_constr, *trueQlminus1_f);
+    //dof_trueDof_L2_lvls[0]->MultTranspose(*rhs_constr, *trueQlminus1_f);
 
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
         // solution updates will always satisfy homogeneous essential boundary conditions
         *solupdate_lvls[l] = 0.0;
+        *truesolupdate_lvls[l] = 0.0;
 
         ComputeLocalRhsConstr(l);
 
         // solve local problems at level l
         SolveLocalProblems(l, *rhsfunc_lvls[l], rhs_constr, *solupdate_lvls[l]);
+        SolveTrueLocalProblems(l, *trueresfunc_lvls[l], rhs_constr, *truesolupdate_lvls[l]);
+
         ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
+        ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         if (Smoo)
         {
             Smoo->ComputeRhsLevel(l, *tempvec_lvls[l]);
+            Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
+
             Smoo->MultLevel(l, *solupdate_lvls[l], *tempvec_lvls[l]);
+            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l], NULL, NULL);
+
             *solupdate_lvls[l] = *tempvec_lvls[l];
+            *truesolupdate_lvls[l] = *truetempvec_lvls[l];
+
             ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
+            ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
 
         *rhsfunc_lvls[l] = *tempvec_lvls[l];
+        *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
         // setting up rhs from the functional for the next (coarser) level
         ProjectFinerFuncToCoarser(l, *rhsfunc_lvls[l], *rhsfunc_lvls[l + 1] );
+        TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
     } // end of loop over finer levels
 
     // 2. setup and solve the coarse problem
     *rhs_constr = *Qlminus1_f;
+    //*truerhs_constr = *trueQlminus1_f;
 
     // imposes boundary conditions and assembles coarsest level's
     // righthand side (from rhsfunc) on true dofs
     SetUpCoarsestRhsFunc();
 
+    //Vector temp(coarse_rhsfunc->Size());
+    //temp = *coarse_rhsfunc;
+
+    //temp -= *coarse_rhsfunc;
+    //std::cout << "temp norm = " << temp.Norml2() << "\n";
+
+    SetUpCoarsestTrueRhsFunc();
+
     // 2.5 solve coarse problem
     SolveCoarseProblem(*coarse_rhsfunc, rhs_constr, *solupdate_lvls[num_levels-1]);
+    SolveTrueCoarseProblem(*coarse_rhsfunc, rhs_constr, *truesolupdate_lvls[num_levels - 1]);
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -1716,6 +1826,13 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
 
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         *solupdate_lvls[level - 1] += *tempvec_lvls[level - 1];
+
+        //// solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
+        //P_Func[level - 1]->AddMult(*solupdate_lvls[level], *solupdate_lvls[level - 1], 1.0 );
+
+        TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
+        *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
+
     }
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
@@ -1723,12 +1840,17 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
     *tempvec_lvls[0] = *solupdate_lvls[0];
     *tempvec_lvls[0] += start_guess;
 
+    particular_solution = truestart_guess;
+    particular_solution += *truesolupdate_lvls[0];
+
+    /*
     for (int blk = 0; blk < numblocks; ++blk)
     {
         SparseMatrix tempdiag;
         dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
         tempdiag.MultTranspose(tempvec_lvls[0]->GetBlock(blk), particular_solution.GetBlock(blk));
     }
+    */
     //particular_solution += *solupdate_lvls[0];
 
     if (print_level > 10)
@@ -1992,8 +2114,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         *truesolupdate_lvls[l] = 0.0;
 
         // solve local problems at level l
-        SolveLocalProblems(l, *rhsfunc_lvls[l], NULL, *solupdate_lvls[l]);
-        SolveTrueLocalProblems(l, *trueresfunc_lvls[l], NULL, *truesolupdate_lvls[l]);
+        //SolveLocalProblems(l, *rhsfunc_lvls[l], NULL, *solupdate_lvls[l]);
+        //SolveTrueLocalProblems(l, *trueresfunc_lvls[l], NULL, *truesolupdate_lvls[l]);
 
         ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
@@ -2038,6 +2160,65 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             *solupdate_lvls[l] = *tempvec_lvls[l];
             *truesolupdate_lvls[l] = *truetempvec_lvls[l];
+
+            /*
+            int myid;
+            MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+            FILE * file;
+            if (myid == 0)
+            {
+                file = fopen("hdiv_guy_0.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[0])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 1)
+            {
+                file = fopen("hdiv_guy_1.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[0])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 2)
+            {
+                file = fopen("hdiv_guy_2.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[0])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 3)
+            {
+                file = fopen("hdiv_guy_3.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[0])[i] = temp;
+                }
+                fclose(file);
+            }
+            */
+
 
             /*
             Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
@@ -2888,8 +3069,8 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
     } // end of loop over AEs
 
 
-    if (level == 0 && CheckConstrRes(sol_update.GetBlock(0), *Constr_lvls[0], NULL,"special 2") == false )
-        std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+    //if (level == 0 && CheckConstrRes(sol_update.GetBlock(0), *Constr_lvls[0], NULL,"special 2") == false )
+        //std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -3456,7 +3637,10 @@ void MinConstrSolver::SolveTrueCoarseProblem(BlockVector& coarserhs_func, Vector
     coarsetrueRhs->GetBlock(0) = coarserhs_func.GetBlock(0);
     if (coarserhs_constr)
     {
-        MFEM_ABORT("SolveTrueCoarseProblem() should not be called with coarserhs_constr != NULL \n");
+        MFEM_ASSERT(coarsetrueRhs->GetBlock(1).Size() == coarserhs_constr->Size(),
+                    "Sizes mismatch when finalizing rhs at the coarsest level!\n");
+        coarsetrueRhs->GetBlock(1) = *coarserhs_constr;
+        //MFEM_ABORT("SolveTrueCoarseProblem() should not be called with coarserhs_constr != NULL \n");
     }
 
     std::cout << "Check for the coarsest problem: rhs norm = " << coarsetrueRhs->Norml2() << "\n";
@@ -3466,7 +3650,6 @@ void MinConstrSolver::SolveTrueCoarseProblem(BlockVector& coarserhs_func, Vector
 
     for ( int blk = 0; blk < numblocks; ++blk)
         truesol_coarse.GetBlock(blk) = coarsetrueX->GetBlock(blk);
-
 
     return;
 }
