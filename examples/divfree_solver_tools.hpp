@@ -2036,17 +2036,19 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
+    /*
     // casting righthand side and previous solution into dofs representation rhsblock and xblock
     for (int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[0][blk]->Mult(righthand_side.GetBlock(blk), rhsblock->GetBlock(blk));
         dof_trueDof_Func_lvls[0][blk]->Mult(previous_sol.GetBlock(blk), xblock->GetBlock(blk));
     }
-
 #ifndef CHECK_SPDSOLVER
     MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "at the start of Solve()");
 #endif
+    */
+
 
 #ifdef DEBUGGING
     CheckFunctValue(comm, *Funct_lvls[0], *xblock, "at the beginning of Solve(): ", print_level);

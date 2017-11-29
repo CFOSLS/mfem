@@ -2805,7 +2805,7 @@ int main(int argc, char *argv[])
     ParGridFunction * PartSolDofs = new ParGridFunction(R_space_lvls[0]);
     PartSolDofs->Distribute(ParticSol);
 
-    MFEM_ASSERT(CheckConstrRes(PartSolDofs, Constraint_mat_lvls[0], ConstrRhs, "in the main code for poarticular solution"), "Failure");
+    MFEM_ASSERT(CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for particular solution"), "Failure");
 
     if (verbose)
         std::cout << "Success \n";
