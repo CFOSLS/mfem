@@ -18,7 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -1160,6 +1160,7 @@ int main(int argc, char *argv[])
     all_bdrSigma = 1;
     std::vector<std::vector<Array<int>* > > BdrDofs_R(1, std::vector<Array<int>* >(num_levels));
     std::vector<std::vector<Array<int>* > > EssBdrDofs_R(1, std::vector<Array<int>* >(num_levels));
+    std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_R(1, std::vector<Array<int>* >(num_levels));
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
@@ -1181,6 +1182,7 @@ int main(int argc, char *argv[])
        Dof_TrueDof_Func_lvls[l].resize(1);
        BdrDofs_R[0][l] = new Array<int>;
        EssBdrDofs_R[0][l] = new Array<int>;
+       EssBdrTrueDofs_R[0][l] = new Array<int>;
        EssBdrDofs_Hcurl[l] = new Array<int>;
        Funct_mat_offsets_lvls[l] = new Array<int>;
    }
@@ -1301,6 +1303,7 @@ int main(int argc, char *argv[])
         // getting boundary and essential boundary dofs
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_R[0][l]);
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_R[0][l]);
+        R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_R[0][l]);
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
 
         // getting operators at level l
@@ -1370,19 +1373,41 @@ int main(int argc, char *argv[])
             Element_dofs_W[l] = W_Element_to_dofs1;
 
             // computing projectors assembled on true dofs
+            /*
             HypreParMatrix * P_R_coarser_d_td = Dof_TrueDof_Func_lvls[l + 1][0]->
                     LeftDiagMult( *P_R[l],  R_space_lvls[l]->GetDofOffsets());
             TrueP_R[num_levels - 2 - l] = ParMult(Dof_TrueDof_Func_lvls[l][0]->Transpose(), P_R_coarser_d_td);
             TrueP_R[num_levels - 2 - l]->CopyColStarts();
             TrueP_R[num_levels - 2 - l]->CopyRowStarts();
+            */
+
+            // FIXME: Rewrite these ugly computations
+            auto d_td_coarse_R = R_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            unique_ptr<SparseMatrix>RP_R_local(
+                        Mult(*R_space_lvls[l]->GetRestrictionMatrix(), *P_R[l]));
+            TrueP_R[num_levels - 2 - l] = d_td_coarse_R->LeftDiagMult(
+                        *RP_R_local, R_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_R[num_levels - 2 - l]->CopyColStarts();
+            TrueP_R[num_levels - 2 - l]->CopyRowStarts();
 
             if (prec_is_MG)
             {
+                /*
                 HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl_lvls[l + 1]->
                         LeftDiagMult( *Proj_Hcurl_lvls[l],  C_space_lvls[l]->GetDofOffsets());
                 P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl_lvls[l]->Transpose(), P_C_coarser_d_td);
                 P_C[num_levels - 2 - l]->CopyColStarts();
                 P_C[num_levels - 2 - l]->CopyRowStarts();
+                */
+
+                auto d_td_coarse_C = C_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+                unique_ptr<SparseMatrix>RP_C_local(
+                            Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *Proj_Hcurl_lvls[l]));
+                P_C[num_levels - 2 - l] = d_td_coarse_C->LeftDiagMult(
+                            *RP_C_local, C_space_lvls[l]->GetTrueDofOffsets());
+                P_C[num_levels - 2 - l]->CopyColStarts();
+                P_C[num_levels - 2 - l]->CopyRowStarts();
+
             }
         }
 
@@ -2285,6 +2310,9 @@ int main(int argc, char *argv[])
     }
 #endif
 
+    //MPI_Finalize();
+    //return 0;
+
 #ifdef COMPUTING_LAMBDA
     ParGridFunction * sigma_special = new ParGridFunction(R_space);
     ParGridFunction * lambda_special = new ParGridFunction(W_space);
@@ -2707,7 +2735,7 @@ int main(int argc, char *argv[])
 
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                     P_Func, TrueP_Func, P_W, BdrDofs_R, EssBdrDofs_R,
+                     P_Func, TrueP_Func, P_W, BdrDofs_R, EssBdrDofs_R, EssBdrTrueDofs_R,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
@@ -2722,7 +2750,7 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(30);
+    NewSolver.SetMaxIter(1);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
@@ -3093,8 +3121,16 @@ int main(int argc, char *argv[])
     NewSolver.SetInitialGuess(ParticSol);
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
-    NewSolver.Mult(NewRhs, NewX);
+    /*
+    if (verbose)
+        std::cout << "bdr dofs \n";
+    EssBdrDofs_R[0][1]->Print();
+    if (verbose)
+        std::cout << "bdr true dofs \n";
+    EssBdrTrueDofs_R[0][1]->Print();
+    */
 
+    NewSolver.Mult(NewRhs, NewX);
 
 
     /*

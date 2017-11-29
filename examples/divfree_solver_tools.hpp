@@ -1052,6 +1052,7 @@ protected:
     // vector which defines if a dof is at the boundary / essential part of the boundary
     const std::vector<std::vector<Array<int>* > > & bdrdofs_Func;
     const std::vector<std::vector<Array<int>* > > & essbdrdofs_Func;
+    const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func;
 
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
@@ -1176,6 +1177,7 @@ protected:
 
     // Assembles the coarsest level righthand side for the functional
     void SetUpCoarsestRhsFunc() const;
+    void SetUpCoarsestTrueRhsFunc() const;
 
     // Computes out_l as updated rhs in the functional for the current level
     //      out_l := rhs_l - M_l * solupd_l
@@ -1237,6 +1239,7 @@ public:
                            const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
+                           const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix *> &FunctOp_lvls,
                            const Array<SparseMatrix *> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
@@ -1386,6 +1389,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
                        const Array< SparseMatrix*> &Proj_L2,
                        const std::vector<std::vector<Array<int> *> > &BdrDofs_Func,
                        const std::vector<std::vector<Array<int> *> > &EssBdrDofs_Func,
+                       const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
                        const Vector& ConstrRhsVec,
@@ -1406,6 +1410,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
        P_Func(Proj_Func), TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
        bdrdofs_Func(BdrDofs_Func),
        essbdrdofs_Func(EssBdrDofs_Func),
+       essbdrtruedofs_Func(EssBdrTrueDofs_Func),
        numblocks(FunctOp_lvls[0]->NumColBlocks()),
        block_offsets(FunctOp_lvls[0]->RowOffsets()),
        ConstrRhs(ConstrRhsVec),
@@ -1585,10 +1590,10 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         //*part_solution = bdrdata_finest; worked on dofs
     }
 
+    // actually, is correct only for the serial run
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]),
                               "for the initial guess");
-    // actually, is correct only for the serial run
     MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
                 &ConstrRhs, "for the particular solution"),"");
 
@@ -2001,10 +2006,102 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // BOTTOM: solve the global problem at the coarsest level
     // imposes boundary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
+
+    /*
+    Vector temp0(rhsfunc_lvls[1]->Size());
+    temp0 = *rhsfunc_lvls[1];
+    temp0 -= *trueresfunc_lvls[1];
+    //temp.Print();
+    std::cout << "temp0 norm = " << temp0.Norml2() << "\n";
+    */
+
     SetUpCoarsestRhsFunc();
 
+    //Vector temp(coarse_rhsfunc->Size());
+    //temp = *coarse_rhsfunc;
+
+    SetUpCoarsestTrueRhsFunc();
+
+    //temp -= *coarse_rhsfunc;
+    //std::cout << "temp norm = " << temp.Norml2() << "\n";
+
+    //Vector tempp(coarse_rhsfunc->Size());
+    //tempp = *coarse_rhsfunc;
+    //std::cout << "tempp norm = " << tempp.Norml2() << "\n";
+
+    /*
+    for ( int blk = 0; blk < numblocks; ++blk )
+    {
+        dof_trueDof_Func_lvls[1][blk]->Mult(*truesolupdate_lvls[num_levels - 1], *solupdate_lvls[num_levels - 1]);
+    }
+
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *solupdate_lvls[num_levels - 1]);
+
+    for ( int blk = 0; blk < numblocks; ++blk )
+    {
+        SparseMatrix dtddiag;
+        dof_trueDof_Func_lvls[1][blk]->GetDiag(dtddiag);
+        dtddiag.MultTranspose(*solupdate_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
+    }
+    */
+
+    //SolveCoarseProblem(*coarse_rhsfunc, NULL, *truesolupdate_lvls[num_levels - 1]);
     SolveTrueCoarseProblem(*coarse_rhsfunc, NULL, *truesolupdate_lvls[num_levels - 1]);
+
+    Vector temppp(truesolupdate_lvls[num_levels - 1]->Size());
+    temppp = *truesolupdate_lvls[num_levels - 1];
+    std::cout << "temppp norm = " << temppp.Norml2() << "\n";
+
+
+    /*
+    BlockVector temp(Funct_lvls[1]->RowOffsets());
+    for (int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[1][blk]->Mult(truesolupdate_lvls[num_levels - 1]->GetBlock(blk), temp.GetBlock(blk));
+    BlockVector temp2(block_offsets);
+    temp2 = 0.0;
+    P_Func[0]->Mult(temp, temp2 );
+    if (CheckConstrRes(temp2.GetBlock(0), *Constr_lvls[0], NULL,"special") == false )
+        std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+    */
+
+    /*
+    HypreParMatrix * Constr_d_td = dof_trueDof_Func_lvls[num_levels - 1][0]->LeftDiagMult(
+                *Constr_lvls[num_levels - 1], dof_trueDof_L2_lvls[num_levels - 1]->GetColStarts());
+    HypreParMatrix * d_td_L2_T = dof_trueDof_L2_lvls[num_levels - 1]->Transpose();
+
+    HypreParMatrix * Constr_global = ParMult(d_td_L2_T, Constr_d_td);
+    Constr_global->CopyRowStarts();
+    Constr_global->CopyColStarts();
+
+    Vector truediv(dof_trueDof_L2_lvls[num_levels - 1]->Width());
+    Constr_global->Mult(truesolupdate_lvls[num_levels - 1]->GetBlock(0), truediv);
+
+    std::cout << "truediv norm at level 1 = " << truediv.Norml2() << "\n";
+    */
+
+    /*
+    BlockVector truetemp(block_trueoffsets);
+    TrueP_Func[0]->Mult(*truesolupdate_lvls[num_levels - 1], truetemp);
+    BlockVector temp(block_offsets);
+    for (int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[0][blk]->Mult(truetemp.GetBlock(blk), temp.GetBlock(blk));
+    if (CheckConstrRes(temp.GetBlock(0), *Constr_lvls[0], NULL,"special") == false )
+        std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
+    HypreParMatrix * Constr_d_td0 = dof_trueDof_Func_lvls[0][0]->LeftDiagMult(
+                *Constr_lvls[0], dof_trueDof_L2_lvls[0]->GetColStarts());
+    HypreParMatrix * d_td_L2_T0 = dof_trueDof_L2_lvls[0]->Transpose();
+
+    HypreParMatrix * Constr_global0 = ParMult(d_td_L2_T0, Constr_d_td0);
+    Constr_global0->CopyRowStarts();
+    Constr_global0->CopyColStarts();
+
+    Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
+    Constr_global0->Mult(truetemp.GetBlock(0), truediv0);
+
+    //truediv0.Print();
+    std::cout << "truediv0 norm at level 0 = " << truediv0.Norml2() << "\n";
+    */
 
     /*
     Vector temp(solupdate_lvls[0]->Size());
@@ -2017,6 +2114,20 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     temp -= *truesolupdate_lvls[1];
     temp.Print();
     */
+
+
+    HypreParMatrix * Constr_d_td0 = dof_trueDof_Func_lvls[0][0]->LeftDiagMult(
+                *Constr_lvls[0], dof_trueDof_L2_lvls[0]->GetColStarts());
+    HypreParMatrix * d_td_L2_T0 = dof_trueDof_L2_lvls[0]->Transpose();
+
+    HypreParMatrix * Constr_global0 = ParMult(d_td_L2_T0, Constr_d_td0);
+    Constr_global0->CopyRowStarts();
+    Constr_global0->CopyColStarts();
+
+    Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
+    Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv0);
+
+    std::cout << "truediv0 norm at level 0 before upward = " << truediv0.Norml2() << "\n";
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
@@ -2065,6 +2176,16 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *solupdate_lvls[l - 1] += *tempvec_lvls[l - 1];
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
+            Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
+            Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv0);
+            std::cout << "truediv0 norm at level 0 before upward local solve = " << truediv0.Norml2() << "\n";
+
+            BlockVector tempp(block_offsets);
+            for (int blk = 0; blk < numblocks; ++blk)
+                dof_trueDof_Func_lvls[0][blk]->Mult(truesolupdate_lvls[0]->GetBlock(blk), tempp.GetBlock(blk));
+            if (CheckConstrRes(tempp.GetBlock(0), *Constr_lvls[0], NULL,"special 3") == false )
+                std::cout << "Error temppp!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
             /*
             Vector temp0(solupdate_lvls[0]->Size());
             temp0 = *solupdate_lvls[0];
@@ -2082,15 +2203,22 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             SolveLocalProblems(l - 1, *tempvec2_lvls[l - 1], NULL, *solupdate_lvls[l - 1]);
             SolveTrueLocalProblems(l - 1, *truetempvec2_lvls[l - 1], NULL, *truesolupdate_lvls[l - 1]);
 
+            Vector truediv00(dof_trueDof_L2_lvls[0]->Width());
+            Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv00);
+            std::cout << "truediv00 norm at level 0 after upward local solve = " << truediv00.Norml2() << "\n";
+
+            BlockVector temp(block_offsets);
+            for (int blk = 0; blk < numblocks; ++blk)
+                dof_trueDof_Func_lvls[0][blk]->Mult(truesolupdate_lvls[0]->GetBlock(blk), temp.GetBlock(blk));
+            if (CheckConstrRes(temp.GetBlock(0), *Constr_lvls[0], NULL,"special 3") == false )
+                std::cout << "Error temp!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
             /*
             Vector temp(solupdate_lvls[0]->Size());
             temp = *solupdate_lvls[0];
             temp -= *truesolupdate_lvls[0];
             temp.Print();
             */
-
-            //int p = 3;
-            //p = sin (p * 1.0);
         }
 
     }
@@ -2309,7 +2437,7 @@ void BaseGeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         (*trueoffsets_lvls[lvl + 1])[blk + 1] = (*trueoffsets_lvls[lvl + 1])[blk] +
-                dof_trueDof_Func_lvls[lvl + 1][blk]->Height();
+                dof_trueDof_Func_lvls[lvl + 1][blk]->Width();
     }
 
     truetempvec_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
@@ -2582,6 +2710,9 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
     {
         dof_trueDof_Func_lvls[level][blk]->Mult(truesol_update.GetBlock(blk), sol_update.GetBlock(blk));
     }
+    if (level == 0 && CheckConstrRes(sol_update.GetBlock(0), *Constr_lvls[0], NULL,"special 1") == false )
+        std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
 
     DenseMatrix sub_Constr;
     Vector sub_rhsconstr;
@@ -2680,9 +2811,28 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
 
     } // end of loop over AEs
 
+
+    if (level == 0 && CheckConstrRes(sol_update.GetBlock(0), *Constr_lvls[0], NULL,"special 2") == false )
+        std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
     for (int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[level][blk]->MultTranspose(sol_update.GetBlock(blk), truesol_update.GetBlock(blk));
+    }
+
+    if (level == 0)
+    {
+        BlockVector temp(block_offsets);
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            dof_trueDof_Func_lvls[level][blk]->Mult(truesol_update.GetBlock(blk), temp.GetBlock(blk));
+        }
+
+        if (CheckConstrRes(temp.GetBlock(0), *Constr_lvls[0], NULL,"special 2.5") == false )
+            std::cout << "Error hmmmm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+
+        temp -= sol_update;
+        temp.Print();
     }
 
     return;
@@ -2704,6 +2854,36 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestRhsFunc() const
     }
 
 }
+
+// same as SetUpCoarsestRhsFunc, but on true dofs
+void BaseGeneralMinConstrSolver::SetUpCoarsestTrueRhsFunc() const
+{
+    /*
+    std::cout << "Got here 0 \n";
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        std::cout << "d_td_blk[1]->Height = " << dof_trueDof_Func_lvls[1][blk]->Height() << " \n";
+        std::cout << "blk = " << blk << "coarse_rhsfunc blocksize = " << coarse_rhsfunc->GetBlock(blk).Size() <<
+                     " trueres...block size = " << trueresfunc_lvls[num_levels - 1]->GetBlock(blk).Size() << "\n";
+    }
+    */
+    *coarse_rhsfunc = *trueresfunc_lvls[num_levels - 1];
+    //std::cout << "Got here 1 \n";
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> * temp = essbdrtruedofs_Func[blk][num_levels - 1];
+
+        //const Array<int> * temp2 = essbdrdofs_Func[blk][num_levels - 1];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            coarse_rhsfunc->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            //std::cout << tdof << ": " << (*temp)[tdof] << " " << (*temp2)[tdof] << "\n";
+        }
+    }
+
+}
+
 
 // Sets up the coarse problem: matrix and righthand side
 void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
@@ -2734,10 +2914,18 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
 
     // 2. Creating the block matrix from the local parts using dof_truedof relation
 
-    HypreParMatrix * Constr_global = dof_trueDof_Func_lvls[num_levels - 1][0]->LeftDiagMult(
+    HypreParMatrix * Constr_d_td = dof_trueDof_Func_lvls[num_levels - 1][0]->LeftDiagMult(
                 *Constr_lvls[num_levels - 1], dof_trueDof_L2_lvls[num_levels - 1]->GetColStarts());
+    HypreParMatrix * d_td_L2_T = dof_trueDof_L2_lvls[num_levels - 1]->Transpose();
+
+    HypreParMatrix * Constr_global = ParMult(d_td_L2_T, Constr_d_td);
+    Constr_global->CopyRowStarts();
+    Constr_global->CopyColStarts();
 
     HypreParMatrix *ConstrT_global = Constr_global->Transpose();
+
+    //delete Constr_d_td;
+    //delete d_td_L2_T;
 
     // FIXME: Where these temporary objects are deleted?
     std::vector<HypreParMatrix*> Funct_d_td(numblocks);
@@ -2764,6 +2952,9 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
         coarse_rhsfunc_offsets[blk + 1] = Funct_global[blk]->Height();
     coarse_rhsfunc_offsets.PartialSum();
 
+    //std::cout << "coarse_rhsfunc offsets \n";
+    //coarse_rhsfunc_offsets.Print();
+
     coarse_rhsfunc = new BlockVector(coarse_rhsfunc_offsets);
 
     coarse_matrix = new BlockOperator(coarse_offsets);
@@ -2775,6 +2966,8 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     // coarse solution and righthand side vectors
     coarsetrueX = new BlockVector(coarse_offsets);
     coarsetrueRhs = new BlockVector(coarse_offsets);
+
+    //coarse_offsets.Print();
 
     // preconditioner for the coarse problem
 
@@ -2808,14 +3001,49 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     double rtol(1.e-18);
     double atol(1.e-18);
 
-    coarseSolver = new MINRESSolver(MPI_COMM_WORLD);
+    int myid;
+    MPI_Comm_rank(comm, &myid);
+
+    std::cout << "myid = " << myid << "\n";
+
+    /*
+    if (myid == 3)
+    {
+        SparseMatrix diag00;
+        Funct_global[0]->GetDiag(diag00);
+        std::cout << "diag 00 norm = " << diag00.MaxNorm() << "\n";
+
+        SparseMatrix offdiag00;
+        int * cmap00;
+        Funct_global[0]->GetOffd(offdiag00, cmap00);
+        std::cout << "offdiag 00 norm = " << offdiag00.MaxNorm() << "\n";
+
+        SparseMatrix diag10;
+        Constr_global->GetDiag(diag10);
+        std::cout << "diag 10 norm = " << diag10.MaxNorm() << "\n";
+
+        SparseMatrix offdiag10;
+        int * cmap10;
+        Constr_global->GetOffd(offdiag10, cmap10);
+        std::cout << "offdiag 10 norm = " << offdiag10.MaxNorm() << "\n";
+    }
+    */
+
+    //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
+
+
+    coarseSolver = new MINRESSolver(comm);
     coarseSolver->SetAbsTol(atol);
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
     coarseSolver->SetPreconditioner(*coarse_prec);
     coarseSolver->SetPrintLevel(0);
-
+    //coarseSolver->SetOperator(*coarse_id);
+    //if (myid == 2)
+        //coarseSolver->SetPrintLevel(1);
+    //else
+    //    coarseSolver->SetPrintLevel(1);
 }
 
 
@@ -2869,6 +3097,7 @@ public:
                            const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &BdrDofs_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrDofs_Func,
+                           const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix*> & FunctOp_lvls, const Array<SparseMatrix*> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_Finest,
@@ -2877,7 +3106,7 @@ public:
         BaseGeneralMinConstrSolver(NumLevels, AE_to_e, El_to_dofs_Func, El_to_dofs_L2,
                                    Dof_TrueDof_Func, Dof_TrueDof_L2,
                                    Proj_Func, TrueProj_Func, Proj_L2,
-                                   BdrDofs_Func,EssBdrDofs_Func,
+                                   BdrDofs_Func,EssBdrDofs_Func, EssBdrTrueDofs_Func,
                                    FunctOp_lvls, ConstrOp_lvls,
                                    ConstrRhsVec,
                                    Bdrdata_Finest,
@@ -3140,6 +3369,7 @@ void MinConstrSolver::SolveTrueCoarseProblem(BlockVector& coarserhs_func, Vector
                                          BlockVector& truesol_coarse) const
 {
     // 1. set up solution and righthand side vectors
+    *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
 
     MFEM_ASSERT(coarsetrueRhs->GetBlock(0).Size() == coarserhs_func.GetBlock(0).Size(),
@@ -3150,8 +3380,14 @@ void MinConstrSolver::SolveTrueCoarseProblem(BlockVector& coarserhs_func, Vector
         MFEM_ABORT("SolveTrueCoarseProblem() should not be called with coarserhs_constr != NULL \n");
     }
 
+    std::cout << "Check for the coarsest problem: rhs norm = " << coarsetrueRhs->Norml2() << "\n";
+
     // 2. solve the linear system with preconditioned MINRES.
-    coarseSolver->Mult(*coarsetrueRhs, truesol_coarse);
+    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+        truesol_coarse.GetBlock(blk) = coarsetrueX->GetBlock(blk);
+
 
     return;
 }
