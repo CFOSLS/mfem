@@ -2750,7 +2750,7 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(30);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);

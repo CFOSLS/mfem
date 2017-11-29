@@ -1590,13 +1590,15 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         //*part_solution = bdrdata_finest; worked on dofs
     }
 
+    // FIXME
     // actually, is correct only for the serial run
+    /*
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
                               bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]),
                               "for the initial guess");
     MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
                 &ConstrRhs, "for the particular solution"),"");
-
+    */
     // in the end, part_solution is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
     setup_finished = true;
@@ -1732,6 +1734,8 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     {
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
+        // FIXME: Rewrite the checks considering the true dof stuff
+        /*
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
@@ -1741,6 +1745,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         }
         else
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
+        */
 
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
 
@@ -2254,6 +2259,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         //std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  /// sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
+        // FIXME: Rewrite this using true doff stuff
+        /*
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
@@ -2264,6 +2271,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         else
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], NULL,
                                         "after all levels update"),"");
+        */
     }
 
     // some monitoring service calls
@@ -2693,7 +2701,6 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
     return;
 }
 
-
 // same as SolveLocalProblems() but on true dofs interface
 // FIXME: Maybe, local matrices can also be stored as an improvement?
 void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& truerhs_func,
@@ -2706,12 +2713,15 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
         dof_trueDof_Func_lvls[level][blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
     }
     BlockVector sol_update(block_offsets);
+    sol_update = 0.0;
+    /*
     for (int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[level][blk]->Mult(truesol_update.GetBlock(blk), sol_update.GetBlock(blk));
     }
     if (level == 0 && CheckConstrRes(sol_update.GetBlock(0), *Constr_lvls[0], NULL,"special 1") == false )
         std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+    */
 
 
     DenseMatrix sub_Constr;
@@ -2817,9 +2827,11 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
-        dof_trueDof_Func_lvls[level][blk]->MultTranspose(sol_update.GetBlock(blk), truesol_update.GetBlock(blk));
+        //dof_trueDof_Func_lvls[level][blk]->MultTranspose(sol_update.GetBlock(blk), truesol_update.GetBlock(blk));
+        dof_trueDof_Func_lvls[level][blk]->MultTranspose(1.0, sol_update.GetBlock(blk), 1.0, truesol_update.GetBlock(blk));
     }
 
+    /*
     if (level == 0)
     {
         BlockVector temp(block_offsets);
@@ -2834,6 +2846,7 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
         temp -= sol_update;
         temp.Print();
     }
+    */
 
     return;
 }
