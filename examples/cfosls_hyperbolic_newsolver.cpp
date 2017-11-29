@@ -18,7 +18,7 @@
 #define NEW_STUFF
 
 // switches on/off usage of smoother in the new minimization solver
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -2750,7 +2750,7 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(30);
+    NewSolver.SetMaxIter(1);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
@@ -3119,7 +3119,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
     /*
     if (verbose)

@@ -2039,9 +2039,11 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
         dof_trueDof_Func_lvls[1][blk]->Mult(*truesolupdate_lvls[num_levels - 1], *solupdate_lvls[num_levels - 1]);
     }
+    */
 
     SolveCoarseProblem(*coarse_rhsfunc, NULL, *solupdate_lvls[num_levels - 1]);
 
+    /*
     for ( int blk = 0; blk < numblocks; ++blk )
     {
         SparseMatrix dtddiag;
