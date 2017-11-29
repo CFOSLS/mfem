@@ -2143,13 +2143,13 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
 
+    // FIXME: Rewrite this using true dof stuff
+    /*
     if (print_level)
     {
         //std::cout << "sol_update norm: " << solupdate_lvls[0]->GetBlock(0).Norml2()
                  /// sqrt(solupdate_lvls[0]->GetBlock(0).Size()) << "\n";
 
-        // FIXME: Rewrite this using true doff stuff
-        /*
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
@@ -2160,8 +2160,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         else
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], NULL,
                                         "after all levels update"),"");
-        */
     }
+    */
 
     // some monitoring service calls
     if (!preconditioner_mode)
@@ -2175,6 +2175,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                                     "of the update: ", print_level);
 
     if (print_level || stopcriteria_type == 2)
+    {
         if (!preconditioner_mode)
         {
             ComputeUpdatedLvlRhsFunc(0, *rhsblock, *xblock, *rhsfunc_lvls[0]);
@@ -2184,6 +2185,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *yblock, *rhsblock));
         }
+    }
 
     if (current_iteration == 0)
         solupdate_firstmgnorm = solupdate_currmgnorm;
