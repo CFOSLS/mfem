@@ -166,7 +166,7 @@ public:
 
     // main function which applies the smoother at the given level
     virtual void MultLevel(int level, Vector& in, Vector& out) = 0;
-    virtual void MultTrueLevel(int level, Vector& in, Vector& out) = 0;
+    virtual void MultTrueLevel(int level, Vector& in, Vector& out, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug) = 0;
 
     // legacy of the Operator class
     virtual void Mult (const Vector& x, Vector& y) const
@@ -209,7 +209,7 @@ void MultilevelSmoother::MultLevel(int level, Vector& in, Vector& out)
     MFEM_ABORT("MultLevel is called from the abstract base class but must have been redefined \n");
 }
 
-void MultilevelSmoother::MultTrueLevel(int level, Vector& in, Vector& out)
+void MultilevelSmoother::MultTrueLevel(int level, Vector& in, Vector& out, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug)
 {
     MFEM_ABORT("MultTrueLevel is called from the abstract base class but must have been redefined \n");
 }
@@ -276,7 +276,7 @@ protected:
     mutable Array<HypreParMatrix*> Curlh_global_lvls;
     // global CT*M operators at all levels;
     mutable Array<HypreParMatrix*> CTM_global_lvls;
-    mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
+
     mutable Array<Vector*> truevec_lvls;  // lives in Hdiv_h on true dofs
     mutable Array<Vector*> truevec2_lvls;
     mutable Array<Vector*> truevec3_lvls; // lives in Hcurl_h on true dofs
@@ -289,6 +289,7 @@ protected:
 
     // Lists of essential boundary dofs for Hcurl at all levels
     const std::vector<Array<int>* >  & essbdrdofs_lvls;
+    mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
 
     // temporary storage variables
     mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
@@ -323,7 +324,7 @@ public:
     // Updates the given iterate at level l by solving a minimization
     // problem in H(curl) at level l (using the precomputed righthand side)
     void MultLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
-    void MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
+    void MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug) override;
 
     // service routines
     bool WillConstructCurls() const {return construct_curls;}
@@ -627,7 +628,7 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 }
 
 // same as MultLevel but on true dofs
-void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
+void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, SparseMatrix * Constr_debug, HypreParMatrix * Constr_gl_debug)
 {
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for a non-finalized level");
@@ -660,7 +661,7 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
         }
         else
         {
-            // FIXME Get rid of temporary vectors
+            // FIXME: Get rid of temporary vectors
             Vector temp1(Curlh_lvls[level]->Width());
             d_td_Hcurl_lvls[level]->Mult(*truex_lvls[level], temp1);
 
@@ -669,7 +670,54 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
             // rhs_l = CT_l * res_lvl
             Curlh_lvls[level]->Mult(temp1, temp2);
 
-            d_td_Hdiv_lvls[level]->MultTranspose(temp2, out_lvl);
+            //d_td_Hdiv_lvls[level]->MultTranspose(temp2, out_lvl);
+            SparseMatrix d_td_Hdiv_diag;
+            d_td_Hdiv_lvls[level]->GetDiag(d_td_Hdiv_diag);
+            d_td_Hdiv_diag.MultTranspose(temp2, out_lvl);
+
+            /*
+            Vector temp3(Constr_debug->Height());
+            Constr_debug->Mult(temp2, temp3);
+            std::cout << "temp3 norm = " << temp3.Norml2() << "\n";
+
+            if (Constr_gl_debug)
+            {
+                Vector temp4(Constr_gl_debug->Height());
+                Constr_gl_debug->Mult(out_lvl, temp4);
+                std::cout << "temp4 norm = " << temp4.Norml2() << "\n";
+            }
+
+            HypreParMatrix * d_td_Hdiv_T = d_td_Hdiv_lvls[level]->Transpose();
+            HypreParMatrix* C_d_td = d_td_Hcurl_lvls[level]->LeftDiagMult(*Curlh_lvls[level], d_td_Hdiv_lvls[level]->GetRowStarts());
+            auto Curlh_global = ParMult(d_td_Hdiv_T, C_d_td);
+            Curlh_global->CopyRowStarts();
+            Curlh_global->CopyColStarts();
+            delete C_d_td;
+            delete d_td_Hdiv_T;
+
+            Vector temp5(Curlh_global->Height());
+            Curlh_global->Mult(*truex_lvls[level], temp5);
+            temp5 -= out_lvl;
+            std::cout << "temp5 norm = " << temp5.Norml2() << "\n";
+
+            if (Constr_gl_debug)
+            {
+                Vector temp6(Curlh_global->Height());
+                Curlh_global->Mult(*truex_lvls[level], temp6);
+                Vector temp7(Constr_gl_debug->Height());
+                Constr_gl_debug->Mult(temp6, temp7);
+                std::cout << "temp7 norm = " << temp7.Norml2() << "\n";
+
+                auto product = ParMult(Constr_gl_debug, Curlh_global);
+                SparseMatrix diag;
+                product->GetDiag(diag);
+                std::cout << "diag norm = " << diag.MaxNorm() << "\n";
+                SparseMatrix offdiag;
+                int * cmap;
+                product->GetOffd(offdiag, cmap);
+                std::cout << "offdiag norm = " << offdiag.MaxNorm() << "\n";
+            }
+            */
 
             out_lvl += in_lvl;
         }
@@ -677,7 +725,7 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
     }
     else
     {
-        MFEM_ABORT ("HCurlGSSmoother::MultLevel(): This case was not implemented!");
+        MFEM_ABORT ("HCurlGSSmoother::MultTrueLevel(): This case was not implemented!");
     }
 
 }
@@ -1045,8 +1093,8 @@ protected:
 
     // Projectors for the variables related to the functional and constraint
     const Array< BlockMatrix*>& P_Func;
-    const Array< SparseMatrix*>& P_L2;
     const Array< BlockOperator*>& TrueP_Func;
+    const Array< SparseMatrix*>& P_L2;
 
     // for each variable in the functional and for each level stores a boolean
     // vector which defines if a dof is at the boundary / essential part of the boundary
@@ -1935,13 +1983,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     ComputeUpdatedLvlRhsFunc(0, *rhsblock, *xblock, *rhsfunc_lvls[0]);
     ComputeUpdatedLvlTrueResFunc(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
-    /*
-    Vector temp(rhsfunc_lvls[0]->Size());
-    temp = *rhsfunc_lvls[0];
-    temp -= *trueresfunc_lvls[0];
-    temp.Print();
-    */
-
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1953,13 +1994,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // solve local problems at level l
         SolveLocalProblems(l, *rhsfunc_lvls[l], NULL, *solupdate_lvls[l]);
         SolveTrueLocalProblems(l, *trueresfunc_lvls[l], NULL, *truesolupdate_lvls[l]);
-
-        /*
-        Vector temp(solupdate_lvls[l]->Size());
-        temp = *solupdate_lvls[l];
-        temp -= *truesolupdate_lvls[l];
-        temp.Print();
-        */
 
         ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
@@ -1982,8 +2016,18 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             std::cout << "temp norm = " << temp.Norml2() << "\n";
             */
 
+            /*
+            HypreParMatrix * Constr_d_td0 = dof_trueDof_Func_lvls[0][0]->LeftDiagMult(
+                        *Constr_lvls[0], dof_trueDof_L2_lvls[0]->GetColStarts());
+            HypreParMatrix * d_td_L2_T0 = dof_trueDof_L2_lvls[0]->Transpose();
+
+            HypreParMatrix * Constr_global0 = ParMult(d_td_L2_T0, Constr_d_td0);
+            Constr_global0->CopyRowStarts();
+            Constr_global0->CopyColStarts();
+            */
+
             Smoo->MultLevel(l, *solupdate_lvls[l], *tempvec_lvls[l]);
-            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l]);
+            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l], Constr_lvls[0], NULL );
 
             /*
             Vector temp1(tempvec_lvls[l]->Size());
@@ -1994,6 +2038,20 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             *solupdate_lvls[l] = *tempvec_lvls[l];
             *truesolupdate_lvls[l] = *truetempvec_lvls[l];
+
+            /*
+            Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
+            Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv0);
+
+            //truediv0.Print();
+            std::cout << "truediv0 norm at level 0 = " << truediv0.Norml2() << "\n";
+
+            BlockVector temp(Funct_lvls[0]->RowOffsets());
+            for (int blk = 0; blk < numblocks; ++blk)
+                dof_trueDof_Func_lvls[0][blk]->Mult(truesolupdate_lvls[0]->GetBlock(blk), temp.GetBlock(blk));
+            if (CheckConstrRes(temp.GetBlock(0), *Constr_lvls[0], NULL,"special smoo") == false )
+                std::cout << "Error!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+            */
 
             ComputeUpdatedLvlRhsFunc(l, *rhsfunc_lvls[l], *solupdate_lvls[l], *tempvec_lvls[l] );
             ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
@@ -2055,9 +2113,9 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     //SolveCoarseProblem(*coarse_rhsfunc, NULL, *truesolupdate_lvls[num_levels - 1]);
     SolveTrueCoarseProblem(*coarse_rhsfunc, NULL, *truesolupdate_lvls[num_levels - 1]);
 
-    Vector temppp(truesolupdate_lvls[num_levels - 1]->Size());
-    temppp = *truesolupdate_lvls[num_levels - 1];
-    std::cout << "temppp norm = " << temppp.Norml2() << "\n";
+    //Vector temppp(truesolupdate_lvls[num_levels - 1]->Size());
+    //temppp = *truesolupdate_lvls[num_levels - 1];
+    //std::cout << "temppp norm = " << temppp.Norml2() << "\n";
 
 
     /*
@@ -2123,6 +2181,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     */
 
 
+    /*
     HypreParMatrix * Constr_d_td0 = dof_trueDof_Func_lvls[0][0]->LeftDiagMult(
                 *Constr_lvls[0], dof_trueDof_L2_lvls[0]->GetColStarts());
     HypreParMatrix * d_td_L2_T0 = dof_trueDof_L2_lvls[0]->Transpose();
@@ -2135,6 +2194,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv0);
 
     std::cout << "truediv0 norm at level 0 before upward = " << truediv0.Norml2() << "\n";
+    */
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
@@ -2169,7 +2229,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 Smoo->ComputeTrueRhsLevel(l - 1, *truetempvec2_lvls[l - 1]);
 
                 Smoo->MultLevel(l - 1, *tempvec_lvls[l - 1], *tempvec2_lvls[l - 1]);
-                Smoo->MultTrueLevel(l - 1, *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1]);
+                Smoo->MultTrueLevel(l - 1, *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1], Constr_lvls[0], NULL);
 
                 *tempvec_lvls[l - 1] = *tempvec2_lvls[l - 1];
                 *truetempvec_lvls[l - 1] = *truetempvec2_lvls[l - 1];
@@ -2183,6 +2243,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *solupdate_lvls[l - 1] += *tempvec_lvls[l - 1];
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
+            /*
             Vector truediv0(dof_trueDof_L2_lvls[0]->Width());
             Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv0);
             std::cout << "truediv0 norm at level 0 before upward local solve = " << truediv0.Norml2() << "\n";
@@ -2192,6 +2253,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 dof_trueDof_Func_lvls[0][blk]->Mult(truesolupdate_lvls[0]->GetBlock(blk), tempp.GetBlock(blk));
             if (CheckConstrRes(tempp.GetBlock(0), *Constr_lvls[0], NULL,"special 3") == false )
                 std::cout << "Error temppp!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+            */
 
             /*
             Vector temp0(solupdate_lvls[0]->Size());
@@ -2210,6 +2272,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             SolveLocalProblems(l - 1, *tempvec2_lvls[l - 1], NULL, *solupdate_lvls[l - 1]);
             SolveTrueLocalProblems(l - 1, *truetempvec2_lvls[l - 1], NULL, *truesolupdate_lvls[l - 1]);
 
+            /*
             Vector truediv00(dof_trueDof_L2_lvls[0]->Width());
             Constr_global0->Mult(truesolupdate_lvls[0]->GetBlock(0), truediv00);
             std::cout << "truediv00 norm at level 0 after upward local solve = " << truediv00.Norml2() << "\n";
@@ -2219,6 +2282,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 dof_trueDof_Func_lvls[0][blk]->Mult(truesolupdate_lvls[0]->GetBlock(blk), temp.GetBlock(blk));
             if (CheckConstrRes(temp.GetBlock(0), *Constr_lvls[0], NULL,"special 3") == false )
                 std::cout << "Error temp!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! \n";
+            */
 
             /*
             Vector temp(solupdate_lvls[0]->Size());

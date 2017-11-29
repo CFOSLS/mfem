@@ -1340,11 +1340,51 @@ int main(int argc, char *argv[])
         Bblock->Finalize();
         Constraint_mat_lvls[l] = Bblock->LoseMat();
 
+        /*
+        Divfree_op.Assemble();
+        Divfree_op.Finalize();
+        auto Divfree_global = Divfree_op.ParallelAssemble();
+        Bblock->Assemble();
+        Bblock->Finalize();
+        auto Constr_global = Bblock->ParallelAssemble();
+        auto product = ParMult(Constr_global, Divfree_global);
+        SparseMatrix diag;
+        product->GetDiag(diag);
+        std::cout << "diag norm = " << diag.MaxNorm() << "\n";
+        SparseMatrix offdiag;
+        int * cmap;
+        product->GetOffd(offdiag, cmap);
+        std::cout << "offdiag norm = " << offdiag.MaxNorm() << "\n";
+        */
+
         // getting pointers to dof_truedof matrices
         Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
+
+        /*
+        if (l == 0)
+        {
+            HypreParMatrix * d_td_Hdiv_T = Dof_TrueDof_Hdiv_lvls[l]->Transpose();
+            HypreParMatrix* C_d_td = Dof_TrueDof_Hcurl_lvls[l]->LeftDiagMult(*Divfree_mat_lvls[l], Dof_TrueDof_Hdiv_lvls[l]->GetRowStarts());
+            auto Curlh_global = ParMult(d_td_Hdiv_T, C_d_td);
+            Curlh_global->CopyRowStarts();
+            Curlh_global->CopyColStarts();
+            //delete C_d_td;
+            //delete d_td_Hdiv_T;
+
+            auto product = ParMult(Constr_global, Curlh_global);
+            SparseMatrix diag;
+            product->GetDiag(diag);
+            std::cout << "diag norm = " << diag.MaxNorm() << "\n";
+            SparseMatrix offdiag;
+            int * cmap;
+            product->GetOffd(offdiag, cmap);
+            std::cout << "offdiag norm = " << offdiag.MaxNorm() << "\n";
+        }
+        */
+
 
         // for all but one levels we create projection matrices between levels
         // and projectors assembled on true dofs if MG preconditioner is used
@@ -2750,7 +2790,7 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(33);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
