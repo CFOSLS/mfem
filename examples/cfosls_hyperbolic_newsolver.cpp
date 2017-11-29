@@ -19,7 +19,7 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -1414,13 +1414,6 @@ int main(int argc, char *argv[])
             Element_dofs_W[l] = W_Element_to_dofs1;
 
             // computing projectors assembled on true dofs
-            /*
-            HypreParMatrix * P_R_coarser_d_td = Dof_TrueDof_Func_lvls[l + 1][0]->
-                    LeftDiagMult( *P_R[l],  R_space_lvls[l]->GetDofOffsets());
-            TrueP_R[num_levels - 2 - l] = ParMult(Dof_TrueDof_Func_lvls[l][0]->Transpose(), P_R_coarser_d_td);
-            TrueP_R[num_levels - 2 - l]->CopyColStarts();
-            TrueP_R[num_levels - 2 - l]->CopyRowStarts();
-            */
 
             // FIXME: Rewrite these ugly computations
             auto d_td_coarse_R = R_space_lvls[l + 1]->Dof_TrueDof_Matrix();
@@ -2626,9 +2619,17 @@ int main(int argc, char *argv[])
         col_offsets_TrueP_Func[i][1] = TrueP_R[i]->Width();
         TrueP_Func[i] = new BlockOperator(row_offsets_TrueP_Func[i], col_offsets_TrueP_Func[i]);
         TrueP_Func[i]->SetBlock(0,0, TrueP_R[i]);
+
+        std::cout << "level = " << i << "\n";
+        std::cout << "TrueP at this level is " << TrueP_R[i]->Height() << " x " << TrueP_R[i]->Width() << "\n";
+        SparseMatrix diag;
+        TrueP_R[i]->GetDiag(diag);
+        std::cout << "diag TrueP norm = " << diag.MaxNorm() << "\n";
+        SparseMatrix offdiag;
+        int * cmap;
+        TrueP_R[i]->GetOffd(offdiag, cmap);
+        std::cout << "offdiag TrueP norm = " << offdiag.MaxNorm() << "\n";
     }
-
-
 
     Array<SparseMatrix*> P_WT(ref_levels); //AE_e matrices
     for (int i = 0; i < ref_levels; ++i)
@@ -2791,12 +2792,30 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(40);
+    NewSolver.SetMaxIter(1);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
+
+    Vector error3(ParticSol.Size());
+    error3 = ParticSol;
+
+    int local_size3 = error3.Size();
+    int global_size3 = 0;
+    MPI_Allreduce(&local_size3, &global_size3, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq3 = error3 * error3;
+    double global_norm3 = 0.0;
+    MPI_Allreduce(&local_normsq3, &global_norm3, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm3 = sqrt (global_norm3 / global_size3);
+
+    if (verbose)
+        std::cout << "error3 norm special = " << global_norm3 << "\n";
+
+    MPI_Finalize();
+    return 0;
 
     /*
     if (verbose)
@@ -2805,7 +2824,7 @@ int main(int argc, char *argv[])
     ParGridFunction * PartSolDofs = new ParGridFunction(R_space_lvls[0]);
     PartSolDofs->Distribute(ParticSol);
 
-    MFEM_ASSERT(CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for particular solution"), "Failure");
+    MFEM_ASSERT(CheckConstrRes(PartSolDofs, Constraint_mat_lvls[0], ConstrRhs, "in the main code for poarticular solution"), "Failure");
 
     if (verbose)
         std::cout << "Success \n";
@@ -2840,6 +2859,9 @@ int main(int argc, char *argv[])
 
     ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
 
+    //Vector Tempx(sigma_exact_finest->Size());
+    //Tempx = 0.0;
+    //Vector Tempy(Tempx.Size());
     Vector Tempy(ParticSol.Size());
     Tempy = 0.0;
 
@@ -3159,6 +3181,90 @@ int main(int argc, char *argv[])
     NewSolver.SetInitialGuess(ParticSol);
     NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
+
+    /*
+    Vector Truevec1(C_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hcurl_guy = new ParGridFunction(C_space_lvls[0]);
+    Vector ones_v(pmesh->Dimension());
+    ones_v = 1.0;
+    VectorConstantCoefficient ones_vcoeff(ones_v);
+    hcurl_guy->ProjectCoefficient(ones_vcoeff);
+    hcurl_guy->ParallelProject(Truevec1);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hcurl_guy_0.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hcurl_guy_1.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hcurl_guy_2.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hcurl_guy_3.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+
+    Vector Truevec2(R_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hdiv_guy = new ParGridFunction(R_space_lvls[0]);
+    hdiv_guy->ProjectCoefficient(ones_vcoeff);
+    hdiv_guy->ParallelProject(Truevec2);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hdiv_guy_0.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hdiv_guy_1.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hdiv_guy_2.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hdiv_guy_3.txt");
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+
+
+    //Vector error(Truevec1.Size());
+    //error = Truevec1;
+    Vector error(Truevec2.Size());
+    error = Truevec2;
+
+    int local_size = error.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq = error * error;
+    double global_norm = 0.0;
+    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm = sqrt (global_norm / global_size);
+
+    if (verbose)
+        std::cout << "error norm special = " << global_norm << "\n";
+    */
+
     NewSolver.Mult(NewRhs, NewX);
 
 
@@ -3176,6 +3282,109 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "error2 norm special = " << global_norm2 << "\n";
+
+    /*
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
+        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
+        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
+    }
+    MPI_Barrier(comm);
+    */
+
+    /*
+    //NewX = 1.0;
+
+    //NewSigmahat->Distribute(&NewX);
+
+    //NewX = 0.002;
+
+    //Vector temp(NewX.Size());
+    //temp = 0.002;
+    //sigma_exact_finest->Distribute(&temp);
+    //double debugg_norm = sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size());
+    //std::cout << "debugg norm outside = " << debugg_norm << "\n";
+
+    Vector trueexact(NewX.Size());
+    //trueexact = *(sigma_exact_finest->GetTrueDofs());
+    trueexact = NewX;
+    //sigma_exact_finest->ParallelAssemble(trueexact);
+    //sigma_exact_finest->ParallelProject(trueexact);
+
+    //if (myid == 0)
+        //sigma_exact_finest->Print(std::cout,1);
+
+    //NewX.Print();
+
+    Vector error(NewX.Size());
+    error = 0.0;
+    //error = NewX;
+    error = ParticSol;
+    //error -= trueexact;
+    //error = 1.0;
+
+    int local_size = error.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "myid = 0 \n";
+        std::cout << "local_size = " << local_size << "\n";
+        std::cout << "global_size = " << global_size << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "myid = 1 \n";
+        std::cout << "local_size = " << local_size << "\n";
+        std::cout << "global_size = " << global_size << "\n";
+    }
+    MPI_Barrier(comm);
+
+    double local_normsq = error * error;
+    double global_norm = 0.0;
+    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm = sqrt (global_norm / global_size);
+
+    MPI_Barrier(comm);
+    if (myid == 0)
+    {
+        std::cout << "myid = 0 \n";
+        std::cout << "local_normsq = " << local_normsq << "\n";
+        std::cout << "global_norm = " << global_norm << "\n";
+        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+    }
+    MPI_Barrier(comm);
+    if (myid == 1)
+    {
+        std::cout << "myid = 1 \n";
+        std::cout << "local_normsq = " << local_normsq << "\n";
+        std::cout << "global_norm = " << global_norm << "\n";
+        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
+    }
+    MPI_Barrier(comm);
+
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+
+    if (verbose)
+        std::cout << "error norm special = " << global_norm << "\n";
+
+    MPI_Finalize();
+    return 0;
+    */
+
+    //*NewSigmahat = 1.0;
 
     NewSigmahat->Distribute(&NewX);
 
