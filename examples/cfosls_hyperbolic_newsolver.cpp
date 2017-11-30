@@ -19,10 +19,10 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-//#define WITH_SMOOTHER
+#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -2759,6 +2759,7 @@ int main(int argc, char *argv[])
     */
 
 
+    /*
     Vector ones_v(pmesh->Dimension());
     ones_v = 1.0;
     VectorConstantCoefficient ones_vcoeff(ones_v);
@@ -2841,6 +2842,7 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "error1 norm special = " << global_norm1 << "\n";
+    */
 
 
 
@@ -3067,7 +3069,7 @@ int main(int argc, char *argv[])
 
     trueXtest = 0.0;
     // trueRhstest = - M * particular solution, on true dofs
-    Atest->Mult(trueParticSol, trueRhstest);
+    Atest->Mult(ParticSol, trueRhstest);
     trueRhstest *= -1.0;
 
     chrono.Clear();
@@ -3088,7 +3090,7 @@ int main(int argc, char *argv[])
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
 
-    trueXtest += trueParticSol;
+    trueXtest += ParticSol;
     NewSigmahat->Distribute(trueXtest);
 
     /*
