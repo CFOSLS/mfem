@@ -19,7 +19,7 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
 //#define USE_AS_A_PREC
@@ -774,7 +774,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2759,6 +2759,91 @@ int main(int argc, char *argv[])
     */
 
 
+    Vector ones_v(pmesh->Dimension());
+    ones_v = 1.0;
+    VectorConstantCoefficient ones_vcoeff(ones_v);
+
+    Vector Truevec1(C_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hcurl_guy = new ParGridFunction(C_space_lvls[0]);
+    hcurl_guy->ProjectCoefficient(ones_vcoeff);
+    hcurl_guy->ParallelProject(Truevec1);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hcurl_guy_0.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hcurl_guy_1.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hcurl_guy_2.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hcurl_guy_3.txt");
+        ofs << Truevec1.Size() << "\n";
+        Truevec1.Print(ofs,1);
+    }
+
+    Vector Truevec2(R_space_lvls[0]->GetTrueVSize());
+    ParGridFunction * hdiv_guy = new ParGridFunction(R_space_lvls[0]);
+    hdiv_guy->ProjectCoefficient(ones_vcoeff);
+    hdiv_guy->ParallelProject(Truevec2);
+
+    if (myid == 0)
+    {
+        ofstream ofs("hdiv_guy_0.txt");
+        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 1)
+    {
+        ofstream ofs("hdiv_guy_1.txt");
+        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 2)
+    {
+        ofstream ofs("hdiv_guy_2.txt");
+        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+    if (myid == 3)
+    {
+        ofstream ofs("hdiv_guy_3.txt");
+        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
+        ofs << Truevec2.Size() << "\n";
+        Truevec2.Print(ofs,1);
+    }
+
+    Vector error1(Truevec2.Size());
+    error1 = Truevec2;
+
+    int local_size1 = error1.Size();
+    int global_size1 = 0;
+    MPI_Allreduce(&local_size1, &global_size1, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_normsq1 = error1 * error1;
+    double global_norm1 = 0.0;
+    MPI_Allreduce(&local_normsq1, &global_norm1, 1, MPI_DOUBLE, MPI_SUM, comm);
+    global_norm1 = sqrt (global_norm1 / global_size1);
+
+    if (verbose)
+        std::cout << "error1 norm special = " << global_norm1 << "\n";
+
+
+
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
 
@@ -2792,7 +2877,7 @@ int main(int argc, char *argv[])
     }
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(1);
+    NewSolver.SetMaxIter(40);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
@@ -2814,8 +2899,8 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "error3 norm special = " << global_norm3 << "\n";
 
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 
     /*
     if (verbose)
@@ -3179,7 +3264,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
 
     /*

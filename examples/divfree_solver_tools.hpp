@@ -562,21 +562,79 @@ void HCurlGSSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
 void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
 {
     Vector temp1(Curlh_lvls[level]->Height());
-    d_td_Hdiv_lvls[level]->Mult(res_lvl.GetBlock(0), temp1);
+    //d_td_Hdiv_lvls[level]->Mult(res_lvl.GetBlock(0), temp1);
 
-    //SparseMatrix d_td_Hdiv_diag;
-    //d_td_Hdiv_lvls[level]->GetDiag(d_td_Hdiv_diag);
-    //d_td_Hdiv_diag.Mult(res_lvl.GetBlock(0), temp1);
+    SparseMatrix d_td_Hdiv_diag;
+    d_td_Hdiv_lvls[level]->GetDiag(d_td_Hdiv_diag);
+    d_td_Hdiv_diag.Mult(res_lvl.GetBlock(0), temp1);
 
     Vector temp2(Curlh_lvls[level]->Width());
 
     // rhs_l = CT_l * res_lvl
     Curlh_lvls[level]->MultTranspose(temp1, temp2);
 
-    SparseMatrix d_td_Hcurl_diag;
-    d_td_Hcurl_lvls[level]->GetDiag(d_td_Hcurl_diag);
-    d_td_Hcurl_diag.MultTranspose(temp2, *truerhs_lvls[level]);
-    //d_td_Hcurl_lvls[level]->MultTranspose(temp2, *truerhs_lvls[level]);
+    //SparseMatrix d_td_Hcurl_diag;
+    //d_td_Hcurl_lvls[level]->GetDiag(d_td_Hcurl_diag);
+    //d_td_Hcurl_diag.MultTranspose(temp2, *truerhs_lvls[level]);
+    d_td_Hcurl_lvls[level]->MultTranspose(temp2, *truerhs_lvls[level]);
+
+    /*
+    int myid;
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    FILE * file;
+    if (myid == 0)
+    {
+        file = fopen("hcurl_guy_0.txt", "rt");
+        int size;
+        fscanf(file, "%d\n", &size);
+        for ( int i = 0; i < size; ++i)
+        {
+            double temp;
+            fscanf(file, "%lf\n", &temp);
+            (*truerhs_lvls[level])[i] = temp;
+        }
+        fclose(file);
+    }
+    if (myid == 1)
+    {
+        file = fopen("hcurl_guy_1.txt", "rt");
+        int size;
+        fscanf(file, "%d\n", &size);
+        for ( int i = 0; i < size; ++i)
+        {
+            double temp;
+            fscanf(file, "%lf\n", &temp);
+            (*truerhs_lvls[level])[i] = temp;
+        }
+        fclose(file);
+    }
+    if (myid == 2)
+    {
+        file = fopen("hcurl_guy_2.txt", "rt");
+        int size;
+        fscanf(file, "%d\n", &size);
+        for ( int i = 0; i < size; ++i)
+        {
+            double temp;
+            fscanf(file, "%lf\n", &temp);
+            (*truerhs_lvls[level])[i] = temp;
+        }
+        fclose(file);
+    }
+    if (myid == 3)
+    {
+        file = fopen("hcurl_guy_3.txt", "rt");
+        int size;
+        fscanf(file, "%d\n", &size);
+        for ( int i = 0; i < size; ++i)
+        {
+            double temp;
+            fscanf(file, "%lf\n", &temp);
+            (*truerhs_lvls[level])[i] = temp;
+        }
+        fclose(file);
+    }
+    */
 
 }
 
@@ -728,11 +786,11 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, 
         *truex_lvls[level] = 0.0;
         //if (Constr_debug)
         //{
-            Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
-            id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+            //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
+            //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
         //}
         //else
-            //Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+            Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
         //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
         //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
         //CTMC_global_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
@@ -1759,7 +1817,6 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
         //dof_trueDof_Func_lvls[0][blk]->MultTranspose(start_guess.GetBlock(blk), truestart_guess.GetBlock(blk));
     }
 
-
     // 0. Compute rhs in the functional for the finest level
     ComputeTrueResFunc(0, truestart_guess, *trueresfunc_lvls[0]);
 
@@ -1779,15 +1836,143 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start
         // solve local problems at level l
         SolveTrueLocalProblems(l, *trueresfunc_lvls[l], rhs_constr, *truesolupdate_lvls[l]);
 
+        //after this parallel = serial
+
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         if (Smoo)
         {
+
+            /*
+            int myid;
+            MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+            FILE * file;
+            if (myid == 0)
+            {
+                file = fopen("hdiv_guy_0.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truetempvec_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 1)
+            {
+                file = fopen("hdiv_guy_1.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truetempvec_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 2)
+            {
+                file = fopen("hdiv_guy_2.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truetempvec_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 3)
+            {
+                file = fopen("hdiv_guy_3.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truetempvec_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            */
+
             Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
 
             Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l], NULL, NULL);
 
             *truesolupdate_lvls[l] = *truetempvec_lvls[l];
+
+            /*
+            int myid;
+            MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+            FILE * file;
+            if (myid == 0)
+            {
+                file = fopen("hdiv_guy_0.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                std::cout << "size = " << size << "size of truesol = " << truesolupdate_lvls[l]->Size() << "\n";
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 1)
+            {
+                file = fopen("hdiv_guy_1.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                std::cout << "size = " << size << "size of truesol = " << truesolupdate_lvls[l]->Size() << "\n";
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 2)
+            {
+                file = fopen("hdiv_guy_2.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                std::cout << "size = " << size << "size of truesol = " << truesolupdate_lvls[l]->Size() << "\n";
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            if (myid == 3)
+            {
+                file = fopen("hdiv_guy_3.txt", "rt");
+                int size;
+                fscanf(file, "%d\n", &size);
+                std::cout << "size = " << size << "size of truesol = " << truesolupdate_lvls[l]->Size() << "\n";
+                for ( int i = 0; i < size; ++i)
+                {
+                    double temp;
+                    fscanf(file, "%lf\n", &temp);
+                    (*truesolupdate_lvls[l])[i] = temp;
+                }
+                fclose(file);
+            }
+            */
+
+            //particular_solution = 0.0;//truestart_guess;
+            //particular_solution += *truesolupdate_lvls[0];
+            //return;
+
 
             ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
