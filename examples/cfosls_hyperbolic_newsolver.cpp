@@ -2673,11 +2673,10 @@ int main(int argc, char *argv[])
     BlockVector Xinit_truedofs(new_trueoffsets);
     Xinit_truedofs = 0.0;
 
-    for (int i = 0; i < sigma_exact_truedofs.Size(); ++i )
+    for (int i = 0; i < EssBdrTrueDofs_R[0][0]->Size(); ++i )
     {
-        // just setting Xinit to store correct boundary values at essential boundary
-        if ( (*EssBdrTrueDofs_R[0][0])[i] != 0)
-            Xinit_truedofs.GetBlock(0)[i] = sigma_exact_truedofs[i];
+        int tdof = (*EssBdrTrueDofs_R[0][0])[i];
+        Xinit_truedofs.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
     }
 
     //MPI_Finalize();
