@@ -22,16 +22,13 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-// initializes sigma with exact solution
-// if combined with COMPUTING_LAMBDA, it will
-// be exact discrete solution,
-// else a projection of the exact solution
-//#define EXACTSOLH_INIT
+// computes the solution of the exact
+// discrete solution
 //#define COMPUTING_LAMBDA
 
 #include "divfree_solver_tools.hpp"
@@ -1454,6 +1451,8 @@ int main(int argc, char *argv[])
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space_lvls[0]);
     sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
+    Vector sigma_exact_truedofs(R_space_lvls[0]->GetTrueVSize());
+    sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
 #endif
     //if(dim==3) pmesh->ReorientTetMesh();
 
@@ -2657,81 +2656,29 @@ int main(int argc, char *argv[])
     MFEM_ASSERT(Xinit.GetBlock(0).Size() == sigma_exact_finest->Size(),
                 "Xinit and sigma_exact_finest have different sizes! \n");
 
-#ifdef EXACTSOLH_INIT
-    if (verbose)
-        std::cout << "EXACTSOLH_INIT is activated \n";
-#endif
-
     for (int i = 0; i < sigma_exact_finest->Size(); ++i )
     {
         // just setting Xinit to store correct boundary values at essential boundary
         if ( (*EssBdrDofs_R[0][0])[i] != 0)
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
 
-        //probably doing something better than just essential boundary values
-#ifdef EXACTSOLH_INIT
-    #ifdef COMPUTING_LAMBDA
-        Xinit.GetBlock(0)[i] = (*sigma_special)[i];
-        if ( fabs ((*sigma_special)[i] - (*sigma_exact_finest)[i]) > 1.0e-10 && (*EssBdrDofs_R[0][0])[i] != 0)
-            std::cout << "Weird! Mismatching essential boundary values for sigma_h,exact and sigma_exact,h \n";
-    #else
-        //Xinit.GetBlock(0)[i] = sigmahat_pau[i];
-    #endif
-#endif
     }
 
-#ifdef EXACTSOLH_INIT
-    BlockVector res_func (Funct_mat_lvls[0]->ColOffsets());
-    Funct_mat_lvls[0]->Mult(Xinit, res_func);
 
-    ParGridFunction * Ax_check = new ParGridFunction(R_space);
-    Vector trueAx_check(Adiag_check.Height());
-    Adiag_check.Mult(trueX_special.GetBlock(0), trueAx_check);
-    Ax_check->Distribute(&trueAx_check);
-    *Ax_check -= res_func.GetBlock(0);
-    double Ax_diff_norm = Ax_check->Norml2() / sqrt (Ax_check->Size());
-    if (verbose)
-        std::cout << "(Adiag sigma_special - A\' Xinit ) norm: " << Ax_diff_norm << "\n";
+    Array<int> new_trueoffsets(numblocks + 1);
+    new_trueoffsets[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+        new_trueoffsets[blk + 1] = Dof_TrueDof_Func_lvls[0][blk]->Width();
+    new_trueoffsets.PartialSum();
+    BlockVector Xinit_truedofs(new_trueoffsets);
+    Xinit_truedofs = 0.0;
 
-    Vector BTlambda(Constraint_mat_lvls[0]->Width());
-    Constraint_mat_lvls[0]->MultTranspose(*lambda_special, BTlambda);
-
-    ParGridFunction * BTlam_check = new ParGridFunction(R_space);
-    Vector trueBTlam_check(Bdiag_check.Width());
-    Bdiag_check.MultTranspose(trueX_special.GetBlock(1), trueBTlam_check);
-    BTlam_check->Distribute(&trueBTlam_check);
-    *BTlam_check -= BTlambda;
-    double BTlam_diff_norm = BTlam_check->Norml2() / sqrt (BTlam_check->Size());
-    if (verbose)
-        std::cout << "Bdiag sigma_special - B\' Xinit ) norm: " << BTlam_diff_norm << "\n";
-
-    res_func.GetBlock(0) += BTlambda;
-    //res_func.GetBlock(0).Print();
-    for ( int i = 0; i < res_func.GetBlock(0).Size(); ++i)
+    for (int i = 0; i < sigma_exact_truedofs.Size(); ++i )
     {
-        double value = fabs(res_func.GetBlock(0)[i]);
-        if ( value > 1.0e-6 && value < 1.0e-4 )
-        {
-            std::cout << "i = " << i << "between 1.0e-4 and 1.0e-6, val = " << value << "\n";
-            if ( (*EssBdrDofs_R[0][0])[i] != 0 )
-                std::cout << "It belongs to the essential boundary! \n";
-            else if ( (*BdrDofs_R[0][0])[i] != 0 )
-                std::cout << "It belongs to the nonessential boundary! \n";
-        }
+        // just setting Xinit to store correct boundary values at essential boundary
+        if ( (*EssBdrTrueDofs_R[0][0])[i] != 0)
+            Xinit_truedofs.GetBlock(0)[i] = sigma_exact_truedofs[i];
     }
-
-    double res_func_norm = res_func.GetBlock(0).Norml2() / sqrt (res_func.GetBlock(0).Size());
-    if (verbose)
-        std::cout << "residual norm in functional for correct sigma_h: " << res_func_norm << "\n";
-
-    Vector res_constr (Constraint_mat_lvls[0]->Height());
-    Constraint_mat_lvls[0]->Mult(Xinit, res_constr);
-    res_constr -= Floc;
-    double res_constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
-    if (verbose)
-        std::cout << "residual norm in constraint for correct sigma_h: " << res_constr_norm << "\n";
-
-#endif
 
     //MPI_Finalize();
     //return 0;
@@ -2865,7 +2812,7 @@ int main(int argc, char *argv[])
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                      P_Func, TrueP_Func, P_W, BdrDofs_R, EssBdrDofs_R, EssBdrTrueDofs_R,
-                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit,
+                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif

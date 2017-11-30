@@ -17,6 +17,9 @@ using std::unique_ptr;
 // FIXME: Maybe, it is better to implement a multigrid class more general than Chak did
 // FIXME: and describe the new solver as a multigrid with a specific settings (smoothers)?
 
+// FIXME: Shouldn't it be full BlockVectors check in CheckBdrError everywhere
+
+
 void CompareTrueVecwithVec (const HypreParMatrix * d_td, const Vector &TrueVec, const Vector& Vec, Vector& TempVec)
 {
     d_td->Mult(TrueVec, TempVec);
@@ -1142,8 +1145,8 @@ protected:
 
     // a given blockvector which satisfies essential bdr conditions
     // imposed for the initial problem
-    // on dofs
-    const BlockVector& bdrdata_finest;
+    // on true dofs
+    const BlockVector& bdrdata_truedofs;
 
     // a parameter used in Get_AE_eintdofs to identify if one should additionally look
     // for fine-grid dofs which are internal to the fine-grid elements
@@ -1293,7 +1296,7 @@ protected:
 
     // finds a particular solution (like the first iteration of the previous
     // version of the solver) and returns it as a vector on true dofs
-    void FindParticularSolution( const BlockVector& initial_guess,
+    void FindParticularSolution(const BlockVector& truestart_guess,
                                  BlockVector& particular_solution) const;
 
     // main solver iteration routine
@@ -1316,7 +1319,7 @@ public:
                            const Array<BlockMatrix *> &FunctOp_lvls,
                            const Array<SparseMatrix *> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
-                           const BlockVector& Bdrdata_Finest,
+                           const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
                            bool Higher_Order_Elements = false,
                            bool Construct_CoarseOps = true,
@@ -1466,7 +1469,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
                        const Vector& ConstrRhsVec,
-                       const BlockVector& Bdrdata_Finest,
+                       const BlockVector& Bdrdata_TrueDofs,
                        MultilevelSmoother* Smoother, bool Higher_Order_Elements, bool Construct_CoarseOps, int StopCriteria_Type)
      : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()),
        construct_coarseops(Construct_CoarseOps),
@@ -1487,7 +1490,7 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
        numblocks(FunctOp_lvls[0]->NumColBlocks()),
        block_offsets(FunctOp_lvls[0]->RowOffsets()),
        ConstrRhs(ConstrRhsVec),
-       bdrdata_finest(Bdrdata_Finest),
+       bdrdata_truedofs(Bdrdata_TrueDofs),
        higher_order(Higher_Order_Elements)
 {
 
@@ -1600,9 +1603,8 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
 
     // 1. copying the given initial vector to the internal variable
 
-    // is incorrect since now Funct value is computed on true dofs and bdrdata_finest is on dofs
-    //CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], bdrdata_finest, "for initial vector at the beginning"
-                                                     //" of solver setup: ", print_level);
+    CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], bdrdata_truedofs,
+            "for initial vector at the beginning of solver setup: ", print_level);
 
     // 2. setting up the required internal data at all levels
     // including smoothers
@@ -1641,7 +1643,13 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     SetUpCoarsestLvl();
 
     // 3. checking if the given initial vector satisfies the divergence constraint
-    Constr_lvls[0]->Mult(bdrdata_finest.GetBlock(0), *rhs_constr);
+    BlockVector temp_dofs(block_offsets);
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->Mult(bdrdata_truedofs.GetBlock(blk), temp_dofs.GetBlock(blk));
+    }
+
+    Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), *rhs_constr);
     *rhs_constr *= -1.0;
     *rhs_constr += ConstrRhs;
 
@@ -1651,28 +1659,25 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
         std::cout << "Calling FindParticularSolution() \n";
 
-        FindParticularSolution(bdrdata_finest, *part_solution);
+        FindParticularSolution(bdrdata_truedofs, *part_solution);
     }
     else
     {
-        for ( int blk = 0; blk < numblocks; ++blk)
-        {
-            SparseMatrix tempdiag;
-            dof_trueDof_Func_lvls[0][blk]->GetDiag(tempdiag);
-            tempdiag.MultTranspose(bdrdata_finest.GetBlock(blk), part_solution->GetBlock(blk));
-        }
-        //*part_solution = bdrdata_finest; worked on dofs
+        *part_solution = bdrdata_truedofs;
     }
 
-    // FIXME
-    // actually, is correct only for the serial run
-    /*
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]),
+                              bdrdata_truedofs.GetBlock(0), *essbdrtruedofs_Func[0][0]),
                               "for the initial guess");
-    MFEM_ASSERT(CheckConstrRes(part_solution->GetBlock(0), *Constr_lvls[0],
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        dof_trueDof_Func_lvls[0][blk]->Mult(part_solution->GetBlock(blk), temp_dofs.GetBlock(blk));
+    }
+
+    MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
                 &ConstrRhs, "for the particular solution"),"");
-    */
+
     // in the end, part_solution is in any case a valid initial iterate
     // i.e, it satisfies the divergence contraint
     setup_finished = true;
@@ -1683,20 +1688,9 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
 
 // the start_guess is on dofs
 // (*) returns particular solution as a vector on true dofs!
-void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& start_guess,
+void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& truestart_guess,
                                                          BlockVector& particular_solution) const
 {
-    BlockVector truestart_guess(block_trueoffsets);
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        // FIXME: Decide what should be done here
-        SparseMatrix diag;
-        dof_trueDof_Func_lvls[0][blk]->GetDiag(diag);
-        diag.MultTranspose(start_guess.GetBlock(blk), truestart_guess.GetBlock(blk) );
-
-        //dof_trueDof_Func_lvls[0][blk]->MultTranspose(start_guess.GetBlock(blk), truestart_guess.GetBlock(blk));
-    }
-
     // 0. Compute rhs in the functional for the finest level
     ComputeTrueResFunc(0, truestart_guess, *trueresfunc_lvls[0]);
 
@@ -1809,14 +1803,15 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     {
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
+        MFEM_ASSERT(CheckBdrError(tempblock_truedofs->GetBlock(0), bdrdata_truedofs.GetBlock(0),
+                                  *essbdrtruedofs_Func[0][0]), "before the iteration");
+
         // FIXME: Rewrite the checks considering the true dof stuff
         /*
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                        "before the iteration"),"");
-            MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0), bdrdata_finest.GetBlock(0),
-                                      *essbdrdofs_Func[0][0]), "before the iteration");
         }
         else
             MFEM_ASSERT(CheckConstrRes(xblock->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
@@ -1989,13 +1984,10 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     }
     */
 
-    /*
-     * FIXME:
 #ifndef CHECK_SPDSOLVER
-    MFEM_ASSERT(CheckBdrError(xblock->GetBlock(0),
-                              bdrdata_finest.GetBlock(0), *essbdrdofs_Func[0][0]), "at the start of Solve()");
+    MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
+                              bdrdata_truedofs.GetBlock(0), *essbdrtruedofs_Func[0][0]), "at the start of Solve()");
 #endif
-    */
 
     next_sol = previous_sol;
 
@@ -2087,6 +2079,15 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
 
+    if (print_level)
+    {
+        if (!preconditioner_mode)
+        {
+            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_truedofs.GetBlock(0),
+                                      *essbdrtruedofs_Func[0][0]), "after all levels update");
+        }
+
+    }
     // FIXME: Rewrite this using true doff stuff
     /*
     if (print_level)
@@ -2098,8 +2099,6 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                         "after all levels update"),"");
-            MFEM_ASSERT(CheckBdrError(yblock->GetBlock(0), bdrdata_finest.GetBlock(0),
-                                      *essbdrdofs_Func[0][0]), "after all levels update");
         }
         else
             MFEM_ASSERT(CheckConstrRes(yblock->GetBlock(0), *Constr_lvls[0], NULL,
@@ -2934,7 +2933,7 @@ public:
                            const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix*> & FunctOp_lvls, const Array<SparseMatrix*> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
-                           const BlockVector& Bdrdata_Finest,
+                           const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
                            bool Higher_Order_Elements = false, bool Construct_CoarseOps = true):
         BaseGeneralMinConstrSolver(NumLevels, AE_to_e, El_to_dofs_Func, El_to_dofs_L2,
@@ -2943,7 +2942,7 @@ public:
                                    BdrDofs_Func,EssBdrDofs_Func, EssBdrTrueDofs_Func,
                                    FunctOp_lvls, ConstrOp_lvls,
                                    ConstrRhsVec,
-                                   Bdrdata_Finest,
+                                   Bdrdata_TrueDofs,
                                    Smoother,
                                    Higher_Order_Elements, Construct_CoarseOps)
         {
