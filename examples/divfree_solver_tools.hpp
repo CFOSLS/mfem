@@ -164,12 +164,12 @@ public:
                                const std::vector<HypreParMatrix*>* D_tD_lvl = NULL) = 0;
 
     // general functions for setting righthand side at the given level
-    virtual void ComputeRhsLevel(int level, const BlockVector& res_lvl);
+    //virtual void ComputeRhsLevel(int level, const BlockVector& res_lvl);
     virtual void ComputeTrueRhsLevel(int level, const BlockVector& res_lvl);
 
     // main function which applies the smoother at the given level
-    virtual void MultLevel(int level, Vector& in, Vector& out) = 0;
-    virtual void MultTrueLevel(int level, Vector& in, Vector& out, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug) = 0;
+    //virtual void MultLevel(int level, Vector& in, Vector& out) = 0;
+    virtual void MultTrueLevel(int level, Vector& in, Vector& out) = 0;
 
     // legacy of the Operator class
     virtual void Mult (const Vector& x, Vector& y) const
@@ -207,20 +207,22 @@ void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl,
                  " class but must have been redefined \n");
 }
 
+/*
 void MultilevelSmoother::MultLevel(int level, Vector& in, Vector& out)
 {
     MFEM_ABORT("MultLevel is called from the abstract base class but must have been redefined \n");
-}
-
-void MultilevelSmoother::MultTrueLevel(int level, Vector& in, Vector& out, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug)
-{
-    MFEM_ABORT("MultTrueLevel is called from the abstract base class but must have been redefined \n");
 }
 
 void MultilevelSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
 {
     std::cout << "ComputeRhsLevel for a BlockVector argument is called from the abstract base"
                  " class but must have been redefined \n";
+}
+*/
+
+void MultilevelSmoother::MultTrueLevel(int level, Vector& in, Vector& out)
+{
+    MFEM_ABORT("MultTrueLevel is called from the abstract base class but must have been redefined \n");
 }
 
 void MultilevelSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
@@ -295,8 +297,8 @@ protected:
     mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
 
     // temporary storage variables
-    mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
-    mutable Array<Vector*> tempvec_lvls;  // lives in H(curl)_h
+    //mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
+    //mutable Array<Vector*> tempvec_lvls;  // lives in H(curl)_h
     //mutable Array<Vector*> tempvec2_lvls; // lives in H(div)_h
 
 public:
@@ -321,13 +323,13 @@ public:
     // Computes the righthand side for the local minimization problem
     // solved in MultLevel() from the given residual at level l of the
     // original problem
-    void ComputeRhsLevel(int level, const BlockVector& res_lvl) override;
+    //void ComputeRhsLevel(int level, const BlockVector& res_lvl) override;
     void ComputeTrueRhsLevel(int level, const BlockVector& res_lvl) override;
 
     // Updates the given iterate at level l by solving a minimization
     // problem in H(curl) at level l (using the precomputed righthand side)
-    void MultLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
-    void MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, SparseMatrix *Constr_debug, HypreParMatrix *Constr_gl_debug) override;
+    //void MultLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
+    void MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
 
     // service routines
     bool WillConstructCurls() const {return construct_curls;}
@@ -412,9 +414,9 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & 
     truerhs_lvls.SetSize(num_levels);
     essbdrtruedofs_lvls.resize(num_levels);
 
-    rhs_lvls.SetSize(num_levels);
+    //rhs_lvls.SetSize(num_levels);
     //tempvec2_lvls.SetSize(num_levels);
-    tempvec_lvls.SetSize(num_levels);
+    //tempvec_lvls.SetSize(num_levels);
     truevec_lvls.SetSize(num_levels);
     truevec2_lvls.SetSize(num_levels);
     truevec3_lvls.SetSize(num_levels);
@@ -530,8 +532,8 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
                             0.0, essbdrtruedofs_lvls[level]->GetData());
 
         // allocating memory for local-to-level vector arrays
-        rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
-        tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+        //rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+        //tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
 
         delete CTMC_d_td;
         delete d_td_T;
@@ -541,7 +543,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
     }// end of if level wasn't finelized already before the call
 }
 
-
+/*
 // Computes the residual for the "smoother equation"
 // from the given residual of the basic minimization process:
 //      rhs_l = CT_l * res_l
@@ -550,8 +552,12 @@ void HCurlGSSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
     // rhs_l = CT_l * res_lvl
     Curlh_lvls[level]->MultTranspose(res_lvl.GetBlock(0), *rhs_lvls[level]);
 }
+*/
 
-// same as ComputeRhsLevel but on true dofs
+// (*) same as ComputeRhsLevel but on true dofs
+// Computes the residual for the "smoother equation"
+// from the given residual of the basic minimization process:
+//      rhs_l = CT_l * res_l
 void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
 {
     Vector temp1(Curlh_lvls[level]->Height());
@@ -631,7 +637,7 @@ void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
 
 }
 
-
+/*
 // Solves the minimization problem in the div-free subspace
 // Takes the current iterate in_lvl
 // and returns the updated iterate
@@ -694,9 +700,19 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     }
 
 }
+*/
 
-// same as MultLevel but on true dofs
-void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl, SparseMatrix * Constr_debug, HypreParMatrix * Constr_gl_debug)
+// (*) same as MultLevel but on true dofs
+// Solves the minimization problem in the div-free subspace
+// Takes the current iterate in_lvl
+// and returns the updated iterate
+//      out_lvl = in_lvl + Curl_l * sol_l (all assembled on dofs)
+// where sol_l is obtained by a several GS sweeps
+// for the system
+//      CurlT_l M Curl_l sol_l = rhs_l
+// and rhs_l is computed using the residual of the original problem
+// during the call to SetUpRhs() before MultLevel
+void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
 {
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for a non-finalized level");
@@ -821,11 +837,11 @@ public:
     // Computes the righthand side for the local minimization problem
     // solved in MultLevel() from the given residual at level l of the
     // original problem
-    void ComputeRhsLevel(int level, const BlockVector& res_lvl) override;
+    //void ComputeRhsLevel(int level, const BlockVector& res_lvl) override;
 
     // Updates the given iterate at level l by solving a minimization
     // problem in H(curl) at level l (using the precomputed righthand side)
-    void MultLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
+    //void MultLevel(int level, Vector& in_lvl, Vector& out_lvl) override;
 
     void SetAbsTol(double AbsTol) const {abs_tol = AbsTol;}
     void SetRelTol(double RelTol) const {rel_tol = RelTol;}
@@ -948,6 +964,7 @@ void HCurlSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
     //std::cout << "Exiting SetUpSmoother\n";
 }
 
+/*
 void HCurlSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
 {
     // rhs_l = CT_l * res_lvl
@@ -1038,6 +1055,7 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     // out_lvl = in_lvl + Curlh_l * x_l
     out_lvl += in_lvl;
 }
+*/
 
 // TODO: Add as an option using blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
@@ -1198,11 +1216,6 @@ protected:
     // on true dofs
     mutable BlockVector* part_solution;
 
-    // variable-size vectors (initialized with the finest level sizes)
-    mutable Vector* rhs_constr;     // righthand side (from the divergence constraint) at level l
-    mutable Vector* Qlminus1_f;     // stores P_l^T rhs_constr_l
-    mutable Vector* workfvec;       // used only in ComputeLocalRhsConstr()
-
     // used for storing solution updates at all levels
     //mutable Array<BlockVector*> solupdate_lvls;
 
@@ -1219,8 +1232,8 @@ protected:
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
 
-    mutable Vector * trueQlminus1_f;
-    mutable Vector * truerhs_constr;
+    //mutable Vector * trueQlminus1_f;
+    //mutable Vector * truerhs_constr;
 
 protected:
     BlockMatrix* Get_AE_eintdofs(int level, BlockMatrix& el_to_dofs,
@@ -1240,7 +1253,7 @@ protected:
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
     // Should be called only during the first solver iterate (since it must be 0 at the next)
-    void ComputeLocalRhsConstr(int level) const;
+    void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr, Vector &workfvec) const;
 
     // Allocates current level-related data and computes coarser matrices for the functional
     // and the constraint.
@@ -1511,9 +1524,6 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 
     AE_edofs_L2.SetSize(num_levels - 1);
     AE_eintdofs_Func.SetSize(num_levels - 1);
-    rhs_constr = new Vector(ConstrOp_lvls[0]->Height());
-    Qlminus1_f = new Vector(ConstrOp_lvls[0]->Height());
-    workfvec = new Vector(ConstrOp_lvls[0]->Height());
     //xblock = new BlockVector(block_offsets);
     //yblock = new BlockVector(block_offsets);
     //rhsblock = new BlockVector(block_offsets);
@@ -1562,8 +1572,8 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
 
     part_solution = new BlockVector(block_trueoffsets);
 
-    truerhs_constr = new Vector(Dof_TrueDof_L2_lvls[0]->Width());
-    trueQlminus1_f = new Vector(Dof_TrueDof_L2_lvls[0]->Width());
+    //truerhs_constr = new Vector(Dof_TrueDof_L2_lvls[0]->Width());
+    //trueQlminus1_f = new Vector(Dof_TrueDof_L2_lvls[0]->Width());
 
     // can't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
@@ -1643,18 +1653,19 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     SetUpCoarsestLvl();
 
     // 3. checking if the given initial vector satisfies the divergence constraint
+    // FIXME: Get rid of temp vectors
     BlockVector temp_dofs(block_offsets);
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         dof_trueDof_Func_lvls[0][blk]->Mult(bdrdata_truedofs.GetBlock(blk), temp_dofs.GetBlock(blk));
     }
 
-    Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), *rhs_constr);
-    *rhs_constr *= -1.0;
-    *rhs_constr += ConstrRhs;
+    Vector temp_constr(Constr_lvls[0]->Height());
+    Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), temp_constr);
+    temp_constr -= ConstrRhs;
 
     // 3.1 if not, computing the particular solution
-    if ( ComputeMPIVecNorm(comm,*rhs_constr,"", print_level) > 1.0e-14 )
+    if ( ComputeMPIVecNorm(comm, temp_constr,"", print_level) > 1.0e-14 )
     {
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
         std::cout << "Calling FindParticularSolution() \n";
@@ -1691,10 +1702,23 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
 void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& truestart_guess,
                                                          BlockVector& particular_solution) const
 {
+    BlockVector temp_dofs(block_offsets);
+    for ( int blk = 0; blk < numblocks; ++blk)
+        dof_trueDof_Func_lvls[0][blk]->Mult(truestart_guess.GetBlock(blk), temp_dofs.GetBlock(blk));
+
+    // variable-size vectors (initialized with the finest level sizes) on dofs
+    Vector rhs_constr((Constr_lvls[0]->Height()));     // righthand side (from the divergence constraint) at level l
+    Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), rhs_constr);
+    rhs_constr *= -1.0;
+    rhs_constr += ConstrRhs;
+
+    Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
+    Vector workfvec(rhs_constr.Size());       // used only in ComputeLocalRhsConstr()
+
     // 0. Compute rhs in the functional for the finest level
     ComputeTrueResFunc(0, truestart_guess, *trueresfunc_lvls[0]);
 
-    *Qlminus1_f = *rhs_constr;
+    Qlminus1_f = rhs_constr;
 
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1702,10 +1726,10 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
 
-        ComputeLocalRhsConstr(l);
+        ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, workfvec);
 
         // solve local problems at level l
-        SolveTrueLocalProblems(l, *trueresfunc_lvls[l], rhs_constr, *truesolupdate_lvls[l]);
+        SolveTrueLocalProblems(l, *trueresfunc_lvls[l], &rhs_constr, *truesolupdate_lvls[l]);
 
         //after this parallel = serial
 
@@ -1715,7 +1739,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
         {
             Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
 
-            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l], NULL, NULL);
+            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l]);
 
             *truesolupdate_lvls[l] = *truetempvec_lvls[l];
 
@@ -1730,7 +1754,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
     } // end of loop over finer levels
 
     // 2. setup and solve the coarse problem
-    *rhs_constr = *Qlminus1_f;
+    rhs_constr = Qlminus1_f;
 
     // imposes boundary conditions and assembles coarsest level's
     // righthand side (from rhsfunc) on true dofs
@@ -1738,7 +1762,7 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
     SetUpCoarsestTrueRhsFunc();
 
     // 2.5 solve coarse problem
-    SolveTrueCoarseProblem(*coarse_rhsfunc, rhs_constr, *truesolupdate_lvls[num_levels - 1]);
+    SolveTrueCoarseProblem(*coarse_rhsfunc, &rhs_constr, *truesolupdate_lvls[num_levels - 1]);
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -1769,11 +1793,6 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
     if (print_level)
         sol_firstitnorm = ComputeMPIVecNorm(comm, *truetempvec_lvls[0],
                 "for the particular solution", print_level);
-
-    // 5. restore sizes of righthand side vectors for the constraint
-    // which were changed during transfer between levels
-    rhs_constr->SetSize(ConstrRhs.Size());
-    Qlminus1_f->SetSize(rhs_constr->Size());
 }
 
 
@@ -2010,7 +2029,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
 
-            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l], Constr_lvls[0], NULL );
+            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l]);
 
             *truesolupdate_lvls[l] = *truetempvec_lvls[l];
 
@@ -2047,7 +2066,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             {
                 Smoo->ComputeTrueRhsLevel(l - 1, *truetempvec2_lvls[l - 1]);
 
-                Smoo->MultTrueLevel(l - 1, *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1], Constr_lvls[0], NULL);
+                Smoo->MultTrueLevel(l - 1, *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1]);
 
                 *truetempvec_lvls[l - 1] = *truetempvec2_lvls[l - 1];
 
@@ -2194,20 +2213,23 @@ void BaseGeneralMinConstrSolver::InterpolateBack(int start_level, BlockVector& v
 //   Q_{l-1,l} = P_l * inv(P_l^T P_l) * P_l^T
 // where P_l columns compose the basis of the coarser space.
 // (*) Uses workfvec as an intermediate buffer
-void BaseGeneralMinConstrSolver::ComputeLocalRhsConstr(int level) const
+// Input: Qlminus1_f
+// Output: Qlminus1_f, rhs_constr
+// Buffer: workfvec
+void BaseGeneralMinConstrSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f, Vector& rhs_constr, Vector& workfvec) const
 {
     // 1. rhs_constr = Q_{l-1,l} * Q_{l-1} * f = Q_l * f
     //    workfvec = P_l^T * Q_{l-1} * f
-    ProjectFinerL2ToCoarser(level, *Qlminus1_f, *workfvec, *rhs_constr);
+    ProjectFinerL2ToCoarser(level, Qlminus1_f, workfvec, rhs_constr);
 
     // 2. rhs_constr = Q_l f - Q_{l-1}f
-    *rhs_constr -= *Qlminus1_f;
+    rhs_constr -= Qlminus1_f;
 
     // 3. rhs_constr (new) = - rhs_constr(old) = Q_{l-1} f - Q_l f
-    *rhs_constr *= -1;
+    rhs_constr *= -1;
 
     // 3. Q_{l-1} (new) = P_L2T[level] * f
-    *Qlminus1_f = *workfvec;
+    Qlminus1_f = workfvec;
 
     return;
 }
