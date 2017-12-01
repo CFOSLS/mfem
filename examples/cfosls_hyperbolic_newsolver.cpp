@@ -2618,16 +2618,6 @@ int main(int argc, char *argv[])
         col_offsets_TrueP_Func[i][1] = TrueP_R[i]->Width();
         TrueP_Func[i] = new BlockOperator(row_offsets_TrueP_Func[i], col_offsets_TrueP_Func[i]);
         TrueP_Func[i]->SetBlock(0,0, TrueP_R[i]);
-
-        std::cout << "level = " << i << "\n";
-        std::cout << "TrueP at this level is " << TrueP_R[i]->Height() << " x " << TrueP_R[i]->Width() << "\n";
-        SparseMatrix diag;
-        TrueP_R[i]->GetDiag(diag);
-        std::cout << "diag TrueP norm = " << diag.MaxNorm() << "\n";
-        SparseMatrix offdiag;
-        int * cmap;
-        TrueP_R[i]->GetOffd(offdiag, cmap);
-        std::cout << "offdiag TrueP norm = " << offdiag.MaxNorm() << "\n";
     }
 
     Array<SparseMatrix*> P_WT(ref_levels); //AE_e matrices
@@ -2865,6 +2855,7 @@ int main(int argc, char *argv[])
     return 0;
     */
 
+    /*
     Vector tempp(sigma_exact_finest->Size());
     tempp = *sigma_exact_finest;
     tempp -= Xinit;
@@ -2883,6 +2874,7 @@ int main(int argc, char *argv[])
     func_norm = res.Norml2() / sqrt (res.Size());
     std::cout << "Functional norm for exact sigma_h:  = " << func_norm << " ... \n";
 #endif
+    */
 
     if (verbose)
         std::cout << "New solver was set up in " << chrono.RealTime() << " seconds.\n";
@@ -3010,7 +3002,8 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetPrintLevel(0);
-    NewSolver.PrintAllOptions();
+    if (verbose)
+        NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);
 
     trueXtest = 0.0;

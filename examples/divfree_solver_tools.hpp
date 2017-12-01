@@ -22,21 +22,6 @@ using std::unique_ptr;
 
 // FIXME: Shouldn't it be full BlockVectors check in CheckBdrError everywhere
 
-
-void CompareTrueVecwithVec (const HypreParMatrix * d_td, const Vector &TrueVec, const Vector& Vec, Vector& TempVec)
-{
-    d_td->Mult(TrueVec, TempVec);
-
-    Vector tmp(Vec.Size());
-    tmp = Vec;
-    tmp -= TempVec;
-
-    std::cout << "diff norm = " << tmp.Norml2();
-    std::cout << flush;
-}
-
-
-
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
@@ -1245,7 +1230,7 @@ protected:
     // the given contraint and sets it as the initial iterate.
     // at each finer level also computes factorization of the local problems
     // matrices and stores them
-    void SetUpSolver() const;
+    void SetUpSolver(bool verbose = false) const;
 
     // an optional routine which can save LU factors for the local problems
     // solved at finer levels if needed. Should be redefined in the inheriting
@@ -1255,7 +1240,7 @@ protected:
     // finds a particular solution (like the first iteration of the previous
     // version of the solver) and returns it as a vector on true dofs
     void FindParticularSolution(const BlockVector& truestart_guess,
-                                 BlockVector& particular_solution) const;
+                                 BlockVector& particular_solution, bool verbose = false) const;
 
     // main solver iteration routine
     void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
@@ -1551,9 +1536,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     init_guess = new BlockVector(block_trueoffsets);
 }
 
-void BaseGeneralMinConstrSolver::SetUpSolver() const
+void BaseGeneralMinConstrSolver::SetUpSolver(bool verbose) const
 {
-    if (print_level)
+    if (verbose)
         std::cout << "Starting solver setup \n";
 
     // 1. copying the given initial vector to the internal variable
@@ -1599,7 +1584,7 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     temp_constr -= ConstrRhs;
 
     // 3.1 if not, computing the particular solution
-    if ( ComputeMPIVecNorm(comm, temp_constr,"", print_level) > 1.0e-14 )
+    if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-14 )
     {
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
         std::cout << "Calling FindParticularSolution() \n";
@@ -1627,14 +1612,14 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     // i.e, it satisfies the divergence contraint
     setup_finished = true;
 
-    if (print_level)
+    if (verbose)
         std::cout << "Solver setup completed \n";
 }
 
 // the start_guess is on dofs
 // (*) returns particular solution as a vector on true dofs!
 void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& truestart_guess,
-                                                         BlockVector& particular_solution) const
+                                                         BlockVector& particular_solution, bool verbose) const
 {
     BlockVector temp_dofs(Funct_lvls[0]->RowOffsets());
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -1715,18 +1700,16 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
     particular_solution = truestart_guess;
     particular_solution += *truesolupdate_lvls[0];
 
-    if (print_level > 10)
+    if (verbose)
         std::cout << "sol_update norm: " << truetempvec_lvls[0]->GetBlock(0).Norml2()
                  / sqrt(truetempvec_lvls[0]->GetBlock(0).Size()) << "\n";
 
     // computing some numbers for stopping criterium
-    if (print_level)
-        funct_firstnorm = CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], *truetempvec_lvls[0],
-                "for the particular solution: ", print_level);
+    funct_firstnorm = CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], *truetempvec_lvls[0],
+            "for the particular solution: ", verbose);
 
-    if (print_level)
-        sol_firstitnorm = ComputeMPIVecNorm(comm, *truetempvec_lvls[0],
-                "for the particular solution", print_level);
+    sol_firstitnorm = ComputeMPIVecNorm(comm, *truetempvec_lvls[0],
+            "for the particular solution", verbose);
 }
 
 
@@ -2789,12 +2772,12 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
     double rtol(1.e-18);
     double atol(1.e-18);
 
+    /*
     int myid;
     MPI_Comm_rank(comm, &myid);
 
     std::cout << "myid = " << myid << "\n";
 
-    /*
     if (myid == 3)
     {
         SparseMatrix diag00;
@@ -2905,7 +2888,7 @@ public:
                                     " sigma only but more blocks are present!");
             optimized_localsolve = true;
             LUfactors_lvls.resize(num_levels - 1);
-            SetPrintLevel(1);
+            //SetPrintLevel(1);
             SetUpSolver();
         }
 
