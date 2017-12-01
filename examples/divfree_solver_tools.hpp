@@ -36,7 +36,7 @@ double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec
     double global_norm = 0;
     MPI_Allreduce(&local_dotprod, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
     if (global_norm < 0)
-        std::cout << "MG norm is not a norm: dot product less than zero! \n";
+        std::cout << "MG norm is not a norm: dot product = " << global_norm << " less than zero! \n";
     global_norm = sqrt (global_norm / global_size);
 
     return global_norm;
@@ -498,7 +498,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
         if (relax_all_dofs)
         {
             Smoothers_lvls[level] = new HypreSmoother(*CTMC_global_lvls[level],
-                                                      HypreSmoother::Type::GS, sweeps_num);
+                                                      HypreSmoother::Type::l1GS, sweeps_num);
 
             truex_lvls[level] = new Vector(CTMC_global_lvls[level]->Height());
         }
