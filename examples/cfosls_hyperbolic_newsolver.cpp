@@ -2991,7 +2991,7 @@ int main(int argc, char *argv[])
 
     fform->ParallelAssemble(trueRhstest);
 
-    int TestmaxIter(50);
+    int TestmaxIter(400);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
     Testsolver.SetAbsTol(sqrt(atol));
