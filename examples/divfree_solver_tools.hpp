@@ -117,17 +117,31 @@ bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector* Con
     return passed;
 }
 
-bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const Array<int>& ess_bdrdofs)
+// true for truedofs, false for dofs
+bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const Array<int>& ess_bdr, bool dof_or_truedof)
 {
     bool passed = true;
     double max_bdr_error = 0;
-    for ( int dof = 0; dof < Given_bdrdata.Size(); ++dof)
+    if (dof_or_truedof) // for true dofs
     {
-        if (ess_bdrdofs[dof] != 0.0)
+        for ( int i = 0; i < ess_bdr.Size(); ++i)
         {
-            double bdr_error_dof = fabs(Given_bdrdata[dof] - Candidate[dof]);
+            int tdof = ess_bdr[i];
+            double bdr_error_dof = fabs(Given_bdrdata[tdof] - Candidate[tdof]);
             if ( bdr_error_dof > max_bdr_error )
                 max_bdr_error = bdr_error_dof;
+        }
+    }
+    else // for dofs
+    {
+        for ( int dof = 0; dof < Given_bdrdata.Size(); ++dof)
+        {
+            if (ess_bdr[dof] != 0.0)
+            {
+                double bdr_error_dof = fabs(Given_bdrdata[dof] - Candidate[dof]);
+                if ( bdr_error_dof > max_bdr_error )
+                    max_bdr_error = bdr_error_dof;
+            }
         }
     }
 
@@ -159,12 +173,8 @@ public:
     }
 
     // general setup functions
-    virtual void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
-                               const SparseMatrix* Proj_lvl = NULL,
-                               const HypreParMatrix* D_tD_lvl = NULL) = 0;
-    virtual void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl,
-                               const BlockMatrix* Proj_lvl = NULL,
-                               const std::vector<HypreParMatrix*>* D_tD_lvl = NULL) = 0;
+    virtual void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl) = 0;
+    virtual void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) = 0;
 
     // general functions for setting righthand side at the given level
     //virtual void ComputeRhsLevel(int level, const BlockVector& res_lvl);
@@ -196,15 +206,13 @@ void MultilevelSmoother::PrintAllOptions() const
     std::cout << "\n";
 }
 
-void MultilevelSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
-                                       const SparseMatrix* Proj_lvl, const HypreParMatrix *D_tD_lvl)
+void MultilevelSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
 {
     std::cout << "SetUpSmoother for a SparseMatrix argument is called from the abstract base"
                  " class but must have been redefined \n";
 }
 
-void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl,
-                                       const BlockMatrix* Proj_lvl, const std::vector<HypreParMatrix*>* D_tD_lvl)
+void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl)
 {
     MFEM_ABORT("SetUpSmoother for a BlockMatrix argument is called from the abstract base"
                  " class but must have been redefined \n");
@@ -259,7 +267,7 @@ private:
     bool relax_all_dofs;
 protected:
     // Projection matrices for Hcurl at all levels
-    const Array< SparseMatrix*>& P_lvls;
+    //const Array< SparseMatrix*>& P_lvls;
 
     // discrete curl operators at all levels;
     mutable Array<SparseMatrix*> Curlh_lvls;
@@ -303,6 +311,8 @@ protected:
 
     // Lists of essential boundary dofs for Hcurl at all levels
     const std::vector<Array<int>* >  & essbdrdofs_lvls;
+    // FIXME: Move it to a const constructor argument,
+    // but take care about the fact that GetTrueVDofs is different from GetVDofs()
     mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
 
     // temporary storage variables
@@ -313,21 +323,17 @@ protected:
 public:
     // constructor
     HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & Discrete_Curls_lvls,
-                   const Array< SparseMatrix*>& Proj_lvls,
+                   //const Array< SparseMatrix*>& Proj_lvls,
                    const Array<HypreParMatrix *>& Dof_TrueDof_Hcurl_lvls,
                    const Array<HypreParMatrix *>& Dof_TrueDof_Hdiv_lvls,
                    const std::vector<Array<int>* > & EssBdrdofs_lvls,
                    int SweepsNum = 1, bool Construct_Curls = false, bool Relax_All_Dofs = true);
 
     // SparseMatrix version of SetUpSmoother()
-    void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
-                       const SparseMatrix* Proj_lvl = NULL,
-                       const HypreParMatrix *D_tD_lvl = NULL) override;
+    void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl) override;
 
     // BlockMatrix version of SetUpSmoother()
-    void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl,
-                       const BlockMatrix* Proj_lvl = NULL,
-                       const std::vector<HypreParMatrix*>* D_tD_lvl = NULL) override;
+    void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) override;
 
     // Computes the righthand side for the local minimization problem
     // solved in MultLevel() from the given residual at level l of the
@@ -362,14 +368,14 @@ void HCurlGSSmoother::PrintAllOptions() const
 
 
 HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & Discrete_Curls_lvls,
-                              const Array< SparseMatrix*>& Proj_lvls,
+                              //const Array< SparseMatrix*>& Proj_lvls,
                               const Array<HypreParMatrix*>& Dof_TrueDof_Hcurl_lvls,
                               const Array<HypreParMatrix*>& Dof_TrueDof_Hdiv_lvls,
                               const std::vector<Array<int>* > & EssBdrdofs_lvls,
                               int SweepsNum, bool Construct_Curls, bool Relax_All_Dofs) :
     MultilevelSmoother(Num_Levels), sweeps_num(SweepsNum), construct_curls(Construct_Curls),
     relax_all_dofs(Relax_All_Dofs),
-    P_lvls(Proj_lvls),
+    //P_lvls(Proj_lvls),
     d_td_Hcurl_lvls(Dof_TrueDof_Hcurl_lvls),
     d_td_Hdiv_lvls(Dof_TrueDof_Hdiv_lvls),
     essbdrdofs_lvls(EssBdrdofs_lvls)
@@ -438,14 +444,12 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & 
     truevec3_lvls.SetSize(num_levels);
 }
 
-void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl,
-                                    const BlockMatrix* Proj_lvl, const std::vector<HypreParMatrix *> *D_tD_lvl)
+void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl)
 {
     MFEM_ABORT("HcurlGSSmoother: BlockMatrix arguments are not supported\n");
 }
 
-void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
-                                    const SparseMatrix *Proj_lvl, const HypreParMatrix *D_tD_lvl)
+void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
 {
     if ( !finalized_lvls[level] ) // if level was not set up before
     {
@@ -462,10 +466,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl,
 
         if (!relax_all_dofs)
         {
-            MFEM_ASSERT(D_tD_lvl, "HCurlGSSmoother::SetUpSmoother():"
-                                           " D_tD for the system matrix is required \n");
-
-            HypreParMatrix * d_td_Hdiv_T = d_td_Hdiv_lvls[level]->Transpose();
+            MFEM_ABORT("Not implemented yet");
         }
 
         // form CT*M*C as a SparseMatrix
@@ -713,6 +714,7 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
 
 }
 
+#if 0
 
 // Implements a multilevelel smoother which can update the solution x = (x_l)
 // at each level l by solving a minimization problem
@@ -993,6 +995,8 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 }
 */
 
+#endif
+
 // TODO: Add as an option using blas and lapack versions for solving local problems
 // TODO: Test after all  with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
@@ -1001,6 +1005,7 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 // TODO: Clean up the commented blocks used during debugging
 // TODO: Clean up the function descriptions
 // TODO: Clean up the variables names
+// TODO: Update HcurlSmoother class
 
 // Solver and not IterativeSolver is the right choice for the base class
 class BaseGeneralMinConstrSolver : public Solver
@@ -1573,19 +1578,9 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
         if (Smoo)
         {
             if (numblocks == 1)
-            {
-                if (l == 0)
-                    Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0));
-                else
-                    Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0), &(P_Func[l - 1]->GetBlock(0,0)));
-            }
+                Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0));
             else
-            {
-                if (l == 0)
-                    Smoo->SetUpSmoother(l, *Funct_lvls[l]);
-                else
-                    Smoo->SetUpSmoother(l, *Funct_lvls[l], P_Func[l - 1]);
-            }
+                Smoo->SetUpSmoother(l, *Funct_lvls[l]);
         }
     } // end of loop over finer levels
 
@@ -1617,7 +1612,7 @@ void BaseGeneralMinConstrSolver::SetUpSolver() const
     }
 
     MFEM_ASSERT(CheckBdrError(part_solution->GetBlock(0),
-                              bdrdata_truedofs.GetBlock(0), *essbdrtruedofs_Func[0][0]),
+                              bdrdata_truedofs.GetBlock(0), *essbdrtruedofs_Func[0][0], true),
                               "for the initial guess");
 
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -1765,7 +1760,7 @@ void BaseGeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
         MFEM_ASSERT(CheckBdrError(tempblock_truedofs->GetBlock(0), bdrdata_truedofs.GetBlock(0),
-                                  *essbdrtruedofs_Func[0][0]), "before the iteration");
+                                  *essbdrtruedofs_Func[0][0], true), "before the iteration");
 
 #ifdef MFEM_DEBUG
         for ( int blk = 0; blk < numblocks; ++blk)
@@ -1945,8 +1940,8 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     */
 
 #ifndef CHECK_SPDSOLVER
-    MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0),
-                              bdrdata_truedofs.GetBlock(0), *essbdrtruedofs_Func[0][0]), "at the start of Solve()");
+    MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(0), bdrdata_truedofs.GetBlock(0),
+                              *essbdrtruedofs_Func[0][0], true), "at the start of Solve()");
 #endif
 
     next_sol = previous_sol;
@@ -2044,7 +2039,7 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         if (!preconditioner_mode)
         {
             MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(0), bdrdata_truedofs.GetBlock(0),
-                                      *essbdrtruedofs_Func[0][0]), "after all levels update");
+                                      *essbdrtruedofs_Func[0][0], true), "after all levels update");
         }
 
     }

@@ -22,7 +22,7 @@
 #define WITH_SMOOTHER
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -771,7 +771,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2559,7 +2559,7 @@ int main(int argc, char *argv[])
     */
 
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
-                   Proj_Hcurl_lvls, Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
+                   /*Proj_Hcurl_lvls,*/ Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
                    EssBdrDofs_Hcurl);
     //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
     NewGSSmoother.SetSweepsNumber(5);
