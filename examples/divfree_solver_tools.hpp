@@ -2566,28 +2566,6 @@ void BaseGeneralMinConstrSolver::ProjectFinerL2ToCoarser(int level, const Vector
     return;
 }
 
-/*
-// start_level and end_level must be in 0-based indexing
-// (*) uses tempvec_lvls for storing intermediate results
-void BaseGeneralMinConstrSolver::InterpolateBack(int start_level, BlockVector& vec_start,
-                                                 int end_level, BlockVector& vec_end) const
-{
-    MFEM_ASSERT(start_level > end_level, "Interpolation makes sense only to the finer levels \n");
-
-    *tempvec_lvls[start_level] = vec_start;
-
-    for (int lvl = start_level; lvl > end_level; --lvl)
-    {
-        P_Func[lvl-1]->Mult(*tempvec_lvls[lvl], *tempvec_lvls[lvl-1]);
-    }
-
-    vec_end = *tempvec_lvls[end_level];
-
-    return;
-}
-*/
-
-
 // Righthand side at level l is of the form:
 //   rhs_l = (Q_l - Q_{l+1}) where Q_k is an orthogonal L2-projector: W -> W_k
 // or, equivalently,
