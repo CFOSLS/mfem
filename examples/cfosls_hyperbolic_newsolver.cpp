@@ -28,6 +28,8 @@
 // via a separated class called LocalProblemSolver
 #define NEW_INTERFACE
 
+#define NEW_PARTFINDER
+
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -2839,6 +2841,21 @@ int main(int argc, char *argv[])
                      CoarsestSolver,
                      higher_order, construct_coarseops);
 
+
+    DivConstraintSolver PartsolFinder(num_levels, P_WT,
+                                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
+                                      P_Func, TrueP_Func, P_W,
+                                      EssBdrTrueDofs_Funct_lvls,
+                                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
+#ifdef COMPUTING_LAMBDA
+                                      *sigma_special, *lambda_special,
+#endif
+                                      Smoother,
+#ifdef NEW_INTERFACE
+                                      &LocalSolver_lvls,
+#endif
+                                      CoarsestSolver,
+                                      higher_order, construct_coarseops);
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)
@@ -2852,8 +2869,12 @@ int main(int argc, char *argv[])
     NewSolver.SetStopCriteriaType(0);
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
+#ifdef NEW_PARTFINDER
+    Vector ParticSol(sigma_exact_truedofs.Size());
+    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+#else
     Vector ParticSol(*(NewSolver.ParticularSolution()));
-
+#endif
     Vector error3(ParticSol.Size());
     error3 = ParticSol;
 
