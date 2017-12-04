@@ -1622,8 +1622,9 @@ protected:
     const Array< BlockOperator*>& TrueP_Func;
     const Array< SparseMatrix*>& P_L2;
 
-    // for each variable in the functional and for each level stores a boolean
-    // vector which defines if a dof is at the boundary / essential part of the boundary
+    // for each level and for each variable in the functional stores a vector
+    // which defines if a dof is at the boundary / essential part of the boundary
+    // or not
     const std::vector<std::vector<Array<int>* > > & bdrdofs_Func;
     const std::vector<std::vector<Array<int>* > > & essbdrdofs_Func;
     const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func;
@@ -2776,8 +2777,6 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
     for (int blk = 0; blk < numblocks; ++blk)
     {
         *TempSpMat = el_to_dofs.GetBlock(blk,blk);
-        //TempBdrDofs.MakeRef(*dof_is_bdr[blk][level]);
-        //TempEssBdrDofs.MakeRef(*dof_is_essbdr[blk][level]);
 
         // creating dofs_to_AE relation table
         SparseMatrix * dofs_AE = Transpose(*mfem::Mult(*AE_e[level], *TempSpMat));
@@ -2804,10 +2803,10 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
             {
                 // if a dof belongs to only one fine-grid element and is not at the domain boundary
                 bool inside_finegrid_el = (higher_order &&
-                                           (*dof_is_bdr[blk][level])[dof] == 0 && dofs_AE_data[j] == 1);
+                                           (*dof_is_bdr[level][blk])[dof] == 0 && dofs_AE_data[j] == 1);
                 //bool on_noness_bdr = false;
-                bool on_noness_bdr = ( (*dof_is_essbdr[blk][level])[dof] == 0 &&
-                                      (*dof_is_bdr[blk][level])[dof]!= 0);
+                bool on_noness_bdr = ( (*dof_is_essbdr[level][blk])[dof] == 0 &&
+                                      (*dof_is_bdr[level][blk])[dof]!= 0);
                 MFEM_ASSERT( !inside_finegrid_el,
                         "Remove this assert in Get_AE_eintdofs() before using higher-order elements");
                 MFEM_ASSERT( ( !inside_finegrid_el || (dofs_AE_i[dof+1] - dofs_AE_i[dof] == 1) ),
@@ -2835,10 +2834,10 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
                 dofs_check[dof] = 0;
 #endif
                 bool inside_finegrid_el = (higher_order &&
-                                           (*dof_is_bdr[blk][level])[dof] == 0 && dofs_AE_data[j] == 1);
+                                           (*dof_is_bdr[level][blk])[dof] == 0 && dofs_AE_data[j] == 1);
                 //bool on_noness_bdr = false;
-                bool on_noness_bdr = ( (*dof_is_essbdr[blk][level])[dof] == 0 &&
-                                      (*dof_is_bdr[blk][level])[dof]!= 0);
+                bool on_noness_bdr = ( (*dof_is_essbdr[level][blk])[dof] == 0 &&
+                                      (*dof_is_bdr[level][blk])[dof]!= 0);
                 if (dofs_AE_data[j] == 2 || inside_finegrid_el || on_noness_bdr )
                 {
                     innerdofs_AE_j[nnz_count++] = dofs_AE_j[j];
@@ -2847,7 +2846,7 @@ BlockMatrix* BaseGeneralMinConstrSolver::Get_AE_eintdofs(int level, BlockMatrix&
 #endif
                 }
 #ifdef DEBUG_INFO
-                if ( (*dof_is_essbdr[blk][level])[dof] != 0)
+                if ( (*dof_is_essbdr[level][blk])[dof] != 0)
                 {
                     if (dofs_check[dof] > 0)
                         std::cout << "Error: Smth wrong in dofs \n";
@@ -2939,8 +2938,8 @@ void BaseGeneralMinConstrSolver::SolveLocalProblems(int level, BlockVector& lvlr
 
             for (int i = 0; i < Local_inds[blk]->Size(); ++i)
             {
-                if ( (*bdrdofs_Func[blk][level])[(*Local_inds[blk])[i]] != 0 &&
-                     (*essbdrdofs_Func[blk][level])[(*Local_inds[blk])[i]] == 0)
+                if ( (*bdrdofs_Func[level][blk])[(*Local_inds[blk])[i]] != 0 &&
+                     (*essbdrdofs_Func[level][blk])[(*Local_inds[blk])[i]] == 0)
                 {
                     //std::cout << "then local problem is non-degenerate \n";
                     is_degenerate = false;
@@ -3061,8 +3060,8 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
 
             for (int i = 0; i < Local_inds[blk]->Size(); ++i)
             {
-                if ( (*bdrdofs_Func[blk][level])[(*Local_inds[blk])[i]] != 0 &&
-                     (*essbdrdofs_Func[blk][level])[(*Local_inds[blk])[i]] == 0)
+                if ( (*bdrdofs_Func[level][blk])[(*Local_inds[blk])[i]] != 0 &&
+                     (*essbdrdofs_Func[level][blk])[(*Local_inds[blk])[i]] == 0)
                 {
                     //std::cout << "then local problem is non-degenerate \n";
                     is_degenerate = false;
@@ -3135,25 +3134,6 @@ void BaseGeneralMinConstrSolver::SolveTrueLocalProblems(int level, BlockVector& 
     return;
 }
 
-/*
-void BaseGeneralMinConstrSolver::SetUpCoarsestRhsFunc() const
-{
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        const Array<int> * temp = essbdrdofs_Func[blk][num_levels - 1];
-        for ( int dof = 0; dof < temp->Size(); ++dof)
-            if ( (*temp)[dof] != 0)
-            {
-                rhsfunc_lvls[num_levels-1]->GetBlock(blk)[dof] = 0.0;
-            }
-
-        dof_trueDof_Func_lvls[num_levels-1][blk]->MultTranspose(rhsfunc_lvls[num_levels - 1]->GetBlock(blk),
-                coarse_rhsfunc->GetBlock(blk));
-    }
-
-}
-*/
-
 // same as SetUpCoarsestRhsFunc, but on true dofs
 void BaseGeneralMinConstrSolver::SetUpCoarsestTrueRhsFunc() const
 {
@@ -3161,7 +3141,7 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestTrueRhsFunc() const
     //std::cout << "Got here 1 \n";
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> * temp = essbdrtruedofs_Func[blk][num_levels - 1];
+        const Array<int> * temp = essbdrtruedofs_Func[num_levels - 1][blk];
 
         //const Array<int> * temp2 = essbdrdofs_Func[blk][num_levels - 1];
 
@@ -3179,13 +3159,13 @@ void BaseGeneralMinConstrSolver::SetUpCoarsestTrueRhsFunc() const
 void BaseGeneralMinConstrSolver::SetUpCoarsestLvl() const
 {
     // 1. eliminating boundary conditions at coarse level
-    const Array<int> * temp = essbdrdofs_Func[0][num_levels-1];
+    const Array<int> * temp = essbdrdofs_Func[num_levels-1][0];
 
     Constr_lvls[num_levels - 1]->EliminateCols(*temp);
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> * temp = essbdrdofs_Func[blk][num_levels-1];
+        const Array<int> * temp = essbdrdofs_Func[num_levels-1][blk];
         for ( int dof = 0; dof < temp->Size(); ++dof)
             if ( (*temp)[dof] != 0)
             {
@@ -3472,8 +3452,8 @@ void MinConstrSolver::SaveLocalLUFactors(int l) const
 
         for (int i = 0; i < Local_inds.Size(); ++i)
         {
-            if ( (*bdrdofs_Func[0][l])[Local_inds[i]] != 0 &&
-                 (*essbdrdofs_Func[0][l])[Local_inds[i]] == 0)
+            if ( (*bdrdofs_Func[l][0])[Local_inds[i]] != 0 &&
+                 (*essbdrdofs_Func[l][0])[Local_inds[i]] == 0)
             {
                 //std::cout << "then local problem is non-degenerate \n";
                 is_degenerate = false;

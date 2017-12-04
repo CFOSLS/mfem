@@ -771,7 +771,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1154,11 +1154,12 @@ int main(int argc, char *argv[])
     DivPart divp;
 
 #ifdef NEW_STUFF
+    const int numblocks_funct = 1;
     Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
     all_bdrSigma = 1;
-    std::vector<std::vector<Array<int>* > > BdrDofs_R(1, std::vector<Array<int>* >(num_levels));
-    std::vector<std::vector<Array<int>* > > EssBdrDofs_R(1, std::vector<Array<int>* >(num_levels));
-    std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_R(1, std::vector<Array<int>* >(num_levels));
+    std::vector<std::vector<Array<int>* > > BdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
+    std::vector<std::vector<Array<int>* > > EssBdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
+    std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
@@ -1178,9 +1179,9 @@ int main(int argc, char *argv[])
    for (int l = 0; l < num_levels; ++l)
    {
        Dof_TrueDof_Func_lvls[l].resize(1);
-       BdrDofs_R[0][l] = new Array<int>;
-       EssBdrDofs_R[0][l] = new Array<int>;
-       EssBdrTrueDofs_R[0][l] = new Array<int>;
+       BdrDofs_Funct_lvls[l][0] = new Array<int>;
+       EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
+       EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Hcurl[l] = new Array<int>;
        Funct_mat_offsets_lvls[l] = new Array<int>;
    }
@@ -1316,9 +1317,9 @@ int main(int argc, char *argv[])
         C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
 
         // getting boundary and essential boundary dofs
-        R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_R[0][l]);
-        R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_R[0][l]);
-        R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_R[0][l]);
+        R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
+        R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
+        R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
 
         // getting operators at level l
@@ -1492,6 +1493,7 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
+        /*
         //creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -1501,11 +1503,12 @@ int main(int argc, char *argv[])
                                                          *P_WT[l],
                                                          *Element_dofs_Func[l],
                                                          *Element_dofs_W[l],
-                                                         BdrDofs_R,
-                                                         EssBdrDofs_R,
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
                                                          true, false);
 
         }
+        */
 
     }
 
@@ -1676,7 +1679,7 @@ int main(int argc, char *argv[])
                           Dof_TrueDof_Func_lvls[num_levels - 1][0],
                           Dof_TrueDof_L2_lvls[num_levels - 1],
                           sigmahat_pau,
-                          *EssBdrDofs_R[0][num_levels - 1]);
+                          *EssBdrDofs_Funct_lvls[num_levels - 1][0]);
 
     #ifdef MFEM_DEBUG
             Vector sth(F_fine.Size());
@@ -2659,7 +2662,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < sigma_exact_finest->Size(); ++i )
     {
         // just setting Xinit to store correct boundary values at essential boundary
-        if ( (*EssBdrDofs_R[0][0])[i] != 0)
+        if ( (*EssBdrDofs_Funct_lvls[0][0])[i] != 0)
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
 
     }
@@ -2673,9 +2676,9 @@ int main(int argc, char *argv[])
     BlockVector Xinit_truedofs(new_trueoffsets);
     Xinit_truedofs = 0.0;
 
-    for (int i = 0; i < EssBdrTrueDofs_R[0][0]->Size(); ++i )
+    for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][0]->Size(); ++i )
     {
-        int tdof = (*EssBdrTrueDofs_R[0][0])[i];
+        int tdof = (*EssBdrTrueDofs_Funct_lvls[0][0])[i];
         Xinit_truedofs.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
     }
 
@@ -2810,7 +2813,7 @@ int main(int argc, char *argv[])
 
     MinConstrSolver NewSolver(num_levels, P_WT,
                      Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                     P_Func, TrueP_Func, P_W, BdrDofs_R, EssBdrDofs_R, EssBdrTrueDofs_R,
+                     P_Func, TrueP_Func, P_W, BdrDofs_Funct_lvls, EssBdrDofs_Funct_lvls, EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
@@ -3429,7 +3432,7 @@ int main(int argc, char *argv[])
     double max_bdr_error = 0;
     for ( int dof = 0; dof < Xinit.Size(); ++dof)
     {
-        if ( (*EssBdrDofs_R[0][0])[dof] != 0.0)
+        if ( (*EssBdrDofs_Funct_lvls[0][0])[dof] != 0.0)
         {
             //std::cout << "ess dof index: " << dof << "\n";
             double bdr_error_dof = fabs(Xinit[dof] - (*NewSigmahat)[dof]);
