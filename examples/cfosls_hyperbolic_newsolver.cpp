@@ -2820,7 +2820,11 @@ int main(int argc, char *argv[])
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
 #endif
-                     Smoother, higher_order, construct_coarseops);
+                     Smoother,
+#ifdef NEW_INTERFACE
+                     &LocalSolver_lvls,
+#endif
+                     higher_order, construct_coarseops);
 
     double newsolver_reltol = 1.0e-6;
 
@@ -2834,6 +2838,9 @@ int main(int argc, char *argv[])
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
     NewSolver.SetOptimizedLocalSolve(true);
+#ifdef NEW_INTERFACE
+    //NewSolver.SetLocalSolvers(LocalSolver_lvls);
+#endif
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
@@ -3017,9 +3024,6 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetPrintLevel(0);
-#ifdef NEW_INTERFACE
-    NewSolver.SetLocalSolvers(LocalSolver_lvls);
-#endif
     if (verbose)
         NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);

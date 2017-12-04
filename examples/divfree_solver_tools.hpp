@@ -329,25 +329,28 @@ public:
     void SetUp();
 
     // Operator application: `y=A(x)`.
-    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
+
+    // considers x as the righthand side
+    // and returns y as a solution to all the local problems
+    // (*) both x and y are vectors on true dofs
+    virtual void Mult(const Vector &x, Vector &y, Vector* rhs_constr) const;
 
     // is public since one might want to use that to compute particular solution witn nonzero righthand side in the constraint
     void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const;
 
 };
 
-// considers x as the righthand side
-// and returns y as a solution to all the local problems
-// (*) both x and y are vectors on true dofs
-void LocalProblemSolver::Mult(const Vector &x, Vector &y) const
+void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
 {
     // x will be accessed through xblock as its view
     xblock->Update(x.GetData(), block_offsets);
     // y will be accessed through yblock as its view
     yblock->Update(y.GetData(), block_offsets);
 
-    SolveTrueLocalProblems( *xblock, *yblock, NULL);
+    SolveTrueLocalProblems( *xblock, *yblock, rhs_constr);
 }
+
 
 void LocalProblemSolver::Setup()
 {
@@ -1736,10 +1739,8 @@ protected:
 
     //mutable Vector * trueQlminus1_f;
     //mutable Vector * truerhs_constr;
-#ifdef NEW_INTERFACE
     mutable bool new_interface;
     mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
-#endif
 
 protected:
     BlockMatrix* Get_AE_eintdofs(int level, BlockMatrix& el_to_dofs,
@@ -1840,6 +1841,7 @@ public:
                            const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
+                           Array<LocalProblemSolver*>* LocalSolvers = NULL,
                            bool Higher_Order_Elements = false,
                            bool Construct_CoarseOps = true,
                            int StopCriteria_Type = 1);
@@ -1999,7 +2001,9 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
                        const Vector& ConstrRhsVec,
                        const BlockVector& Bdrdata_TrueDofs,
-                       MultilevelSmoother* Smoother, bool Higher_Order_Elements, bool Construct_CoarseOps, int StopCriteria_Type)
+                       MultilevelSmoother* Smoother,
+                       Array<LocalProblemSolver*>* LocalSolvers,
+                       bool Higher_Order_Elements, bool Construct_CoarseOps, int StopCriteria_Type)
      : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()),
        construct_coarseops(Construct_CoarseOps),
        stopcriteria_type(StopCriteria_Type),
@@ -2120,6 +2124,14 @@ BaseGeneralMinConstrSolver::BaseGeneralMinConstrSolver(int NumLevels,
     compute_AEproblem_matrices = true;
 
     init_guess = new BlockVector(block_trueoffsets);
+
+    if (LocalSolvers)
+    {
+        LocalSolvers_lvls.SetSize(num_levels - 1);
+        for (int l = 0; l < num_levels - 1; ++l)
+            LocalSolvers_lvls[l] = *LocalSolvers[l];
+        new_interface = true;
+    }
 }
 
 void BaseGeneralMinConstrSolver::SetUpSolver(bool verbose) const
@@ -2233,8 +2245,13 @@ void BaseGeneralMinConstrSolver::FindParticularSolution(const BlockVector& trues
         ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, workfvec);
 
         // solve local problems at level l
+#ifdef NEW_INTERFACE
+            MFEM_ASSERT(new_interface, "SetLocalSolvers must be called before using the new interface to local solvers! \n");
+            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
+            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+#else
         SolveTrueLocalProblems(l, *trueresfunc_lvls[l], &rhs_constr, *truesolupdate_lvls[l]);
-
+#endif
         //after this parallel = serial
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
@@ -3428,6 +3445,7 @@ public:
                            const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
+                           Array<LocalProblemSolver*> * LocalSolvers = NULL,
                            bool Higher_Order_Elements = false, bool Construct_CoarseOps = true):
         BaseGeneralMinConstrSolver(NumLevels, AE_to_e, El_to_dofs_Func, El_to_dofs_L2,
                                    Dof_TrueDof_Func, Dof_TrueDof_L2,
@@ -3437,6 +3455,7 @@ public:
                                    ConstrRhsVec,
                                    Bdrdata_TrueDofs,
                                    Smoother,
+                                   LocalSolvers,
                                    Higher_Order_Elements, Construct_CoarseOps)
         {
             MFEM_ASSERT(numblocks == 1, "MinConstrSolver is designed for the formulation with"
