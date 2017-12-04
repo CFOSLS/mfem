@@ -7,9 +7,10 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
-
 #define MEMORY_OPTIMIZED
 
+
+#define STUPID
 // activates some additional checks
 //#define DEBUG_INFO
 
@@ -261,7 +262,7 @@ private:
     mutable Array<bool> compute_AEproblem_matrices;
 
     // all on true dofs
-    const Array<int> &block_offsets;
+    mutable Array<int> block_offsets;
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
@@ -302,12 +303,25 @@ public:
           el_to_dofs_Func(El_to_Dofs_Func),
           el_to_dofs_L2(El_to_Dofs_L2),
           bdrdofs_blocks(BdrDofs_blks),
-          essbdrdofs_blocks(EssBdrDofs_blks),
-          block_offsets(Op_Blksmat.RowOffsets())
+          essbdrdofs_blocks(EssBdrDofs_blks)
     {
         finalized = 0;
         optimized_localsolve = Optimized_LocalSolve;
         higher_order = Higher_Order;
+        compute_AEproblem_matrices.SetSize(numblocks + 1);
+        compute_AEproblem_matrices = true;
+
+        block_offsets.SetSize(numblocks + 1);
+        block_offsets[0] = 0;
+        for (int blk = 0; blk < numblocks; ++blk)
+            block_offsets[blk + 1] = d_td_blocks[blk]->Width();
+        block_offsets.PartialSum();
+
+        if (optimized_localsolve)
+        {
+            compute_AEproblem_matrices = false;
+            compute_AEproblem_matrices[numblocks] = true;
+        }
 
         Setup();
     }
@@ -352,16 +366,17 @@ void LocalProblemSolver::Setup()
 
 }
 
-void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const
+void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol, Vector* localrhs_constr) const
 {
     // FIXME: Get rid of temporary vectors;
     BlockVector lvlrhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
     {
+        //std::cout << "truerhs_func block size = " << truerhs_func.GetBlock(blk).Size() << "\n";// << ", lvlrhsfunc blocksize = " << lvlrhs_func.GetBlock(blk).Size() << "\n";
         d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
     }
-    BlockVector sol_update(Op_blkspmat.RowOffsets());
-    sol_update = 0.0;
+    BlockVector sol(Op_blkspmat.RowOffsets());
+    sol = 0.0;
 
     DenseMatrix sub_Constr;
     Vector sub_rhsconstr;
@@ -395,6 +410,11 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
             if (blk == 0) // sigma block
             {
                 Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
+                if (compute_AEproblem_matrices[numblocks])
+                {
+                    sub_Constr.SetSize(Wtmp_j.Size(), Local_inds[blk]->Size());
+                    Constr_spmat.GetSubMatrix(Wtmp_j, *Local_inds[blk], sub_Constr);
+                }
 
                 if (localrhs_constr)
                     localrhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
@@ -445,16 +465,18 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            sol_update.GetBlock(blk).AddElementVector
+            sol.GetBlock(blk).AddElementVector
                     (*Local_inds[blk], sol_loc.GetBlock(blk));
         }
 
     } // end of loop over AEs
 
     for (int blk = 0; blk < numblocks; ++blk)
-        d_td_blocks[blk]->MultTranspose(1.0, sol_update.GetBlock(blk), 1.0, truesol_update.GetBlock(blk));
+        //d_td_blocks[blk]->MultTranspose(1.0, sol_update.GetBlock(blk), 1.0, truesol.GetBlock(blk));
+        d_td_blocks[blk]->MultTranspose(sol.GetBlock(blk), truesol.GetBlock(blk));
 
     return;
+
 }
 
 void LocalProblemSolver::SolveLocalProblem(int AE, std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
@@ -1714,6 +1736,10 @@ protected:
 
     //mutable Vector * trueQlminus1_f;
     //mutable Vector * truerhs_constr;
+#ifdef NEW_INTERFACE
+    mutable bool new_interface;
+    mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
+#endif
 
 protected:
     BlockMatrix* Get_AE_eintdofs(int level, BlockMatrix& el_to_dofs,
@@ -1849,6 +1875,16 @@ public:
     void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
 
     virtual void PrintAllOptions() const;
+
+#ifdef NEW_INTERFACE
+    void SetLocalSolvers(Array<LocalProblemSolver*> &LocalSolvers) const
+    {
+        LocalSolvers_lvls.SetSize(num_levels - 1);
+        for (int l = 0; l < num_levels - 1; ++l)
+            LocalSolvers_lvls[l] = LocalSolvers[l];
+        new_interface = true;
+    }
+#endif
 };
 
 void BaseGeneralMinConstrSolver::PrintAllOptions() const
@@ -2487,8 +2523,15 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
 
+#ifdef NEW_INTERFACE
+        MFEM_ASSERT(new_interface, "SetLocalSolvers must be called before using the new interface to local solvers! \n");
+        //std::cout << "trueresfunc_l size = " << trueresfunc_lvls[l]->GetBlock(0).Size() << std::flush << "\n";
+        LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
+        *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+#else
         // solve local problems at level l
         SolveTrueLocalProblems(l, *trueresfunc_lvls[l], NULL, *truesolupdate_lvls[l]);
+#endif
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -2545,7 +2588,13 @@ void BaseGeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             // corrections: one after smoothing and one after local solve
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
+#ifdef NEW_INTERFACE
+            MFEM_ASSERT(new_interface, "SetLocalSolvers must be called before using the new interface to local solvers! \n");
+            LocalSolvers_lvls[l - 1]->Mult(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1]);
+            *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+#else
             SolveTrueLocalProblems(l - 1, *truetempvec2_lvls[l - 1], NULL, *truesolupdate_lvls[l - 1]);
+#endif
         }
 
     }

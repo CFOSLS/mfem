@@ -24,6 +24,10 @@
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
+// activates using the new interface to local problem solvers
+// via a separated class called LocalProblemSolver
+#define NEW_INTERFACE
+
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -771,7 +775,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1493,8 +1497,7 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
-        /*
-        //creating local problem solver hierarchy
+        // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
             LocalSolver_lvls[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
@@ -1508,7 +1511,6 @@ int main(int argc, char *argv[])
                                                          true, false);
 
         }
-        */
 
     }
 
@@ -3015,6 +3017,9 @@ int main(int argc, char *argv[])
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetPrintLevel(0);
+#ifdef NEW_INTERFACE
+    NewSolver.SetLocalSolvers(LocalSolver_lvls);
+#endif
     if (verbose)
         NewSolver.PrintAllOptions();
     Testsolver.SetPreconditioner(NewSolver);
