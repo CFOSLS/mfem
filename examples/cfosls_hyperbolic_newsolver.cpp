@@ -28,9 +28,6 @@
 // via a separated class called LocalProblemSolver
 #define NEW_INTERFACE
 
-#define NEW_COARSEINTERFACE
-
-
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -778,7 +775,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2827,9 +2824,10 @@ int main(int argc, char *argv[])
     Smoother = NULL;
 #endif
 
-    MinConstrSolver NewSolver(num_levels, P_WT,
+    GeneralMinConstrSolver NewSolver(num_levels, P_WT,
                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                     P_Func, TrueP_Func, P_W, BdrDofs_Funct_lvls, EssBdrDofs_Funct_lvls, EssBdrTrueDofs_Funct_lvls,
+                     P_Func, TrueP_Func, P_W,
+                     EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
 #ifdef COMPUTING_LAMBDA
                      *sigma_special, *lambda_special,
@@ -2838,11 +2836,7 @@ int main(int argc, char *argv[])
 #ifdef NEW_INTERFACE
                      &LocalSolver_lvls,
 #endif
-#ifdef NEW_COARSEINTERFACE
                      CoarsestSolver,
-#else
-                     NULL,
-#endif
                      higher_order, construct_coarseops);
 
     double newsolver_reltol = 1.0e-6;
