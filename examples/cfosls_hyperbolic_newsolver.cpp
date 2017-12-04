@@ -2636,7 +2636,7 @@ int main(int argc, char *argv[])
                      Smoother,
                      LocalSolver_lvls,
                      CoarsestSolver,
-                     higher_order, construct_coarseops);
+                     construct_coarseops);
 
 
     DivConstraintSolver PartsolFinder(num_levels, P_WT,
