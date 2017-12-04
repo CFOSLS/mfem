@@ -28,6 +28,9 @@
 // via a separated class called LocalProblemSolver
 #define NEW_INTERFACE
 
+#define NEW_COARSEINTERFACE
+
+
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -1194,6 +1197,8 @@ int main(int argc, char *argv[])
 
    Array<LocalProblemSolver*> LocalSolver_lvls(num_levels - 1);
 
+   CoarsestProblemSolver* CoarsestSolver;
+
    Array<BlockMatrix*> Element_dofs_Func(num_levels - 1);
    Array<int>* row_offsets_El_dofs = new Array<int>[num_levels - 1];
    Array<int>* col_offsets_El_dofs = new Array<int>[num_levels - 1];
@@ -1511,6 +1516,15 @@ int main(int argc, char *argv[])
                                                          true, false);
 
         }
+
+        // Creating the coarsest problem solver
+        if (l == num_levels - 1)
+            CoarsestSolver = new CoarsestProblemSolver(*Funct_mat_lvls[l],
+                                                       *Constraint_mat_lvls[l],
+                                                       Dof_TrueDof_Func_lvls[l],
+                                                       *Dof_TrueDof_L2_lvls[l],
+                                                       EssBdrDofs_Funct_lvls[l],
+                                                       EssBdrTrueDofs_Funct_lvls[l]);
 
     }
 
@@ -2823,6 +2837,11 @@ int main(int argc, char *argv[])
                      Smoother,
 #ifdef NEW_INTERFACE
                      &LocalSolver_lvls,
+#endif
+#ifdef NEW_COARSEINTERFACE
+                     CoarsestSolver,
+#else
+                     NULL,
 #endif
                      higher_order, construct_coarseops);
 
