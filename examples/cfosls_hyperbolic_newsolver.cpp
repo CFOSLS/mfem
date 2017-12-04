@@ -14,28 +14,19 @@
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
-// for the new multilevel solver's implementation
-#define NEW_STUFF
-
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHER
 
+// activates using the new interface to local problem solvers
+// via a separated class called LocalProblemSolver
+#define WITH_LOCALSOLVERS
+
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
-// activates using the new interface to local problem solvers
-// via a separated class called LocalProblemSolver
-#define NEW_INTERFACE
-
-#define NEW_PARTFINDER
-
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
-
-// computes the solution of the exact
-// discrete solution
-//#define COMPUTING_LAMBDA
 
 #include "divfree_solver_tools.hpp"
 
@@ -1080,14 +1071,13 @@ int main(int argc, char *argv[])
 
     int ref_levels = par_ref_levels;
 
-#ifdef NEW_STUFF
     int num_levels = ref_levels + 1;
     Array<ParMesh*> pmesh_lvls(num_levels);
     Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> C_space_lvls(num_levels);
     //Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
-#endif
+
     FiniteElementCollection *hdiv_coll;
     ParFiniteElementSpace *R_space;
     FiniteElementCollection *l2_coll;
@@ -1159,7 +1149,6 @@ int main(int argc, char *argv[])
 
     DivPart divp;
 
-#ifdef NEW_STUFF
     const int numblocks_funct = 1;
     Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
     all_bdrSigma = 1;
@@ -1194,7 +1183,12 @@ int main(int argc, char *argv[])
 
    const SparseMatrix* Proj_Hcurl_local;
 
-   Array<LocalProblemSolver*> LocalSolver_lvls(num_levels - 1);
+   Array<LocalProblemSolver*>* LocalSolver_lvls;
+#ifdef WITH_LOCALSOLVERS
+   LocalSolver_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
+#else
+   LocalSolver_lvls = NULL;
+#endif
 
    CoarsestProblemSolver* CoarsestSolver;
 
@@ -1211,8 +1205,6 @@ int main(int argc, char *argv[])
    Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
 
    Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
-
-#endif
 
     /*
      * I will just leave it here in case I will revisit the issue with HypreParMatrix copying
@@ -1501,10 +1493,11 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
+#ifdef WITH_LOCALSOLVERS
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
-            LocalSolver_lvls[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+            (*LocalSolver_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
                                                          *P_WT[l],
@@ -1515,7 +1508,7 @@ int main(int argc, char *argv[])
                                                          true, false);
 
         }
-
+#endif
         // Creating the coarsest problem solver
         if (l == num_levels - 1)
             CoarsestSolver = new CoarsestProblemSolver(*Funct_mat_lvls[l],
@@ -1530,13 +1523,12 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
 
-#ifdef NEW_STUFF
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space_lvls[0]);
     sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
     Vector sigma_exact_truedofs(R_space_lvls[0]->GetTrueVSize());
     sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
-#endif
+
     //if(dim==3) pmesh->ReorientTetMesh();
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
@@ -2426,196 +2418,6 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    //MPI_Finalize();
-    //return 0;
-
-#ifdef COMPUTING_LAMBDA
-    ParGridFunction * sigma_special = new ParGridFunction(R_space);
-    ParGridFunction * lambda_special = new ParGridFunction(W_space);
-    SparseMatrix Adiag_check;
-    SparseMatrix Bdiag_check;
-    int numblocks_special = 2;
-    Array<int> offsets_special(numblocks_special + 1);
-    offsets_special[0] = 0;
-    offsets_special[1] = R_space->GetVSize();
-    offsets_special[2] = W_space->GetVSize();
-    offsets_special.PartialSum();
-
-    Array<int> trueOffsets_special(numblocks_special + 1);
-    trueOffsets_special[0] = 0;
-    trueOffsets_special[1] = R_space->GetTrueVSize();
-    trueOffsets_special[2] = W_space->GetTrueVSize();
-    trueOffsets_special.PartialSum();
-
-    BlockVector x_special(offsets_special);
-    BlockVector trueX_special(trueOffsets_special);
-    BlockVector trueRhs_special(trueOffsets_special);
-    x_special = 0.0;
-    trueX_special = 0.0;
-    trueRhs_special = 0.0;
-    {
-        if (verbose)
-            std::cout << "COMPUTING_LAMBDA is activated \n";
-
-
-
-        Transport_test_divfree Mytest(nDimensions, numsol, numcurl);
-
-        ParGridFunction * sigma_exact = new ParGridFunction(R_space);
-        sigma_exact->ProjectCoefficient(*Mytest.sigma);
-
-        x_special.GetBlock(0) = *sigma_exact;
-
-        ParLinearForm *fform = new ParLinearForm(R_space);
-        ConstantCoefficient zero(.0);
-        fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zero));
-        fform->Assemble();
-
-        ParLinearForm *gform;
-        gform = new ParLinearForm(W_space);
-        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
-        gform->Assemble();
-
-        // 10. Assemble the finite element matrices for the CFOSLS operator  A
-        //     where:
-
-        ParBilinearForm *Ablock(new ParBilinearForm(R_space));
-        HypreParMatrix *A;
-        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
-        Ablock->Assemble();
-        Ablock->EliminateEssentialBC(ess_bdrSigma, x_special.GetBlock(0), *fform);
-        Ablock->Finalize();
-        A = Ablock->ParallelAssemble();
-        A->GetDiag(Adiag_check);
-
-        //----------------
-        //  D Block:
-        //-----------------
-
-        HypreParMatrix *D;
-        HypreParMatrix *DT;
-
-        ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space, W_space));
-        Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-        Dblock->Assemble();
-        Dblock->EliminateTrialDofs(ess_bdrSigma, x_special.GetBlock(0), *gform);
-        Dblock->Finalize();
-        D = Dblock->ParallelAssemble();
-        D->GetDiag(Bdiag_check);
-        DT = D->Transpose();
-
-        fform->ParallelAssemble(trueRhs_special.GetBlock(0));
-        gform->ParallelAssemble(trueRhs_special.GetBlock(1));
-
-        BlockOperator *CFOSLSop = new BlockOperator(trueOffsets_special);
-        CFOSLSop->SetBlock(0,0, A);
-        CFOSLSop->SetBlock(0,1, DT);
-        CFOSLSop->SetBlock(1,0, D);
-
-        MINRESSolver solver(MPI_COMM_WORLD);
-        solver.SetAbsTol(atol);
-        solver.SetRelTol(rtol);
-        solver.SetMaxIter(70000);
-        solver.SetOperator(*CFOSLSop);
-        solver.SetPrintLevel(0);
-
-        trueX_special = 0.0;
-        //trueRhs_special.GetBlock(0).Print();
-        solver.Mult(trueRhs_special, trueX_special);
-        chrono.Stop();
-
-        if (verbose)
-        {
-           if (solver.GetConverged())
-              std::cout << "MINRES converged in " << solver.GetNumIterations()
-                        << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
-           else
-              std::cout << "MINRES did not converge in " << solver.GetNumIterations()
-                        << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
-           std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
-        }
-
-        /*
-        std::cout << "\nTrying to check residual for base of sigma_special and lambda_special aka trueX \n";
-
-        BlockVector trueRes(trueOffsets_special);
-        CFOSLSop->Mult(trueX_special, trueRes);
-        trueRes -= trueRhs_special;
-        double trueres_func_norm = trueRes.Norml2() / sqrt (trueRes.Size());
-        std::cout << "trueres_func norm for sigma and lambda: " << trueres_func_norm << "\n\n";
-
-        Vector Asigma(A->Height());
-        A->Mult(trueX_special.GetBlock(0), Asigma);
-        Vector DTlambda(D->Width());
-        DT->Mult(trueX_special.GetBlock(1), DTlambda);
-        MFEM_ASSERT(DTlambda.Size() == Asigma.Size(), "Dimensions of A and D mismatch!");
-        Vector res(Asigma.Size());
-        res = Asigma;
-        res += DTlambda;
-        res -= trueRhs_special.GetBlock(0);
-        double res_func_norm = res.Norml2() / sqrt (res.Size());
-        std::cout << "res_func norm for sigma and lambda: " << res_func_norm << "\n\n";
-        */
-
-
-        sigma_special->Distribute(&(trueX_special.GetBlock(0)));
-        lambda_special->Distribute(&(trueX_special.GetBlock(1)));
-
-        int order_quad = max(2, 2*feorder+1);
-        const IntegrationRule *irs[Geometry::NumGeom];
-        for (int i=0; i < Geometry::NumGeom; ++i)
-        {
-            irs[i] = &(IntRules.Get(i, order_quad));
-        }
-
-        double err_sigma = sigma_special->ComputeL2Error(*Mytest.sigma, irs);
-        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
-
-        if (verbose)
-            cout << "sigma_h = sigma_hat + div-free part, div-free part = curl u_h \n";
-
-        if (verbose)
-        {
-            if ( norm_sigma > MYZEROTOL )
-                cout << "|| sigma_h - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
-            else
-                cout << "|| sigma || = " << err_sigma << " (sigma_ex = 0)" << endl;
-        }
-
-        DiscreteLinearOperator Div(R_space, W_space);
-        Div.AddDomainInterpolator(new DivergenceInterpolator());
-        ParGridFunction DivSigma(W_space);
-        Div.Assemble();
-        Div.Mult(*sigma_special, DivSigma);
-
-        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
-
-        if (verbose)
-        {
-            cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                      << err_div/norm_div  << "\n";
-        }
-
-        if (verbose)
-        {
-            //cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
-            cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
-                      << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
-        }
-
-        // checking that lambda special satisfies the correct essential boundary conditions
-        for (int i = 0; i < sigma_exact_finest->Size(); ++i )
-        {
-            if ( fabs( (*sigma_special)[i] - (*sigma_exact_finest)[i] ) > 1.0e-13 && (*(EssBdrDofs_R[0][0]))[i] != 0)
-                std::cout << "Weird! \n";
-        }
-        //std::cout << "? \n\n";
-
-    }
-#endif
-
-#ifdef NEW_STUFF
     if (verbose)
         std::cout << "\nCreating an instance of the new Hcurl smoother \n";
 
@@ -2826,18 +2628,13 @@ int main(int argc, char *argv[])
     Smoother = NULL;
 #endif
 
-    GeneralMinConstrSolver NewSolver(num_levels, P_WT,
-                     Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
+    GeneralMinConstrSolver NewSolver(num_levels,
+                     Dof_TrueDof_Func_lvls,
                      P_Func, TrueP_Func, P_W,
                      EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
-#ifdef COMPUTING_LAMBDA
-                     *sigma_special, *lambda_special,
-#endif
                      Smoother,
-#ifdef NEW_INTERFACE
-                     &LocalSolver_lvls,
-#endif
+                     LocalSolver_lvls,
                      CoarsestSolver,
                      higher_order, construct_coarseops);
 
@@ -2847,13 +2644,8 @@ int main(int argc, char *argv[])
                                       P_Func, TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
                                       Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
-#ifdef COMPUTING_LAMBDA
-                                      *sigma_special, *lambda_special,
-#endif
                                       Smoother,
-#ifdef NEW_INTERFACE
-                                      &LocalSolver_lvls,
-#endif
+                                      LocalSolver_lvls,
                                       CoarsestSolver,
                                       higher_order, construct_coarseops);
     double newsolver_reltol = 1.0e-6;
@@ -2869,12 +2661,31 @@ int main(int argc, char *argv[])
     NewSolver.SetStopCriteriaType(0);
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
-#ifdef NEW_PARTFINDER
-    Vector ParticSol(sigma_exact_truedofs.Size());
+    BlockVector ParticSol(new_trueoffsets);
+    //Vector ParticSol(sigma_exact_truedofs.Size());
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
-#else
-    Vector ParticSol(*(NewSolver.ParticularSolution()));
-#endif
+
+    // checking that the particular solution satisfies the divergence constraint
+    BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        Dof_TrueDof_Func_lvls[0][blk]->Mult(ParticSol.GetBlock(blk), temp_dofs.GetBlock(blk));
+    }
+
+    Vector temp_constr(Constraint_mat_lvls[0]->Height());
+    Constraint_mat_lvls[0]->Mult(temp_dofs.GetBlock(0), temp_constr);
+    temp_constr -= Floc;
+
+    // 3.1 if not, computing the particular solution
+    if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-14 )
+    {
+        std::cout << "Initial vector does not satisfies divergence constraint. \n";
+        MFEM_ABORT("");
+    }
+
+    MFEM_ASSERT(CheckBdrError(ParticSol, Xinit_truedofs, *EssBdrTrueDofs_Funct_lvls[0][0], true),
+                              "for the particular solution");
+
     Vector error3(ParticSol.Size());
     error3 = ParticSol;
 
@@ -3529,8 +3340,6 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
-
-#endif
 
 #ifdef VISUALIZATION
     if (visualization && nDimensions < 4)
