@@ -2814,7 +2814,7 @@ int main(int argc, char *argv[])
 #endif
 
     MinConstrSolver NewSolver(num_levels, P_WT,
-                     Element_dofs_Func, Element_dofs_W, Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
+                     Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                      P_Func, TrueP_Func, P_W, BdrDofs_Funct_lvls, EssBdrDofs_Funct_lvls, EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
 #ifdef COMPUTING_LAMBDA
@@ -2837,10 +2837,7 @@ int main(int argc, char *argv[])
     NewSolver.SetMaxIter(40);
     NewSolver.SetPrintLevel(1);
     NewSolver.SetStopCriteriaType(0);
-    NewSolver.SetOptimizedLocalSolve(true);
-#ifdef NEW_INTERFACE
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
-#endif
 
     Vector ParticSol(*(NewSolver.ParticularSolution()));
 
