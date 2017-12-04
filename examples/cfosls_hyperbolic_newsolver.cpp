@@ -1186,6 +1186,23 @@ int main(int argc, char *argv[])
    }
 
    const SparseMatrix* Proj_Hcurl_local;
+
+   Array<LocalProblemSolver*> LocalSolver_lvls(num_levels - 1);
+
+   Array<BlockMatrix*> Element_dofs_Func(num_levels - 1);
+   Array<int>* row_offsets_El_dofs = new Array<int>[num_levels - 1];
+   Array<int>* col_offsets_El_dofs = new Array<int>[num_levels - 1];
+
+   Array<BlockMatrix*> P_Func(ref_levels);
+   Array<int> * row_offsets_P_Func = new Array<int>[num_levels - 1];
+   Array<int> * col_offsets_P_Func = new Array<int>[num_levels - 1];
+
+   Array<BlockOperator*> TrueP_Func(ref_levels);
+   Array<int> * row_offsets_TrueP_Func = new Array<int>[num_levels - 1];
+   Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
+
+   Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
+
 #endif
 
     /*
@@ -1440,6 +1457,54 @@ int main(int argc, char *argv[])
                 P_C[num_levels - 2 - l]->CopyRowStarts();
 
             }
+        }
+
+        // creating additional structures required for local problem solvers
+        if (l < num_levels - 1)
+        {
+            row_offsets_El_dofs[l].SetSize(2);
+            row_offsets_El_dofs[l][0] = 0;
+            row_offsets_El_dofs[l][1] = Element_dofs_R[l]->Height();
+            col_offsets_El_dofs[l].SetSize(2);
+            col_offsets_El_dofs[l][0] = 0;
+            col_offsets_El_dofs[l][1] = Element_dofs_R[l]->Width();
+            Element_dofs_Func[l] = new BlockMatrix(row_offsets_El_dofs[l], col_offsets_El_dofs[l]);
+            Element_dofs_Func[l]->SetBlock(0,0, Element_dofs_R[l]);
+
+            row_offsets_P_Func[l].SetSize(2);
+            row_offsets_P_Func[l][0] = 0;
+            row_offsets_P_Func[l][1] = P_R[l]->Height();
+            col_offsets_P_Func[l].SetSize(2);
+            col_offsets_P_Func[l][0] = 0;
+            col_offsets_P_Func[l][1] = P_R[l]->Width();
+            P_Func[l] = new BlockMatrix(row_offsets_P_Func[l], col_offsets_P_Func[l]);
+            P_Func[l]->SetBlock(0,0, P_R[l]);
+
+            row_offsets_TrueP_Func[l].SetSize(2);
+            row_offsets_TrueP_Func[l][0] = 0;
+            row_offsets_TrueP_Func[l][1] = TrueP_R[l]->Height();
+            col_offsets_TrueP_Func[l].SetSize(2);
+            col_offsets_TrueP_Func[l][0] = 0;
+            col_offsets_TrueP_Func[l][1] = TrueP_R[l]->Width();
+            TrueP_Func[l] = new BlockOperator(row_offsets_TrueP_Func[l], col_offsets_TrueP_Func[l]);
+            TrueP_Func[l]->SetBlock(0,0, TrueP_R[l]);
+
+            P_WT[l] = Transpose(*P_W[l]);
+        }
+
+        //creating local problem solver hierarchy
+        if (l < num_levels - 1)
+        {
+            LocalSolver_lvls[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_R,
+                                                         EssBdrDofs_R,
+                                                         true, false);
+
         }
 
     }
@@ -2570,61 +2635,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
-
-    Array<BlockMatrix*> Element_dofs_Func(ref_levels);
-
-    Array<int>* row_offsets_El_dofs = new Array<int>[num_levels - 1];
-    Array<int>* col_offsets_El_dofs = new Array<int>[num_levels - 1];
-    for (int i = 0; i < num_levels - 1; ++i)
-    {
-        row_offsets_El_dofs[i].SetSize(2);
-        row_offsets_El_dofs[i][0] = 0;
-        row_offsets_El_dofs[i][1] = Element_dofs_R[i]->Height();
-        col_offsets_El_dofs[i].SetSize(2);
-        col_offsets_El_dofs[i][0] = 0;
-        col_offsets_El_dofs[i][1] = Element_dofs_R[i]->Width();
-        Element_dofs_Func[i] = new BlockMatrix(row_offsets_El_dofs[i], col_offsets_El_dofs[i]);
-        Element_dofs_Func[i]->SetBlock(0,0, Element_dofs_R[i]);
-    }
-
-    Array<BlockMatrix*> P_Func(ref_levels);
-
-    Array<int> * row_offsets_P_Func = new Array<int>[num_levels - 1];
-    Array<int> * col_offsets_P_Func = new Array<int>[num_levels - 1];
-    for (int i = 0; i < num_levels - 1; ++i)
-    {
-        row_offsets_P_Func[i].SetSize(2);
-        row_offsets_P_Func[i][0] = 0;
-        row_offsets_P_Func[i][1] = P_R[i]->Height();
-        col_offsets_P_Func[i].SetSize(2);
-        col_offsets_P_Func[i][0] = 0;
-        col_offsets_P_Func[i][1] = P_R[i]->Width();
-        P_Func[i] = new BlockMatrix(row_offsets_P_Func[i], col_offsets_P_Func[i]);
-        P_Func[i]->SetBlock(0,0, P_R[i]);
-    }
-
-
-    Array<BlockOperator*> TrueP_Func(ref_levels);
-    Array<int> * row_offsets_TrueP_Func = new Array<int>[num_levels - 1];
-    Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
-
-    for (int i = 0; i < num_levels - 1; ++i)
-    {
-        row_offsets_TrueP_Func[i].SetSize(2);
-        row_offsets_TrueP_Func[i][0] = 0;
-        row_offsets_TrueP_Func[i][1] = TrueP_R[i]->Height();
-        col_offsets_TrueP_Func[i].SetSize(2);
-        col_offsets_TrueP_Func[i][0] = 0;
-        col_offsets_TrueP_Func[i][1] = TrueP_R[i]->Width();
-        TrueP_Func[i] = new BlockOperator(row_offsets_TrueP_Func[i], col_offsets_TrueP_Func[i]);
-        TrueP_Func[i]->SetBlock(0,0, TrueP_R[i]);
-    }
-
-    Array<SparseMatrix*> P_WT(ref_levels); //AE_e matrices
-    for (int i = 0; i < ref_levels; ++i)
-    {
-        P_WT[i] = Transpose(*P_W[i]);
-    }
 
     //ParLinearForm *fform = new ParLinearForm(R_space);
 

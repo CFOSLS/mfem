@@ -220,12 +220,14 @@ void MultilevelSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_l
                  " class but must have been redefined \n";
 }
 
-// FIXME: Rename all the variables appropriately: now it's a mess of Op, Funct etc.
 // ~ Non-overlapping Schwarz smoother based on agglomerated elements
 // which provides zeros at the interfaces in the output
+// TODO: Rename all the variables appropriately: now it's a mess of Op, Funct etc.
 class LocalProblemSolver : public Operator
 {
 private:
+    mutable bool finalized;
+
     int numblocks;
     mutable bool optimized_localsolve;
 
@@ -233,20 +235,24 @@ private:
     // for fine-grid dofs which are internal to the fine-grid elements
     bool higher_order;
 
-    mutable BlockMatrix *Op_blkspmat;
-    mutable SparseMatrix *Constr_spmat;
-    mutable std::vector<HypreParMatrix*> d_td_blocks;
+    const BlockMatrix& Op_blkspmat;
+    const SparseMatrix& Constr_spmat;
+
+    const std::vector<HypreParMatrix*>& d_td_blocks;
 
     // Relation tables which represent agglomerated elements-to-elements relation
-    mutable SparseMatrix* AE_e;
+    const SparseMatrix& AE_e;
+
+    const BlockMatrix& el_to_dofs_Func;
+    const SparseMatrix& el_to_dofs_L2;
 
     mutable SparseMatrix* AE_edofs_L2;
     mutable BlockMatrix* AE_eintdofs_blocks; // relation between AEs and internal (w.r.t to AEs) fine-grid dofs
 
-    const std::vector<Array<int>* > & bdrdofs_blocks;
-    const std::vector<Array<int>* > & essbdrdofs_blocks;
+    const std::vector<Array<int>* >& bdrdofs_blocks;
+    const std::vector<Array<int>* >& essbdrdofs_blocks;
 
-    // LUfactors stores (except the coarsest) LU factors of the local
+    // Store (except the coarsest) LU factors of the local
     // problems' matrices for each agglomerate (2 per agglomerate)
     mutable std::vector<std::vector<DenseMatrixInverse* > > LUfactors;
 
@@ -254,9 +260,12 @@ private:
     // but in the future one can compute them only once and reuse afterwards
     mutable Array<bool> compute_AEproblem_matrices;
 
-protected:
-    void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const;
+    // all on true dofs
+    const Array<int> &block_offsets;
+    mutable BlockVector* xblock;
+    mutable BlockVector* yblock;
 
+protected:
     void SolveLocalProblem(int AE, std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol,
                                    bool is_degenerate) const;
@@ -267,27 +276,91 @@ protected:
                                                Vector& F, BlockVector &sol, bool is_degenerate) const;
     void SaveLocalLUFactors() const;
 
-    BlockMatrix* Get_AE_eintdofs(BlockMatrix& el_to_dofs,
+    BlockMatrix* Get_AE_eintdofs(const BlockMatrix& el_to_dofs,
                                             const std::vector<Array<int>* > &dof_is_essbdr,
                                             const std::vector<Array<int>* > &dof_is_bdr) const;
 
+    void Setup();
+
 public:
-    // constructor
-    LocalProblemSolver();
+    // main constructor
+    LocalProblemSolver(const BlockMatrix& Op_Blksmat,
+                       const SparseMatrix& Constr_Spmat,
+                       const std::vector<HypreParMatrix*>& D_tD_blks,
+                       const SparseMatrix& AE_el,
+                       const BlockMatrix& El_to_Dofs_Func,
+                       const SparseMatrix& El_to_Dofs_L2,
+                       const std::vector<Array<int>* >& BdrDofs_blks,
+                       const std::vector<Array<int>* >& EssBdrDofs_blks,
+                       bool Optimized_LocalSolve,
+                       bool Higher_Order)
+        : Operator(),
+          numblocks(Op_Blksmat.NumRowBlocks()),
+          Op_blkspmat(Op_Blksmat), Constr_spmat(Constr_Spmat),
+          d_td_blocks(D_tD_blks),
+          AE_e(AE_el),
+          el_to_dofs_Func(El_to_Dofs_Func),
+          el_to_dofs_L2(El_to_Dofs_L2),
+          bdrdofs_blocks(BdrDofs_blks),
+          essbdrdofs_blocks(EssBdrDofs_blks),
+          block_offsets(Op_Blksmat.RowOffsets())
+    {
+        finalized = 0;
+        optimized_localsolve = Optimized_LocalSolve;
+        higher_order = Higher_Order;
+
+        Setup();
+    }
+
+    void SetUp();
 
     // Operator application: `y=A(x)`.
-    virtual void Mult(const Vector &x, Vector &y) const = 0;
+    virtual void Mult(const Vector &x, Vector &y) const;
+
+    // is public since one might want to use that to compute particular solution witn nonzero righthand side in the constraint
+    void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const;
+
 };
+
+// considers x as the righthand side
+// and returns y as a solution to all the local problems
+// (*) both x and y are vectors on true dofs
+void LocalProblemSolver::Mult(const Vector &x, Vector &y) const
+{
+    // x will be accessed through xblock as its view
+    xblock->Update(x.GetData(), block_offsets);
+    // y will be accessed through yblock as its view
+    yblock->Update(y.GetData(), block_offsets);
+
+    SolveTrueLocalProblems( *xblock, *yblock, NULL);
+}
+
+void LocalProblemSolver::Setup()
+{
+    AE_edofs_L2 = mfem::Mult(AE_e, el_to_dofs_L2);
+    AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Func, essbdrdofs_blocks, bdrdofs_blocks);
+
+    xblock = new BlockVector(block_offsets);
+    yblock = new BlockVector(block_offsets);
+
+    // (optionally) saves LU factors related to the local problems to be solved
+    // for each agglomerate element
+    if (optimized_localsolve)
+        SaveLocalLUFactors();
+
+    finalized = true;
+
+}
 
 void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const
 {
     // FIXME: Get rid of temporary vectors;
-    BlockVector lvlrhs_func(Op_blkspmat->ColOffsets());
+    BlockVector lvlrhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
     {
         d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
     }
-    BlockVector sol_update(Op_blkspmat->RowOffsets());
+    BlockVector sol_update(Op_blkspmat.RowOffsets());
     sol_update = 0.0;
 
     DenseMatrix sub_Constr;
@@ -309,7 +382,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         {
             //std::cout << "blk = " << blk << "\n";
             if (compute_AEproblem_matrices[blk])
-                Op_blk = &(Op_blkspmat->GetBlock(blk,blk));
+                Op_blk = &(Op_blkspmat.GetBlock(blk,blk));
 
             SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk,blk);
             Array<int> tempview_inds(AE_eintdofs_blk.GetRowColumns(AE), AE_eintdofs_blk.RowSize(AE));
@@ -497,7 +570,7 @@ void LocalProblemSolver::SaveLocalLUFactors() const
     DenseMatrix sub_Func;
 
     SparseMatrix * AE_eintdofs = &(AE_eintdofs_blocks->GetBlock(0,0));
-    const SparseMatrix * Op_blk = &(Op_blkspmat->GetBlock(0,0));
+    const SparseMatrix * Op_blk = &(Op_blkspmat.GetBlock(0,0));
 
     // loop over all AE, computing and saving factorization
     // of local saddle point matrices in each AE
@@ -516,7 +589,7 @@ void LocalProblemSolver::SaveLocalLUFactors() const
 
         Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
         sub_Constr.SetSize(Wtmp_j.Size(), Local_inds.Size());
-        Constr_spmat->GetSubMatrix(Wtmp_j, Local_inds, sub_Constr);
+        Constr_spmat.GetSubMatrix(Wtmp_j, Local_inds, sub_Constr);
 
         for (int i = 0; i < Local_inds.Size(); ++i)
         {
@@ -572,7 +645,7 @@ void LocalProblemSolver::SaveLocalLUFactors() const
 // for higher order elements there will be two parts,
 // one for dofs at fine-grid element faces which belong to the global boundary
 // and a different treatment for internal (w.r.t. to fine elements) dofs
-BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(BlockMatrix& el_to_dofs,
+BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
                                         const std::vector<Array<int>* > &dof_is_essbdr,
                                         const std::vector<Array<int>* > &dof_is_bdr) const
 {
@@ -584,7 +657,7 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(BlockMatrix& el_to_dofs,
     Array<int> res_rowoffsets(numblocks+1);
     res_rowoffsets[0] = 0;
     for (int blk = 0; blk < numblocks; ++blk)
-        res_rowoffsets[blk + 1] = res_rowoffsets[blk] + AE_e->Height();
+        res_rowoffsets[blk + 1] = res_rowoffsets[blk] + AE_e.Height();
     Array<int> res_coloffsets(numblocks+1);
     res_coloffsets[0] = 0;
     for (int blk = 0; blk < numblocks; ++blk)
@@ -604,7 +677,7 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(BlockMatrix& el_to_dofs,
         //TempEssBdrDofs.MakeRef(*dof_is_essbdr[blk][level]);
 
         // creating dofs_to_AE relation table
-        SparseMatrix * dofs_AE = Transpose(*mfem::Mult(*AE_e, *TempSpMat));
+        SparseMatrix * dofs_AE = Transpose(*mfem::Mult(AE_e, *TempSpMat));
         int ndofs = dofs_AE->Height();
 #ifdef DEBUG_INFO
         if (blk == 0)
