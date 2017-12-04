@@ -2647,7 +2647,7 @@ int main(int argc, char *argv[])
                                       Smoother,
                                       LocalSolver_lvls,
                                       CoarsestSolver,
-                                      higher_order, construct_coarseops);
+                                      construct_coarseops);
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)
