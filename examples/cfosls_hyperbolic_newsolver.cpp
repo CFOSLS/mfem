@@ -2443,7 +2443,7 @@ int main(int argc, char *argv[])
     NewSmoother.SetPrintLevel(0);
     */
 
-    HCurlGSSmoother NewGSSmoother(num_levels - 1, Divfree_mat_lvls,
+    HCurlGSSmoother NewGSSmoother(num_levels - 1, Funct_mat_lvls, Divfree_mat_lvls,
                    /*Proj_Hcurl_lvls,*/ Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
                    EssBdrDofs_Hcurl);
     //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
@@ -2618,7 +2618,7 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    const bool higher_order = false;
+    //const bool higher_order = false;
     const bool construct_coarseops = true;
     MultilevelSmoother * Smoother;
 #ifdef WITH_SMOOTHER
@@ -2627,6 +2627,16 @@ int main(int argc, char *argv[])
 #else
     Smoother = NULL;
 #endif
+
+    DivConstraintSolver PartsolFinder(num_levels, P_WT,
+                                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
+                                      P_Func, TrueP_Func, P_W,
+                                      EssBdrTrueDofs_Funct_lvls,
+                                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
+                                      Smoother,
+                                      LocalSolver_lvls,
+                                      CoarsestSolver,
+                                      construct_coarseops);
 
     GeneralMinConstrSolver NewSolver(num_levels,
                      Dof_TrueDof_Func_lvls,
@@ -2639,15 +2649,6 @@ int main(int argc, char *argv[])
                      construct_coarseops);
 
 
-    DivConstraintSolver PartsolFinder(num_levels, P_WT,
-                                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                                      P_Func, TrueP_Func, P_W,
-                                      EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
-                                      Smoother,
-                                      LocalSolver_lvls,
-                                      CoarsestSolver,
-                                      construct_coarseops);
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)

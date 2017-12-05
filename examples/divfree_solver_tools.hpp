@@ -150,8 +150,7 @@ public:
     }
 
     // general setup functions
-    virtual void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl) = 0;
-    virtual void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) = 0;
+    virtual void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) const = 0;
 
     // general functions for setting righthand side at the given level
     //virtual void ComputeRhsLevel(int level, const BlockVector& res_lvl);
@@ -173,7 +172,10 @@ public:
     int GetPrintLevel() const { return print_level;}
 
     virtual void PrintAllOptions() const;
+
+    virtual void Setup() const = 0;
 };
+
 
 void MultilevelSmoother::PrintAllOptions() const
 {
@@ -183,13 +185,7 @@ void MultilevelSmoother::PrintAllOptions() const
     std::cout << "\n";
 }
 
-void MultilevelSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
-{
-    std::cout << "SetUpSmoother for a SparseMatrix argument is called from the abstract base"
-                 " class but must have been redefined \n";
-}
-
-void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl)
+void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) const
 {
     MFEM_ABORT("SetUpSmoother for a BlockMatrix argument is called from the abstract base"
                  " class but must have been redefined \n");
@@ -1087,10 +1083,6 @@ private:
     mutable bool setup_finished;
 
     mutable int print_level;
-    mutable double rel_tol;
-    mutable int max_iter;
-    mutable int converged;
-
 protected:
     int num_levels;
 
@@ -1205,8 +1197,6 @@ public:
     void FindParticularSolution(const BlockVector& truestart_guess, BlockVector& particular_solution, const Vector& ConstrRhs, bool verbose) const;
 
     // have to define these to mimic useful routines from IterativeSolver class
-    void SetRelTol(double RelTol) const {rel_tol = RelTol;}
-    void SetMaxIter(int MaxIter) const {max_iter = MaxIter;}
     void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
 
 };
@@ -1296,10 +1286,7 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     else
         CoarseSolver = NULL;
 
-    SetRelTol(1.0e-12);
-    SetMaxIter(1000);
     SetPrintLevel(0);
-    converged = 0;
 
     if (LocalSolvers)
     {
@@ -1448,14 +1435,6 @@ void DivConstraintSolver::Setup(bool verbose) const
         //sets up the current level and prepares operators for the next one
         SetUpFinerLvl(l);
 
-        // if smoother is present, sets up the smoother's internal data
-        if (Smoo)
-        {
-            if (numblocks == 1)
-                Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0));
-            else
-                Smoo->SetUpSmoother(l, *Funct_lvls[l]);
-        }
     } // end of loop over finer levels
 
     // in the end, part_solution is in any case a valid initial iterate
@@ -1626,7 +1605,6 @@ void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f, V
 
 class HCurlGSSmoother : public MultilevelSmoother
 {
-    //using MultilevelSmoother::SetUpSmoother;
 private:
     // number of GS sweeps
     int sweeps_num;
@@ -1641,8 +1619,7 @@ private:
     // else, some new code will be used (but was not implemented)
     bool relax_all_dofs;
 protected:
-    // Projection matrices for Hcurl at all levels
-    //const Array< SparseMatrix*>& P_lvls;
+    const Array< BlockMatrix*> & Funct_mat_lvls;
 
     // discrete curl operators at all levels;
     mutable Array<SparseMatrix*> Curlh_lvls;
@@ -1690,25 +1667,18 @@ protected:
     // but take care about the fact that GetTrueVDofs is different from GetVDofs()
     mutable std::vector<Array<int>* >  essbdrtruedofs_lvls;
 
-    // temporary storage variables
-    //mutable Array<Vector*> rhs_lvls;      // rhs for the problems in H(curl)
-    //mutable Array<Vector*> tempvec_lvls;  // lives in H(curl)_h
-    //mutable Array<Vector*> tempvec2_lvls; // lives in H(div)_h
-
 public:
     // constructor
-    HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & Discrete_Curls_lvls,
-                   //const Array< SparseMatrix*>& Proj_lvls,
-                   const Array<HypreParMatrix *>& Dof_TrueDof_Hcurl_lvls,
-                   const Array<HypreParMatrix *>& Dof_TrueDof_Hdiv_lvls,
-                   const std::vector<Array<int>* > & EssBdrdofs_lvls,
-                   int SweepsNum = 1, bool Construct_Curls = false, bool Relax_All_Dofs = true);
+    HCurlGSSmoother (int Num_Levels,
+                     const Array< BlockMatrix*> & Funct_Mat_lvls,
+                     const Array< SparseMatrix*> & Discrete_Curls_lvls,
+                     //const Array< SparseMatrix*>& Proj_lvls,
+                     const Array<HypreParMatrix *>& Dof_TrueDof_Hcurl_lvls,
+                     const Array<HypreParMatrix *>& Dof_TrueDof_Hdiv_lvls,
+                     const std::vector<Array<int>* > & EssBdrdofs_lvls,
+                     int SweepsNum = 1, bool Construct_Curls = false, bool Relax_All_Dofs = true);
 
-    // SparseMatrix version of SetUpSmoother()
-    void SetUpSmoother(int level, const SparseMatrix& SysMat_lvl) override;
-
-    // BlockMatrix version of SetUpSmoother()
-    void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) override;
+    void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) const override;
 
     // Computes the righthand side for the local minimization problem
     // solved in MultLevel() from the given residual at level l of the
@@ -1725,11 +1695,27 @@ public:
     bool WillConstructCurls() const {return construct_curls;}
     bool WillRelaxAllDofs() const {return relax_all_dofs;}
     int GetSweepsNumber() const {return sweeps_num;}
-    void SetSweepsNumber(int Number_of_sweeps) {sweeps_num = Number_of_sweeps;}
+    void SetSweepsNumber(int Number_of_sweeps)
+    {
+        sweeps_num = Number_of_sweeps;
+        for ( int l = 0; l < num_levels; ++l)
+            Smoothers_lvls[l]->SetType(HypreSmoother::Type::l1GS, sweeps_num);
+    }
     void SetDofsToRelax(bool Relax_all_dofs) {relax_all_dofs = Relax_all_dofs;}
 
     void PrintAllOptions() const override;
+
+    void Setup() const override;
 };
+
+void HCurlGSSmoother::Setup() const
+{
+    for (int l = 0; l < num_levels; ++l)
+    {
+        SetUpSmoother(l, *Funct_mat_lvls[l]);
+    }
+}
+
 
 void HCurlGSSmoother::PrintAllOptions() const
 {
@@ -1742,18 +1728,21 @@ void HCurlGSSmoother::PrintAllOptions() const
 }
 
 
-HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & Discrete_Curls_lvls,
-                              //const Array< SparseMatrix*>& Proj_lvls,
-                              const Array<HypreParMatrix*>& Dof_TrueDof_Hcurl_lvls,
-                              const Array<HypreParMatrix*>& Dof_TrueDof_Hdiv_lvls,
-                              const std::vector<Array<int>* > & EssBdrdofs_lvls,
-                              int SweepsNum, bool Construct_Curls, bool Relax_All_Dofs) :
-    MultilevelSmoother(Num_Levels), sweeps_num(SweepsNum), construct_curls(Construct_Curls),
-    relax_all_dofs(Relax_All_Dofs),
-    //P_lvls(Proj_lvls),
-    d_td_Hcurl_lvls(Dof_TrueDof_Hcurl_lvls),
-    d_td_Hdiv_lvls(Dof_TrueDof_Hdiv_lvls),
-    essbdrdofs_lvls(EssBdrdofs_lvls)
+HCurlGSSmoother::HCurlGSSmoother (int Num_Levels,
+                                  const Array< BlockMatrix*> & Funct_Mat_lvls,
+                                  const Array< SparseMatrix*> & Discrete_Curls_lvls,
+                                  const Array<HypreParMatrix*>& Dof_TrueDof_Hcurl_lvls,
+                                  const Array<HypreParMatrix*>& Dof_TrueDof_Hdiv_lvls,
+                                  const std::vector<Array<int>* > & EssBdrdofs_lvls,
+                                  int SweepsNum, bool Construct_Curls, bool Relax_All_Dofs)
+    : MultilevelSmoother(Num_Levels),
+      sweeps_num(SweepsNum),
+      construct_curls(Construct_Curls),
+      relax_all_dofs(Relax_All_Dofs),
+      Funct_mat_lvls(Funct_Mat_lvls),
+      d_td_Hcurl_lvls(Dof_TrueDof_Hcurl_lvls),
+      d_td_Hdiv_lvls(Dof_TrueDof_Hdiv_lvls),
+      essbdrdofs_lvls(EssBdrdofs_lvls)
 {
     std::cout << "Calling constructor of the HCurlGSSmoother \n";
     MFEM_ASSERT(Discrete_Curls_lvls[0] != NULL, "HCurlGSSmoother::HCurlGSSmoother()"
@@ -1811,20 +1800,14 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels, const Array< SparseMatrix*> & 
     truerhs_lvls.SetSize(num_levels);
     essbdrtruedofs_lvls.resize(num_levels);
 
-    //rhs_lvls.SetSize(num_levels);
-    //tempvec2_lvls.SetSize(num_levels);
-    //tempvec_lvls.SetSize(num_levels);
     truevec_lvls.SetSize(num_levels);
     truevec2_lvls.SetSize(num_levels);
     truevec3_lvls.SetSize(num_levels);
+
+    Setup();
 }
 
-void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl)
-{
-    MFEM_ABORT("HcurlGSSmoother: BlockMatrix arguments are not supported\n");
-}
-
-void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
+void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_blk) const
 {
     if ( !finalized_lvls[level] ) // if level was not set up before
     {
@@ -1833,6 +1816,11 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
         // shortcuts
         SparseMatrix *Curlh = Curlh_lvls[level];
         SparseMatrix *CurlhT = Transpose(*Curlh);
+        const SparseMatrix * SysMat_lvl = &(SysMat_blk.GetBlock(0,0));
+        //std::cout << "SysMat_lvl, lvl = " << level << "--------------------------------------\n";
+        //SysMat_lvl->Print();
+        //ofstream ofs("newsolver_out.txt");
+        //res_constr.Print(ofs,1);
         Array<int> * essbdr = essbdrdofs_lvls[level];
 
         HypreParMatrix * d_td = d_td_Hcurl_lvls[level];
@@ -1845,7 +1833,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const SparseMatrix& SysMat_lvl)
         }
 
         // form CT*M*C as a SparseMatrix
-        SparseMatrix *SysMat_Curlh = mfem::Mult(SysMat_lvl, *Curlh_lvls[level]);
+        SparseMatrix *SysMat_Curlh = mfem::Mult(*SysMat_lvl, *Curlh_lvls[level]);
         CTMC_lvls[level] = mfem::Mult(*CurlhT, *SysMat_Curlh);
 
         delete SysMat_Curlh;
@@ -2476,7 +2464,7 @@ protected:
     // stores Functional matrix on all levels except the finest
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
     mutable Array<BlockMatrix*> Funct_lvls;
-    mutable Array<SparseMatrix*> Constr_lvls;
+    mutable Array<SparseMatrix*> Constr_lvls; // can be removed since it's used only for debugging
 
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
@@ -2511,7 +2499,7 @@ protected:
 
     // Allocates current level-related data and computes coarser matrices for the functional
     // and the constraint.
-    // Called only during the SetUpSolver()
+    // Called only during the Setup()
     virtual void SetUpFinerLvl(int lvl) const;
 
     // Computes out_l as updated rhs in the functional for the current level
@@ -2524,7 +2512,7 @@ protected:
     // the given contraint and sets it as the initial iterate.
     // at each finer level also computes factorization of the local problems
     // matrices and stores them
-    void SetUpSolver(bool verbose = false) const;
+    void Setup(bool verbose = false) const;
 
     // main solver iteration routine
     void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
@@ -2788,10 +2776,10 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
         have_localsolvers = true;
     }
 
-    SetUpSolver();
+    Setup();
 }
 
-void GeneralMinConstrSolver::SetUpSolver(bool verbose) const
+void GeneralMinConstrSolver::Setup(bool verbose) const
 {
     if (verbose)
         std::cout << "Starting solver setup \n";
@@ -2804,20 +2792,11 @@ void GeneralMinConstrSolver::SetUpSolver(bool verbose) const
     // 2. setting up the required internal data at all levels
     // including smoothers
 
-    // 2.1 all levels except the coarsest
+    // 2.1 loop over all levels except the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
         //sets up the current level and prepares operators for the next one
         SetUpFinerLvl(l);
-
-        // if smoother is present, sets up the smoother's internal data
-        if (Smoo)
-        {
-            if (numblocks == 1)
-                Smoo->SetUpSmoother(l, Funct_lvls[l]->GetBlock(0,0));
-            else
-                Smoo->SetUpSmoother(l, *Funct_lvls[l]);
-        }
     } // end of loop over finer levels
 
     setup_finished = true;
@@ -3159,15 +3138,15 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     // Funct_lvls[lvl] stores the Functional matrix on level lvl
     if (construct_coarseops)
     {
-        BlockMatrix * Funct_PR;
+        BlockMatrix * Funct_PFunc;
         BlockMatrix * P_FuncT = Transpose(*P_Func[lvl]);
-        Funct_PR = mfem::Mult(*Funct_lvls[lvl],*P_Func[lvl]);
+        Funct_PFunc = mfem::Mult(*Funct_lvls[lvl],*P_Func[lvl]);
 
         // checking the difference between coarsened and true
         // (from bilinear form) functional operators
         /*
         std::cout << "level = " << lvl << "\n";
-        BlockMatrix * tempdiff = mfem::Mult(*P_FuncT, *Funct_PR);
+        BlockMatrix * tempdiff = mfem::Mult(*P_FuncT, *Funct_PFunc);
         for ( int blk = 0; blk < numblocks; blk++)
         {
             std::cout << "blk = " << blk << "\n";
@@ -3176,7 +3155,7 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
             std::cout << tempdiffblk->MaxNorm() << "\n";
         }
         */
-        Funct_lvls[lvl + 1] = mfem::Mult(*P_FuncT, *Funct_PR);
+        Funct_lvls[lvl + 1] = mfem::Mult(*P_FuncT, *Funct_PFunc);
 
         SparseMatrix *P_L2T = Transpose(*P_L2[lvl]);
         SparseMatrix *Constr_PR;
@@ -3192,7 +3171,7 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
 
         Constr_lvls[lvl + 1] = mfem::Mult(*P_L2T, *Constr_PR);
 
-        delete Funct_PR;
+        delete Funct_PFunc;
         delete Constr_PR;
         delete P_FuncT;
         delete P_L2T;
