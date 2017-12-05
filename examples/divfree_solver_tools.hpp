@@ -215,8 +215,11 @@ void MultilevelSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_l
                  " class but must have been redefined \n";
 }
 
-// TODO: Implement an abstract base for the coarsest problem solver
-// TODO: Implement an abstract base for the local problems solver
+// TODO: Implement a new class with local solvers for the case when S is also given
+
+
+// TODO: Implement an abstract base for the coarsest problem solver. Maybe unnecessary now
+// TODO: Implement an abstract base for the local problems solver. Maybe unnecessary now
 
 class CoarsestProblemSolver : public Operator
 {
@@ -414,7 +417,7 @@ void CoarsestProblemSolver::Setup() const
 
     coarse_prec = new BlockDiagonalPreconditioner(coarse_offsets);
     for ( int blk = 0; blk < numblocks; ++blk)
-        coarse_prec->SetDiagonalBlock(0, Funct_prec[blk]);
+        coarse_prec->SetDiagonalBlock(blk, Funct_prec[blk]);
     coarse_prec->SetDiagonalBlock(numblocks, invSchur);
 
     // coarse solver
@@ -2365,13 +2368,9 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 // TODO: Check the timings and make it faster
 // TODO: Add destructors for the new classes which deallocates all the memory
 // TODO: Run a valgrind check
-// TODO: Clean up the commented blocks used during debugging
 // TODO: Clean up the function descriptions
 // TODO: Clean up the variables names
 // TODO: Update HcurlSmoother class
-// TODO: Add switching on/off the local problems solve as an option for the solver
-// TODO: Maybe, it is better to implement a multigrid class more general than Chak did
-// TODO: and describe the new solver as a multigrid with a specific settings (smoothers)?
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
 
 // Solver and not IterativeSolver is the right choice for the base class

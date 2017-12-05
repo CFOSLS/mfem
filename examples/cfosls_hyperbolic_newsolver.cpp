@@ -768,9 +768,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1069,6 +1069,14 @@ int main(int argc, char *argv[])
         //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
     }
 
+    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
+    ess_bdrS = 0;
+    if (strcmp(space_for_S,"H1") == 0) // S is from H1
+    {
+        ess_bdrS[0] = 1; // t = 0
+        //ess_bdrS = 1;
+    }
+
     int ref_levels = par_ref_levels;
 
     int num_levels = ref_levels + 1;
@@ -1076,7 +1084,7 @@ int main(int argc, char *argv[])
     Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> C_space_lvls(num_levels);
-    //Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
+    Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
 
     FiniteElementCollection *hdiv_coll;
     ParFiniteElementSpace *R_space;
@@ -1149,7 +1157,9 @@ int main(int argc, char *argv[])
 
     DivPart divp;
 
-    const int numblocks_funct = 1;
+    int numblocks_funct = 1;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        numblocks_funct++;
     Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
     all_bdrSigma = 1;
     std::vector<std::vector<Array<int>* > > BdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
@@ -1158,9 +1168,12 @@ int main(int argc, char *argv[])
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
-
     Array< SparseMatrix* > Proj_Hcurl_lvls(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
+
+    std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
+    Array< SparseMatrix* > Proj_H1_lvls(num_levels - 1);
+    Array<HypreParMatrix* > Dof_TrueDof_H1_lvls(num_levels);
     Array<HypreParMatrix* > Dof_TrueDof_Hdiv_lvls(num_levels);
 
     std::vector<std::vector<HypreParMatrix*> > Dof_TrueDof_Func_lvls(num_levels);
@@ -1173,15 +1186,23 @@ int main(int argc, char *argv[])
 
    for (int l = 0; l < num_levels; ++l)
    {
-       Dof_TrueDof_Func_lvls[l].resize(1);
+       Dof_TrueDof_Func_lvls[l].resize(numblocks_funct);
        BdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Hcurl[l] = new Array<int>;
        Funct_mat_offsets_lvls[l] = new Array<int>;
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+       {
+           BdrDofs_Funct_lvls[l][1] = new Array<int>;
+           EssBdrDofs_Funct_lvls[l][1] = new Array<int>;
+           EssBdrTrueDofs_Funct_lvls[l][1] = new Array<int>;
+           EssBdrDofs_H1[l] = new Array<int>;
+       }
    }
 
    const SparseMatrix* Proj_Hcurl_local;
+   const SparseMatrix* Proj_H1_local;
 
    Array<Operator*>* LocalSolver_lvls;
 #ifdef WITH_LOCALSOLVERS
@@ -1321,12 +1342,16 @@ int main(int argc, char *argv[])
         R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
         W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
         C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
 
         // getting boundary and essential boundary dofs
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
 
         // getting operators at level l
         // curl or divskew operator from C_space into R_space
@@ -1346,14 +1371,50 @@ int main(int argc, char *argv[])
         //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
 
-        Funct_mat_offsets_lvls[l]->SetSize(2);
+        ParBilinearForm *Cblock;
+        ParMixedBilinearForm *BTblock;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Case when S is from L2 but is not"
+                                                       " eliminated is not supported currently! \n");
+
+            // diagonal block for H^1
+            Cblock = new ParBilinearForm(H_space_lvls[l]);
+            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+            Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+            Cblock->Assemble();
+            // FIXME: What about boundary conditons here?
+            //Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
+            Cblock->Finalize();
+
+            // off-diagonal block for (H(div), Space_for_S) block
+            // you need to create a new integrator here to swap the spaces
+            BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
+            BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+            BTblock->Assemble();
+            // FIXME: What about boundary conditons here?
+            //BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
+            //BTblock->EliminateTestDofs(ess_bdrS);
+            BTblock->Finalize();
+        }
+
+        Funct_mat_offsets_lvls[l]->SetSize(numblocks_funct + 1);
         //SparseMatrix Aloc = Ablock->SpMat();
         //Array<int> offsets(2);
         (*Funct_mat_offsets_lvls[l])[0] = 0;
         (*Funct_mat_offsets_lvls[l])[1] = Ablock->Height();
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            (*Funct_mat_offsets_lvls[l])[2] = Cblock->Height();
+        Funct_mat_offsets_lvls[l]->PartialSum();
 
         Funct_mat_lvls[l] = new BlockMatrix(*Funct_mat_offsets_lvls[l]);
         Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            Funct_mat_lvls[l]->SetBlock(1,1,Cblock->LoseMat());
+            Funct_mat_lvls[l]->SetBlock(1,0,BTblock->LoseMat());
+            Funct_mat_lvls[l]->SetBlock(0,1,Transpose(Funct_mat_lvls[l]->GetBlock(1,0)));
+        }
 
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
         Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
@@ -1384,6 +1445,11 @@ int main(int argc, char *argv[])
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            Dof_TrueDof_H1_lvls[l] = H_space_lvls[l]->Dof_TrueDof_Matrix();
+            Dof_TrueDof_Func_lvls[l][1] = Dof_TrueDof_H1_lvls[l];
+        }
 
         /*
         if (l == 0)
@@ -1416,6 +1482,13 @@ int main(int argc, char *argv[])
             Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
             Proj_Hcurl_lvls[l] = RemoveZeroEntries(*Proj_Hcurl_local);
 
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                H_space->Update();
+                Proj_H1_local = (SparseMatrix *)H_space->GetUpdateOperator();
+                Proj_H1_lvls[l] = RemoveZeroEntries(*Proj_H1_local);
+            }
+
             W_space->Update();
             R_space->Update();
 
@@ -1447,14 +1520,6 @@ int main(int argc, char *argv[])
 
             if (prec_is_MG)
             {
-                /*
-                HypreParMatrix * P_C_coarser_d_td = Dof_TrueDof_Hcurl_lvls[l + 1]->
-                        LeftDiagMult( *Proj_Hcurl_lvls[l],  C_space_lvls[l]->GetDofOffsets());
-                P_C[num_levels - 2 - l] = ParMult(Dof_TrueDof_Hcurl_lvls[l]->Transpose(), P_C_coarser_d_td);
-                P_C[num_levels - 2 - l]->CopyColStarts();
-                P_C[num_levels - 2 - l]->CopyRowStarts();
-                */
-
                 auto d_td_coarse_C = C_space_lvls[l + 1]->Dof_TrueDof_Matrix();
                 unique_ptr<SparseMatrix>RP_C_local(
                             Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *Proj_Hcurl_lvls[l]));
@@ -1462,6 +1527,17 @@ int main(int argc, char *argv[])
                             *RP_C_local, C_space_lvls[l]->GetTrueDofOffsets());
                 P_C[num_levels - 2 - l]->CopyColStarts();
                 P_C[num_levels - 2 - l]->CopyRowStarts();
+
+                if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                {
+                    auto d_td_coarse_H = H_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+                    unique_ptr<SparseMatrix>RP_H_local(
+                                Mult(*H_space_lvls[l]->GetRestrictionMatrix(), *Proj_H1_lvls[l]));
+                    P_H[num_levels - 2 - l] = d_td_coarse_H->LeftDiagMult(
+                                *RP_H_local, H_space_lvls[l]->GetTrueDofOffsets());
+                    P_H[num_levels - 2 - l]->CopyColStarts();
+                    P_H[num_levels - 2 - l]->CopyRowStarts();
+                }
 
             }
         }
@@ -1503,17 +1579,6 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
-            /*
-            (*LocalSolver_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
-                                                         *Constraint_mat_lvls[l],
-                                                         Dof_TrueDof_Func_lvls[l],
-                                                         *P_WT[l],
-                                                         *Element_dofs_Func[l],
-                                                         *Element_dofs_W[l],
-                                                         BdrDofs_Funct_lvls[l],
-                                                         EssBdrDofs_Funct_lvls[l],
-                                                         true, false);
-            */
             (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
@@ -1614,17 +1679,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr cnds on sigma
         ess_bdrU[0] = 1;
 
-
     C_space->GetEssentialTrueDofs(ess_bdrU, ess_tdof_listU);
-
-    Array<int> ess_tdof_listS, ess_bdrS(pmesh->bdr_attributes.Max());
-    ess_bdrS = 0;
-    if (strcmp(space_for_S,"H1") == 0) // S is from H1
-    {
-        ess_bdrS[0] = 1; // t = 0
-        //ess_bdrS = 1;
-        S_space->GetEssentialTrueDofs(ess_bdrS, ess_tdof_listS);
-    }
 
     if (verbose)
     {
