@@ -72,6 +72,20 @@ double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const std::vecto
     return global_func_norm;
 }
 
+// Computes and prints the norm of ( Funct * y, y )_2,h, assembled over all processes
+double CheckFunctValue(MPI_Comm comm, const BlockOperator& Funct, const Array<int>& offsets, const BlockVector& truevec, char const * string, bool print)
+{
+    BlockVector trueres(offsets);
+    Funct.Mult(truevec, trueres);
+    double local_func_norm = truevec * trueres / sqrt (trueres.Size());
+    double global_func_norm = 0;
+    MPI_Allreduce(&local_func_norm, &global_func_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    if (print)
+        std::cout << "Functional norm " << string << global_func_norm << " ... \n";
+    return global_func_norm;
+}
+
+
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h
 bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector* ConstrRhs,
                                                 char const* string)
@@ -2372,6 +2386,10 @@ void HCurlSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 // TODO: Clean up the variables names
 // TODO: Update HcurlSmoother class
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
+// TODO: Make dof_truedof an optional data member so that either dof_truedof or
+// TODO: global funct matrices (and offsets) are given at all level, maybe via two different constructors
+// TODO: In the latter case ComputeTrueRes can be rewritten using global matrices and dof_truedof
+// TODO: can remain unused at all.
 
 // Solver and not IterativeSolver is the right choice for the base class
 class GeneralMinConstrSolver : public Solver
@@ -2447,7 +2465,7 @@ protected:
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
     //const Array<int>& block_offsets;
-    mutable Array<int> block_trueoffsets;
+    //mutable Array<int> block_trueoffsets;
 
     // Righthand side of  the divergence contraint on dofs
     // (remains unchanged throughout the solving process)
@@ -2466,6 +2484,11 @@ protected:
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
     mutable Array<BlockMatrix*> Funct_lvls;
     mutable Array<SparseMatrix*> Constr_lvls; // can be removed since it's used only for debugging
+
+    const BlockOperator& Funct_global;
+    // a required input since MFEM cannot give out offsets out of the const BlockOperator which is ugly imo
+    // FIXME: Because of this one cannot check the compatibility of these two _global variables though they must be compatible
+    const Array<int>& offsets_global;
 
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
@@ -2528,10 +2551,12 @@ public:
                            const Array<BlockMatrix *> &FunctOp_lvls,
                            const Array<SparseMatrix *> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
+                           const BlockOperator& Funct_Global,
+                           const Array<int>& Offsets_Global,
                            const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
                            Array<Operator*>* LocalSolvers = NULL,
-                           CoarsestProblemSolver* CoarseSolver = NULL,
+                           Operator* CoarseSolver = NULL,
                            bool Construct_CoarseOps = true,
                            int StopCriteria_Type = 1);
 
@@ -2596,7 +2621,7 @@ void GeneralMinConstrSolver::PrintAllOptions() const
 // The input must be defined on true dofs
 void GeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
 {
-    init_guess->Update(InitGuess.GetData(), block_trueoffsets);
+    init_guess->Update(InitGuess.GetData(), offsets_global);
 }
 
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
@@ -2670,12 +2695,14 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
                        const Vector& ConstrRhsVec,
+                       const BlockOperator& Funct_Global,
+                       const Array<int>& Offsets_Global,
                        const BlockVector& Bdrdata_TrueDofs,
                        MultilevelSmoother* Smoother,
                        Array<Operator*>* LocalSolvers,
-                       CoarsestProblemSolver* CoarsestSolver,
+                       Operator *CoarsestSolver,
                        bool Construct_CoarseOps, int StopCriteria_Type)
-     : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()),
+     : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()), // FIXME: Wrong sizes may affect smth, should be true sizes
        construct_coarseops(Construct_CoarseOps),
        stopcriteria_type(StopCriteria_Type),
        setup_finished(false),
@@ -2687,6 +2714,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
        essbdrtruedofs_Func(EssBdrTrueDofs_Func),
        numblocks(FunctOp_lvls[0]->NumColBlocks()),
        ConstrRhs(ConstrRhsVec),
+       Funct_global(Funct_Global),
+       offsets_global(Offsets_Global),
        bdrdata_truedofs(Bdrdata_TrueDofs)
 {
 
@@ -2713,27 +2742,21 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     for (int l = 0; l < num_levels; ++l)
         Constr_lvls[l] = ConstrOp_lvls[l];
 
-    block_trueoffsets.SetSize(numblocks + 1);
-    block_trueoffsets[0] = 0;
-    for ( int blk = 0; blk < numblocks; ++blk )
-        block_trueoffsets[blk + 1] = Dof_TrueDof_Func_lvls[0][blk]->Width();
-    block_trueoffsets.PartialSum();
-
-    xblock_truedofs = new BlockVector(block_trueoffsets);
-    yblock_truedofs = new BlockVector(block_trueoffsets);
-    tempblock_truedofs = new BlockVector(block_trueoffsets);
+    xblock_truedofs = new BlockVector(offsets_global);
+    yblock_truedofs = new BlockVector(offsets_global);
+    tempblock_truedofs = new BlockVector(offsets_global);
 
     truesolupdate_lvls.SetSize(num_levels);
-    truesolupdate_lvls[0] = new BlockVector(block_trueoffsets);
+    truesolupdate_lvls[0] = new BlockVector(offsets_global);
 
     trueoffsets_lvls.SetSize(num_levels);
-    trueoffsets_lvls[0] = &block_trueoffsets;
+    trueoffsets_lvls[0] = NULL;//&offsets_global;
     truetempvec_lvls.SetSize(num_levels);
-    truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
+    truetempvec_lvls[0] = new BlockVector(offsets_global);
     truetempvec2_lvls.SetSize(num_levels);
-    truetempvec2_lvls[0] = new BlockVector(block_trueoffsets);
+    truetempvec2_lvls[0] = new BlockVector(offsets_global);
     trueresfunc_lvls.SetSize(num_levels);
-    trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
+    trueresfunc_lvls[0] = new BlockVector(offsets_global);
 
     // can't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
@@ -2765,7 +2788,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
 
-    init_guess = new BlockVector(block_trueoffsets);
+    init_guess = new BlockVector(offsets_global);
     *init_guess = 0.0;
 
     if (LocalSolvers)
@@ -2786,7 +2809,10 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
 
     // 1. copying the given initial vector to the internal variable
 
-    CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], *init_guess,
+    //CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], *init_guess,
+            //"for the initial guess during solver setup: ", print_level);
+
+    CheckFunctValue(comm, Funct_global, offsets_global, *init_guess,
             "for the initial guess during solver setup: ", print_level);
 
     // 2. setting up the required internal data at all levels
@@ -2819,9 +2845,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     converged = 0;
 
     // x will be accessed through xblock_truedofs as its view
-    xblock_truedofs->Update(x.GetData(), block_trueoffsets);
+    xblock_truedofs->Update(x.GetData(), offsets_global);
     // y will be accessed through yblock_truedofs as its view
-    yblock_truedofs->Update(y.GetData(), block_trueoffsets);
+    yblock_truedofs->Update(y.GetData(), offsets_global);
 
     if (preconditioner_mode)
         *init_guess = 0.0;
@@ -2978,15 +3004,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
-    /*
-    // casting righthand side and previous solution into dofs representation rhsblock and xblock
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[0][blk]->Mult(righthand_side.GetBlock(blk), rhsblock->GetBlock(blk));
-        dof_trueDof_Func_lvls[0][blk]->Mult(previous_sol.GetBlock(blk), xblock->GetBlock(blk));
-    }
-    */
-
 #ifndef CHECK_SPDSOLVER
     MFEM_ASSERT(CheckBdrError(previous_sol, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
             "at the start of Solve()");
@@ -3106,8 +3123,16 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // some monitoring service calls
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
-            funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], next_sol,
-                                             "at the end of iteration: ", print_level);
+        {
+            //funct_currnorm = CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], next_sol,
+                                             //"at the end of iteration: ", print_level);
+            funct_currnorm = CheckFunctValue(comm, Funct_global, offsets_global, next_sol,
+                                     "at the end of iteration: ", print_level);
+
+            //if (fabs(funct_currnorm - funct_currnorm2) < 1.0e-14)
+                //MFEM_ABORT("");
+            //MFEM_ASSERT(fabs(funct_currnorm - funct_currnorm2) < 1.0e-14, "Functional values are computed differently! \n");
+        }
 
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 1)

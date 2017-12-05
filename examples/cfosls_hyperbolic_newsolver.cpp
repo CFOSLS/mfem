@@ -23,7 +23,7 @@
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -768,9 +768,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1183,6 +1183,9 @@ int main(int argc, char *argv[])
     std::vector<Array<int>*> Funct_mat_offsets_lvls(num_levels);
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
+
+    BlockOperator* Funct_global;
+    Array<int> offsets_global(numblocks_funct + 1);
 
    for (int l = 0; l < num_levels; ++l)
    {
@@ -1601,6 +1604,32 @@ int main(int argc, char *argv[])
                                                        EssBdrDofs_Funct_lvls[l],
                                                        EssBdrTrueDofs_Funct_lvls[l]);
 
+        // Creating global functional matrix
+        if (l == 0)
+        {
+            offsets_global[0] = 0;
+            for ( int blk = 0; blk < numblocks_funct; ++blk)
+                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
+            offsets_global.PartialSum();
+
+            Funct_global = new BlockOperator(offsets_global);
+
+            Ablock->Assemble();
+            Ablock->Finalize();
+            Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
+
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                Cblock->Assemble();
+                Cblock->Finalize();
+                Funct_global->SetBlock(1,1, Cblock->ParallelAssemble());
+                BTblock->Assemble();
+                BTblock->Finalize();
+                HypreParMatrix * BT = BTblock->ParallelAssemble();
+                Funct_global->SetBlock(1,0, BT);
+                Funct_global->SetBlock(1,1, BT->Transpose());
+            }
+        }
     }
 
     if (verbose)
@@ -2715,7 +2744,9 @@ int main(int argc, char *argv[])
                      Dof_TrueDof_Func_lvls,
                      P_Func, TrueP_Func, P_W,
                      EssBdrTrueDofs_Funct_lvls,
-                     Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
+                     Funct_mat_lvls, Constraint_mat_lvls, Floc,
+                     *Funct_global, offsets_global,
+                     Xinit_truedofs,
                      Smoother,
                      LocalSolver_lvls,
                      CoarsestSolver,
