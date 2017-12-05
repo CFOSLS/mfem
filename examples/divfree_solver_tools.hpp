@@ -1356,9 +1356,11 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, workfvec);
 
         // solve local problems at level l
-        MFEM_ASSERT(have_localsolvers, "SetLocalSolvers must be called before using the new interface to local solvers! \n");
-        LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
-        *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        if (have_localsolvers)
+        {
+            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
+            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        }
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -2441,7 +2443,7 @@ protected:
     // for each level and for each variable in the functional stores a vector
     // which defines if a dof is at the boundary / essential part of the boundary
     // or not
-    const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func;
+    const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func; // can be removed since it is used only for debugging
 
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
@@ -2471,7 +2473,6 @@ protected:
     mutable BlockVector* yblock_truedofs;
     mutable BlockVector* tempblock_truedofs;
 
-
     // stores the initial guess for the solver
     // which satisfies the divergence contraint
     // if not specified in the constructor.
@@ -2486,8 +2487,8 @@ protected:
     mutable Array<BlockVector*> truesolupdate_lvls;
 
     mutable bool have_localsolvers;
-    mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
-    mutable CoarsestProblemSolver* CoarseSolver;
+    mutable Array<Operator*> LocalSolvers_lvls;
+    mutable Operator* CoarseSolver;
 
 protected:
     // REMARK: It is virtual because one might want a complicated strategy where
@@ -2530,7 +2531,7 @@ public:
                            const Vector& ConstrRhsVec,
                            const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
-                           Array<LocalProblemSolver*>* LocalSolvers = NULL,
+                           Array<Operator*>* LocalSolvers = NULL,
                            CoarsestProblemSolver* CoarseSolver = NULL,
                            bool Construct_CoarseOps = true,
                            int StopCriteria_Type = 1);
@@ -2565,7 +2566,7 @@ public:
 
     virtual void PrintAllOptions() const;
 
-    void SetLocalSolvers(Array<LocalProblemSolver*> &LocalSolvers) const
+    void SetLocalSolvers(Array<Operator*> &LocalSolvers) const
     {
         LocalSolvers_lvls.SetSize(num_levels - 1);
         for (int l = 0; l < num_levels - 1; ++l)
@@ -2672,7 +2673,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Vector& ConstrRhsVec,
                        const BlockVector& Bdrdata_TrueDofs,
                        MultilevelSmoother* Smoother,
-                       Array<LocalProblemSolver*>* LocalSolvers,
+                       Array<Operator*>* LocalSolvers,
                        CoarsestProblemSolver* CoarsestSolver,
                        bool Construct_CoarseOps, int StopCriteria_Type)
      : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()),
@@ -3003,8 +3004,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
 
-        LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
-        *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        if (have_localsolvers)
+        {
+            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
+            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        }
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -3059,8 +3063,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             // corrections: one after smoothing and one after local solve
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
-            LocalSolvers_lvls[l - 1]->Mult(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1]);
-            *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+            if (have_localsolvers)
+            {
+                LocalSolvers_lvls[l - 1]->Mult(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1]);
+                *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+            }
         }
 
     }

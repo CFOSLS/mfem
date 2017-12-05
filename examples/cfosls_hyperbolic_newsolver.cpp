@@ -1183,11 +1183,17 @@ int main(int argc, char *argv[])
 
    const SparseMatrix* Proj_Hcurl_local;
 
-   Array<LocalProblemSolver*>* LocalSolver_lvls;
+   Array<Operator*>* LocalSolver_lvls;
 #ifdef WITH_LOCALSOLVERS
-   LocalSolver_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
+   LocalSolver_lvls = new Array<Operator*>(num_levels - 1);
 #else
    LocalSolver_lvls = NULL;
+#endif
+   Array<LocalProblemSolver*>* LocalSolver_partfinder_lvls;
+#ifdef WITH_LOCALSOLVERS
+   LocalSolver_partfinder_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
+#else
+   LocalSolver_partfinder_lvls = NULL;
 #endif
 
    CoarsestProblemSolver* CoarsestSolver;
@@ -1497,6 +1503,7 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
+            /*
             (*LocalSolver_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
@@ -1506,6 +1513,17 @@ int main(int argc, char *argv[])
                                                          BdrDofs_Funct_lvls[l],
                                                          EssBdrDofs_Funct_lvls[l],
                                                          true, false);
+            */
+            (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+                                                         true, false);
+            (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
 #endif
@@ -2634,7 +2652,7 @@ int main(int argc, char *argv[])
                                       EssBdrTrueDofs_Funct_lvls,
                                       Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
                                       Smoother,
-                                      LocalSolver_lvls,
+                                      LocalSolver_partfinder_lvls,
                                       CoarsestSolver,
                                       construct_coarseops);
 
