@@ -9,6 +9,8 @@ using std::unique_ptr;
 
 #define MEMORY_OPTIMIZED
 
+#define CHECK_LOCALSOLVE
+
 // activates some additional checks
 //#define DEBUG_INFO
 
@@ -678,10 +680,40 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         //std::cout << "AE = " << AE << "\n";
         bool is_degenerate = true;
         sub_Func_offsets[0] = 0;
+        for ( int blk = 0; blk < numblocks; ++blk )
+        {
+            SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk,blk);
+
+            // FIXME: Is this necessary?
+            Array<int> tempview_inds(AE_eintdofs_blk.GetRowColumns(AE), AE_eintdofs_blk.RowSize(AE));
+            Local_inds[blk] = new Array<int>;
+            tempview_inds.Copy(*Local_inds[blk]);
+
+            //bdrdofs_blocks[blk1]->Print();
+            //essbdrdofs_blocks[blk]->Print();
+            if (blk == 0) // degeneracy comes from Constraint matrix which involves only sigma = the first block
+            {
+                for (int i = 0; i < Local_inds[blk]->Size(); ++i)
+                {
+                    if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
+                         (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                    {
+                        //std::cout << "i = " << i << "\n";
+                        //std::cout << "bdrdofs[" << (*Local_inds[blk])[i] << "] = " << (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] << "\n";
+                        //std::cout << "essbdrdofs[" << (*Local_inds[blk])[i] << "] = " << (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] << "\n";
+                        //std::cout << "then local problem is non-degenerate \n";
+                        is_degenerate = false;
+                        break;
+                    }
+                }
+            }
+        }
+
         for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
         {
             for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
             {
+                /*
                 if (blk2 == 0)
                 {
                     SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk1,blk2);
@@ -692,6 +724,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                     tempview_inds.Copy(*Local_inds[blk1]);
 
                 }
+                */
 
                 if (blk1 == 0 && blk2 == 0) // handling L2 block
                 {
@@ -712,17 +745,6 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                 } // end of special treatment of the first block involved into constraint
 
                 sub_Func_offsets[blk1 + 1] = sub_Func_offsets[blk1] + Local_inds[blk1]->Size();
-
-                for (int i = 0; i < Local_inds[blk1]->Size(); ++i)
-                {
-                    if ( (*bdrdofs_blocks[blk1])[(*Local_inds[blk1])[i]] != 0 &&
-                         (*essbdrdofs_blocks[blk1])[(*Local_inds[blk1])[i]] == 0)
-                    {
-                        //std::cout << "then local problem is non-degenerate \n";
-                        is_degenerate = false;
-                        break;
-                    }
-                }
 
                 if (compute_AEproblem_matrices(blk1,blk2))
                     Op_blks(blk1,blk2) = &(Op_blkspmat.GetBlock(blk1,blk2));
@@ -1253,20 +1275,24 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         DenseMatrix * DT = FunctBlks(0,1);
 
         // creating inv_C
+        //std::cout << "inv_C \n";
+        //C->Print();
         DenseMatrixInverse inv_C(*C);
 
         // creating D * inv_C * DT
-        DenseMatrix invCDT;
-        inv_C.Mult(*DT, invCDT);
+        DenseMatrix invCD;
+        inv_C.Mult(*D, invCD);
 
-        DenseMatrix DinvCDT(D->Height(), DT->Width());
-        mfem::Mult(*D, invCDT, DinvCDT);
+        DenseMatrix DTinvCD(DT->Height(), D->Width());
+        mfem::Mult(*DT, invCD, DTinvCD);
 
         // creating inv Atilda = inv(A - D * inv_C * DT)
         DenseMatrix Atilda(A->Height(), A->Width());
         Atilda = *A;
-        Atilda -= DinvCDT;
+        Atilda -= DTinvCD;
 
+        //std::cout << "inv_Atilda \n";
+        //Atilda.Print();
         DenseMatrixInverse inv_Atilda(Atilda);
 
         // computing Schur = B * inv_Atilda * BT
@@ -1275,17 +1301,20 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         BT.Transpose(B);
         inv_Atilda.Mult(BT, inv_AtildaBT);
 
-        DenseMatrix Schur(B.Height(), B.Width());
+        DenseMatrix Schur(B.Height(), B.Height());
         mfem::Mult(B, inv_AtildaBT, Schur);
 
         // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
         if (is_degenerate)
         {
+            //std::cout << "degenerate! \n";
             Schur.SetRow(0,0);
             Schur.SetCol(0,0);
             Schur(0,0) = 1.;
         }
 
+        //std::cout << "inv_Schur \n";
+        //Schur.Print();
         DenseMatrixInverse inv_Schur(Schur);
 
         // creating DT * invC * F_S
@@ -1333,6 +1362,45 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         temp2 += G.GetBlock(1);
 
         inv_C.Mult(temp2, sol.GetBlock(1));
+
+#ifdef CHECK_LOCALSOLVE
+        // checking that the system was solved correctly
+        Vector res1(G.GetBlock(0).Size());
+        Vector temp1res1(G.GetBlock(0).Size());
+        A->Mult(sol.GetBlock(0), temp1res1);
+        Vector temp2res1(G.GetBlock(0).Size());
+        DT->Mult(sol.GetBlock(1), temp2res1);
+        Vector temp3res1(G.GetBlock(0).Size());
+        B.MultTranspose(lambda, temp3res1);
+        res1 = 0.0;
+        res1 += temp1res1;
+        res1 += temp2res1;
+        res1 += temp3res1;
+        res1 -= G.GetBlock(0);
+
+        //std::cout << "res1 norm = " << res1.Norml2() << "\n";
+        MFEM_ASSERT(res1.Norml2() < 1.0e-16, "Local system was solved incorrectly, res1 != 0 \n");
+
+        Vector res2(G.GetBlock(1).Size());
+        Vector temp1res2(G.GetBlock(1).Size());
+        D->Mult(sol.GetBlock(0), temp1res2);
+        Vector temp2res2(G.GetBlock(1).Size());
+        C->Mult(sol.GetBlock(1), temp2res2);
+        res2 = 0.0;
+        res2 += temp1res2;
+        res2 += temp2res2;
+        res2 -= G.GetBlock(1);
+
+        //std::cout << "res2 norm = " << res2.Norml2() << "\n";
+        MFEM_ASSERT(res2.Norml2() < 1.0e-16, "Local system was solved incorrectly, res2 != 0 \n");
+
+        Vector res3(F.Size());
+        B.Mult(sol.GetBlock(0), res3);
+        res3 -= F;
+
+        //std::cout << "res3 norm = " << res3.Norml2() << "\n";
+        MFEM_ASSERT(res3.Norml2() < 1.0e-16, "Local system was solved incorrectly, res3 != 0 \n");
+#endif
     }
 
     return;

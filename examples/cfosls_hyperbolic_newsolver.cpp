@@ -770,7 +770,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1077,6 +1077,12 @@ int main(int argc, char *argv[])
         //ess_bdrS = 1;
     }
 
+    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
+    all_bdrSigma = 1;
+
+    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
+    all_bdrS = 1;
+
     int ref_levels = par_ref_levels;
 
     int num_levels = ref_levels + 1;
@@ -1149,7 +1155,7 @@ int main(int argc, char *argv[])
 
     Array< SparseMatrix*> P_W(ref_levels);
     Array< SparseMatrix*> P_R(ref_levels);
-    Array< SparseMatrix*> P_H(ref_levels);
+    //Array< SparseMatrix*> P_H(ref_levels);
     Array< SparseMatrix*> Element_dofs_R(ref_levels);
     Array< SparseMatrix*> Element_dofs_H(ref_levels);
     Array< SparseMatrix*> Element_dofs_W(ref_levels);
@@ -1163,8 +1169,6 @@ int main(int argc, char *argv[])
     int numblocks_funct = 1;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         numblocks_funct++;
-    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
-    all_bdrSigma = 1;
     std::vector<std::vector<Array<int>* > > BdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
     std::vector<std::vector<Array<int>* > > EssBdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
     std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
@@ -1359,7 +1363,12 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
+            H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_Funct_lvls[l][1]);
+            H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_Funct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
+        }
 
         // getting operators at level l
         // curl or divskew operator from C_space into R_space
@@ -1553,6 +1562,8 @@ int main(int argc, char *argv[])
 
         }
 
+        // FIXME: TrueP_C and TrueP_H has different level ordering compared to TrueP_R
+
         // creating additional structures required for local problem solvers
         if (l < num_levels - 1)
         {
@@ -1579,32 +1590,39 @@ int main(int argc, char *argv[])
             row_offsets_P_Func[l][0] = 0;
             row_offsets_P_Func[l][1] = P_R[l]->Height();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                row_offsets_P_Func[l][1] = P_H[l]->Height();
+                row_offsets_P_Func[l][2] = P_H_lvls[l]->Height();
             row_offsets_P_Func[l].PartialSum();
 
             col_offsets_P_Func[l].SetSize(numblocks_funct + 1);
             col_offsets_P_Func[l][0] = 0;
             col_offsets_P_Func[l][1] = P_R[l]->Width();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                col_offsets_P_Func[l][2] = P_H[l]->Width();
+                col_offsets_P_Func[l][2] = P_H_lvls[l]->Width();
             col_offsets_P_Func[l].PartialSum();
 
             P_Func[l] = new BlockMatrix(row_offsets_P_Func[l], col_offsets_P_Func[l]);
             P_Func[l]->SetBlock(0,0, P_R[l]);
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                P_Func[l]->SetBlock(1,1, P_H[l]);
+                P_Func[l]->SetBlock(1,1, P_H_lvls[l]);
 
-            change the next lines as above
-                    // upgrade this with S from H1 case
-
-            row_offsets_TrueP_Func[l].SetSize(2);
+            row_offsets_TrueP_Func[l].SetSize(numblocks_funct + 1);
             row_offsets_TrueP_Func[l][0] = 0;
             row_offsets_TrueP_Func[l][1] = TrueP_R[l]->Height();
-            col_offsets_TrueP_Func[l].SetSize(2);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                row_offsets_TrueP_Func[l][2] = TrueP_H[num_levels - 2 - l]->Height();
+            row_offsets_TrueP_Func[l].PartialSum();
+
+            col_offsets_TrueP_Func[l].SetSize(numblocks_funct + 1);
             col_offsets_TrueP_Func[l][0] = 0;
             col_offsets_TrueP_Func[l][1] = TrueP_R[l]->Width();
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                col_offsets_TrueP_Func[l][2] = TrueP_H[num_levels - 2 - l]->Width();
+            col_offsets_TrueP_Func[l].PartialSum();
+
             TrueP_Func[l] = new BlockOperator(row_offsets_TrueP_Func[l], col_offsets_TrueP_Func[l]);
             TrueP_Func[l]->SetBlock(0,0, TrueP_R[l]);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                TrueP_Func[l]->SetBlock(1,1, TrueP_H[num_levels - 2 - l]);
 
             P_WT[l] = Transpose(*P_W[l]);
         }
@@ -1680,7 +1698,7 @@ int main(int argc, char *argv[])
                 BTblock->Finalize();
                 HypreParMatrix * BT = BTblock->ParallelAssemble();
                 Funct_global->SetBlock(1,0, BT);
-                Funct_global->SetBlock(1,1, BT->Transpose());
+                Funct_global->SetBlock(0,1, BT->Transpose());
             }
         }
     }
