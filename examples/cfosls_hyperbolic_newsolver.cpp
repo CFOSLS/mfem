@@ -23,7 +23,7 @@
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -770,7 +770,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1142,18 +1142,21 @@ int main(int argc, char *argv[])
 #endif
 
     // For geometric multigrid
-    Array<HypreParMatrix*> P_C(par_ref_levels);
-    Array<HypreParMatrix*> P_H(par_ref_levels);
+    Array<HypreParMatrix*> TrueP_C(par_ref_levels);
+    Array<HypreParMatrix*> TrueP_H(par_ref_levels);
 
     Array<HypreParMatrix*> TrueP_R(par_ref_levels);
 
     Array< SparseMatrix*> P_W(ref_levels);
     Array< SparseMatrix*> P_R(ref_levels);
+    Array< SparseMatrix*> P_H(ref_levels);
     Array< SparseMatrix*> Element_dofs_R(ref_levels);
+    Array< SparseMatrix*> Element_dofs_H(ref_levels);
     Array< SparseMatrix*> Element_dofs_W(ref_levels);
 
     const SparseMatrix* P_W_local;
     const SparseMatrix* P_R_local;
+    const SparseMatrix* P_H_local;
 
     DivPart divp;
 
@@ -1168,11 +1171,11 @@ int main(int argc, char *argv[])
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
-    Array< SparseMatrix* > Proj_Hcurl_lvls(num_levels - 1);
+    Array< SparseMatrix* > P_C_lvls(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
 
     std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
-    Array< SparseMatrix* > Proj_H1_lvls(num_levels - 1);
+    Array< SparseMatrix* > P_H_lvls(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_H1_lvls(num_levels);
     Array<HypreParMatrix* > Dof_TrueDof_Hdiv_lvls(num_levels);
 
@@ -1204,15 +1207,16 @@ int main(int argc, char *argv[])
        }
    }
 
-   const SparseMatrix* Proj_Hcurl_local;
-   const SparseMatrix* Proj_H1_local;
+   const SparseMatrix* P_C_local;
 
+   //Actually this and LocalSolver_partfinder_lvls handle the same objects
    Array<Operator*>* LocalSolver_lvls;
 #ifdef WITH_LOCALSOLVERS
    LocalSolver_lvls = new Array<Operator*>(num_levels - 1);
 #else
    LocalSolver_lvls = NULL;
 #endif
+
    Array<LocalProblemSolver*>* LocalSolver_partfinder_lvls;
 #ifdef WITH_LOCALSOLVERS
    LocalSolver_partfinder_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
@@ -1220,7 +1224,8 @@ int main(int argc, char *argv[])
    LocalSolver_partfinder_lvls = NULL;
 #endif
 
-   CoarsestProblemSolver* CoarsestSolver;
+   Operator* CoarsestSolver;
+   CoarsestProblemSolver* CoarsestSolver_partfinder;
 
    Array<BlockMatrix*> Element_dofs_Func(num_levels - 1);
    Array<int>* row_offsets_El_dofs = new Array<int>[num_levels - 1];
@@ -1482,18 +1487,21 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             C_space->Update();
-            Proj_Hcurl_local = (SparseMatrix *)C_space->GetUpdateOperator();
-            Proj_Hcurl_lvls[l] = RemoveZeroEntries(*Proj_Hcurl_local);
+            P_C_local = (SparseMatrix *)C_space->GetUpdateOperator();
+            P_C_lvls[l] = RemoveZeroEntries(*P_C_local);
+
+            W_space->Update();
+            R_space->Update();
 
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
                 H_space->Update();
-                Proj_H1_local = (SparseMatrix *)H_space->GetUpdateOperator();
-                Proj_H1_lvls[l] = RemoveZeroEntries(*Proj_H1_local);
+                P_H_local = (SparseMatrix *)H_space->GetUpdateOperator();
+                SparseMatrix* H_Element_to_dofs1 = new SparseMatrix();
+                P_H_lvls[l] = RemoveZeroEntries(*P_H_local);
+                divp.Elem2Dofs(*H_space, *H_Element_to_dofs1);
+                Element_dofs_H[l] = H_Element_to_dofs1;
             }
-
-            W_space->Update();
-            R_space->Update();
 
             P_W_local = (SparseMatrix *)W_space->GetUpdateOperator();
             P_R_local = (SparseMatrix *)R_space->GetUpdateOperator();
@@ -1525,46 +1533,69 @@ int main(int argc, char *argv[])
             {
                 auto d_td_coarse_C = C_space_lvls[l + 1]->Dof_TrueDof_Matrix();
                 unique_ptr<SparseMatrix>RP_C_local(
-                            Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *Proj_Hcurl_lvls[l]));
-                P_C[num_levels - 2 - l] = d_td_coarse_C->LeftDiagMult(
+                            Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *P_C_lvls[l]));
+                TrueP_C[num_levels - 2 - l] = d_td_coarse_C->LeftDiagMult(
                             *RP_C_local, C_space_lvls[l]->GetTrueDofOffsets());
-                P_C[num_levels - 2 - l]->CopyColStarts();
-                P_C[num_levels - 2 - l]->CopyRowStarts();
-
-                if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                {
-                    auto d_td_coarse_H = H_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-                    unique_ptr<SparseMatrix>RP_H_local(
-                                Mult(*H_space_lvls[l]->GetRestrictionMatrix(), *Proj_H1_lvls[l]));
-                    P_H[num_levels - 2 - l] = d_td_coarse_H->LeftDiagMult(
-                                *RP_H_local, H_space_lvls[l]->GetTrueDofOffsets());
-                    P_H[num_levels - 2 - l]->CopyColStarts();
-                    P_H[num_levels - 2 - l]->CopyRowStarts();
-                }
-
+                TrueP_C[num_levels - 2 - l]->CopyColStarts();
+                TrueP_C[num_levels - 2 - l]->CopyRowStarts();
             }
+
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                auto d_td_coarse_H = H_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+                unique_ptr<SparseMatrix>RP_H_local(
+                            Mult(*H_space_lvls[l]->GetRestrictionMatrix(), *P_H_lvls[l]));
+                TrueP_H[num_levels - 2 - l] = d_td_coarse_H->LeftDiagMult(
+                            *RP_H_local, H_space_lvls[l]->GetTrueDofOffsets());
+                TrueP_H[num_levels - 2 - l]->CopyColStarts();
+                TrueP_H[num_levels - 2 - l]->CopyRowStarts();
+            }
+
         }
 
         // creating additional structures required for local problem solvers
         if (l < num_levels - 1)
         {
-            row_offsets_El_dofs[l].SetSize(2);
+            row_offsets_El_dofs[l].SetSize(numblocks_funct + 1);
             row_offsets_El_dofs[l][0] = 0;
             row_offsets_El_dofs[l][1] = Element_dofs_R[l]->Height();
-            col_offsets_El_dofs[l].SetSize(2);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                row_offsets_El_dofs[l][2] = Element_dofs_H[l]->Height();
+            row_offsets_El_dofs[l].PartialSum();
+
+            col_offsets_El_dofs[l].SetSize(numblocks_funct + 1);
             col_offsets_El_dofs[l][0] = 0;
             col_offsets_El_dofs[l][1] = Element_dofs_R[l]->Width();
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                col_offsets_El_dofs[l][2] = Element_dofs_H[l]->Width();
+            col_offsets_El_dofs[l].PartialSum();
+
             Element_dofs_Func[l] = new BlockMatrix(row_offsets_El_dofs[l], col_offsets_El_dofs[l]);
             Element_dofs_Func[l]->SetBlock(0,0, Element_dofs_R[l]);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                Element_dofs_Func[l]->SetBlock(1,1, Element_dofs_H[l]);
 
-            row_offsets_P_Func[l].SetSize(2);
+            row_offsets_P_Func[l].SetSize(numblocks_funct + 1);
             row_offsets_P_Func[l][0] = 0;
             row_offsets_P_Func[l][1] = P_R[l]->Height();
-            col_offsets_P_Func[l].SetSize(2);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                row_offsets_P_Func[l][1] = P_H[l]->Height();
+            row_offsets_P_Func[l].PartialSum();
+
+            col_offsets_P_Func[l].SetSize(numblocks_funct + 1);
             col_offsets_P_Func[l][0] = 0;
             col_offsets_P_Func[l][1] = P_R[l]->Width();
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                col_offsets_P_Func[l][2] = P_H[l]->Width();
+            col_offsets_P_Func[l].PartialSum();
+
             P_Func[l] = new BlockMatrix(row_offsets_P_Func[l], col_offsets_P_Func[l]);
             P_Func[l]->SetBlock(0,0, P_R[l]);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                P_Func[l]->SetBlock(1,1, P_H[l]);
+
+            change the next lines as above
+                    // upgrade this with S from H1 case
 
             row_offsets_TrueP_Func[l].SetSize(2);
             row_offsets_TrueP_Func[l][0] = 0;
@@ -1582,7 +1613,10 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
-            (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+            bool optimized_localsolve = false;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
                                                          *P_WT[l],
@@ -1590,19 +1624,38 @@ int main(int argc, char *argv[])
                                                          *Element_dofs_W[l],
                                                          BdrDofs_Funct_lvls[l],
                                                          EssBdrDofs_Funct_lvls[l],
-                                                         true, false);
+                                                         optimized_localsolve,
+                                                         false);
+            }
+            else // no S
+            {
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+                                                         optimized_localsolve,
+                                                         false);
+            }
+
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
 #endif
         // Creating the coarsest problem solver
         if (l == num_levels - 1)
-            CoarsestSolver = new CoarsestProblemSolver(*Funct_mat_lvls[l],
+        {
+            CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[l],
                                                        *Constraint_mat_lvls[l],
                                                        Dof_TrueDof_Func_lvls[l],
                                                        *Dof_TrueDof_L2_lvls[l],
                                                        EssBdrDofs_Funct_lvls[l],
                                                        EssBdrTrueDofs_Funct_lvls[l]);
+            CoarsestSolver = CoarsestSolver_partfinder;
+        }
 
         // Creating global functional matrix
         if (l == 0)
@@ -2027,29 +2080,29 @@ int main(int argc, char *argv[])
                 {
                     if (monolithicMG)
                     {
-                        P.SetSize(P_C.Size());
+                        P.SetSize(TrueP_C.Size());
 
                         for (int l = 0; l < P.Size(); l++)
                         {
                             auto offsets_f  = new Array<int>(3);
                             auto offsets_c  = new Array<int>(3);
                             (*offsets_f)[0] = (*offsets_c)[0] = 0;
-                            (*offsets_f)[1] = P_C[l]->Height();
-                            (*offsets_c)[1] = P_C[l]->Width();
-                            (*offsets_f)[2] = (*offsets_f)[1] + P_H[l]->Height();
-                            (*offsets_c)[2] = (*offsets_c)[1] + P_H[l]->Width();
+                            (*offsets_f)[1] = TrueP_C[l]->Height();
+                            (*offsets_c)[1] = TrueP_C[l]->Width();
+                            (*offsets_f)[2] = (*offsets_f)[1] + TrueP_H[l]->Height();
+                            (*offsets_c)[2] = (*offsets_c)[1] + TrueP_H[l]->Width();
 
                             P[l] = new BlockOperator(*offsets_f, *offsets_c);
-                            P[l]->SetBlock(0, 0, P_C[l]);
-                            P[l]->SetBlock(1, 1, P_H[l]);
+                            P[l]->SetBlock(0, 0, TrueP_C[l]);
+                            P[l]->SetBlock(1, 1, TrueP_H[l]);
                         }
                         prec = new MonolithicMultigrid(*MainOp, P);
                     }
                     else
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, P_C);
-                        Operator * precS = new Multigrid(*C, P_H);
+                        Operator * precU = new Multigrid(*A, TrueP_C);
+                        Operator * precS = new Multigrid(*C, TrueP_H);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
                     }
@@ -2062,7 +2115,7 @@ int main(int argc, char *argv[])
                     if (prec_is_MG)
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, P_C);
+                        Operator * precU = new Multigrid(*A, TrueP_C);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                     }
 
@@ -2546,7 +2599,7 @@ int main(int argc, char *argv[])
     */
 
     HCurlGSSmoother NewGSSmoother(num_levels - 1, Funct_mat_lvls, Divfree_mat_lvls,
-                   /*Proj_Hcurl_lvls,*/ Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
+                   Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
                    EssBdrDofs_Hcurl);
     //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
     NewGSSmoother.SetSweepsNumber(5);
@@ -2737,7 +2790,7 @@ int main(int argc, char *argv[])
                                       Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
                                       Smoother,
                                       LocalSolver_partfinder_lvls,
-                                      CoarsestSolver,
+                                      CoarsestSolver_partfinder,
                                       construct_coarseops);
 
     GeneralMinConstrSolver NewSolver(num_levels,
