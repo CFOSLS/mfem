@@ -2046,6 +2046,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
     for ( int i = 0; i < numblocks + 1; ++i)
         block_offsets[i] = Block_Offsets[i];
 
+    xblock = new BlockVector(block_offsets);
+    yblock = new BlockVector(block_offsets);
+
     trueblock_offsets.SetSize(numblocks + 1);
     trueblock_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -2078,7 +2081,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
     // x will be accessed through xblock as its view
-    fails here
     xblock->Update(x.GetData(), block_offsets);
     // y will be accessed through yblock as its view
     yblock->Update(y.GetData(), block_offsets);
@@ -3072,9 +3074,11 @@ protected:
     // (remains unchanged throughout the solving process)
     const Vector& ConstrRhs; // can be removed since it used only for debugging
 
+#ifndef NEW_SMOOTHERCLASS
     // (Optionally used) Multilevel Smoother
     // used for updates at the interfaces after local updates
     mutable MultilevelSmoother* Smoo;
+#endif
 
 #ifdef NEW_SMOOTHERCLASS
     const Array<Operator*>& Smoothers_lvls;
@@ -3221,8 +3225,10 @@ void GeneralMinConstrSolver::PrintAllOptions() const
     std::cout << "max_iter: " <<  max_iter << "\n";
     std::cout << "\n";
 
+#ifndef NEW_SMOOTHERCLASS
     if (Smoo)
         Smoo->PrintAllOptions();
+#endif
 }
 
 // The input must be defined on true dofs
@@ -3372,11 +3378,13 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(offsets_global);
 
+#ifndef NEW_SMOOTHERCLASS
     // can't this be replaced by Smoo(Smoother) in the init. list?
     if (Smoother)
         Smoo = Smoother;
     else
         Smoo = NULL;
+#endif
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -3684,29 +3692,40 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             // interpolate back to the finer level
             TrueP_Func[l - 1]->Mult(*truesolupdate_lvls[l], *truetempvec_lvls[l - 1]);
 
+            *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+
             ComputeUpdatedLvlTrueResFunc(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
+            *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
 
             // smooth at the finer level
+#ifndef NEW_SMOOTHERCLASS
             if (Smoo)
             {
-                Smoo->ComputeTrueRhsLevel(l - 1, *truetempvec2_lvls[l - 1]);
+                Smoo->ComputeTrueRhsLevel(l - 1, *trueresfunc_lvls[l - 1]);
 
-                Smoo->MultTrueLevel(l - 1, *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1]);
+                Smoo->MultTrueLevel(l - 1, *truesolupdate_lvls[l - 1], *truetempvec_lvls[l - 1]);
+                *truetempvec2_lvls[l - 1] = *truetempvec_lvls[l - 1];
+                *truetempvec2_lvls[l - 1] -= *truesolupdate_lvls[l - 1];
 
-                *truetempvec_lvls[l - 1] = *truetempvec2_lvls[l - 1];
+                *truesolupdate_lvls[l - 1] = *truetempvec_lvls[l - 1];
 
-                ComputeUpdatedLvlTrueResFunc(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
+                ComputeUpdatedLvlTrueResFunc(l - 1, trueresfunc_lvls[l - 1], *truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
             }
-
-            // update the solution at the finer level with two
-            // corrections: one after smoothing and one after local solve
-            *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+#else
+            if (Smoothers_lvls[l - 1])
+            {
+                Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
+                *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+                ComputeUpdatedLvlTrueResFunc(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec_lvls[l - 1] );
+            }
+#endif
 
             if (have_localsolvers)
             {
-                LocalSolvers_lvls[l - 1]->Mult(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1]);
-                *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+                LocalSolvers_lvls[l - 1]->Mult(*truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1]);
+                *truesolupdate_lvls[l - 1] += *truetempvec2_lvls[l - 1];
             }
+
         }
 
     }
