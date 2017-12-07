@@ -2616,7 +2616,7 @@ int main(int argc, char *argv[])
     NewSmoother.SetPrintLevel(0);
     */
 
-    HCurlGSSmoother NewGSSmoother(num_levels - 1, Funct_mat_lvls, Divfree_mat_lvls,
+    MultilevelHCurlGSSmoother NewGSSmoother(num_levels - 1, Funct_mat_lvls, Divfree_mat_lvls,
                    Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
                    EssBdrDofs_Hcurl);
     //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));

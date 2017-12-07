@@ -1943,7 +1943,281 @@ void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f, V
     return;
 }
 
-class HCurlGSSmoother : public MultilevelSmoother
+// TODO: Implement a separate class for Hcurl smoother at level l in the block form, probably abstract
+class HcurlGSSSmoother : public BlockOperator
+{
+private:
+    int numblocks;
+
+    // number of GS sweeps for each block
+    Array<int> & sweeps_num;
+
+    int print_level;
+
+protected:
+    const BlockMatrix& Funct_mat;
+
+    // discrete curl operators at all levels;
+    mutable SparseMatrix* Curlh;
+
+#ifdef MEMORY_OPTIMIZED
+    mutable Vector* temp_Hdiv_dofs;
+    mutable Vector* temp_Hcurl_dofs;
+#else
+    // global discrete curl operator
+    mutable HypreParMatrix* Curlh_global;
+#endif
+
+    // Projection of the system matrix onto discrete Hcurl space
+    // Curl_hT * A_l * Curlh matrices at all levels
+    mutable SparseMatrix* CTMC;
+
+    // global CTMC as HypreParMatrices at all levels;
+    mutable HypreParMatrix* CTMC_global;
+
+    // structures used when all dofs are relaxed (via HypreSmoothers):
+    mutable Array<Operator*> Smoothers;
+    mutable BlockVector* truerhs;  // rhs for H(curl) x other blocks problems on true dofs
+    mutable BlockVector* truex;    // sol for H(curl) x other blocks problems on true dofs
+
+    mutable Array<Vector*> truevec_lvls;  // lives in Hdiv_h on true dofs
+    mutable Array<Vector*> truevec2_lvls;
+    mutable Array<Vector*> truevec3_lvls; // lives in Hcurl_h on true dofs
+
+    // Dof_TrueDof tables for Hcurl at all levels
+    const HypreParMatrix & d_td_Hcurl;
+
+    // Dof_TrueDof tables for Hdiv at all levels
+    const Array<HypreParMatrix*> & d_td_Funct_blocks;
+
+    // Lists of essential boundary dofs for Hcurl at all levels
+    const Array<int>  & essbdrdofs_Hcurl;
+    // FIXME: Move it to a const constructor argument,
+    // but take care about the fact that GetTrueVDofs is different from GetVDofs()
+    mutable Array<int>*  essbdrtruedofs_Hcurl;
+
+    mutable Array<int>* block_offsets;
+    mutable BlockVector * xblock;
+    mutable BlockVector * yblock;
+
+public:
+    // constructor
+    HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
+                     const SparseMatrix& Discrete_Curl,
+                     const HypreParMatrix& Dof_TrueDof_Hcurl,
+                     const Array<HypreParMatrix*> & Dof_TrueDof_Funct,
+                     const std::vector<Array<int>* > & EssBdrdofs_Funct,
+                     const Array<int> * SweepsNum);
+
+    // FIXME: Implement this
+    //void PrintAllOptions() const;
+
+    virtual void Setup() const;
+
+    // Operator application
+    virtual void Mult (const Vector & x, Vector & y) const;
+
+    // Action of the transpose operator
+    virtual void MultTranspose (const Vector & x, Vector & y) const {Mult(x,y);}
+
+    // service routines
+    int GetSweepsNumber(int block) const {return sweeps_num[block];}
+
+};
+
+HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
+                                    const SparseMatrix& Discrete_Curl,
+                                    const HypreParMatrix& Dof_TrueDof_Hcurl,
+                                    const Array<HypreParMatrix*> & Dof_TrueDof_Funct,
+                                    const Array<int>* & EssBdrdofs_Hcurl,
+                                    const Array<int> * SweepsNum)
+    : BlockOperator(),
+      numblocks(Funct_Mat.NumRowBlocks()),
+      finalized(0),
+      print_level(0),
+      Funct_mat(Funct_Mat),
+      Curlh(Discrete_Curl),
+      d_td_Hcurl(Dof_TrueDof_Hcurl),
+      d_td_Funct_blocks(Dof_TrueDof_Funct),
+      essbdrdofs_Hcurl(EssBdrdofs_Hcurl)
+{
+    block_offsets = new Array<int>(numblocks + 1);
+    block_offsets[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            block_offsets[1] = Dof_TrueDof_Hcurl.Width();
+        else
+            block_offsets[blk + 1] = Dof_TrueDof_Funct[blk]->Width();
+    }
+    block_offsets.PartialSum();
+
+    Smoothers.SetSize(numblocks);
+
+    sweeps_num.SetSize(numblocks);
+    if (SweepsNum)
+        for ( int blk = 0; blk < numblocks; ++blk)
+            sweeps_num[blk] = (*SweepsNum)[blk];
+    else
+        sweeps_num = 1;
+
+    Setup();
+}
+
+void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
+{
+    if (print_level)
+        std::cout << "Smoothing with HcurlGSS smoother \n";
+
+    if (x.GetData() == y.GetData())
+        mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
+
+    // x will be accessed through xblock as its view
+    xblock->Update(x.GetData(), *block_offsets);
+    // y will be accessed through yblock as its view
+    yblock->Update(y.GetData(), *block_offsets);
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+        {
+#ifdef MEMORY_OPTIMIZED
+            SparseMatrix d_td_Hdiv_diag;
+            d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
+            d_td_Hdiv_diag.Mult(xblock->GetBlock(0), *temp_Hdiv_dofs);
+
+            // rhs_l = CT_l * res_lvl
+            Curlh->MultTranspose(*temp_Hdiv_dofs, *temp_Hcurl_dofs);
+
+            d_td_Hcurl.MultTranspose(*temp_Hcurl_dofs, truerhs->GetBlock(0));
+#else
+            Curlh_global->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+#endif
+        }
+        else
+        {
+            truerhs->GetBlock(blk) = xblock->GetBlock(blk);
+        }
+
+    }
+
+
+    // imposing boundary conditions in Hcurl on the righthand side
+    Array<int> * temp = essbdrtruedofs_Hcurl;
+
+    for ( int tdof = 0; tdof < temp->Size(); ++tdof)
+    {
+        if ( (*temp)[tdof] != 0)
+        {
+            truerhs->GetBlock(0)[tdof] = 0.0;
+        }
+    }
+
+    *truex = 0.0;
+    //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
+    //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+    //CTMC_global_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+    //Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+    }
+
+    // computing the solution update in the H(div) x other blocks space
+    // in two steps:
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
+        {
+#ifdef MEMORY_OPTIMIZED
+            d_td_Hcurl.Mult(truex->GetBlock(0), *temp_Hcurl_dofs);
+            Curlh->Mult(*temp_Hcurl_dofs, *temp_Hdiv_dofs);
+
+            SparseMatrix d_td_Hdiv_diag;
+            d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
+            d_td_Hdiv_diag.MultTranspose(*temp_Hdiv_dofs, yblock->GetBlock(0));
+#else
+            Curlh_global->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+#endif
+        }
+        else
+            yblock->GetBlock(blk) += truex->GetBlock(blk);
+    }
+
+
+}
+
+
+void HcurlGSSSmoother::Setup() const
+{
+    MFEM_ASSERT(numblocks == 1, "HcurlGSSSmoother::Setup was implemented for the case numblocks = 1 only \n");
+
+    // shortcuts
+    SparseMatrix *CurlhT = Transpose(*Curlh);
+    const SparseMatrix * M = &(Funct_mat.GetBlock(0,0));
+
+    HypreParMatrix * d_td_Hcurl_T = d_td_Hcurl.Transpose();
+
+    // form CT*M*C as a SparseMatrix
+    SparseMatrix *M_Curlh = mfem::Mult(*M, *Curlh);
+    CTMC = mfem::Mult(*CurlhT, *M_Curlh);
+
+    delete M_Curlh;
+    delete CurlhT;
+
+    // imposing essential boundary conditions
+    for ( int dof = 0; dof < essbdrdofs_Hcurl.Size(); ++dof)
+    {
+        if ( essbdrdofs_Hcurl[dof] != 0)
+        {
+            CTMC->EliminateRowCol(dof);
+        }
+    }
+
+    // form CT*M*C as HypreParMatrices
+    HypreParMatrix* CTMC_d_td;
+    CTMC_d_td = d_td_Hcurl.LeftDiagMult( *CTMC );
+
+    CTMC_global = ParMult(d_td_Hcurl_T, CTMC_d_td);
+    CTMC_global->CopyRowStarts();
+    CTMC_global->CopyColStarts();
+
+#ifdef MEMORY_OPTIMIZED
+    temp_Hdiv_dofs = new Vector(Curlh->Height());
+    temp_Hcurl_dofs = new Vector(Curlh->Width());
+#else
+    // FIXME : RowStarts or ColStarts()?
+    HypreParMatrix* C_d_td = d_td_Hcurl.LeftDiagMult(*Curlh, d_td_Funct_blocks[0]->GetRowStarts() );
+    SparseMatrix d_td_Hdiv_diag;
+    d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
+    Curlh_global = C_d_td->LeftDiagMult(*Transpose(d_td_Hdiv_diag), d_td_Funct_blocks[0]->GetColStarts() );
+    Curlh_global->CopyRowStarts();
+    Curlh_global->CopyColStarts();
+    delete C_d_td;
+#endif
+
+    Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
+
+    // FIXME!!!
+    truex = new BlockVector(*block_offsets);
+    truerhs = new BlockVector(*block_offsets);
+
+    // creating essbdrtruedofs list at level l
+    essbdrtruedofs_Hcurl = new Array<int>(d_td_Hcurl_T->Height());
+    *essbdrtruedofs_Hcurl = 0.0;
+    d_td_Hcurl_T->BooleanMult(1.0, essbdrdofs_Hcurl.GetData(),
+                        0.0, essbdrtruedofs_Hcurl->GetData());
+
+    // allocating memory for local-to-level vector arrays
+    //rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+    //tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
+
+    delete CTMC_d_td;
+    delete d_td_Hcurl_T;
+}
+
+class MultilevelHCurlGSSmoother : public MultilevelSmoother
 {
 private:
     // number of GS sweeps
@@ -1959,7 +2233,7 @@ private:
     // else, some new code will be used (but was not implemented)
     bool relax_all_dofs;
 protected:
-    const Array< BlockMatrix*> & Funct_mat_lvls;
+    const Array<BlockMatrix*> & Funct_mat_lvls;
 
     // discrete curl operators at all levels;
     mutable Array<SparseMatrix*> Curlh_lvls;
@@ -2009,7 +2283,7 @@ protected:
 
 public:
     // constructor
-    HCurlGSSmoother (int Num_Levels,
+    MultilevelHCurlGSSmoother (int Num_Levels,
                      const Array< BlockMatrix*> & Funct_Mat_lvls,
                      const Array< SparseMatrix*> & Discrete_Curls_lvls,
                      //const Array< SparseMatrix*>& Proj_lvls,
@@ -2048,7 +2322,7 @@ public:
     void Setup() const override;
 };
 
-void HCurlGSSmoother::Setup() const
+void MultilevelHCurlGSSmoother::Setup() const
 {
     for (int l = 0; l < num_levels; ++l)
     {
@@ -2057,7 +2331,7 @@ void HCurlGSSmoother::Setup() const
 }
 
 
-void HCurlGSSmoother::PrintAllOptions() const
+void MultilevelHCurlGSSmoother::PrintAllOptions() const
 {
     MultilevelSmoother::PrintAllOptions();
     std::cout << "HcurlGSS smoother options: \n";
@@ -2068,7 +2342,7 @@ void HCurlGSSmoother::PrintAllOptions() const
 }
 
 
-HCurlGSSmoother::HCurlGSSmoother (int Num_Levels,
+MultilevelHCurlGSSmoother::MultilevelHCurlGSSmoother (int Num_Levels,
                                   const Array< BlockMatrix*> & Funct_Mat_lvls,
                                   const Array< SparseMatrix*> & Discrete_Curls_lvls,
                                   const Array<HypreParMatrix*>& Dof_TrueDof_Hcurl_lvls,
@@ -2084,14 +2358,14 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels,
       d_td_Hdiv_lvls(Dof_TrueDof_Hdiv_lvls),
       essbdrdofs_lvls(EssBdrdofs_lvls)
 {
-    std::cout << "Calling constructor of the HCurlGSSmoother \n";
-    MFEM_ASSERT(Discrete_Curls_lvls[0] != NULL, "HCurlGSSmoother::HCurlGSSmoother()"
+    std::cout << "Calling constructor of the MultilevelHCurlGSSmoother \n";
+    MFEM_ASSERT(Discrete_Curls_lvls[0] != NULL, "MultilevelHCurlGSSmoother::MultilevelHCurlGSSmoother()"
                                                 " Curl operator at the finest level must be given anyway!");
     MFEM_ASSERT(!construct_curls, "Construction of discrete curls using projectors is not possible for now,"
                                   "canonical projectors are required!" );
     if (!construct_curls)
         for ( int l = 0; l < num_levels; ++l)
-            MFEM_ASSERT(Discrete_Curls_lvls[l] != NULL, "HCurlGSSmoother::HCurlGSSmoother()"
+            MFEM_ASSERT(Discrete_Curls_lvls[l] != NULL, "MultilevelHCurlGSSmoother::MultilevelHCurlGSSmoother()"
                                                         " curl operators at all levels must be provided "
                                                         " when construct_curls == false!");
     MFEM_ASSERT(relax_all_dofs, "Case relax-all_dofs = false is not implemented!");
@@ -2147,11 +2421,11 @@ HCurlGSSmoother::HCurlGSSmoother (int Num_Levels,
     Setup();
 }
 
-void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_blk) const
+void MultilevelHCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_blk) const
 {
     if ( !finalized_lvls[level] ) // if level was not set up before
     {
-        MFEM_ASSERT(Curlh_lvls[level], "HCurlGSSmoother::SetUpSmoother():"
+        MFEM_ASSERT(Curlh_lvls[level], "MultilevelHCurlGSSmoother::SetUpSmoother():"
                                        " curl operator must have been set already at this level \n");
         // shortcuts
         SparseMatrix *Curlh = Curlh_lvls[level];
@@ -2252,7 +2526,7 @@ void HCurlGSSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_blk) co
 // Computes the residual for the "smoother equation"
 // from the given residual of the basic minimization process:
 //      rhs_l = CT_l * res_l
-void HCurlGSSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
+void MultilevelHCurlGSSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
 {
     // rhs_l = CT_l * res_lvl
     Curlh_lvls[level]->MultTranspose(res_lvl.GetBlock(0), *rhs_lvls[level]);
@@ -2263,7 +2537,7 @@ void HCurlGSSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
 // Computes the residual for the "smoother equation"
 // from the given residual of the basic minimization process:
 //      rhs_l = CT_l * res_l
-void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
+void MultilevelHCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
 {
 #ifdef MEMORY_OPTIMIZED
     SparseMatrix d_td_Hdiv_diag;
@@ -2289,7 +2563,7 @@ void HCurlGSSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
 //      CurlT_l M Curl_l sol_l = rhs_l
 // and rhs_l is computed using the residual of the original problem
 // during the call to SetUpRhs() before MultLevel
-void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
+void MultilevelHCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 {
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for a non-finalized level");
@@ -2338,7 +2612,7 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
     }
     else
     {
-        MFEM_ABORT ("HCurlGSSmoother::MultLevel(): This case was not implemented!");
+        MFEM_ABORT ("MultilevelHCurlGSSmoother::MultLevel(): This case was not implemented!");
     }
 
 }
@@ -2354,7 +2628,7 @@ void HCurlGSSmoother::MultLevel(int level, Vector& in_lvl, Vector& out_lvl)
 //      CurlT_l M Curl_l sol_l = rhs_l
 // and rhs_l is computed using the residual of the original problem
 // during the call to SetUpRhs() before MultLevel
-void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
+void MultilevelHCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
 {
     MFEM_ASSERT(finalized_lvls[level] == true,
                 "MultLevel() must not be called for a non-finalized level");
@@ -2410,7 +2684,7 @@ void HCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector& out_lvl)
     }
     else
     {
-        MFEM_ABORT ("HCurlGSSmoother::MultTrueLevel(): This case was not implemented!");
+        MFEM_ABORT ("MultilevelHCurlGSSmoother::MultTrueLevel(): This case was not implemented!");
     }
 
 }
