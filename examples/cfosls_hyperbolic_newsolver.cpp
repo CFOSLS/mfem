@@ -28,6 +28,9 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
+#define NEW_SMOOTHERCLASS
+
+
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -1174,7 +1177,8 @@ int main(int argc, char *argv[])
     std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
-    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
+    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels); // FIXME: Proably, minus 1 for all Hcurl entries?
+    std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels);
     Array< SparseMatrix* > P_C_lvls(num_levels - 1);
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
 
@@ -1201,6 +1205,7 @@ int main(int argc, char *argv[])
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Hcurl[l] = new Array<int>;
+       EssBdrTrueDofs_Hcurl[l] = new Array<int>;
        Funct_mat_offsets_lvls[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        {
@@ -1227,6 +1232,11 @@ int main(int argc, char *argv[])
 #else
    LocalSolver_partfinder_lvls = NULL;
 #endif
+
+#ifdef NEW_SMOOTHERCLASS
+    Array<Operator*> Smoothers_lvls(num_levels - 1);
+#endif
+
 
    Operator* CoarsestSolver;
    CoarsestProblemSolver* CoarsestSolver_partfinder;
@@ -1362,6 +1372,7 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
+        C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
@@ -1701,6 +1712,24 @@ int main(int argc, char *argv[])
                 Funct_global->SetBlock(0,1, BT->Transpose());
             }
         }
+
+#ifdef NEW_SMOOTHERCLASS
+        if (l < num_levels - 1)
+        {
+            Array<int> SweepsNum(numblocks_funct);
+            Array<int> offsets_global(numblocks_funct + 1);
+            offsets_global[0] = 0;
+            for ( int blk = 0; blk < numblocks_funct; ++blk)
+                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
+            offsets_global.PartialSum();
+            SweepsNum = 5;
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
+                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
+                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
+                                                     &SweepsNum, offsets_global);
+        }
+#endif
+
     }
 
     if (verbose)
@@ -2793,6 +2822,7 @@ int main(int argc, char *argv[])
 
     //const bool higher_order = false;
     const bool construct_coarseops = true;
+    int stopcriteria_type = 1;
     MultilevelSmoother * Smoother;
 #ifdef WITH_SMOOTHER
     Smoother = &NewGSSmoother;
@@ -2817,11 +2847,14 @@ int main(int argc, char *argv[])
                      EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
                      *Funct_global, offsets_global,
+#ifdef NEW_SMOOTHERCLASS
+                     Smoothers_lvls,
+#endif
                      Xinit_truedofs,
                      Smoother,
                      LocalSolver_lvls,
                      CoarsestSolver,
-                     construct_coarseops);
+                     construct_coarseops, stopcriteria_type);
 
 
     double newsolver_reltol = 1.0e-6;

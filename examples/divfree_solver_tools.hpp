@@ -9,7 +9,8 @@ using std::unique_ptr;
 
 #define MEMORY_OPTIMIZED
 
-#define CHECK_LOCALSOLVE
+// activates a check for the correctness of local problem solve for the blocked case (with S)
+//#define CHECK_LOCALSOLVE
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -1950,7 +1951,7 @@ private:
     int numblocks;
 
     // number of GS sweeps for each block
-    Array<int> & sweeps_num;
+    mutable Array<int> sweeps_num;
 
     int print_level;
 
@@ -1958,7 +1959,7 @@ protected:
     const BlockMatrix& Funct_mat;
 
     // discrete curl operators at all levels;
-    mutable SparseMatrix* Curlh;
+    const SparseMatrix* Curlh;
 
 #ifdef MEMORY_OPTIMIZED
     mutable Vector* temp_Hdiv_dofs;
@@ -1977,26 +1978,23 @@ protected:
 
     // structures used when all dofs are relaxed (via HypreSmoothers):
     mutable Array<Operator*> Smoothers;
+    mutable Array<int> trueblock_offsets; //block offsets for H(curl) x other blocks problems on true dofs
     mutable BlockVector* truerhs;  // rhs for H(curl) x other blocks problems on true dofs
     mutable BlockVector* truex;    // sol for H(curl) x other blocks problems on true dofs
-
-    mutable Array<Vector*> truevec_lvls;  // lives in Hdiv_h on true dofs
-    mutable Array<Vector*> truevec2_lvls;
-    mutable Array<Vector*> truevec3_lvls; // lives in Hcurl_h on true dofs
 
     // Dof_TrueDof tables for Hcurl at all levels
     const HypreParMatrix & d_td_Hcurl;
 
     // Dof_TrueDof tables for Hdiv at all levels
-    const Array<HypreParMatrix*> & d_td_Funct_blocks;
+    const std::vector<HypreParMatrix*> & d_td_Funct_blocks;
 
-    // Lists of essential boundary dofs for Hcurl at all levels
-    const Array<int>  & essbdrdofs_Hcurl;
+    // List of essential boundary dofs for Hcurl
+    const Array<int> & essbdrdofs_Hcurl;
     // FIXME: Move it to a const constructor argument,
     // but take care about the fact that GetTrueVDofs is different from GetVDofs()
-    mutable Array<int>*  essbdrtruedofs_Hcurl;
+    const Array<int> & essbdrtruedofs_Hcurl;
 
-    mutable Array<int>* block_offsets;
+    mutable Array<int> block_offsets;
     mutable BlockVector * xblock;
     mutable BlockVector * yblock;
 
@@ -2005,9 +2003,9 @@ public:
     HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                      const SparseMatrix& Discrete_Curl,
                      const HypreParMatrix& Dof_TrueDof_Hcurl,
-                     const Array<HypreParMatrix*> & Dof_TrueDof_Funct,
-                     const std::vector<Array<int>* > & EssBdrdofs_Funct,
-                     const Array<int> * SweepsNum);
+                     const std::vector<HypreParMatrix*> & Dof_TrueDof_Funct,
+                     const Array<int>& EssBdrdofs_Hcurl, const Array<int> &EssBdrtruedofs_Hcurl,
+                     const Array<int> * SweepsNum, const Array<int> &Block_Offsets);
 
     // FIXME: Implement this
     //void PrintAllOptions() const;
@@ -2028,29 +2026,36 @@ public:
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                                     const SparseMatrix& Discrete_Curl,
                                     const HypreParMatrix& Dof_TrueDof_Hcurl,
-                                    const Array<HypreParMatrix*> & Dof_TrueDof_Funct,
-                                    const Array<int>* & EssBdrdofs_Hcurl,
-                                    const Array<int> * SweepsNum)
-    : BlockOperator(),
+                                    const std::vector<HypreParMatrix *> &Dof_TrueDof_Funct,
+                                    const Array<int>& EssBdrdofs_Hcurl,
+                                    const Array<int>& EssBdrtruedofs_Hcurl,
+                                    const Array<int> * SweepsNum,
+                                    const Array<int>& Block_Offsets)
+    : BlockOperator(Block_Offsets),
       numblocks(Funct_Mat.NumRowBlocks()),
-      finalized(0),
       print_level(0),
       Funct_mat(Funct_Mat),
-      Curlh(Discrete_Curl),
       d_td_Hcurl(Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
-      essbdrdofs_Hcurl(EssBdrdofs_Hcurl)
+      essbdrdofs_Hcurl(EssBdrdofs_Hcurl),
+      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl)
 {
-    block_offsets = new Array<int>(numblocks + 1);
-    block_offsets[0] = 0;
+    Curlh = &Discrete_Curl;
+
+    block_offsets.SetSize(numblocks + 1);
+    for ( int i = 0; i < numblocks + 1; ++i)
+        block_offsets[i] = Block_Offsets[i];
+
+    trueblock_offsets.SetSize(numblocks + 1);
+    trueblock_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
-            block_offsets[1] = Dof_TrueDof_Hcurl.Width();
+            trueblock_offsets[1] = Dof_TrueDof_Hcurl.Width();
         else
-            block_offsets[blk + 1] = Dof_TrueDof_Funct[blk]->Width();
+            trueblock_offsets[blk + 1] = Dof_TrueDof_Funct[blk]->Width();
     }
-    block_offsets.PartialSum();
+    trueblock_offsets.PartialSum();
 
     Smoothers.SetSize(numblocks);
 
@@ -2073,9 +2078,10 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
     // x will be accessed through xblock as its view
-    xblock->Update(x.GetData(), *block_offsets);
+    fails here
+    xblock->Update(x.GetData(), block_offsets);
     // y will be accessed through yblock as its view
-    yblock->Update(y.GetData(), *block_offsets);
+    yblock->Update(y.GetData(), block_offsets);
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -2103,8 +2109,13 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
 
     // imposing boundary conditions in Hcurl on the righthand side
-    Array<int> * temp = essbdrtruedofs_Hcurl;
+    for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+    {
+        truerhs->GetBlock(0)[essbdrtruedofs_Hcurl[tdofind]] = 0.0;
+    }
 
+
+    /*
     for ( int tdof = 0; tdof < temp->Size(); ++tdof)
     {
         if ( (*temp)[tdof] != 0)
@@ -2112,6 +2123,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             truerhs->GetBlock(0)[tdof] = 0.0;
         }
     }
+    */
 
     *truex = 0.0;
     //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
@@ -2200,14 +2212,8 @@ void HcurlGSSSmoother::Setup() const
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
 
     // FIXME!!!
-    truex = new BlockVector(*block_offsets);
-    truerhs = new BlockVector(*block_offsets);
-
-    // creating essbdrtruedofs list at level l
-    essbdrtruedofs_Hcurl = new Array<int>(d_td_Hcurl_T->Height());
-    *essbdrtruedofs_Hcurl = 0.0;
-    d_td_Hcurl_T->BooleanMult(1.0, essbdrdofs_Hcurl.GetData(),
-                        0.0, essbdrtruedofs_Hcurl->GetData());
+    truex = new BlockVector(trueblock_offsets);
+    truerhs = new BlockVector(trueblock_offsets);
 
     // allocating memory for local-to-level vector arrays
     //rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
@@ -3070,6 +3076,9 @@ protected:
     // used for updates at the interfaces after local updates
     mutable MultilevelSmoother* Smoo;
 
+#ifdef NEW_SMOOTHERCLASS
+    const Array<Operator*>& Smoothers_lvls;
+#endif
     // a given blockvector which satisfies essential bdr conditions
     // imposed for the initial problem
     // on true dofs
@@ -3136,7 +3145,7 @@ protected:
     void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
-    // constructor with a smoother
+    // constructor
     GeneralMinConstrSolver(int NumLevels,
                            const std::vector<std::vector<HypreParMatrix *> > &Dof_TrueDof_Func_lvls,
                            const Array< BlockMatrix*> &Proj_Func,
@@ -3148,6 +3157,9 @@ public:
                            const Vector& ConstrRhsVec,
                            const BlockOperator& Funct_Global,
                            const Array<int>& Offsets_Global,
+#ifdef NEW_SMOOTHERCLASS
+                           const Array<Operator*>& Smoothers_Lvls,
+#endif
                            const BlockVector& Bdrdata_TrueDofs,
                            MultilevelSmoother* Smoother = NULL,
                            Array<Operator*>* LocalSolvers = NULL,
@@ -3292,6 +3304,9 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Vector& ConstrRhsVec,
                        const BlockOperator& Funct_Global,
                        const Array<int>& Offsets_Global,
+#ifdef NEW_SMOOTHERCLASS
+                       const Array<Operator*>& Smoothers_Lvls,
+#endif
                        const BlockVector& Bdrdata_TrueDofs,
                        MultilevelSmoother* Smoother,
                        Array<Operator*>* LocalSolvers,
@@ -3311,6 +3326,9 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
        ConstrRhs(ConstrRhsVec),
        Funct_global(Funct_Global),
        offsets_global(Offsets_Global),
+#ifdef NEW_SMOOTHERCLASS
+       Smoothers_lvls(Smoothers_Lvls),
+#endif
        bdrdata_truedofs(Bdrdata_TrueDofs)
 {
 
@@ -3318,6 +3336,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                                                 " Funct operator at the finest level must be given anyway!");
     MFEM_ASSERT(ConstrOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
                                                 " Constraint operator at the finest level must be given anyway!");
+
     if (!construct_coarseops)
         for ( int l = 0; l < num_levels; ++l)
         {
@@ -3624,6 +3643,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         // smooth
+#ifndef NEW_SMOOTHERCLASS
         if (Smoo)
         {
             Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
@@ -3634,6 +3654,14 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
+#else
+        if (Smoothers_lvls[l])
+        {
+            Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+            *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
+            ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+        }
+#endif
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
