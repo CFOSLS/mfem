@@ -28,9 +28,6 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-#define NEW_SMOOTHERCLASS
-
-
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -1233,9 +1230,7 @@ int main(int argc, char *argv[])
    LocalSolver_partfinder_lvls = NULL;
 #endif
 
-#ifdef NEW_SMOOTHERCLASS
     Array<Operator*> Smoothers_lvls(num_levels - 1);
-#endif
 
 
    Operator* CoarsestSolver;
@@ -1713,7 +1708,6 @@ int main(int argc, char *argv[])
             }
         }
 
-#ifdef NEW_SMOOTHERCLASS
         if (l < num_levels - 1)
         {
             Array<int> SweepsNum(numblocks_funct);
@@ -1728,7 +1722,6 @@ int main(int argc, char *argv[])
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
                                                      &SweepsNum, offsets_global);
         }
-#endif
 
     }
 
@@ -2847,11 +2840,8 @@ int main(int argc, char *argv[])
                      EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
                      *Funct_global, offsets_global,
-#ifdef NEW_SMOOTHERCLASS
                      Smoothers_lvls,
-#endif
                      Xinit_truedofs,
-                     Smoother,
                      LocalSolver_lvls,
                      CoarsestSolver,
                      construct_coarseops, stopcriteria_type);
