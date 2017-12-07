@@ -2828,8 +2828,9 @@ int main(int argc, char *argv[])
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Floc, Xinit_truedofs,
-                                      Smoother,
+                                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
+                                      Smoothers_lvls,
+                                      Xinit_truedofs,
                                       LocalSolver_partfinder_lvls,
                                       CoarsestSolver_partfinder,
                                       construct_coarseops);

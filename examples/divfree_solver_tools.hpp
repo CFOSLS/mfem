@@ -1456,9 +1456,7 @@ protected:
     // (remains unchanged throughout the solving process)
     const Vector& ConstrRhs;
 
-    // (Optionally used) Multilevel Smoother
-    // used for updates at the interfaces after local updates
-    mutable MultilevelSmoother* Smoo;
+    const Array<Operator*>& Smoothers_lvls;
 
     // a given blockvector which satisfies essential bdr conditions
     // imposed for the initial problem
@@ -1477,6 +1475,7 @@ protected:
 
     mutable Array<Array<int>* > trueoffsets_lvls;
     mutable Array<BlockVector*> truetempvec_lvls;
+    mutable Array<BlockVector*> truetempvec2_lvls;
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
 
@@ -1512,8 +1511,8 @@ public:
                            const Array<BlockMatrix*> & FunctOp_lvls,
                            const Array<SparseMatrix*> &ConstrOp_lvls,
                            const Vector& ConstrRhsVec,
+                           const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
-                           MultilevelSmoother* Smoother,
                            Array<LocalProblemSolver*>* LocalSolvers,
                            CoarsestProblemSolver* CoarsestSolver,
                            bool Construct_CoarseOps = true);
@@ -1550,8 +1549,8 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
                        const Vector& ConstrRhsVec,
+                       const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
-                       MultilevelSmoother* Smoother,
                        Array<LocalProblemSolver*>* LocalSolvers,
                        CoarsestProblemSolver* CoarsestSolver,
                        bool Construct_CoarseOps)
@@ -1567,6 +1566,7 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
        essbdrtruedofs_Func(EssBdrTrueDofs_Func),
        numblocks(FunctOp_lvls[0]->NumColBlocks()),
        ConstrRhs(ConstrRhsVec),
+       Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs)
 {
 
@@ -1610,14 +1610,10 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     trueoffsets_lvls[0] = &block_trueoffsets;
     truetempvec_lvls.SetSize(num_levels);
     truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
+    truetempvec2_lvls.SetSize(num_levels);
+    truetempvec2_lvls[0] = new BlockVector(block_trueoffsets);
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
-
-    // can't this be replaced by Smoo(Smoother) in the init. list?
-    if (Smoother)
-        Smoo = Smoother;
-    else
-        Smoo = NULL;
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -1701,14 +1697,11 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
-        if (Smoo)
+        // smooth
+        if (Smoothers_lvls[l])
         {
-            Smoo->ComputeTrueRhsLevel(l, *truetempvec_lvls[l]);
-
-            Smoo->MultTrueLevel(l, *truesolupdate_lvls[l], *truetempvec_lvls[l]);
-
-            *truesolupdate_lvls[l] = *truetempvec_lvls[l];
-
+            Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+            *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
 
@@ -1766,7 +1759,6 @@ void DivConstraintSolver::Setup(bool verbose) const
             "for initial vector at the beginning of solver setup: ", print_level);
 
     // 2. setting up the required internal data at all levels
-    // including smoothers
 
     // 2.1 all levels except the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1866,6 +1858,7 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
     }
 
     truetempvec_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+    truetempvec2_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     truesolupdate_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     trueresfunc_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
 }
