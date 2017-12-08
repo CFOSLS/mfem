@@ -778,7 +778,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
 
-        sub_rhsconstr.Print();
+        //sub_rhsconstr.Print();
 
         // solving local problem at the agglomerate element AE
         SolveLocalProblem(AE, LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr,
@@ -1278,11 +1278,13 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         inv_C.Mult(temp2, sol.GetBlock(1));
 
         //std::cout << "AE = " << AE << "\n";
-        std::cout << "F (local constraint rhs): \n";
-        F.Print();
+        //std::cout << "F (local constraint rhs): \n";
+        //F.Print();
 
 #ifdef CHECK_LOCALSOLVE
         // checking that the system was solved correctly
+        double checkval = 0.0;
+
         Vector res1(G.GetBlock(0).Size());
         Vector temp1res1(G.GetBlock(0).Size());
         A->Mult(sol.GetBlock(0), temp1res1);
@@ -1296,8 +1298,17 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         res1 += temp3res1;
         res1 -= G.GetBlock(0);
 
+        checkval = std::max(1.0e-13 * G.GetBlock(0).Norml2(), 1.0e-13);
         //std::cout << "res1 norm = " << res1.Norml2() << "\n";
-        MFEM_ASSERT(res1.Norml2() < 1.0e-16, "Local system was solved incorrectly, res1 != 0 \n");
+        if (!(res1.Norml2() < checkval))
+        {
+            std::cout << "res1: \n";
+            res1.Print();
+            std::cout << "norm res1 = " << res1.Norml2() <<
+                         ", checkval = " << checkval << "\n";
+        }
+        MFEM_ASSERT(res1.Norml2() < checkval,
+                    "Local system was solved incorrectly, res1 too large \n");
 
         Vector res2(G.GetBlock(1).Size());
         Vector temp1res2(G.GetBlock(1).Size());
@@ -1310,7 +1321,25 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         res2 -= G.GetBlock(1);
 
         //std::cout << "res2 norm = " << res2.Norml2() << "\n";
-        MFEM_ASSERT(res2.Norml2() < 1.0e-16, "Local system was solved incorrectly, res2 != 0 \n");
+        checkval = std::max(1.0e-13 * G.GetBlock(1).Norml2(), 1.0e-13);
+        if (!(res2.Norml2() < checkval ))
+        {
+            std::cout << "res2: \n";
+            res2.Print();
+            std::cout << "norm res2 = " << res2.Norml2() <<
+                         ", checkval = " << checkval << "\n";
+        }
+        MFEM_ASSERT(res2.Norml2() < checkval,
+                    "Local system was solved incorrectly, res2 too large \n");
+
+        /*
+        if (!(F.Norml2() < 1.0e-15))
+        {
+            std::cout << "F.Norml2() = " << F.Norml2() << "\n";
+            F.Print();
+        }
+        MFEM_ASSERT(F.Norml2() < 1.0e-15, "In the solver local divergence constraint rhs must be 0! \n");
+        */
 
         Vector res3(F.Size());
         B.Mult(sol.GetBlock(0), res3);
@@ -1327,7 +1356,18 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         std::cout << "res3: \n";
         res3.Print();
         */
-        MFEM_ASSERT(res3.Norml2() < 1.0e-16, "Local system was solved incorrectly, res3 != 0 \n");
+
+        checkval = std::max(1.0e-13 * F.Norml2(), 1.0e-13);
+        if (!(res3.Norml2() < checkval))
+        {
+            std::cout << "res3: \n";
+            res3.Print();
+            std::cout << "norm res3 = " << res3.Norml2() <<
+                         ", checkval = " << checkval << "\n";
+        }
+
+        MFEM_ASSERT(res3.Norml2() < checkval,
+                    "Local system was solved incorrectly, res3 != 0 \n");
 #endif
     }
 
@@ -3376,6 +3416,10 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
     if (preconditioner_mode)
         *init_guess = 0.0;
+    else
+        funct_firstnorm = CheckFunctValue(comm, Funct_global, offsets_global, *init_guess,
+                                 "for the initial guess: ", print_level);
+
 
     // tempblock is the initial guess (on true dofs)
     *tempblock_truedofs = *init_guess;
@@ -3554,8 +3598,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
 
         // FIXME:
-        MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[l]->GetBlock(0), *Constr_lvls[0], NULL,
-                                   "for the local update"),"");
+        //MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[l]->GetBlock(0), *Constr_lvls[0], NULL,
+                                   //"for the local update"),"");
 
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -3578,8 +3622,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // imposes boundary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
 
-    //CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
-    *truesolupdate_lvls[num_levels - 1] = 0.0;
+    CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
+    //*truesolupdate_lvls[num_levels - 1] = 0.0;
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
