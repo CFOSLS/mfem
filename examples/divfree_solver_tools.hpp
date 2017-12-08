@@ -10,7 +10,7 @@ using std::unique_ptr;
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
-//#define CHECK_LOCALSOLVE
+#define CHECK_LOCALSOLVE
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -151,6 +151,8 @@ bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const 
     return passed;
 }
 
+
+#if 0
 class MultilevelSmoother : public Operator
 {
 protected:
@@ -231,9 +233,7 @@ void MultilevelSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_l
     std::cout << "ComputeTrueRhsLevel for a BlockVector argument is called from the abstract base"
                  " class but must have been redefined \n";
 }
-
-// TODO: Implement a new class with local solvers for the case when S is also given
-
+#endif
 
 // TODO: Implement an abstract base for the coarsest problem solver. Maybe unnecessary now
 // TODO: Implement an abstract base for the local problems solver. Maybe unnecessary now
@@ -484,14 +484,18 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
 
-    MFEM_ASSERT(coarsetrueRhs->GetBlock(0).Size() == xblock->GetBlock(0).Size(),
-                "Sizes mismatch when finalizing rhs at the coarsest level!\n");
-    coarsetrueRhs->GetBlock(0) = xblock->GetBlock(0);
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(coarsetrueRhs->GetBlock(blk).Size() == xblock->GetBlock(blk).Size(),
+                    "Sizes mismatch when finalizing rhs at the coarsest level!\n");
+        coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
+    }
+
     if (rhs_constr)
     {
-        MFEM_ASSERT(coarsetrueRhs->GetBlock(1).Size() == rhs_constr->Size(),
+        MFEM_ASSERT(coarsetrueRhs->GetBlock(numblocks).Size() == rhs_constr->Size(),
                     "Sizes mismatch when finalizing rhs at the coarsest level!\n");
-        coarsetrueRhs->GetBlock(1) = *rhs_constr;
+        coarsetrueRhs->GetBlock(numblocks) = *rhs_constr;
     }
 
     // 2. solve the linear system with preconditioned MINRES.
@@ -773,6 +777,8 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
+
+        sub_rhsconstr.Print();
 
         // solving local problem at the agglomerate element AE
         SolveLocalProblem(AE, LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr,
@@ -1159,99 +1165,6 @@ public:
 void LocalProblemSolverWithS::SaveLocalLUFactors() const
 {
     MFEM_ABORT("LocalProblemSolverWithS::SaveLocalLUFactors is not implemented!");
-    /*
-    if (!optimized_localsolve)
-        return;
-
-    int nAE = AE_edofs_L2->Height();
-    LUfactors.resize(nAE);
-
-    DenseMatrix sub_Constr;
-    DenseMatrix sub_Func;
-
-    Array<SparseMatrix*> AE_eintdofs_blks(numblocks);
-    Array2D<SparseMatrix*> Op_blks(numblocks, numblocks);
-
-    std::vector<DenseMatrix> LocalAE_Matrices(numblocks);
-    std::vector<Array<int>*> Local_inds(numblocks);
-
-    // loop over all AE, computing and saving factorization
-    // of local saddle point matrices in each AE
-    for( int AE = 0; AE < nAE; ++AE)
-    {
-        // for each AE we will store:
-        // 1) Op(1,1)^{-1},
-        // 2) (Op(0,0) - Op(0,1) Op(1,1)^{-1} Op(1,0))^{-1}
-        // 3) ( Constr * (Op(0,0) - Op(0,1) Op(1,1)^{-1} Op(1,0))^{-1} * ConstrT )^{-1}
-        LUfactors[AE].resize(3);
-
-        for ( int blk = 0; blk < numblocks; ++blk)
-        {
-            AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
-            for ( int blk2 = 0; blk2 < numblocks; ++blk2)
-                Op_blks(blk,blk2) = &(Op_blkspmat.GetBlock(blk,blk2));
-        }
-
-        //std::cout << "AE = " << AE << "\n";
-        bool is_degenerate = true;
-
-        //Array<int> tempview_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
-        //Local_inds = new Array<int>;
-        //tempview_inds.Copy(Local_inds[0]);
-        Array<int> Local_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
-
-        Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
-        sub_Constr.SetSize(Wtmp_j.Size(), Local_inds.Size());
-        Constr_spmat.GetSubMatrix(Wtmp_j, Local_inds, sub_Constr);
-
-        // FIXME: Is this a correct detection of degeneracy in the block case?
-        for (int i = 0; i < Local_inds.Size(); ++i)
-        {
-            if ( (*bdrdofs_blocks[0])[Local_inds[i]] != 0 &&
-                 (*essbdrdofs_blocks[0])[Local_inds[i]] == 0)
-            {
-                //std::cout << "then local problem is non-degenerate \n";
-                is_degenerate = false;
-                break;
-            }
-        }
-
-        // Setting size of Dense Matrices
-        sub_Func.SetSize(Local_inds.Size());
-
-        // Obtaining operator submatrices:
-        Op_blk->GetSubMatrix(Local_inds, Local_inds, sub_Func);
-
-        LUfactors[AE][0] = new DenseMatrixInverse(sub_Func);
-
-        DenseMatrix sub_ConstrT(sub_Constr.Width(), sub_Constr.Height());
-        sub_ConstrT.Transpose(sub_Constr);
-
-        DenseMatrix invABT;
-        LUfactors[AE][0]->Mult(sub_ConstrT, invABT);
-
-        // Schur = BinvABT
-        DenseMatrix Schur(sub_Constr.Height(), invABT.Width());
-        mfem::Mult(sub_Constr, invABT, Schur);
-
-        // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
-        if (is_degenerate)
-        {
-            Schur.SetRow(0,0);
-            Schur.SetCol(0,0);
-            Schur(0,0) = 1.;
-        }
-
-        //Schur.Print();
-        LUfactors[AE][2] = new DenseMatrixInverse(Schur);
-
-    } // end of loop over AEs
-
-    // FIXME: maybe here we want to change the size from numblocks + 1 to numblocks*numblocks + 1?
-    // Then don't forget to call everythere with correct indices
-    compute_AEproblem_matrices = false;
-    compute_AEproblem_matrices[numblocks] = true;
-    */
 }
 
 void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
@@ -1265,7 +1178,7 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         //DenseMatrixInverse * inv_Schur = LUfactors[AE][1];
         //SolveLocalProblemOpt(inv_A, inv_Schur, B, G, F, sol, is_degenerate);
     }
-    else // lazy variant with computations of lu each time
+    else // an expensive variant with computations of lu each time
     {
         // creating a Schur complement matrix Binv(A)BT
 
@@ -1333,7 +1246,7 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         // creating invAtildaFtilda = inv(Atilda) * Ftilda =
         // = inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S)
         Vector invAtildaFtilda(Atilda.Height());
-        Atilda.Mult(F1tilda, invAtildaFtilda);
+        inv_Atilda.Mult(F1tilda, invAtildaFtilda);
 
         Vector FinalFlam(B.Height());
         B.Mult(invAtildaFtilda, FinalFlam);
@@ -1363,6 +1276,10 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         temp2 += G.GetBlock(1);
 
         inv_C.Mult(temp2, sol.GetBlock(1));
+
+        //std::cout << "AE = " << AE << "\n";
+        std::cout << "F (local constraint rhs): \n";
+        F.Print();
 
 #ifdef CHECK_LOCALSOLVE
         // checking that the system was solved correctly
@@ -1399,7 +1316,17 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         B.Mult(sol.GetBlock(0), res3);
         res3 -= F;
 
+        /*
         //std::cout << "res3 norm = " << res3.Norml2() << "\n";
+        std::cout << "sigma: \n";
+        sol.GetBlock(0).Print();
+        std::cout << "S: \n";
+        sol.GetBlock(1).Print();
+        std::cout << "lambda: \n";
+        lambda.Print();
+        std::cout << "res3: \n";
+        res3.Print();
+        */
         MFEM_ASSERT(res3.Norml2() < 1.0e-16, "Local system was solved incorrectly, res3 != 0 \n");
 #endif
     }
@@ -2156,7 +2083,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
 void HcurlGSSSmoother::Setup() const
 {
-    MFEM_ASSERT(numblocks == 1, "HcurlGSSSmoother::Setup was implemented for the case numblocks = 1 only \n");
+    MFEM_ASSERT(numblocks <= 2, "HcurlGSSSmoother::Setup was implemented for the "
+                                "cases numblocks = 1 or 2 only \n");
 
     // shortcuts
     SparseMatrix *CurlhT = Transpose(*Curlh);
@@ -2203,8 +2131,21 @@ void HcurlGSSSmoother::Setup() const
 #endif
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
+    if (numblocks > 1)
+    {
+        int blk = 1;
+        const SparseMatrix * Funct_blk = &(Funct_mat.GetBlock(blk,blk));
+        HypreParMatrix* Functblk_d_td_blk = d_td_Funct_blocks[blk]->LeftDiagMult(*Funct_blk, d_td_Funct_blocks[blk]->GetRowStarts() );
+        HypreParMatrix * d_td_blk_T = d_td_Funct_blocks[blk]->Transpose();
+        HypreParMatrix * Functblk_global = ParMult(d_td_blk_T, Functblk_d_td_blk);
+        Functblk_global->CopyRowStarts();
+        Functblk_global->CopyColStarts();
+        delete Functblk_d_td_blk;
 
-    // FIXME!!!
+        Smoothers[1] = new HypreBoomerAMG(*Functblk_global);
+        delete Functblk_global;
+    }
+
     truex = new BlockVector(trueblock_offsets);
     truerhs = new BlockVector(trueblock_offsets);
 
@@ -2216,6 +2157,7 @@ void HcurlGSSSmoother::Setup() const
     delete d_td_Hcurl_T;
 }
 
+#if 0
 class MultilevelHCurlGSSmoother : public MultilevelSmoother
 {
 private:
@@ -2687,6 +2629,7 @@ void MultilevelHCurlGSSmoother::MultTrueLevel(int level, Vector& in_lvl, Vector&
     }
 
 }
+#endif
 
 #if 0
 
@@ -3451,6 +3394,8 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         if (!preconditioner_mode)
         {
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+                                       "before the iteration"),"");
             MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                        "before the iteration"),"");
         }
@@ -3608,6 +3553,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
         }
 
+        // FIXME:
+        MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[l]->GetBlock(0), *Constr_lvls[0], NULL,
+                                   "for the local update"),"");
+
         ComputeUpdatedLvlTrueResFunc(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         // smooth
@@ -3629,7 +3578,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // imposes boundary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
 
-    CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
+    //CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
+    *truesolupdate_lvls[num_levels - 1] = 0.0;
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up

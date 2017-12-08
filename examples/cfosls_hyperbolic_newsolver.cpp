@@ -16,14 +16,14 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-#define WITH_SMOOTHER
+//#define WITH_SMOOTHERS
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -750,6 +750,165 @@ Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl
     } // end of setting test coefficients in correct case
 }
 
+
+void test_function(DenseMatrix *A, DenseMatrix * DT, DenseMatrix * C, DenseMatrix * D, DenseMatrix& B,
+                   Vector& G0, Vector& G1, Vector &F,
+                   Vector Sol0, Vector Sol1, Vector Sol2,
+                   bool is_degenerate)
+{
+    // creating inv_C
+    //std::cout << "inv_C \n";
+    //C->Print();
+    DenseMatrixInverse inv_C(*C);
+
+    // creating D * inv_C * DT
+    DenseMatrix invCD;
+    inv_C.Mult(*D, invCD);
+
+    DenseMatrix DTinvCD(DT->Height(), D->Width());
+    mfem::Mult(*DT, invCD, DTinvCD);
+
+    // creating inv Atilda = inv(A - D * inv_C * DT)
+    DenseMatrix Atilda(A->Height(), A->Width());
+    Atilda = *A;
+    Atilda -= DTinvCD;
+
+    //std::cout << "inv_Atilda \n";
+    //Atilda.Print();
+    DenseMatrixInverse inv_Atilda(Atilda);
+
+    // computing Schur = B * inv_Atilda * BT
+    DenseMatrix inv_AtildaBT;
+    DenseMatrix BT(B.Width(), B.Height());
+    BT.Transpose(B);
+    inv_Atilda.Mult(BT, inv_AtildaBT);
+
+    DenseMatrix Schur(B.Height(), B.Height());
+    mfem::Mult(B, inv_AtildaBT, Schur);
+
+    // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
+    if (is_degenerate)
+    {
+        //std::cout << "degenerate! \n";
+        Schur.SetRow(0,0);
+        Schur.SetCol(0,0);
+        Schur(0,0) = 1.;
+    }
+
+    //std::cout << "inv_Schur \n";
+    //Schur.Print();
+    DenseMatrixInverse inv_Schur(Schur);
+
+    // creating DT * invC * F_S
+    Vector invCF2;
+    inv_C.Mult(G1, invCF2);
+
+    Vector DTinvCF2(DT->Height());
+    DT->Mult(invCF2, DTinvCF2);
+
+    // creating F1tilda = F_sigma - DT * invC * F_S
+    Vector F1tilda(DT->Height());
+    F1tilda = G0;
+    F1tilda -= DTinvCF2;
+
+    // creating invAtildaFtilda = inv(Atilda) * Ftilda =
+    // = inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S)
+    Vector invAtildaFtilda(Atilda.Height());
+    inv_Atilda.Mult(F1tilda, invAtildaFtilda);
+
+    Vector FinalFlam(B.Height());
+    B.Mult(invAtildaFtilda, FinalFlam);
+    FinalFlam -= F;
+
+    if (is_degenerate)
+        FinalFlam(0) = 0;
+
+    // lambda = inv_Schur * ( F_lam - B * inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S) )
+    inv_Schur.Mult(FinalFlam, Sol2);
+
+    // changing Ftilda so that Ftilda_new = Ftilda_old - BT * lambda
+    // = F_sigma - DT * invC * F_S - BT * lambda
+    Vector temp(B.Width());
+    B.MultTranspose(Sol2, temp);
+    F1tilda -= temp;
+
+    // sigma = inv_Atilda * Ftilda(new)
+    // = inv(A - D * inv_C * DT) * ( F_sigma - DT * invC * F_S - BT * lambda )
+    inv_Atilda.Mult(F1tilda, Sol0);
+
+    // temp2 = F_S - D * sigma
+    Vector temp2(D->Height());
+    D->Mult(Sol0, temp2);
+    temp2 *= -1.0;
+    temp2 += G1;
+
+    inv_C.Mult(temp2, Sol1);
+
+    std::cout << "F (local constraint rhs): \n";
+    F.Print();
+
+    std::cout << "Sol0 \n";
+    Sol0.Print();
+
+    std::cout << "Sol1 \n";
+    Sol1.Print();
+
+    std::cout << "Sol2 \n";
+    Sol2.Print();
+
+#ifdef CHECK_LOCALSOLVE
+    // checking that the system was solved correctly
+    Vector res1(G0.Size());
+    Vector temp1res1(G0.Size());
+    A->Mult(Sol0, temp1res1);
+    Vector temp2res1(G0.Size());
+    DT->Mult(Sol1, temp2res1);
+    Vector temp3res1(G0.Size());
+    B.MultTranspose(Sol2, temp3res1);
+    res1 = 0.0;
+    res1 += temp1res1;
+    res1 += temp2res1;
+    res1 += temp3res1;
+    res1 -= G0;
+
+    //std::cout << "res1 norm = " << res1.Norml2() << "\n";
+    MFEM_ASSERT(res1.Norml2() < 1.0e-16, "Local system was solved incorrectly, res1 != 0 \n");
+
+    Vector res2(G1.Size());
+    Vector temp1res2(G1.Size());
+    D->Mult(Sol0, temp1res2);
+    Vector temp2res2(G1.Size());
+    C->Mult(Sol1, temp2res2);
+    res2 = 0.0;
+    res2 += temp1res2;
+    res2 += temp2res2;
+    res2 -= G1;
+
+    //std::cout << "res2 norm = " << res2.Norml2() << "\n";
+    MFEM_ASSERT(res2.Norml2() < 1.0e-16, "Local system was solved incorrectly, res2 != 0 \n");
+
+    Vector res3(F.Size());
+    B.Mult(Sol0, res3);
+    res3 -= F;
+
+    std::cout << "res3: \n";
+    res3.Print();
+
+    /*
+    //std::cout << "res3 norm = " << res3.Norml2() << "\n";
+    std::cout << "sigma: \n";
+    Sol0.Print();
+    std::cout << "S: \n";
+    Sol1.Print();
+    std::cout << "lambda: \n";
+    Sol2.Print();
+    std::cout << "res3: \n";
+    res3.Print();
+    */
+    MFEM_ASSERT(res3.Norml2() < 1.0e-16, "Local system was solved incorrectly, res3 != 0 \n");
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -768,9 +927,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1298,6 +1457,84 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
+#if 0
+    if (verbose)
+        std::cout << "Testing local solve 3x3 \n";
+
+    int size1 = 3;
+    int size2 = 4;
+    int size3 = 2;
+    DenseMatrix A(size1,size1);
+    A = 0.0;
+    for (int i = 0; i < size1; ++i)
+        for  (int j = 0; j < size1; ++j)
+            if (i == j)
+                A(i,j) = 1;
+            else
+                A(i,j) = 0;
+    std::cout << "A : \n";
+    A.Print();
+    DenseMatrix DT(size1,size2);
+    DT = 0.0;
+    DT(0,0) = 1;
+    DT(0,1) = -1;
+    DT(1,2) = 1;
+    DT(1,3) = -1;
+    DT(2,1) = 1;
+    DT(2,3) = 1;
+    DenseMatrix D(size2,size1);
+    D.Transpose(DT);
+    std::cout << "D : \n";
+    D.Print();
+    DenseMatrix C(size2,size2);
+    C = 0.0;
+    for (int i = 0; i < size2; ++i)
+        for  (int j = 0; j < size2; ++j)
+            if (i == j)
+                C(i,j) = 1;
+            else
+                C(i,j) = 0;
+    std::cout << "C : \n";
+    C.Print();
+    DenseMatrix B(size3,size1);
+    B = 0.0;
+    B(0,0) = 1;
+    B(0,1) = -1;
+    B(1,1) = 1;
+    B(1,2) = -1;
+    std::cout << "B : \n";
+    B.Print();
+
+    Vector Sol0(size1);
+    Vector Sol1(size2);
+    Vector Sol2(size3);
+
+    Vector G0(size1);
+    for (int i = 0; i < size1; ++i)
+        G0[i] = i + 1;
+    std::cout << "G0 : \n";
+    G0.Print();
+
+    Vector G1(size2);
+    for (int i = 0; i < size2; ++i)
+        G1[i] = 10 * i - 3 * i + 2;
+    std::cout << "G0 : \n";
+    G1.Print();
+    Vector F(size3);
+    for (int i = 0; i < size3; ++i)
+        F[i] = i + 4;
+    std::cout << "F : \n";
+    F.Print();
+
+    bool is_degenerate = false;
+
+    test_function(&A, &DT, &C, &D, B, G0, G1, F, Sol0, Sol1, Sol2, is_degenerate);
+
+    MPI_Finalize();
+    return 0;
+    }
+#endif
+
     //const int finest_level = 0;
     //const int coarsest_level = num_levels - 1;
 
@@ -1710,6 +1947,7 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
+#ifdef WITH_SMOOTHERS
             Array<int> SweepsNum(numblocks_funct);
             Array<int> offsets_global(numblocks_funct + 1);
             offsets_global[0] = 0;
@@ -1721,6 +1959,9 @@ int main(int argc, char *argv[])
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
                                                      &SweepsNum, offsets_global);
+#else
+            Smoothers_lvls[l] = NULL;
+#endif
         }
 
     }
@@ -2619,6 +2860,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
 
+#if 0
     /*
     double smooth_abstol = 1.0e-12;
     double smooth_reltol = 1.0e-12;
@@ -2647,6 +2889,7 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Number of smoothing steps: " << NewGSSmoother.GetSweepsNumber() << "\n";
+#endif
 
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
@@ -2816,13 +3059,6 @@ int main(int argc, char *argv[])
     //const bool higher_order = false;
     const bool construct_coarseops = true;
     int stopcriteria_type = 1;
-    MultilevelSmoother * Smoother;
-#ifdef WITH_SMOOTHER
-    Smoother = &NewGSSmoother;
-    //Smoother = &NewSmoother;
-#else
-    Smoother = NULL;
-#endif
 
     DivConstraintSolver PartsolFinder(num_levels, P_WT,
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
@@ -3269,7 +3505,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
 
     /*
