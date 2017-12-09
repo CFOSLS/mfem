@@ -1626,7 +1626,10 @@ int main(int argc, char *argv[])
 
         ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
         //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
-        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        else
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
         Ablock->Assemble();
         //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
@@ -3590,6 +3593,9 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "error norm special = " << global_norm << "\n";
     */
+
+    if (verbose)
+        NewSolver.PrintAllOptions();
 
     NewSolver.Mult(NewRhs, NewX);
 

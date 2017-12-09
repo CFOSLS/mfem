@@ -690,6 +690,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
             SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk,blk);
 
             // FIXME: Is this necessary?
+            // For each AE a new command?
             Array<int> tempview_inds(AE_eintdofs_blk.GetRowColumns(AE), AE_eintdofs_blk.RowSize(AE));
             Local_inds[blk] = new Array<int>;
             tempview_inds.Copy(*Local_inds[blk]);
@@ -711,27 +712,14 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                         break;
                     }
                 }
-            }
-        }
+            } // end of if blk == 0
+        } // end of loop over blocks
 
         for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
         {
             for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
             {
-                /*
-                if (blk2 == 0)
-                {
-                    SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk1,blk2);
-
-                    // FIXME: Is this necessary?
-                    Array<int> tempview_inds(AE_eintdofs_blk.GetRowColumns(AE), AE_eintdofs_blk.RowSize(AE));
-                    Local_inds[blk1] = new Array<int>;
-                    tempview_inds.Copy(*Local_inds[blk1]);
-
-                }
-                */
-
-                if (blk1 == 0 && blk2 == 0) // handling L2 block
+                if (blk1 == 0 && blk2 == 0) // handling L2 block (constraint)
                 {
                     Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
                     if (compute_AEproblem_matrices(numblocks, numblocks))
@@ -756,6 +744,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
                 if (compute_AEproblem_matrices(blk1,blk2))
                 {
+                    // FIXME: Memory leak here? New allocation for each AE but no free
                     // Setting size of Dense Matrices
                     LocalAE_Matrices(blk1,blk2) = new DenseMatrix(Local_inds[blk1]->Size(), Local_inds[blk2]->Size());
 
@@ -766,7 +755,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
 
             }
-        } // end of loop over all blocks
+        } // end of loop over all blocks in the functional
 
         BlockVector sub_Func(sub_Func_offsets);
 
@@ -3582,7 +3571,28 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     next_sol = previous_sol;
 
+    // FIXME: Remove
+    CheckFunctValue(comm, Funct_global, offsets_global, next_sol,
+                             "at the beginning of Solve: ", print_level);
+
     ComputeUpdatedLvlTrueResFunc(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
+
+    /*
+    // FIXME: Comment
+    Funct_global.Mult(previous_sol, *trueresfunc_lvls[0]);
+    *trueresfunc_lvls[0] *= -1.0;
+    *trueresfunc_lvls[0] += righthand_side;
+    * */
+
+    /*
+    *truesolupdate_lvls[0] = 0.0;
+
+    if (LocalSolvers_lvls[0])
+    {
+        LocalSolvers_lvls[0]->Mult(*trueresfunc_lvls[0], *truetempvec_lvls[0]);
+        *truesolupdate_lvls[0] += *truetempvec_lvls[0];
+    }
+    */
 
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
@@ -3597,7 +3607,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
         }
 
-        // FIXME:
+        // FIXME: Remove
         //MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[l]->GetBlock(0), *Constr_lvls[0], NULL,
                                    //"for the local update"),"");
 
@@ -3618,12 +3628,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     } // end of loop over finer levels
 
+    // FIXME: Only for debugging, the functional in blocked case is not being minimized
+    // 4. update the global iterate by the resulting update at the finest level
+    next_sol += *truesolupdate_lvls[0];
+    funct_currnorm = CheckFunctValue(comm, Funct_global, offsets_global, next_sol,
+                             "after local solve at level 0: ", print_level);
+    next_sol -= *truesolupdate_lvls[0];
+
     // BOTTOM: solve the global problem at the coarsest level
     // imposes boundary conditions and assembles the coarsests level's
     // righthand side  (from rhsfunc) on true dofs
 
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
     //*truesolupdate_lvls[num_levels - 1] = 0.0;
+
+    //truesolupdate_lvls[num_levels - 1]->Print();
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
