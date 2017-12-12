@@ -28,6 +28,8 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
+#define COMPUTE_EXACTDISCRETESOL
+
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -36,6 +38,8 @@
 //#define BAD_TEST
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
+
+
 
 #define MYZEROTOL (1.0e-13)
 
@@ -929,7 +933,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1535,6 +1539,606 @@ int main(int argc, char *argv[])
     }
 #endif
 
+#ifdef COMPUTE_EXACTDISCRETESOL
+    if (verbose)
+        std::cout << "COMPUTE_EXACTDISCRETESOL is activated \n";
+
+    bool use_ADS = true;
+    bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
+
+    const char *formulation = "cfosls"; // "cfosls" or "fosls"
+
+    Vector * sigma_vec, *S_vec, *lambda_vec;
+    int numblocks_discrete = 1;
+
+    if (strcmp(space_for_S,"H1") == 0)
+        numblocks_discrete++;
+    else // "L2"
+        if (!eliminateS)
+            numblocks_discrete++;
+    if (strcmp(formulation,"cfosls") == 0)
+        numblocks_discrete++;
+    Array<int> block_trueOffsets_discrete(numblocks_discrete + 1); // number of variables + 1
+    BlockVector * trueX_discrete;
+
+    {
+
+        ifstream imesh(mesh_file);
+        if (!imesh)
+        {
+            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+            MPI_Finalize();
+            return -2;
+        }
+        else
+        {
+            mesh = new Mesh(imesh, 1, 1);
+            imesh.close();
+        }
+
+        for (int l = 0; l < ser_ref_levels; l++)
+                mesh->UniformRefinement();
+
+        if (verbose)
+            cout << "Creating parmesh(" << nDimensions <<
+                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
+        shared_ptr<ParMesh> pmesh_copy = make_shared<ParMesh>(comm, *mesh);
+        delete mesh;
+
+        for ( int l = 0; l < ref_levels; ++l)
+            pmesh_copy->UniformRefinement();
+
+        // 6. Define a parallel finite element space on the parallel mesh. Here we
+        //    use the Raviart-Thomas finite elements of the specified order.
+        int dim = nDimensions;
+
+        FiniteElementCollection *hdiv_coll;
+        if ( dim == 4 )
+        {
+            hdiv_coll = new RT0_4DFECollection;
+            if(verbose)
+                cout << "RT: order 0 for 4D" << endl;
+        }
+        else
+        {
+            hdiv_coll = new RT_FECollection(feorder, dim);
+            if(verbose)
+                cout << "RT: order " << feorder << " for 3D" << endl;
+        }
+
+        if (dim == 4)
+            MFEM_ASSERT(feorder==0, "Only lowest order elements are support in 4D!");
+        FiniteElementCollection *h1_coll;
+        if (dim == 4)
+        {
+            h1_coll = new LinearFECollection;
+            if (verbose)
+                cout << "H1 in 4D: linear elements are used" << endl;
+        }
+        else
+        {
+            h1_coll = new H1_FECollection(feorder+1, dim);
+            if(verbose)
+                cout << "H1: order " << feorder + 1 << " for 3D" << endl;
+        }
+        FiniteElementCollection *l2_coll = new L2_FECollection(feorder, dim);
+        if(verbose)
+            cout << "L2: order " << feorder << endl;
+
+        ParFiniteElementSpace *R_space = new ParFiniteElementSpace(pmesh_copy.get(), hdiv_coll);
+        ParFiniteElementSpace *H_space = new ParFiniteElementSpace(pmesh_copy.get(), h1_coll);
+        ParFiniteElementSpace *W_space = new ParFiniteElementSpace(pmesh_copy.get(), l2_coll);
+        ParFiniteElementSpace * S_space;
+        if (strcmp(space_for_S,"H1") == 0)
+            S_space = H_space;
+        else // "L2"
+            S_space = W_space;
+
+        HYPRE_Int dimR = R_space->GlobalTrueVSize();
+        HYPRE_Int dimH = H_space->GlobalTrueVSize();
+        HYPRE_Int dimW = W_space->GlobalTrueVSize();
+
+        if (verbose)
+        {
+           std::cout << "***********************************************************\n";
+           std::cout << "dim H(div)_h = " << dimR << ", ";
+           std::cout << "dim H1_h = " << dimH << ", ";
+           std::cout << "dim L2_h = " << dimW << "\n";
+           std::cout << "Spaces we use: \n";
+           std::cout << "H(div)";
+           if (strcmp(space_for_S,"H1") == 0)
+               std::cout << " x H1";
+           else // "L2"
+               if (!eliminateS)
+                   std::cout << " x L2";
+           if (strcmp(formulation,"cfosls") == 0)
+               std::cout << " x L2 \n";
+           std::cout << "***********************************************************\n";
+        }
+
+        // 7. Define the two BlockStructure of the problem.  block_offsets is used
+        //    for Vector based on dof (like ParGridFunction or ParLinearForm),
+        //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
+        //    for the rhs and solution of the linear system).  The offsets computed
+        //    here are local to the processor.
+        std::cout << "Number of blocks in the formulation: " << numblocks_discrete << "\n";
+
+        Array<int> block_offsets(numblocks_discrete + 1); // number of variables + 1
+        int tempblknum = 0;
+        block_offsets[0] = 0;
+        tempblknum++;
+        block_offsets[tempblknum] = R_space->GetVSize();
+        tempblknum++;
+
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            block_offsets[tempblknum] = H_space->GetVSize();
+            tempblknum++;
+        }
+        else // "L2"
+            if (!eliminateS)
+            {
+                block_offsets[tempblknum] = W_space->GetVSize();
+                tempblknum++;
+            }
+        if (strcmp(formulation,"cfosls") == 0)
+        {
+            block_offsets[tempblknum] = W_space->GetVSize();
+            tempblknum++;
+        }
+        block_offsets.PartialSum();
+
+        tempblknum = 0;
+        block_trueOffsets_discrete[0] = 0;
+        tempblknum++;
+        block_trueOffsets_discrete[tempblknum] = R_space->TrueVSize();
+        tempblknum++;
+
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            block_trueOffsets_discrete[tempblknum] = H_space->TrueVSize();
+            tempblknum++;
+        }
+        else // "L2"
+            if (!eliminateS)
+            {
+                block_trueOffsets_discrete[tempblknum] = W_space->TrueVSize();
+                tempblknum++;
+            }
+        if (strcmp(formulation,"cfosls") == 0)
+        {
+            block_trueOffsets_discrete[tempblknum] = W_space->TrueVSize();
+            tempblknum++;
+        }
+        block_trueOffsets_discrete.PartialSum();
+
+        BlockVector x(block_offsets), rhs(block_offsets);
+        //BlockVector trueX(block_trueOffsets);
+        trueX_discrete = new BlockVector(block_trueOffsets_discrete);
+        BlockVector trueRhs(block_trueOffsets_discrete);
+        x = 0.0;
+        rhs = 0.0;
+        *trueX_discrete = 0.0;
+        trueRhs = 0.0;
+
+        sigma_vec = new Vector(R_space->GetVSize());
+        S_vec = new Vector(H_space->GetVSize());
+        lambda_vec = new Vector(W_space->GetVSize());
+
+        Transport_test_divfree Mytest(nDimensions, numsol, numcurl);
+
+        ParGridFunction *S_exact = new ParGridFunction(S_space);
+        S_exact->ProjectCoefficient(*(Mytest.scalarS));
+
+        ParGridFunction * sigma_exact = new ParGridFunction(R_space);
+        sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
+        x.GetBlock(0) = *sigma_exact;
+        x.GetBlock(1) = *S_exact;
+
+       // 8. Define the coefficients, analytical solution, and rhs of the PDE.
+       ConstantCoefficient zero(.0);
+
+       //----------------------------------------------------------
+       // Setting boundary conditions.
+       //----------------------------------------------------------
+
+       Array<int> ess_bdrS(pmesh_copy->bdr_attributes.Max());
+       ess_bdrS = 0;
+       ess_bdrS[0] = 1; // t = 0
+       Array<int> ess_bdrSigma(pmesh_copy->bdr_attributes.Max());
+       ess_bdrSigma = 0;
+       ess_bdrSigma[0] = 1;
+       //ess_bdrSigma = 1;
+       //ess_bdrSigma[pmesh_copy->bdr_attributes.Max()-1] = 0;
+
+       if (verbose)
+       {
+           std::cout << "Boundary conditions: \n";
+           std::cout << "ess bdr Sigma: \n";
+           ess_bdrSigma.Print(std::cout, pmesh_copy->bdr_attributes.Max());
+           std::cout << "ess bdr S: \n";
+           ess_bdrS.Print(std::cout, pmesh_copy->bdr_attributes.Max());
+       }
+       //-----------------------
+
+       // 9. Define the parallel grid function and parallel linear forms, solution
+       //    vector and rhs.
+
+       ParLinearForm *fform = new ParLinearForm(R_space);
+       if (strcmp(space_for_S,"L2") == 0 && keep_divdiv) // if L2 for S and we keep div-div term
+           fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(*Mytest.scalardivsigma));
+       else
+           fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zero));
+
+       fform->Assemble();
+
+       ParLinearForm *qform;
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+       {
+           qform = new ParLinearForm(S_space);
+           qform->Update(S_space, rhs.GetBlock(1), 0);
+       }
+
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+           qform->Assemble();//qform->Print();
+       }
+       else // "L2"
+       {
+           if (!eliminateS)
+           {
+               qform->AddDomainIntegrator(new DomainLFIntegrator(zero));
+               qform->Assemble();
+           }
+       }
+
+       ParLinearForm *gform;
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+           gform = new ParLinearForm(W_space);
+           gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+           gform->Assemble();
+       }
+
+       // 10. Assemble the finite element matrices for the CFOSLS operator  A
+       //     where:
+
+       ParBilinearForm *Ablock(new ParBilinearForm(R_space));
+       HypreParMatrix *A;
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       }
+       else // "L2"
+       {
+           if (eliminateS) // S is eliminated
+               Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+           else // S is present
+               Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+           if (keep_divdiv)
+               Ablock->AddDomainIntegrator(new DivDivIntegrator);
+       }
+       Ablock->Assemble();
+       Ablock->EliminateEssentialBC(ess_bdrSigma, x.GetBlock(0), *fform);
+       Ablock->Finalize();
+       A = Ablock->ParallelAssemble();
+
+       //---------------
+       //  C Block:
+       //---------------
+
+       ParBilinearForm *Cblock;
+       HypreParMatrix *C;
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+       {
+           Cblock = new ParBilinearForm(S_space);
+           if (strcmp(space_for_S,"H1") == 0)
+           {
+               Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+               Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+           }
+           else // "L2" & !eliminateS
+           {
+               Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+           }
+           Cblock->Assemble();
+           Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+           Cblock->Finalize();
+           C = Cblock->ParallelAssemble();
+       }
+
+       //---------------
+       //  B Block:
+       //---------------
+
+       ParMixedBilinearForm *Bblock;
+       HypreParMatrix *B;
+       HypreParMatrix *BT;
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+       {
+           Bblock = new ParMixedBilinearForm(R_space, S_space);
+           //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+           Bblock->Assemble();
+           Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
+           Bblock->EliminateTestDofs(ess_bdrS);
+           Bblock->Finalize();
+
+           B = Bblock->ParallelAssemble();
+           //*B *= -1.;
+           BT = B->Transpose();
+       }
+
+       //----------------
+       //  D Block:
+       //-----------------
+
+       HypreParMatrix *D;
+       HypreParMatrix *DT;
+
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+          ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space, W_space));
+          Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+          Dblock->Assemble();
+          Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
+          Dblock->Finalize();
+          D = Dblock->ParallelAssemble();
+          DT = D->Transpose();
+       }
+
+       //=======================================================
+       // Setting up the block system Matrix
+       //-------------------------------------------------------
+
+      tempblknum = 0;
+      fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+      tempblknum++;
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+        qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+        tempblknum++;
+      }
+      if (strcmp(formulation,"cfosls") == 0)
+         gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+
+      BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets_discrete);
+      CFOSLSop->SetBlock(0,0, A);
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+          CFOSLSop->SetBlock(0,1, BT);
+          CFOSLSop->SetBlock(1,0, B);
+          CFOSLSop->SetBlock(1,1, C);
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop->SetBlock(0,2, DT);
+            CFOSLSop->SetBlock(2,0, D);
+          }
+      }
+      else // no S
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop->SetBlock(0,1, DT);
+            CFOSLSop->SetBlock(1,0, D);
+          }
+
+       if (verbose)
+           cout << "Final saddle point matrix assembled \n";
+       MPI_Barrier(MPI_COMM_WORLD);
+
+       //=======================================================
+       // Setting up the preconditioner
+       //-------------------------------------------------------
+
+       // Construct the operators for preconditioner
+       if (verbose)
+       {
+           std::cout << "Block diagonal preconditioner: \n";
+           if (use_ADS)
+               std::cout << "ADS(A) for H(div) \n";
+           else
+                std::cout << "Diag(A) for H(div) \n";
+           if (strcmp(space_for_S,"H1") == 0) // S is from H1
+               std::cout << "BoomerAMG(C) for H1 \n";
+           else
+           {
+               if (!eliminateS) // S is from L2 and not eliminated
+                    std::cout << "Diag(C) for L2 \n";
+           }
+           if (strcmp(formulation,"cfosls") == 0 )
+           {
+               std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+           }
+           std::cout << "\n";
+       }
+       chrono.Clear();
+       chrono.Start();
+
+       HypreParMatrix *Schur;
+       if (strcmp(formulation,"cfosls") == 0 )
+       {
+          HypreParMatrix *AinvDt = D->Transpose();
+          HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(),
+                                               A->GetRowStarts());
+          A->GetDiag(*Ad);
+          AinvDt->InvScaleRows(*Ad);
+          Schur = ParMult(D, AinvDt);
+       }
+
+       Solver * invA;
+       if (use_ADS)
+           invA = new HypreADS(*A, R_space);
+       else // using Diag(A);
+            invA = new HypreDiagScale(*A);
+
+       invA->iterative_mode = false;
+
+       Solver * invC;
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+           invC = new HypreBoomerAMG(*C);
+           ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+           ((HypreBoomerAMG*)invC)->iterative_mode = false;
+       }
+       else // S from L2
+       {
+           if (!eliminateS) // S is from L2 and not eliminated
+           {
+               invC = new HypreDiagScale(*C);
+               ((HypreDiagScale*)invC)->iterative_mode = false;
+           }
+       }
+
+       Solver * invS;
+       if (strcmp(formulation,"cfosls") == 0 )
+       {
+            invS = new HypreBoomerAMG(*Schur);
+            ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+            ((HypreBoomerAMG *)invS)->iterative_mode = false;
+       }
+
+       BlockDiagonalPreconditioner prec(block_trueOffsets_discrete);
+       if (prec_option > 0)
+       {
+           tempblknum = 0;
+           prec.SetDiagonalBlock(tempblknum, invA);
+           tempblknum++;
+           if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           {
+               prec.SetDiagonalBlock(tempblknum, invC);
+               tempblknum++;
+           }
+           if (strcmp(formulation,"cfosls") == 0)
+                prec.SetDiagonalBlock(tempblknum, invS);
+
+           if (verbose)
+               std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
+       }
+       else
+           if (verbose)
+               cout << "No preconditioner is used. \n";
+
+       // 12. Solve the linear system with MINRES.
+       //     Check the norm of the unpreconditioned residual.
+
+       chrono.Clear();
+       chrono.Start();
+       MINRESSolver solver(MPI_COMM_WORLD);
+       solver.SetAbsTol(atol);
+       solver.SetRelTol(rtol);
+       solver.SetMaxIter(70000);
+       solver.SetOperator(*CFOSLSop);
+       if (prec_option > 0)
+            solver.SetPreconditioner(prec);
+       solver.SetPrintLevel(0);
+       *trueX_discrete = 0.0;
+       solver.Mult(trueRhs, *trueX_discrete);
+       chrono.Stop();
+
+       if (verbose)
+       {
+          if (solver.GetConverged())
+             std::cout << "MINRES converged in " << solver.GetNumIterations()
+                       << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
+          else
+             std::cout << "MINRES did not converge in " << solver.GetNumIterations()
+                       << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
+          std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
+       }
+
+       ParGridFunction * sigma = new ParGridFunction(R_space);
+       sigma->Distribute(&(trueX_discrete->GetBlock(0)));
+
+       ParGridFunction * S = new ParGridFunction(S_space);
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           S->Distribute(&(trueX_discrete->GetBlock(1)));
+       else // no S in the formulation
+       {
+           ParBilinearForm *Cblock(new ParBilinearForm(S_space));
+           Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+           Cblock->Assemble();
+           Cblock->Finalize();
+           HypreParMatrix * C = Cblock->ParallelAssemble();
+
+           ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space, S_space));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+           Bblock->Assemble();
+           Bblock->Finalize();
+           HypreParMatrix * B = Bblock->ParallelAssemble();
+           Vector bTsigma(C->Height());
+           B->Mult(trueX_discrete->GetBlock(0),bTsigma);
+
+           Vector trueS(C->Height());
+
+           CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+           S->Distribute(trueS);
+       }
+
+       ParGridFunction * lambda = new ParGridFunction(W_space);
+       lambda->Distribute(&(trueX_discrete->GetBlock(numblocks_discrete - 1)));
+
+       // 13. Extract the parallel grid function corresponding to the finite element
+       //     approximation X. This is the local solution on each processor. Compute
+       //     L2 error norms.
+
+       int order_quad = max(2, 2*feorder+1);
+       const IntegrationRule *irs[Geometry::NumGeom];
+       for (int i=0; i < Geometry::NumGeom; ++i)
+       {
+          irs[i] = &(IntRules.Get(i, order_quad));
+       }
+
+
+       double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
+       double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh_copy, irs);
+       if (verbose)
+           cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
+
+       DiscreteLinearOperator Div(R_space, W_space);
+       Div.AddDomainInterpolator(new DivergenceInterpolator());
+       ParGridFunction DivSigma(W_space);
+       Div.Assemble();
+       Div.Mult(*sigma, DivSigma);
+
+       double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
+       double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh_copy, irs);
+
+       if (verbose)
+       {
+           cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                     << err_div/norm_div  << "\n";
+       }
+
+       if (verbose)
+       {
+           cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
+           cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
+                     << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
+       }
+
+       // Computing error for S
+
+       double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
+       double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh_copy, irs);
+       if (verbose)
+       {
+           std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                        err_S / norm_S << "\n";
+       }
+
+       *sigma_vec = *sigma;
+       *S_vec = *S;
+       *lambda_vec = *lambda;
+
+       //delete pmesh_copy;
+    }
+
+    if (verbose)
+        std::cout << "COMPUTE_EXACTDISCRETESOL ended\n";
+#endif
+
     //const int finest_level = 0;
     //const int coarsest_level = num_levels - 1;
 
@@ -1888,6 +2492,9 @@ int main(int argc, char *argv[])
                                                          *Element_dofs_W[l],
                                                          BdrDofs_Funct_lvls[l],
                                                          EssBdrDofs_Funct_lvls[l],
+#ifdef COMPUTE_EXACTDISCRETESOL
+                                                         sigma_vec, S_vec, lambda_vec,
+#endif
                                                          optimized_localsolve,
                                                          false);
             }
@@ -1901,6 +2508,9 @@ int main(int argc, char *argv[])
                                                          *Element_dofs_W[l],
                                                          BdrDofs_Funct_lvls[l],
                                                          EssBdrDofs_Funct_lvls[l],
+#ifdef COMPUTE_EXACTDISCRETESOL
+                                                         sigma_vec, NULL, lambda_vec,
+#endif
                                                          optimized_localsolve,
                                                          false);
             }
@@ -3084,6 +3694,9 @@ int main(int argc, char *argv[])
                      Xinit_truedofs,
                      LocalSolver_lvls,
                      CoarsestSolver,
+#ifdef COMPUTE_EXACTDISCRETESOL
+                     sigma_vec, S_vec, lambda_vec,
+#endif
                      construct_coarseops, stopcriteria_type);
 
 
@@ -3102,8 +3715,21 @@ int main(int argc, char *argv[])
 
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
-    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
+#ifdef COMPUTE_EXACTDISCRETESOL
+    //ParGridFunction * sigma_h_exact = new ParGridFunction(R_space_lvls[0]);
+    //sigma_h_exact->Distribute(&(trueX_discrete->GetBlock(0)));
+    //ParGridFunction * S_h_exact = new ParGridFunction(H_space_lvls[0]);
+    //S_h_exact->Distribute(&(trueX_discrete->GetBlock(1)));
+
+    ParticSol = 0.0;
+    ParticSol.GetBlock(0) = trueX_discrete->GetBlock(0);
+    if (numblocks_funct == 2)
+        ParticSol.GetBlock(1) = trueX_discrete->GetBlock(1);
+
+#else
+    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+#endif
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -3116,9 +3742,13 @@ int main(int argc, char *argv[])
     temp_constr -= Floc;
 
     // 3.1 if not, computing the particular solution
-    if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-14 )
+    if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-13 )
     {
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
+        double temp = ComputeMPIVecNorm(comm, temp_constr,"", verbose);
+        //temp_constr.Print();
+        if (verbose)
+            std::cout << "Constraint residual norm: " << temp << "\n";
         MFEM_ABORT("");
     }
 
