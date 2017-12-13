@@ -7,6 +7,20 @@ using namespace mfem;
 using namespace std;
 using std::unique_ptr;
 
+
+// PLAN:
+// 1) Add righthand side everywhere in the functional residual computation and as an input parameter
+// 2) Test that particular solution finder is working without smoother
+// 2a) that with exact discrete solution as initial guess all the updates are 0 for the local problem solves
+// 3) Test that particular solution finder is working with the smoother
+// 4) Test that solver is working in the non-preconditioner mode
+// 4) Figure out how it should be treated in the preconditioner mode
+// 5) Test that the solver is working in the preconditioner mode
+
+// QUESTION: Should I compute functional rhs at each level outside the solver using the bilinear form or
+// just coarsen the functional righthand side given at the finest level?
+
+
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
@@ -707,6 +721,50 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     Array2D<DenseMatrix*> LocalAE_Matrices(numblocks, numblocks);
     std::vector<Array<int>*> Local_inds(numblocks);
 
+#ifdef COMPUTE_EXACTDISCRETESOL
+    // a preliminary check
+    const SparseMatrix * Atemp = &(Op_blkspmat.GetBlock(0,0));
+
+    Vector Asigma(Atemp->Height());
+    Atemp->Mult(*sigma, Asigma);
+
+    Vector BTlambda(Constr_spmat.Width());
+    Constr_spmat.MultTranspose(*lambda, BTlambda);
+
+    Vector vectemp1(Asigma.Size());
+    vectemp1 = Asigma;
+    vectemp1 += BTlambda;
+
+    Vector Dsigma, DTS, CS;
+
+    if (numblocks > 1)
+    {
+        const SparseMatrix * Dtemp = &(Op_blkspmat.GetBlock(1,0));
+        const SparseMatrix * DTtemp = &(Op_blkspmat.GetBlock(0,1));
+        const SparseMatrix * Ctemp = &(Op_blkspmat.GetBlock(1,1));
+
+        Dsigma.SetSize(Dtemp->Height());
+        Dtemp->Mult(*sigma, Dsigma);
+
+        CS.SetSize(Ctemp->Height());
+        Ctemp->Mult(*S, CS);
+
+        Vector vectemp2(Dsigma.Size());
+        vectemp2 = Dsigma;
+        vectemp2 += CS;
+
+        vectemp2.Print();
+        std::cout << "vectemp2 norm = " << vectemp2.Norml2() << "\n";
+
+        DTS.SetSize(DTtemp->Height());
+        DTtemp->Mult(*S, DTS);
+        vectemp1 += DTS;
+    }
+
+    vectemp1.Print();
+    std::cout << "vectemp1 norm = " << vectemp1.Norml2() << "\n";
+
+#endif
     // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2->Height();
     for( int AE = 0; AE < nAE; ++AE)
@@ -764,19 +822,17 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                     if (localrhs_constr)
                     {
                         localrhs_constr->GetSubVector(Wtmp_j, sub_rhsconstr);
-#ifdef COMPUTE_EXACTDISCRETESOL
-                        if (numblocks > 2)
-                        {
-                            lambda_loc.SetSize(Wtmp_j.Size());
-                            lambda->GetSubVector(Wtmp_j, lambda_loc);
-                        }
-#endif
                     }
                     else
                     {
                         sub_rhsconstr.SetSize(Wtmp_j.Size());
                         sub_rhsconstr = 0.0;
                     }
+
+#ifdef COMPUTE_EXACTDISCRETESOL
+                    lambda_loc.SetSize(Wtmp_j.Size());
+                    lambda->GetSubVector(Wtmp_j, lambda_loc);
+#endif
 
                 } // end of special treatment of the first block involved into constraint
 
@@ -819,6 +875,95 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
             S_loc.SetSize(sol_loc.GetBlock(1).Size());
             S->GetSubVector(*Local_inds[1], S_loc);
         }
+
+        Vector vectemp1_loc(sol_loc.GetBlock(0).Size());
+        vectemp1.GetSubVector(*Local_inds[0], vectemp1_loc);
+
+        std::cout << "vectemp1_loc \n";
+        vectemp1_loc.Print();
+
+        Vector Asigma_loc(sol_loc.GetBlock(0).Size());
+        Asigma.GetSubVector(*Local_inds[0], Asigma_loc);
+
+        Vector BTlambda_loc(sol_loc.GetBlock(0).Size());
+        BTlambda.GetSubVector(*Local_inds[0], BTlambda_loc);
+
+        Vector v1(Asigma_loc.Size());
+        v1 = Asigma_loc;
+        v1 += BTlambda_loc;
+
+        if (numblocks > 1)
+        {
+            Vector DTS_loc(sol_loc.GetBlock(0).Size());
+            DTS.GetSubVector(*Local_inds[0], DTS_loc);
+            v1 += DTS_loc;
+            std::cout << "Asigma_loc  + BTlambda_loc + DTS_loc \n";
+        }
+        else
+        {
+            std::cout << "Asigma_loc  + BTlambda_loc \n";
+        }
+        v1.Print();
+
+        Vector Aloc_sigmaloc(sol_loc.GetBlock(0).Size());
+        LocalAE_Matrices(0,0)->Mult(sigma_loc, Aloc_sigmaloc);
+
+        Vector v2(Aloc_sigmaloc.Size());
+        v2 = Aloc_sigmaloc;
+        v2 -= Asigma_loc;
+        std::cout << "Asigma_loc - Aloc * sigmaloc \n";
+        std::cout << "Should not be 0 actually \n";
+        v2.Print();
+
+        Vector BTloc_lambdaloc(sol_loc.GetBlock(0).Size());
+        sub_Constr.MultTranspose(lambda_loc, BTloc_lambdaloc);
+
+        Vector v3(BTloc_lambdaloc.Size());
+        v3 = BTloc_lambdaloc;
+        v3 -= BTlambda_loc;
+        std::cout << "BTlambda_loc - BTloc * lambdaloc \n";
+        v3.Print();
+
+        if (numblocks > 1)
+        {
+            Vector DTS_loc(sol_loc.GetBlock(0).Size());
+            DTS.GetSubVector(*Local_inds[0], DTS_loc);
+
+            Vector DTloc_Sloc(sol_loc.GetBlock(0).Size());
+            LocalAE_Matrices(0,1)->Mult(S_loc, DTloc_Sloc);
+
+            Vector v4(DTloc_Sloc.Size());
+            v4 = DTloc_Sloc;
+            v4 -= DTS_loc;
+            std::cout << "DTS_loc - DTloc * Sloc \n";
+            v4.Print();
+
+            Vector Dloc_sigmaloc(sol_loc.GetBlock(1).Size());
+            LocalAE_Matrices(1,0)->Mult(sigma_loc, Dloc_sigmaloc);
+
+            Vector Dsigma_loc(sol_loc.GetBlock(1).Size());
+            Dsigma.GetSubVector(*Local_inds[1], Dsigma_loc);
+
+            Vector v5(Dloc_sigmaloc.Size());
+            v5 = Dloc_sigmaloc;
+            v5 -= Dsigma_loc;
+            std::cout << "Dsigma_loc - Dloc * sigmaloc \n";
+            v5.Print();
+
+            Vector Cloc_Sloc(sol_loc.GetBlock(1).Size());
+            LocalAE_Matrices(1,1)->Mult(S_loc, Cloc_Sloc);
+
+            Vector CS_loc(sol_loc.GetBlock(1).Size());
+            CS.GetSubVector(*Local_inds[1], CS_loc);
+
+            Vector v6(sol_loc.GetBlock(1).Size());
+            v6 = Dsigma_loc;
+            v6 += CS_loc;
+            std::cout << "Dsigma_loc + CS_loc \n";
+            v6.Print();
+
+        }
+
 #endif
 
         // solving local problem at the agglomerate element AE
@@ -917,6 +1062,7 @@ void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctB
         // sig = invA * temp2 = invA * (G - BT * lambda)
         inv_A.Mult(temp2, sol.GetBlock(0));
 
+        /*
 #ifdef COMPUTE_EXACTDISCRETESOL
         // checking that exact discrete solution satisfies local problems
 
@@ -950,7 +1096,7 @@ void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctB
         res1special = 0.0;
         res1special += temp1res1special;
         res1special += temp3res1special;
-        res1special -= G.GetBlock(0);
+        //res1special -= G.GetBlock(0);
 
         checkval = std::max(1.0e-13 * G.GetBlock(0).Norml2(), 1.0e-13);
         //std::cout << "res1special norm = " << res1special.Norml2() << "\n";
@@ -964,6 +1110,9 @@ void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctB
         MFEM_ASSERT(res1special.Norml2() < checkval,
                     "Local system is not solved by exact discrete solution, res1special too large \n");
 #endif
+        */
+        //std::cout << "sol \n";
+        //sol.Print();
     }
 
     return;
@@ -1399,6 +1548,13 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
         //F.Print();
 
 #ifdef CHECK_LOCALSOLVE
+        std::cout << "sol block 0 \n";
+        sol.GetBlock(0).Print();
+        std::cout << "sol block 1 \n";
+        sol.GetBlock(1).Print();
+        std::cout << "sol block 2 \n";
+        sol.GetBlock(2).Print();
+
         // checking that the system was solved correctly
         double checkval = 0.0;
 
@@ -1617,6 +1773,8 @@ protected:
     mutable Array<BlockMatrix*> Funct_lvls;
     mutable Array<SparseMatrix*> Constr_lvls;
 
+    mutable Array<BlockVector*> Funct_rhs_lvls;
+
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
     mutable BlockVector* yblock_truedofs;
@@ -1659,6 +1817,7 @@ public:
                            const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix*> & FunctOp_lvls,
                            const Array<SparseMatrix*> &ConstrOp_lvls,
+                           const Array<BlockVector*> & FunctRhs_lvls,
                            const Vector& ConstrRhsVec,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
@@ -1697,6 +1856,7 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
+                       const Array<BlockVector*> & FunctRhs_lvls,
                        const Vector& ConstrRhsVec,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
@@ -1737,6 +1897,10 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     Funct_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Funct_lvls[l] = FunctOp_lvls[l];
+
+    Funct_rhs_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Funct_rhs_lvls[l] = FunctRhs_lvls[l];
 
     Constr_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
@@ -3242,6 +3406,8 @@ protected:
     mutable Array<BlockMatrix*> Funct_lvls;
     mutable Array<SparseMatrix*> Constr_lvls; // can be removed since it's used only for debugging
 
+    mutable Array<BlockVector*> Funct_rhs_lvls;
+
     const BlockOperator& Funct_global;
     // a required input since MFEM cannot give out offsets out of the const BlockOperator which is ugly imo
     // FIXME: Because of this one cannot check the compatibility of these two _global variables though they must be compatible
@@ -3306,6 +3472,7 @@ public:
                            const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix *> &FunctOp_lvls,
                            const Array<SparseMatrix *> &ConstrOp_lvls,
+                           const Array<BlockVector *> &FunctRhs_lvls,
                            const Vector& ConstrRhsVec,
                            const BlockOperator& Funct_Global,
                            const Array<int>& Offsets_Global,
@@ -3449,6 +3616,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
+                       const Array<BlockVector *> &FunctRhs_lvls,
                        const Vector& ConstrRhsVec,
                        const BlockOperator& Funct_Global,
                        const Array<int>& Offsets_Global,
@@ -3502,6 +3670,10 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     Constr_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Constr_lvls[l] = ConstrOp_lvls[l];
+
+    Funct_rhs_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Funct_rhs_lvls[l] = FunctRhs_lvls[l];
 
     xblock_truedofs = new BlockVector(offsets_global);
     yblock_truedofs = new BlockVector(offsets_global);

@@ -933,7 +933,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1354,6 +1354,7 @@ int main(int argc, char *argv[])
     std::vector<Array<int>*> Funct_mat_offsets_lvls(num_levels);
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
+    Array<BlockVector*> Funct_rhs_lvls(num_levels);
 
     BlockOperator* Funct_global;
     Array<int> offsets_global(numblocks_funct + 1);
@@ -1549,6 +1550,8 @@ int main(int argc, char *argv[])
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
 
     Vector * sigma_vec, *S_vec, *lambda_vec;
+    SparseMatrix Block10_check, Block11_check;
+    Vector Gblock1_check;
     int numblocks_discrete = 1;
 
     if (strcmp(space_for_S,"H1") == 0)
@@ -1846,6 +1849,9 @@ int main(int argc, char *argv[])
            Cblock->Assemble();
            Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
            Cblock->Finalize();
+
+           Block11_check = Cblock->SpMat();
+
            C = Cblock->ParallelAssemble();
        }
 
@@ -1865,6 +1871,8 @@ int main(int argc, char *argv[])
            Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
            Bblock->EliminateTestDofs(ess_bdrS);
            Bblock->Finalize();
+
+           Block10_check = Bblock->SpMat();
 
            B = Bblock->ParallelAssemble();
            //*B *= -1.;
@@ -1888,6 +1896,9 @@ int main(int argc, char *argv[])
           D = Dblock->ParallelAssemble();
           DT = D->Transpose();
        }
+
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           Gblock1_check = *qform;
 
        //=======================================================
        // Setting up the block system Matrix
@@ -2289,6 +2300,20 @@ int main(int argc, char *argv[])
         //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
         Bblock->Finalize();
         Constraint_mat_lvls[l] = Bblock->LoseMat();
+
+        Funct_rhs_lvls[l] = new BlockVector(*Funct_mat_offsets_lvls[l]);
+        Funct_rhs_lvls[l]->GetBlock(0) = 0.0;
+
+        ParLinearForm *secondeqn_rhs;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+        {
+            secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
+            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+            secondeqn_rhs->Assemble();
+            Funct_rhs_lvls[l]->GetBlock(1) = *secondeqn_rhs;
+        }
+        else
+            Funct_rhs_lvls[l]->GetBlock(1) = 0.0;
 
         /*
         Divfree_op.Assemble();
@@ -3677,7 +3702,7 @@ int main(int argc, char *argv[])
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
+                                      Funct_mat_lvls, Constraint_mat_lvls, Funct_rhs_lvls, Floc,
                                       Smoothers_lvls,
                                       Xinit_truedofs,
                                       LocalSolver_partfinder_lvls,
@@ -3688,7 +3713,8 @@ int main(int argc, char *argv[])
                      Dof_TrueDof_Func_lvls,
                      P_Func, TrueP_Func, P_W,
                      EssBdrTrueDofs_Funct_lvls,
-                     Funct_mat_lvls, Constraint_mat_lvls, Floc,
+                     Funct_mat_lvls, Constraint_mat_lvls,
+                     Funct_rhs_lvls, Floc,
                      *Funct_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
@@ -3740,6 +3766,84 @@ int main(int argc, char *argv[])
     Vector temp_constr(Constraint_mat_lvls[0]->Height());
     Constraint_mat_lvls[0]->Mult(temp_dofs.GetBlock(0), temp_constr);
     temp_constr -= Floc;
+
+#ifdef COMPUTE_EXACTDISCRETESOL
+    // checking that the sigma, S and lambda satisfy all the equations on dofs level
+    SparseMatrix Ablocktemp = Funct_mat_lvls[0]->GetBlock(0,0);
+    SparseMatrix Constrtemp = *Constraint_mat_lvls[0];
+
+    Vector Asigma(Ablocktemp.Height());
+    Ablocktemp.Mult(*sigma_vec, Asigma);
+
+    Vector BTlambda(Constrtemp.Width());
+    Constrtemp.MultTranspose(*lambda_vec, BTlambda);
+
+    Vector DTS, Dsigma, CS;
+    if (numblocks > 1)
+    {
+        SparseMatrix Dblocktemp = Funct_mat_lvls[0]->GetBlock(1,0);
+        SparseMatrix DTblocktemp = Funct_mat_lvls[0]->GetBlock(0,1);
+        SparseMatrix Cblocktemp = Funct_mat_lvls[0]->GetBlock(1,1);
+
+        DTS.SetSize(Ablocktemp.Height());
+        DTblocktemp.Mult(*S_vec, DTS);
+
+        Dsigma.SetSize(Dblocktemp.Height());
+        Dblocktemp.Mult(*sigma_vec, Dsigma);
+
+        CS.SetSize(Cblocktemp.Height());
+        Cblocktemp.Mult(*S_vec, CS);
+
+        Vector res2(Cblocktemp.Height());
+        res2 = Dsigma;
+        res2 += CS;
+        res2 -= Gblock1_check;
+
+        Vector Dsigma_special(Dblocktemp.Height());
+        Block10_check.Mult(*sigma_vec, Dsigma_special);
+
+        Vector diff_special(Dblocktemp.Height());
+        diff_special = Dsigma;
+        diff_special -= Dsigma_special;
+
+        std::cout << "Dsigma - Dsigma_special norm \n";
+        diff_special.Print();
+        std::cout << "diff_special norm = " << diff_special.Norml2() << "\n";
+
+        Vector CS_special(Cblocktemp.Height());
+        Block11_check.Mult(*S_vec, CS_special);
+
+        Vector diff_special1(Cblocktemp.Height());
+        diff_special1 = CS;
+        diff_special1 -= CS_special;
+
+        std::cout << "CS - CS_special norm \n";
+        diff_special1.Print();
+        std::cout << "diff_special1 norm = " << diff_special1.Norml2() << "\n";
+
+        res2.Print();
+        std::cout << "res2 norm = " << res2.Norml2() << "\n";
+    }
+
+    Vector res1(Ablocktemp.Height());
+    res1 = Asigma;
+    res1 += BTlambda;
+
+    if (numblocks > 1)
+        res1 += DTS;
+    res1.Print();
+    std::cout << "res1 norm = " << res1.Norml2() << "\n";
+
+    Vector Bsigma(Constrtemp.Height());
+    Constrtemp.Mult(*sigma_vec, Bsigma);
+
+    Vector res3(Constrtemp.Height());
+    res3 = Bsigma;
+    res3 -= Floc;
+
+    std::cout << "res3 norm = " << res3.Norml2() << "\n";
+
+#endif
 
     // 3.1 if not, computing the particular solution
     if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-13 )
@@ -4140,90 +4244,6 @@ int main(int argc, char *argv[])
     NewSolver.SetInitialGuess(ParticSol);
     NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
-
-    /*
-    Vector Truevec1(C_space_lvls[0]->GetTrueVSize());
-    ParGridFunction * hcurl_guy = new ParGridFunction(C_space_lvls[0]);
-    Vector ones_v(pmesh->Dimension());
-    ones_v = 1.0;
-    VectorConstantCoefficient ones_vcoeff(ones_v);
-    hcurl_guy->ProjectCoefficient(ones_vcoeff);
-    hcurl_guy->ParallelProject(Truevec1);
-
-    if (myid == 0)
-    {
-        ofstream ofs("hcurl_guy_0.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 1)
-    {
-        ofstream ofs("hcurl_guy_1.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 2)
-    {
-        ofstream ofs("hcurl_guy_2.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 3)
-    {
-        ofstream ofs("hcurl_guy_3.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-
-    Vector Truevec2(R_space_lvls[0]->GetTrueVSize());
-    ParGridFunction * hdiv_guy = new ParGridFunction(R_space_lvls[0]);
-    hdiv_guy->ProjectCoefficient(ones_vcoeff);
-    hdiv_guy->ParallelProject(Truevec2);
-
-    if (myid == 0)
-    {
-        ofstream ofs("hdiv_guy_0.txt");
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 1)
-    {
-        ofstream ofs("hdiv_guy_1.txt");
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 2)
-    {
-        ofstream ofs("hdiv_guy_2.txt");
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 3)
-    {
-        ofstream ofs("hdiv_guy_3.txt");
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-
-
-    //Vector error(Truevec1.Size());
-    //error = Truevec1;
-    Vector error(Truevec2.Size());
-    error = Truevec2;
-
-    int local_size = error.Size();
-    int global_size = 0;
-    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
-
-    double local_normsq = error * error;
-    double global_norm = 0.0;
-    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-    global_norm = sqrt (global_norm / global_size);
-
-    if (verbose)
-        std::cout << "error norm special = " << global_norm << "\n";
-    */
-
     if (verbose)
         NewSolver.PrintAllOptions();
 
@@ -4245,109 +4265,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "error2 norm special = " << global_norm2 << "\n";
 
-    /*
-    MPI_Barrier(comm);
-    if (myid == 0)
-    {
-        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
-        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
-    }
-    MPI_Barrier(comm);
-    if (myid == 1)
-    {
-        std::cout << "Tempy.Size = " << Tempy.Size() << "\n";
-        std::cout << "NewSigmahat.Size = " << NewSigmahat->Size() << "\n";
-    }
-    MPI_Barrier(comm);
-    */
-
-    /*
-    //NewX = 1.0;
-
-    //NewSigmahat->Distribute(&NewX);
-
-    //NewX = 0.002;
-
-    //Vector temp(NewX.Size());
-    //temp = 0.002;
-    //sigma_exact_finest->Distribute(&temp);
-    //double debugg_norm = sigma_exact_finest->Norml2() / sqrt (sigma_exact_finest->Size());
-    //std::cout << "debugg norm outside = " << debugg_norm << "\n";
-
-    Vector trueexact(NewX.Size());
-    //trueexact = *(sigma_exact_finest->GetTrueDofs());
-    trueexact = NewX;
-    //sigma_exact_finest->ParallelAssemble(trueexact);
-    //sigma_exact_finest->ParallelProject(trueexact);
-
-    //if (myid == 0)
-        //sigma_exact_finest->Print(std::cout,1);
-
-    //NewX.Print();
-
-    Vector error(NewX.Size());
-    error = 0.0;
-    //error = NewX;
-    error = ParticSol;
-    //error -= trueexact;
-    //error = 1.0;
-
-    int local_size = error.Size();
-    int global_size = 0;
-    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
-
-    std::cout << std::flush;
-    MPI_Barrier(comm);
-    if (myid == 0)
-    {
-        std::cout << "myid = 0 \n";
-        std::cout << "local_size = " << local_size << "\n";
-        std::cout << "global_size = " << global_size << "\n";
-    }
-    MPI_Barrier(comm);
-    if (myid == 1)
-    {
-        std::cout << "myid = 1 \n";
-        std::cout << "local_size = " << local_size << "\n";
-        std::cout << "global_size = " << global_size << "\n";
-    }
-    MPI_Barrier(comm);
-
-    double local_normsq = error * error;
-    double global_norm = 0.0;
-    MPI_Allreduce(&local_normsq, &global_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-    global_norm = sqrt (global_norm / global_size);
-
-    MPI_Barrier(comm);
-    if (myid == 0)
-    {
-        std::cout << "myid = 0 \n";
-        std::cout << "local_normsq = " << local_normsq << "\n";
-        std::cout << "global_norm = " << global_norm << "\n";
-        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
-    }
-    MPI_Barrier(comm);
-    if (myid == 1)
-    {
-        std::cout << "myid = 1 \n";
-        std::cout << "local_normsq = " << local_normsq << "\n";
-        std::cout << "global_norm = " << global_norm << "\n";
-        std::cout << "error norml2 = " << sqrt( error.Norml2() * error.Norml2() / error.Size() ) << "\n";
-    }
-    MPI_Barrier(comm);
-
-    std::cout << std::flush;
-    MPI_Barrier(comm);
-
-    if (verbose)
-        std::cout << "error norm special = " << global_norm << "\n";
-
-    MPI_Finalize();
-    return 0;
-    */
-
-    //*NewSigmahat = 1.0;
-
     NewSigmahat->Distribute(&NewX);
 
     std::cout << "Solution computed via the new solver \n";
@@ -4367,9 +4284,6 @@ int main(int argc, char *argv[])
     if (max_bdr_error > 1.0e-14)
         std::cout << "Error, boundary values for the solution are wrong:"
                      " max_bdr_error = " << max_bdr_error << "\n";
-    //else
-        //std::cout << "After iter " << i << " of the new solver bdr values at ess bdr are correct \n";
-
     {
         int order_quad = max(2, 2*feorder+1);
         const IntegrationRule *irs[Geometry::NumGeom];
