@@ -1563,6 +1563,7 @@ int main(int argc, char *argv[])
         numblocks_discrete++;
     Array<int> block_trueOffsets_discrete(numblocks_discrete + 1); // number of variables + 1
     BlockVector * trueX_discrete;
+    BlockVector * trueRhs_discrete;
 
     {
 
@@ -1718,11 +1719,11 @@ int main(int argc, char *argv[])
         BlockVector x(block_offsets), rhs(block_offsets);
         //BlockVector trueX(block_trueOffsets);
         trueX_discrete = new BlockVector(block_trueOffsets_discrete);
-        BlockVector trueRhs(block_trueOffsets_discrete);
+        trueRhs_discrete = new BlockVector (block_trueOffsets_discrete);
         x = 0.0;
         rhs = 0.0;
         *trueX_discrete = 0.0;
-        trueRhs = 0.0;
+        *trueRhs_discrete = 0.0;
 
         sigma_vec = new Vector(R_space->GetVSize());
         S_vec = new Vector(H_space->GetVSize());
@@ -1905,15 +1906,15 @@ int main(int argc, char *argv[])
        //-------------------------------------------------------
 
       tempblknum = 0;
-      fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+      fform->ParallelAssemble(trueRhs_discrete->GetBlock(tempblknum));
       tempblknum++;
       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
       {
-        qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+        qform->ParallelAssemble(trueRhs_discrete->GetBlock(tempblknum));
         tempblknum++;
       }
       if (strcmp(formulation,"cfosls") == 0)
-         gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+         gform->ParallelAssemble(trueRhs_discrete->GetBlock(tempblknum));
 
       BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets_discrete);
       CFOSLSop->SetBlock(0,0, A);
@@ -2045,7 +2046,7 @@ int main(int argc, char *argv[])
             solver.SetPreconditioner(prec);
        solver.SetPrintLevel(0);
        *trueX_discrete = 0.0;
-       solver.Mult(trueRhs, *trueX_discrete);
+       solver.Mult(*trueRhs_discrete, *trueX_discrete);
        chrono.Stop();
 
        if (verbose)
@@ -2312,8 +2313,6 @@ int main(int argc, char *argv[])
             secondeqn_rhs->Assemble();
             Funct_rhs_lvls[l]->GetBlock(1) = *secondeqn_rhs;
         }
-        else
-            Funct_rhs_lvls[l]->GetBlock(1) = 0.0;
 
         /*
         Divfree_op.Assemble();
@@ -2612,6 +2611,16 @@ int main(int argc, char *argv[])
     sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
     Vector sigma_exact_truedofs(R_space_lvls[0]->GetTrueVSize());
     sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
+
+    ParGridFunction * S_exact_finest;
+    Vector S_exact_truedofs;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        S_exact_finest = new ParGridFunction(H_space_lvls[0]);
+        S_exact_finest->ProjectCoefficient(*Mytest.scalarS);
+        S_exact_truedofs.SetSize(H_space_lvls[0]->GetTrueVSize());
+        S_exact_finest->ParallelProject(S_exact_truedofs);
+    }
 
     //if(dim==3) pmesh->ReorientTetMesh();
 
@@ -3557,9 +3566,7 @@ int main(int argc, char *argv[])
         // just setting Xinit to store correct boundary values at essential boundary
         if ( (*EssBdrDofs_Funct_lvls[0][0])[i] != 0)
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
-
     }
-
 
     Array<int> new_trueoffsets(numblocks + 1);
     new_trueoffsets[0] = 0;
@@ -3573,6 +3580,22 @@ int main(int argc, char *argv[])
     {
         int tdof = (*EssBdrTrueDofs_Funct_lvls[0][0])[i];
         Xinit_truedofs.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+    }
+
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        for (int i = 0; i < S_exact_finest->Size(); ++i )
+        {
+            // just setting Xinit to store correct boundary values at essential boundary
+            if ( (*EssBdrDofs_Funct_lvls[0][1])[i] != 0)
+                Xinit.GetBlock(1)[i] = (*S_exact_finest)[i];
+        }
+
+        for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][1]->Size(); ++i )
+        {
+            int tdof = (*EssBdrTrueDofs_Funct_lvls[0][1])[i];
+            Xinit_truedofs.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+        }
     }
 
     //MPI_Finalize();
@@ -3742,6 +3765,7 @@ int main(int argc, char *argv[])
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
 
+    /*
 #ifdef COMPUTE_EXACTDISCRETESOL
     //ParGridFunction * sigma_h_exact = new ParGridFunction(R_space_lvls[0]);
     //sigma_h_exact->Distribute(&(trueX_discrete->GetBlock(0)));
@@ -3754,8 +3778,11 @@ int main(int argc, char *argv[])
         ParticSol.GetBlock(1) = trueX_discrete->GetBlock(1);
 
 #else
-    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 #endif
+    */
+
+    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -3799,6 +3826,14 @@ int main(int argc, char *argv[])
         res2 += CS;
         res2 -= Gblock1_check;
 
+        Vector Gblock1diff_special(Dblocktemp.Height());
+        Gblock1diff_special = Gblock1_check;
+        Gblock1diff_special -= Funct_rhs_lvls[0]->GetBlock(1);
+
+        //std::cout << "Gblock1check - Funct_rhs_lvls[0].Block1 norm \n";
+        //Gblock1diff_special.Print();
+        //std::cout << "Gblock1diff_special norm = " << Gblock1diff_special.Norml2() << "\n";
+
         Vector Dsigma_special(Dblocktemp.Height());
         Block10_check.Mult(*sigma_vec, Dsigma_special);
 
@@ -3806,9 +3841,9 @@ int main(int argc, char *argv[])
         diff_special = Dsigma;
         diff_special -= Dsigma_special;
 
-        std::cout << "Dsigma - Dsigma_special norm \n";
-        diff_special.Print();
-        std::cout << "diff_special norm = " << diff_special.Norml2() << "\n";
+        //std::cout << "Dsigma - Dsigma_special norm \n";
+        //diff_special.Print();
+        //std::cout << "diff_special norm = " << diff_special.Norml2() << "\n";
 
         Vector CS_special(Cblocktemp.Height());
         Block11_check.Mult(*S_vec, CS_special);
@@ -3817,22 +3852,83 @@ int main(int argc, char *argv[])
         diff_special1 = CS;
         diff_special1 -= CS_special;
 
-        std::cout << "CS - CS_special norm \n";
-        diff_special1.Print();
-        std::cout << "diff_special1 norm = " << diff_special1.Norml2() << "\n";
+        //std::cout << "CS - CS_special norm \n";
+        //diff_special1.Print();
+        //std::cout << "diff_special1 norm = " << diff_special1.Norml2() << "\n";
 
-        res2.Print();
-        std::cout << "res2 norm = " << res2.Norml2() << "\n";
+        //std::cout << "Dsigma + CS - Gblock1_check \n";
+        //res2.Print();
+        //std::cout << "Dsigma + CS - Gblock1_check = " << res2.Norml2() << "\n";
+
+        res2 = 0.0;
+        res2 += Dsigma;
+        res2 += CS;
+        res2 -= Funct_rhs_lvls[0]->GetBlock(1);
+
+        /*
+        for ( int i = 0; i < EssBdrDofs_Funct_lvls[0][1]->Size(); ++i )
+        {
+            int bdrtdof = (*EssBdrDofs_Funct_lvls[0][1])[i];
+            res2[bdrtdof] = 0.0;
+        }
+        */
+
+        for ( int i = 0; i < res2.Size(); ++i )
+        {
+            if ((*EssBdrDofs_Funct_lvls[0][1])[i] != 0)
+                res2[i] = 0.0;
+        }
+
+
+        ofstream ofs("Dsigma_outside solver.txt");
+        ofs << Dsigma.Size() << "\n";
+        Dsigma.Print(ofs,1);
+        ofs.close();
+
+        ofstream ofs2("CS_outside_solver.txt");
+        ofs2 << CS.Size() << "\n";
+        CS.Print(ofs2,1);
+        ofs2.close();
+
+        ofstream ofs3("Gblock1_outside_solver.txt");
+        ofs3 << Funct_rhs_lvls[0]->GetBlock(1).Size() << "\n";
+        Funct_rhs_lvls[0]->GetBlock(1).Print(ofs3,1);
+        ofs3.close();
+
+
+        //std::cout << "Dsigma + CS - Funct_rhs_lvls[0],secondblock \n";
+        //res2.Print();
+        std::cout << "Dsigma + CS - Funct_rhs_lvls[0],secondblock norm = " << res2.Norml2() << "\n";
     }
 
     Vector res1(Ablocktemp.Height());
     res1 = Asigma;
     res1 += BTlambda;
+    res1 -= Funct_rhs_lvls[0]->GetBlock(0);
 
     if (numblocks > 1)
+    {
         res1 += DTS;
-    res1.Print();
-    std::cout << "res1 norm = " << res1.Norml2() << "\n";
+        for ( int i = 0; i < res1.Size(); ++i )
+        {
+            if ((*EssBdrDofs_Funct_lvls[0][0])[i] != 0)
+                res1[i] = 0.0;
+        }
+        //res1.Print();
+        std::cout << "Asigma + DTS + BTlambda norm " << res1.Norml2()
+                  << " but can be nonzero because of AE boundaries \n";
+    }
+    else
+    {
+        for ( int i = 0; i < res1.Size(); ++i )
+        {
+            if ((*EssBdrDofs_Funct_lvls[0][0])[i] != 0)
+                res1[i] = 0.0;
+        }
+        std::cout << "Asigma + BTlambda norm " << res1.Norml2() <<
+                     " but can be nonzero because of AE boundaries \n";
+    }
+    //res1.Print();
 
     Vector Bsigma(Constrtemp.Height());
     Constrtemp.Mult(*sigma_vec, Bsigma);
@@ -3920,6 +4016,10 @@ int main(int argc, char *argv[])
         std::cout << "\nCalling the new multilevel solver for the first iteration \n";
 
     ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
+
+    ParGridFunction * NewS;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        NewS = new ParGridFunction(H_space_lvls[0]);
 
     //Vector Tempx(sigma_exact_finest->Size());
     //Tempx = 0.0;
@@ -4235,9 +4335,38 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    Vector NewRhs(ParticSol.Size());
+    BlockVector NewRhs(new_trueoffsets);
     NewRhs = 0.0;
-    Vector NewX(NewRhs.Size());
+
+#ifdef COMPUTE_EXACTDISCRETESOL
+    for ( int blk = 0; blk < numblocks; ++blk)
+        NewRhs.GetBlock(blk) = trueRhs_discrete->GetBlock(blk);
+#else
+    if (numblocks > 1)
+    {
+        if (verbose)
+            std::cout << "This place works only for homogeneous boundary conditions \n";
+        ParLinearForm *secondeqn_rhs;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+        {
+            secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
+            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+            secondeqn_rhs->Assemble();
+            secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
+
+            for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][1]->Size(); ++i)
+            {
+                int bdrtdof = (*EssBdrTrueDofs_Funct_lvls[0][1])[i];
+                NewRhs.GetBlock(1)[bdrtdof] = 0.0;
+            }
+
+        }
+    }
+
+#endif
+
+
+    BlockVector NewX(new_trueoffsets);
     NewX = 0.0;
 
     //NewRhs = 0.02;
@@ -4247,9 +4376,17 @@ int main(int argc, char *argv[])
     if (verbose)
         NewSolver.PrintAllOptions();
 
+    if (numblocks > 1)
+    {
+        ofstream ofs3("Gblock1_before solver.txt");
+        ofs3 << NewRhs.GetBlock(1).Size() << "\n";
+        NewRhs.GetBlock(1).Print(ofs3,1);
+        ofs3.close();
+    }
+
     NewSolver.Mult(NewRhs, NewX);
 
-
+#if 0
     Vector error2(NewX.Size());
     error2 = NewX;
 
@@ -4264,25 +4401,26 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "error2 norm special = " << global_norm2 << "\n";
+#endif
 
-    NewSigmahat->Distribute(&NewX);
+    NewSigmahat->Distribute(&(NewX.GetBlock(0)));
 
     std::cout << "Solution computed via the new solver \n";
 
     double max_bdr_error = 0;
-    for ( int dof = 0; dof < Xinit.Size(); ++dof)
+    for ( int dof = 0; dof < Xinit.GetBlock(0).Size(); ++dof)
     {
         if ( (*EssBdrDofs_Funct_lvls[0][0])[dof] != 0.0)
         {
             //std::cout << "ess dof index: " << dof << "\n";
-            double bdr_error_dof = fabs(Xinit[dof] - (*NewSigmahat)[dof]);
+            double bdr_error_dof = fabs(Xinit.GetBlock(0)[dof] - (*NewSigmahat)[dof]);
             if ( bdr_error_dof > max_bdr_error )
                 max_bdr_error = bdr_error_dof;
         }
     }
 
     if (max_bdr_error > 1.0e-14)
-        std::cout << "Error, boundary values for the solution are wrong:"
+        std::cout << "Error, boundary values for the solution (sigma) are wrong:"
                      " max_bdr_error = " << max_bdr_error << "\n";
     {
         int order_quad = max(2, 2*feorder+1);
@@ -4317,6 +4455,50 @@ int main(int argc, char *argv[])
                       << err_div/norm_div  << "\n";
         }
     }
+
+    //////////////////////////////////////////////////////
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        NewS->Distribute(&(NewX.GetBlock(1)));
+
+        double max_bdr_error = 0;
+        for ( int dof = 0; dof < Xinit.GetBlock(1).Size(); ++dof)
+        {
+            if ( (*EssBdrDofs_Funct_lvls[0][1])[dof] != 0.0)
+            {
+                //std::cout << "ess dof index: " << dof << "\n";
+                double bdr_error_dof = fabs(Xinit.GetBlock(1)[dof] - (*NewS)[dof]);
+                if ( bdr_error_dof > max_bdr_error )
+                    max_bdr_error = bdr_error_dof;
+            }
+        }
+
+        if (max_bdr_error > 1.0e-14)
+            std::cout << "Error, boundary values for the solution (S) are wrong:"
+                         " max_bdr_error = " << max_bdr_error << "\n";
+
+        // 13. Extract the parallel grid function corresponding to the finite element
+        //     approximation X. This is the local solution on each processor. Compute
+        //     L2 error norms.
+
+        int order_quad = max(2, 2*feorder+1);
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i=0; i < Geometry::NumGeom; ++i)
+        {
+           irs[i] = &(IntRules.Get(i, order_quad));
+        }
+
+        // Computing error for S
+
+        double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
+        double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+        if (verbose)
+        {
+            std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                         err_S / norm_S << "\n";
+        }
+    }
+    /////////////////////////////////////////////////////////
 
     chrono.Stop();
 
