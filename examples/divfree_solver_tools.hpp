@@ -345,7 +345,7 @@ void CoarsestProblemSolver::Setup() const
 
     Constr_spmat->EliminateCols(*temp);
 
-    // old code which chan ges only diagonal blocks
+    // old code which changes only diagonal blocks
     // incorrect for the block case
     /*
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -379,19 +379,51 @@ void CoarsestProblemSolver::Setup() const
     }
     */
 
+    /*
+    // DOESN't WORK
     // new code, which takes care about the block structure
     // but requires ridiculuous temporary vectors
     // FIXME: Get rid of the temporary vectors
-    Vector tempsol(Op_blkspmat->Width());
+    BlockVector tempsol(Op_blkspmat->ColOffsets());
     tempsol = 0.0;
-    Vector temprhs(Op_blkspmat->Height());
+    BlockVector temprhs(Op_blkspmat->RowOffsets());
     temprhs = 0.0;
 
+    int shift = 0;
+    Array<int> & offsets = Op_blkspmat->RowOffsets();
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         Array<int> * temp = essbdrdofs_blocks[blk];
-        //temp->Print();
-        Op_blkspmat->EliminateRowCol(*temp, tempsol, temprhs);
+        Array<int> temp_shifted(temp->Size());
+        for ( int i = 0; i < temp->Size(); ++i)
+            temp_shifted[i] = (*temp)[i] + shift;
+        std::cout << "shift = " << shift << "\n";
+        std::cout << "temp_shifted in coarsest solver setup \n";
+        if (blk == 0)
+            temp_shifted.Print();
+        temp_shifted.Print();
+        Op_blkspmat->EliminateRowCol(temp_shifted, tempsol, temprhs);
+        shift += offsets[blk + 1];
+    }
+    */
+
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+    {
+        const Array<int> * temp1 = essbdrdofs_blocks[blk1];
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+        {
+            const Array<int> * temp2 = essbdrdofs_blocks[blk2];
+            Op_blkspmat->GetBlock(blk1,blk2).EliminateCols(*temp2);
+
+            for ( int dof1 = 0; dof1 < temp1->Size(); ++dof1)
+                if ( (*temp1)[dof1] != 0)
+                {
+                    if (blk1 == blk2)
+                        Op_blkspmat->GetBlock(blk1,blk2).EliminateRow(dof1, 1.0);
+                    else // doesn't set diagonal entry to 1
+                        Op_blkspmat->GetBlock(blk1,blk2).EliminateRow(dof1);
+                }
+        }
     }
 
     /*
@@ -466,8 +498,7 @@ void CoarsestProblemSolver::Setup() const
     coarse_matrix = new BlockOperator(coarse_offsets);
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
-            //if  (blk1 == blk2)
-                coarse_matrix->SetBlock(blk1, blk2, Funct_global(blk1, blk2));
+            coarse_matrix->SetBlock(blk1, blk2, Funct_global(blk1, blk2));
     coarse_matrix->SetBlock(0, numblocks, ConstrT_global);
     coarse_matrix->SetBlock(numblocks, 0, Constr_global);
 
@@ -538,12 +569,10 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
 {
     MFEM_ASSERT(finalized, "Mult() must not be called before the coarse solver was finalized \n");
 
-    // x will be accessed through xblock as its view
+    // x and y will be accessed through xblock and yblock as viewing structures
     xblock->Update(x.GetData(), block_offsets);
-    // y will be accessed through yblock as its view
     yblock->Update(y.GetData(), block_offsets);
 
-    //std::cout << "Got here 1 \n";
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> * temp = essbdrtruedofs_blocks[blk];
@@ -4037,10 +4066,20 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     // FIXME: Probably eliminate by changing the interface and constructor parameters of the class
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        SparseMatrix d_td_blk_diag;
-        dof_trueDof_Func_lvls[0][blk]->GetDiag(d_td_blk_diag);
-        d_td_blk_diag.MultTranspose(Funct_rhs_lvls[0]->GetBlock(blk), Funct_rhsglobal_truedofs->GetBlock(blk));
+        // assembly
+        dof_trueDof_Func_lvls[0][blk]->MultTranspose(Funct_rhs_lvls[0]->GetBlock(blk), Funct_rhsglobal_truedofs->GetBlock(blk));
+
+        for ( int tdofind = 0; tdofind < essbdrtruedofs_Func[0][blk]->Size(); ++tdofind )
+        {
+            int tdof = (*essbdrtruedofs_Func[0][blk])[tdofind];
+            Funct_rhsglobal_truedofs->GetBlock(blk)[tdof] = 0.0;
+        }
+
+        //SparseMatrix d_td_blk_diag;
+        //dof_trueDof_Func_lvls[0][blk]->GetDiag(d_td_blk_diag);
+        //d_td_blk_diag.MultTranspose(Funct_rhs_lvls[0]->GetBlock(blk), Funct_rhsglobal_truedofs->GetBlock(blk));
     }
+
 
     truesolupdate_lvls.SetSize(num_levels);
     truesolupdate_lvls[0] = new BlockVector(offsets_global);
@@ -4310,6 +4349,31 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
     /*
+    // why this is not zero?
+    {
+        BlockVector temp(offsets_global);
+        temp = righthand_side;
+        temp -= *Funct_rhsglobal_truedofs;
+
+        std::cout << "norm of righthand_side in Solve() - Funct_rhsglobal_truedofs = " << temp.Norml2() / sqrt (temp.Size()) << "\n";
+    }
+
+    // a check
+    {
+        BlockVector temp(offsets_global);
+        MultTrueFunc(0,-1.0, next_sol, temp);
+        temp += *Funct_rhsglobal_truedofs;
+        //temp += righthand_side;
+        //Funct_rhsglobal_truedofs->Print();
+        temp -= *trueresfunc_lvls[0];
+        //temp.Print();
+        std::cout << "norm of (trueresfunc[0] - (F - Funct * current sol)), "
+                     "before the finest level local solve = " << temp.Norml2() / sqrt (temp.Size());
+    }
+    */
+
+
+    /*
     // FIXME: Comment
     Funct_global.Mult(previous_sol, *trueresfunc_lvls[0]);
     *trueresfunc_lvls[0] *= -1.0;
@@ -4382,6 +4446,17 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     next_sol += *truesolupdate_lvls[0];
     funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
                              "after local solve at level 0: ", print_level);
+
+    // a check of the rhs for the coarsest level problem
+    {
+        BlockVector temp(offsets_global);
+        MultTrueFunc(0,-1.0, next_sol, temp);
+        temp += *Funct_rhsglobal_truedofs;
+        temp -= *trueresfunc_lvls[0];
+        //temp.Print();
+        std::cout << "norm of (trueresfunc[0] - (F - Funct * current sol)) = " << temp.Norml2() / sqrt (temp.Size());
+    }
+
     next_sol -= *truesolupdate_lvls[0];
 
     // BOTTOM: solve the global problem at the coarsest level

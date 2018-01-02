@@ -2295,6 +2295,17 @@ int main(int argc, char *argv[])
             Funct_mat_lvls[l]->SetBlock(0,1,Transpose(Funct_mat_lvls[l]->GetBlock(1,0)));
         }
 
+        if (l == num_levels - 1)
+        {
+        SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
+        Funct_00_H->SortColumnIndices();
+        int zerorowsize = Funct_00_H->RowSize(0);
+        double * zerorowinds = Funct_00_H->GetRowEntries(0);
+        std::cout << "zero row of Funct_00_H \n";
+        for (int i = 0; i < zerorowsize; ++i)
+            std::cout << zerorowinds[i] << "\n";
+        }
+
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
         Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
         Bblock->Assemble();
@@ -2312,6 +2323,7 @@ int main(int argc, char *argv[])
             secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
             secondeqn_rhs->Assemble();
             Funct_rhs_lvls[l]->GetBlock(1) = *secondeqn_rhs;
+            //Funct_rhs_lvls[l]->GetBlock(1) = 0.0;
         }
 
         /*
@@ -2501,6 +2513,59 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
+        // checking PtMat_hP - Mat_H
+        if (l < num_levels - 1)
+        {
+            SparseMatrix * Funct_00_h = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
+            Funct_00_h->SortColumnIndices();
+            SparseMatrix * Funct_01_h, * Funct_11_h;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                Funct_01_h = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,1));
+                Funct_01_h->SortColumnIndices();
+                Funct_11_h = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(1,1));
+                Funct_11_h->SortColumnIndices();
+            }
+
+            SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l + 1]->GetBlock(0,0));
+            Funct_00_H->SortColumnIndices();
+            int zerorowsize = Funct_00_H->RowSize(0);
+            double * zerorowinds = Funct_00_H->GetRowEntries(0);
+            std::cout << "zero row of Funct_00_H \n";
+            for (int i = 0; i < zerorowsize; ++i)
+                std::cout << zerorowinds[i] << "\n";
+            SparseMatrix * Funct_01_H, * Funct_11_H;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                Funct_01_H = new SparseMatrix(Funct_mat_lvls[l + 1]->GetBlock(0,1));
+                Funct_01_H->SortColumnIndices();
+                Funct_11_H = new SparseMatrix(Funct_mat_lvls[l + 1]->GetBlock(1,1));
+                Funct_11_H->SortColumnIndices();
+            }
+
+            SparseMatrix * P_0 = new SparseMatrix(P_Func[l]->GetBlock(0,0));
+            SparseMatrix * P_1;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                P_1 = new SparseMatrix(P_Func[l]->GetBlock(1,1));
+
+            // checking (0,0) block
+            {
+                SparseMatrix * temp = mfem::Mult(*Transpose(*P_0), *Funct_00_h);
+                SparseMatrix * PTAP = mfem::Mult(*temp, *P_0);
+                PTAP->SortColumnIndices();
+
+                ofstream ofs("PTAP_00.txt");
+                PTAP->Print(ofs,1);
+                ofs.close();
+
+                ofstream ofs2("A_00_H.txt");
+                Funct_00_H->Print(ofs2,1);
+                ofs2.close();
+            }
+
+        }
+
+
 #ifdef WITH_LOCALSOLVERS
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
@@ -2546,12 +2611,30 @@ int main(int argc, char *argv[])
         // Creating the coarsest problem solver
         if (l == num_levels - 1)
         {
+            {
+            SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
+            Funct_00_H->SortColumnIndices();
+            int zerorowsize = Funct_00_H->RowSize(0);
+            double * zerorowinds = Funct_00_H->GetRowEntries(0);
+            std::cout << "zero row of Funct_00_H \n";
+            for (int i = 0; i < zerorowsize; ++i)
+                std::cout << zerorowinds[i] << "\n";
+            }
             CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[l],
                                                        *Constraint_mat_lvls[l],
                                                        Dof_TrueDof_Func_lvls[l],
                                                        *Dof_TrueDof_L2_lvls[l],
                                                        EssBdrDofs_Funct_lvls[l],
                                                        EssBdrTrueDofs_Funct_lvls[l]);
+            {
+            SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
+            Funct_00_H->SortColumnIndices();
+            int zerorowsize = Funct_00_H->RowSize(0);
+            double * zerorowinds = Funct_00_H->GetRowEntries(0);
+            std::cout << "zero row of Funct_00_H \n";
+            for (int i = 0; i < zerorowsize; ++i)
+                std::cout << zerorowinds[i] << "\n";
+            }
             CoarsestSolver = CoarsestSolver_partfinder;
         }
 
