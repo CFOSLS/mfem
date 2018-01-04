@@ -618,8 +618,8 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         coarsetrueRhs->GetBlock(numblocks) = *rhs_constr;
     }
 
-    std::cout << "coarsetruerhs \n";
-    coarsetrueRhs->Print();
+    //std::cout << "coarsetruerhs \n";
+    //coarsetrueRhs->Print();
     ofstream ofs("coarserhs_inside solver.txt");
     ofs << coarsetrueRhs->Size() << "\n";
     coarsetrueRhs->Print(ofs,1);
@@ -631,8 +631,8 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
     for ( int blk = 0; blk < numblocks; ++blk)
         yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
 
-    std::cout << "y \n";
-    y.Print();
+    //std::cout << "y \n";
+    //y.Print();
 
     return;
 }
@@ -1226,12 +1226,14 @@ void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctB
         // sig = invA * temp2 = invA * (G - BT * lambda)
         inv_A.Mult(temp2, sol.GetBlock(0));
 
+        /*
 #ifdef COMPUTE_EXACTDISCRETESOL
         std::cout << "rhs func block 0 \n";
         G.GetBlock(0).Print();
         std::cout << "sol block 0 \n";
         sol.GetBlock(0).Print();
 #endif
+        */
 
         /*
 #ifdef COMPUTE_EXACTDISCRETESOL
@@ -4703,14 +4705,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     *truetempvec_lvls[1] = *truesolupdate_lvls[num_levels - 1];
 
-
-
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
     *truetempvec2_lvls[1] = *truetempvec_lvls[1];
     *truetempvec2_lvls[1] -= *truesolupdate_lvls[1];
     std::cout << "norm of difference between coarsest updates = " << truetempvec2_lvls[1]->Norml2() / sqrt (truetempvec2_lvls[1]->Size()) << "\n";
-    truetempvec2_lvls[1]->Print(); // must be 0
+    //truetempvec2_lvls[1]->Print(); // must be 0
 
     //*truesolupdate_lvls[1] = *truetempvec_lvls[1];
     //*truesolupdate_lvls[num_levels - 1] = 0.0;
