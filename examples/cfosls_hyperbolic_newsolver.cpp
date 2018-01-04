@@ -933,7 +933,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1461,84 +1461,6 @@ int main(int argc, char *argv[])
 
     chrono.Clear();
     chrono.Start();
-
-#if 0
-    if (verbose)
-        std::cout << "Testing local solve 3x3 \n";
-
-    int size1 = 3;
-    int size2 = 4;
-    int size3 = 2;
-    DenseMatrix A(size1,size1);
-    A = 0.0;
-    for (int i = 0; i < size1; ++i)
-        for  (int j = 0; j < size1; ++j)
-            if (i == j)
-                A(i,j) = 1;
-            else
-                A(i,j) = 0;
-    std::cout << "A : \n";
-    A.Print();
-    DenseMatrix DT(size1,size2);
-    DT = 0.0;
-    DT(0,0) = 1;
-    DT(0,1) = -1;
-    DT(1,2) = 1;
-    DT(1,3) = -1;
-    DT(2,1) = 1;
-    DT(2,3) = 1;
-    DenseMatrix D(size2,size1);
-    D.Transpose(DT);
-    std::cout << "D : \n";
-    D.Print();
-    DenseMatrix C(size2,size2);
-    C = 0.0;
-    for (int i = 0; i < size2; ++i)
-        for  (int j = 0; j < size2; ++j)
-            if (i == j)
-                C(i,j) = 1;
-            else
-                C(i,j) = 0;
-    std::cout << "C : \n";
-    C.Print();
-    DenseMatrix B(size3,size1);
-    B = 0.0;
-    B(0,0) = 1;
-    B(0,1) = -1;
-    B(1,1) = 1;
-    B(1,2) = -1;
-    std::cout << "B : \n";
-    B.Print();
-
-    Vector Sol0(size1);
-    Vector Sol1(size2);
-    Vector Sol2(size3);
-
-    Vector G0(size1);
-    for (int i = 0; i < size1; ++i)
-        G0[i] = i + 1;
-    std::cout << "G0 : \n";
-    G0.Print();
-
-    Vector G1(size2);
-    for (int i = 0; i < size2; ++i)
-        G1[i] = 10 * i - 3 * i + 2;
-    std::cout << "G0 : \n";
-    G1.Print();
-    Vector F(size3);
-    for (int i = 0; i < size3; ++i)
-        F[i] = i + 4;
-    std::cout << "F : \n";
-    F.Print();
-
-    bool is_degenerate = false;
-
-    test_function(&A, &DT, &C, &D, B, G0, G1, F, Sol0, Sol1, Sol2, is_degenerate);
-
-    MPI_Finalize();
-    return 0;
-    }
-#endif
 
 #ifdef COMPUTE_EXACTDISCRETESOL
     if (verbose)
@@ -2286,15 +2208,19 @@ int main(int argc, char *argv[])
             (*Funct_mat_offsets_lvls[l])[2] = Cblock->Height();
         Funct_mat_offsets_lvls[l]->PartialSum();
 
-        Funct_mat_lvls[l] = new BlockMatrix(*Funct_mat_offsets_lvls[l]);
-        Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        if (l == 0)
         {
-            Funct_mat_lvls[l]->SetBlock(1,1,Cblock->LoseMat());
-            Funct_mat_lvls[l]->SetBlock(1,0,BTblock->LoseMat());
-            Funct_mat_lvls[l]->SetBlock(0,1,Transpose(Funct_mat_lvls[l]->GetBlock(1,0)));
+            Funct_mat_lvls[l] = new BlockMatrix(*Funct_mat_offsets_lvls[l]);
+            Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                Funct_mat_lvls[l]->SetBlock(1,1,Cblock->LoseMat());
+                Funct_mat_lvls[l]->SetBlock(1,0,BTblock->LoseMat());
+                Funct_mat_lvls[l]->SetBlock(0,1,Transpose(Funct_mat_lvls[l]->GetBlock(1,0)));
+            }
         }
 
+        /*
         if (l == num_levels - 1)
         {
         SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
@@ -2305,6 +2231,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < zerorowsize; ++i)
             std::cout << zerorowinds[i] << "\n";
         }
+        */
 
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
         Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
@@ -2513,6 +2440,7 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
+        /*
         // checking PtMat_hP - Mat_H
         if (l < num_levels - 1)
         {
@@ -2529,11 +2457,11 @@ int main(int argc, char *argv[])
 
             SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l + 1]->GetBlock(0,0));
             Funct_00_H->SortColumnIndices();
-            int zerorowsize = Funct_00_H->RowSize(0);
-            double * zerorowinds = Funct_00_H->GetRowEntries(0);
-            std::cout << "zero row of Funct_00_H \n";
-            for (int i = 0; i < zerorowsize; ++i)
-                std::cout << zerorowinds[i] << "\n";
+            //int zerorowsize = Funct_00_H->RowSize(0);
+            //double * zerorowinds = Funct_00_H->GetRowEntries(0);
+            //std::cout << "zero row of Funct_00_H \n";
+            //for (int i = 0; i < zerorowsize; ++i)
+                //std::cout << zerorowinds[i] << "\n";
             SparseMatrix * Funct_01_H, * Funct_11_H;
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
@@ -2563,80 +2491,39 @@ int main(int argc, char *argv[])
                 ofs2.close();
             }
 
-        }
-
-
-#ifdef WITH_LOCALSOLVERS
-        // creating local problem solver hierarchy
-        if (l < num_levels - 1)
-        {
-            bool optimized_localsolve = false;
+            // checking (1,1) block
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
-                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
-                                                         *Constraint_mat_lvls[l],
-                                                         Dof_TrueDof_Func_lvls[l],
-                                                         *P_WT[l],
-                                                         *Element_dofs_Func[l],
-                                                         *Element_dofs_W[l],
-                                                         BdrDofs_Funct_lvls[l],
-                                                         EssBdrDofs_Funct_lvls[l],
-#ifdef COMPUTE_EXACTDISCRETESOL
-                                                         sigma_vec, S_vec, lambda_vec,
-#endif
-                                                         optimized_localsolve,
-                                                         false);
-            }
-            else // no S
-            {
-                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
-                                                         *Constraint_mat_lvls[l],
-                                                         Dof_TrueDof_Func_lvls[l],
-                                                         *P_WT[l],
-                                                         *Element_dofs_Func[l],
-                                                         *Element_dofs_W[l],
-                                                         BdrDofs_Funct_lvls[l],
-                                                         EssBdrDofs_Funct_lvls[l],
-#ifdef COMPUTE_EXACTDISCRETESOL
-                                                         sigma_vec, NULL, lambda_vec,
-#endif
-                                                         optimized_localsolve,
-                                                         false);
+                SparseMatrix * temp = mfem::Mult(*Transpose(*P_1), *Funct_11_h);
+                SparseMatrix * PTAP = mfem::Mult(*temp, *P_1);
+                PTAP->SortColumnIndices();
+
+                ofstream ofs("PTAP_11.txt");
+                PTAP->Print(ofs,1);
+                ofs.close();
+
+                ofstream ofs2("A_11_H.txt");
+                Funct_11_H->Print(ofs2,1);
+                ofs2.close();
             }
 
-            (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
+            // checking (0,1) block
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                SparseMatrix * temp = mfem::Mult(*Transpose(*P_0), *Funct_01_h);
+                SparseMatrix * PTAP = mfem::Mult(*temp, *P_1);
+                PTAP->SortColumnIndices();
 
-        }
-#endif
-        // Creating the coarsest problem solver
-        if (l == num_levels - 1)
-        {
-            {
-            SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
-            Funct_00_H->SortColumnIndices();
-            int zerorowsize = Funct_00_H->RowSize(0);
-            double * zerorowinds = Funct_00_H->GetRowEntries(0);
-            std::cout << "zero row of Funct_00_H \n";
-            for (int i = 0; i < zerorowsize; ++i)
-                std::cout << zerorowinds[i] << "\n";
+                ofstream ofs("PTAP_01.txt");
+                PTAP->Print(ofs,1);
+                ofs.close();
+
+                ofstream ofs2("A_01_H.txt");
+                Funct_01_H->Print(ofs2,1);
+                ofs2.close();
             }
-            CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[l],
-                                                       *Constraint_mat_lvls[l],
-                                                       Dof_TrueDof_Func_lvls[l],
-                                                       *Dof_TrueDof_L2_lvls[l],
-                                                       EssBdrDofs_Funct_lvls[l],
-                                                       EssBdrTrueDofs_Funct_lvls[l]);
-            {
-            SparseMatrix * Funct_00_H = new SparseMatrix(Funct_mat_lvls[l]->GetBlock(0,0));
-            Funct_00_H->SortColumnIndices();
-            int zerorowsize = Funct_00_H->RowSize(0);
-            double * zerorowinds = Funct_00_H->GetRowEntries(0);
-            std::cout << "zero row of Funct_00_H \n";
-            for (int i = 0; i < zerorowsize; ++i)
-                std::cout << zerorowinds[i] << "\n";
-            }
-            CoarsestSolver = CoarsestSolver_partfinder;
         }
+        */
 
         // Creating global functional matrix
         if (l == 0)
@@ -2684,7 +2571,71 @@ int main(int argc, char *argv[])
 #endif
         }
 
+    } // end of loop over all levels
+
+    for ( int l = 0; l < num_levels - 1; ++l)
+    {
+        BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
+        Funct_mat_lvls[l + 1] = mfem::Mult(*Transpose(*P_Func[l]), *temp);
+
+        SparseMatrix * temp_sp = mfem::Mult(*Constraint_mat_lvls[l], P_Func[l]->GetBlock(0,0));
+        Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
     }
+
+#ifdef WITH_LOCALSOLVERS
+    for (int l = num_levels - 1; l >=0; --l)
+    {
+        // creating local problem solver hierarchy
+        if (l < num_levels - 1)
+        {
+            bool optimized_localsolve = false;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+#ifdef COMPUTE_EXACTDISCRETESOL
+                                                         sigma_vec, S_vec, lambda_vec,
+#endif
+                                                         optimized_localsolve,
+                                                         false);
+            }
+            else // no S
+            {
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+#ifdef COMPUTE_EXACTDISCRETESOL
+                                                         sigma_vec, NULL, lambda_vec,
+#endif
+                                                         optimized_localsolve,
+                                                         false);
+            }
+
+            (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
+
+        }
+    }
+#endif
+
+    // Creating the coarsest problem solver
+    CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
+                                                     *Constraint_mat_lvls[num_levels - 1],
+                                                     Dof_TrueDof_Func_lvls[num_levels - 1],
+                                                     *Dof_TrueDof_L2_lvls[num_levels - 1],
+                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
+                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1]);
+    CoarsestSolver = CoarsestSolver_partfinder;
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
@@ -3848,7 +3799,6 @@ int main(int argc, char *argv[])
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
 
-    /*
 #ifdef COMPUTE_EXACTDISCRETESOL
     //ParGridFunction * sigma_h_exact = new ParGridFunction(R_space_lvls[0]);
     //sigma_h_exact->Distribute(&(trueX_discrete->GetBlock(0)));
@@ -3859,12 +3809,9 @@ int main(int argc, char *argv[])
     ParticSol.GetBlock(0) = trueX_discrete->GetBlock(0);
     if (numblocks_funct == 2)
         ParticSol.GetBlock(1) = trueX_discrete->GetBlock(1);
-
 #else
-#endif
-    */
-
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+#endif
 
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
@@ -4459,6 +4406,7 @@ int main(int argc, char *argv[])
     if (verbose)
         NewSolver.PrintAllOptions();
 
+    /*
     if (numblocks > 1)
     {
         ofstream ofs3("Gblock1_before solver.txt");
@@ -4466,6 +4414,7 @@ int main(int argc, char *argv[])
         NewRhs.GetBlock(1).Print(ofs3,1);
         ofs3.close();
     }
+    */
 
     NewSolver.Mult(NewRhs, NewX);
 
