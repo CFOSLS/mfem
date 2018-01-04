@@ -3799,6 +3799,7 @@ int main(int argc, char *argv[])
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
 
+    /*
 #ifdef COMPUTE_EXACTDISCRETESOL
     //ParGridFunction * sigma_h_exact = new ParGridFunction(R_space_lvls[0]);
     //sigma_h_exact->Distribute(&(trueX_discrete->GetBlock(0)));
@@ -3812,6 +3813,9 @@ int main(int argc, char *argv[])
 #else
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 #endif
+    */
+
+    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());

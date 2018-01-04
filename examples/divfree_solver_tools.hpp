@@ -4449,10 +4449,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         if (LocalSolvers_lvls[l])
         {
-            std::cout << "Temporarily not solving the local problems! \n";
+            //std::cout << "Temporarily not solving the local problems! \n";
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
             // FIXME: comment this
-            *truetempvec_lvls[l] = 0.0;
+            //*truetempvec_lvls[l] = 0.0;
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
         }
 
@@ -4498,13 +4498,14 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // FIXME: Only for debugging, the functional in blocked case is not being minimized
     // 4. update the global iterate by the resulting update at the finest level
 
-    std::cout << "level 0 update norm = " << truesolupdate_lvls[0]->Norml2() / sqrt (truesolupdate_lvls[0]->Size());
+    std::cout << "level 0 update norm = " << truesolupdate_lvls[0]->Norml2() / sqrt (truesolupdate_lvls[0]->Size()) << "\n";
 
     next_sol += *truesolupdate_lvls[0];
     funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
                              "after local solve at level 0: ", print_level);
 
     // a check of the rhs for the coarsest level problem
+    /*
     {
         BlockVector temp(offsets_global);
         MultTrueFunc(0,-1.0, next_sol, temp);
@@ -4527,6 +4528,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         std::cout << "norm of (trueresfunc[0] - (F - Funct * current sol)) = " << temp.Norml2() / sqrt (temp.Size()) << "\n";
     }
+    */
 
     next_sol -= *truesolupdate_lvls[0];
 
@@ -4535,11 +4537,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // righthand side  (from rhsfunc) on true dofs
 
     // trying to organize the coarsest solver right here
+    /*
     // manually creating the operator at the coarsest level from Funct_lvls[0]
-    SparseMatrix P_RT = P_Func[0]->GetBlock(0,0);
-    SparseMatrix P_H1;
+    SparseMatrix * P_RT = new SparseMatrix(P_Func[0]->GetBlock(0,0));
+    SparseMatrix *P_H1;
     if (numblocks > 1)
-        P_H1 = P_Func[0]->GetBlock(1,1);
+        P_H1 = new SparseMatrix(P_Func[0]->GetBlock(1,1));
     SparseMatrix * Funct_00_h = new SparseMatrix(Funct_lvls[0]->GetBlock(0,0));
     SparseMatrix * Funct_01_h, * Funct_11_h;
     if (numblocks > 1)
@@ -4551,24 +4554,24 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     SparseMatrix * Funct_00_H;
     SparseMatrix * Funct_01_H, * Funct_11_H;
 
-    SparseMatrix * temp00 = mfem::Mult(*Transpose(P_RT), *Funct_00_h);
-    Funct_00_H = mfem::Mult(*temp00, P_RT);
+    SparseMatrix * temp00 = mfem::Mult(*Transpose(*P_RT), *Funct_00_h);
+    Funct_00_H = mfem::Mult(*temp00, *P_RT);
     Funct_00_H->SortColumnIndices();
 
     if (numblocks > 1)
     {
-        SparseMatrix * temp11 = mfem::Mult(*Transpose(P_H1), *Funct_11_h);
-        Funct_11_H = mfem::Mult(*temp11, P_H1);
+        SparseMatrix * temp11 = mfem::Mult(*Transpose(*P_H1), *Funct_11_h);
+        Funct_11_H = mfem::Mult(*temp11, *P_H1);
         Funct_11_H->SortColumnIndices();
 
-        SparseMatrix * temp01 = mfem::Mult(*Transpose(P_RT), *Funct_01_h);
-        Funct_01_H = mfem::Mult(*temp01, P_H1);
+        SparseMatrix * temp01 = mfem::Mult(*Transpose(*P_RT), *Funct_01_h);
+        Funct_01_H = mfem::Mult(*temp01, *P_H1);
         Funct_01_H->SortColumnIndices();
     }
 
     SparseMatrix * Constr_H;
     SparseMatrix * tempconstr = mfem::Mult(*Transpose(*P_L2[0]), *Constr_lvls[0]);
-    Constr_H = mfem::Mult(*tempconstr, P_RT);
+    Constr_H = mfem::Mult(*tempconstr, *P_RT);
     Constr_H->SortColumnIndices();
 
     Array<int> tempblock_offsets(numblocks + 2);
@@ -4616,27 +4619,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 temp2_another[ind] = 1;
             }
 
-            /*
-            for ( int i = 0; i < temp2->Size(); ++i)
-            {
-                int ind = (*temp2)[i];
-                newcoarsemat.GetBlock(blk1,blk2).EliminateCol(ind);
-            }
-            */
             newcoarsemat.GetBlock(blk1,blk2).EliminateCols(temp2_another);
 
             for ( int dof1 = 0; dof1 < temp1_another.Size(); ++dof1)
             {
-                /*
-            for ( int j = 0; j < temp1_another.Size(); ++j)
-            {
-                int ind = (*temp1)[j];
-                if (blk1 == blk2)
-                    newcoarsemat.GetBlock(blk1,blk2).EliminateRow(ind, 1.0);
-                else // doesn't set diagonal entry to 1
-                    newcoarsemat.GetBlock(blk1,blk2).EliminateRow(ind);
-                */
-
                 if ( temp1_another[dof1] != 0)
                 {
                     if (blk1 == blk2)
@@ -4704,9 +4690,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         truesolupdate_lvls[num_levels - 1]->GetBlock(blk) = coarsesol.GetBlock(blk);
 
     *truetempvec_lvls[1] = *truesolupdate_lvls[num_levels - 1];
+    * */
 
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
+    /*
     *truetempvec2_lvls[1] = *truetempvec_lvls[1];
     *truetempvec2_lvls[1] -= *truesolupdate_lvls[1];
     std::cout << "norm of difference between coarsest updates = " << truetempvec2_lvls[1]->Norml2() / sqrt (truetempvec2_lvls[1]->Size()) << "\n";
@@ -4714,9 +4702,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     //*truesolupdate_lvls[1] = *truetempvec_lvls[1];
     //*truesolupdate_lvls[num_levels - 1] = 0.0;
+    */
 
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
-    std::cout << "coarsest level update norm = " << truesolupdate_lvls[1]->Norml2() / sqrt (truesolupdate_lvls[1]->Size());
+    std::cout << "coarsest level update norm = " << truesolupdate_lvls[1]->Norml2() / sqrt (truesolupdate_lvls[1]->Size()) << "\n";
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
 
