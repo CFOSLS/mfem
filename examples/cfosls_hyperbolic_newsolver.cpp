@@ -1357,6 +1357,7 @@ int main(int argc, char *argv[])
     Array<BlockVector*> Funct_rhs_lvls(num_levels);
 
     BlockOperator* Funct_global;
+    BlockVector* Functrhs_global;
     Array<int> offsets_global(numblocks_funct + 1);
 
    for (int l = 0; l < num_levels; ++l)
@@ -2534,6 +2535,19 @@ int main(int argc, char *argv[])
             offsets_global.PartialSum();
 
             Funct_global = new BlockOperator(offsets_global);
+
+            Functrhs_global = new BlockVector(offsets_global);
+
+            Functrhs_global->GetBlock(0) = 0.0;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                secondeqn_rhs->ParallelAssemble(Functrhs_global->GetBlock(1));
+                for (int tdofind = 0; tdofind < EssBdrDofs_Funct_lvls[0][1]->Size(); ++tdofind)
+                {
+                    int tdof = (*EssBdrDofs_Funct_lvls[0][1])[tdofind];
+                    Functrhs_global->GetBlock(1)[tdof] = 0.0;
+                }
+            }
 
             Ablock->Assemble();
             Ablock->Finalize();
@@ -3772,8 +3786,8 @@ int main(int argc, char *argv[])
                      P_Func, TrueP_Func, P_W,
                      EssBdrTrueDofs_Funct_lvls,
                      Funct_mat_lvls, Constraint_mat_lvls,
-                     Funct_rhs_lvls, Floc,
-                     *Funct_global, offsets_global,
+                     Floc,
+                     *Funct_global, *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
                      LocalSolver_lvls,
