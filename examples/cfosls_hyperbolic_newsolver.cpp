@@ -23,7 +23,7 @@
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -931,7 +931,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -4163,26 +4163,84 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Using the new solver as a preconditioner for CG for the correction \n";
 
-
-    ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
+    ParLinearForm *fformtest = new ParLinearForm(R_space_lvls[0]);
     ConstantCoefficient zerotest(.0);
-    fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zerotest));
-    fform->Assemble();
+    fformtest->AddDomainIntegrator(new VectordivDomainLFIntegrator(zerotest));
+    fformtest->Assemble();
 
+    ParLinearForm *qformtest;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+    {
+        qformtest = new ParLinearForm(H_space_lvls[0]);
+        qformtest->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+        qformtest->Assemble();
+    }
 
     ParBilinearForm *Ablocktest(new ParBilinearForm(R_space_lvls[0]));
     HypreParMatrix *Atest;
-    Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+    if (strcmp(space_for_S,"H1") == 0)
+        Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator);
+    else
+        Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
     Ablocktest->Assemble();
-    Ablocktest->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform);
+    Ablocktest->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fformtest);
     Ablocktest->Finalize();
     Atest = Ablocktest->ParallelAssemble();
 
-    Vector trueXtest(Atest->Width());
-    Vector trueRhstest(Atest->Height());
+    HypreParMatrix *Ctest;
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        ParBilinearForm * Cblocktest = new ParBilinearForm(H_space_lvls[0]);
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            Cblocktest->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+            Cblocktest->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+        }
+        Cblocktest->Assemble();
+        Cblocktest->EliminateEssentialBC(ess_bdrS, *S_exact_finest, *qformtest);
+        Cblocktest->Finalize();
+
+        Ctest = Cblocktest->ParallelAssemble();
+    }
+
+    HypreParMatrix *Btest;
+    HypreParMatrix *BTtest;
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        ParMixedBilinearForm *Bblocktest = new ParMixedBilinearForm(R_space_lvls[0], H_space_lvls[0]);
+        Bblocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+        Bblocktest->Assemble();
+        Bblocktest->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *qformtest);
+        Bblocktest->EliminateTestDofs(ess_bdrS);
+        Bblocktest->Finalize();
+
+        Btest = Bblocktest->ParallelAssemble();
+        BTtest = Btest->Transpose();
+    }
+
+    Array<int> blocktest_offsets(numblocks + 1);
+    blocktest_offsets[0] = 0;
+    blocktest_offsets[1] = Atest->Height();
+    if (strcmp(space_for_S,"H1") == 0)
+        blocktest_offsets[2] = Ctest->Height();
+    blocktest_offsets.PartialSum();
+
+    BlockVector trueXtest(blocktest_offsets);
+    BlockVector trueRhstest(blocktest_offsets);
     trueRhstest = 0.0;
 
-    fform->ParallelAssemble(trueRhstest);
+    fformtest->ParallelAssemble(trueRhstest.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0)
+        qformtest->ParallelAssemble(trueRhstest.GetBlock(1));
+
+    BlockOperator *BlockMattest = new BlockOperator(blocktest_offsets);
+    BlockMattest->SetBlock(0,0, Atest);
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        BlockMattest->SetBlock(0,1, BTtest);
+        BlockMattest->SetBlock(1,0, Btest);
+        BlockMattest->SetBlock(1,1, Ctest);
+    }
 
     int TestmaxIter(400);
 
@@ -4190,7 +4248,7 @@ int main(int argc, char *argv[])
     Testsolver.SetAbsTol(sqrt(atol));
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
-    Testsolver.SetOperator(*Atest);
+    Testsolver.SetOperator(*BlockMattest);
     Testsolver.SetPrintLevel(1);
 
     NewSolver.SetAsPreconditioner(true);
@@ -4200,9 +4258,11 @@ int main(int argc, char *argv[])
     Testsolver.SetPreconditioner(NewSolver);
 
     trueXtest = 0.0;
-    // trueRhstest = - M * particular solution, on true dofs
-    Atest->Mult(ParticSol, trueRhstest);
-    trueRhstest *= -1.0;
+
+    // trueRhstest = F - M * particular solution (= residual), on true dofs
+    BlockVector truetemp(blocktest_offsets);
+    BlockMattest->Mult(ParticSol, truetemp);
+    trueRhstest -= truetemp;
 
     chrono.Clear();
     chrono.Start();
@@ -4223,7 +4283,9 @@ int main(int argc, char *argv[])
     }
 
     trueXtest += ParticSol;
-    NewSigmahat->Distribute(trueXtest);
+    NewSigmahat->Distribute(trueXtest.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0)
+        NewS->Distribute(trueXtest.GetBlock(1));
 
     /*
 #ifdef OLD_CODE
@@ -4382,11 +4444,53 @@ int main(int argc, char *argv[])
             cout << "|| div (new sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
                       << err_div/norm_div  << "\n";
         }
+
+        //////////////////////////////////////////////////////
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            double max_bdr_error = 0;
+            for ( int dof = 0; dof < Xinit.GetBlock(1).Size(); ++dof)
+            {
+                if ( (*EssBdrDofs_Funct_lvls[0][1])[dof] != 0.0)
+                {
+                    //std::cout << "ess dof index: " << dof << "\n";
+                    double bdr_error_dof = fabs(Xinit.GetBlock(1)[dof] - (*NewS)[dof]);
+                    if ( bdr_error_dof > max_bdr_error )
+                        max_bdr_error = bdr_error_dof;
+                }
+            }
+
+            if (max_bdr_error > 1.0e-14)
+                std::cout << "Error, boundary values for the solution (S) are wrong:"
+                             " max_bdr_error = " << max_bdr_error << "\n";
+
+            // 13. Extract the parallel grid function corresponding to the finite element
+            //     approximation X. This is the local solution on each processor. Compute
+            //     L2 error norms.
+
+            int order_quad = max(2, 2*feorder+1);
+            const IntegrationRule *irs[Geometry::NumGeom];
+            for (int i=0; i < Geometry::NumGeom; ++i)
+            {
+               irs[i] = &(IntRules.Get(i, order_quad));
+            }
+
+            // Computing error for S
+
+            double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
+            double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+            if (verbose)
+            {
+                std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                             err_S / norm_S << "\n";
+            }
+        }
+        /////////////////////////////////////////////////////////
     }
 
     MPI_Finalize();
     return 0;
-#endif
+#endif // for USE_AS_A_PREC
 
     chrono.Clear();
     chrono.Start();
@@ -4427,7 +4531,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
     if (verbose)
         NewSolver.PrintAllOptions();
