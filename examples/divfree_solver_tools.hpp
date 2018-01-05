@@ -9,24 +9,12 @@ using std::unique_ptr;
 
 
 // PLAN:
-// 1) Add righthand side everywhere in the functional residual computation and as an input parameter
-// 2) Test that particular solution finder is working without smoother
-// 2a) that with exact discrete solution as initial guess all the updates are 0 for the local problem solves
-// 3) Test that particular solution finder is working with the smoother
-// 4) Test that solver is working in the non-preconditioner mode
-// 4) Figure out how it should be treated in the preconditioner mode
-// 5) Test that the solver is working in the preconditioner mode
-
-// QUESTION: Should I compute functional rhs at each level outside the solver using the bilinear form or
-// just coarsen the functional righthand side given at the finest level?
-
+// 1) ...
 
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 #define CHECK_LOCALSOLVE
-
-#define IMPROVEMENT
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -723,10 +711,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     // FIXME: Get rid of temporary vectors;
     BlockVector lvlrhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
-    {
-        //std::cout << "truerhs_func block size = " << truerhs_func.GetBlock(blk).Size() << "\n";// << ", lvlrhsfunc blocksize = " << lvlrhs_func.GetBlock(blk).Size() << "\n";
         d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
-    }
     BlockVector sol(Op_blkspmat.RowOffsets());
     sol = 0.0;
 
@@ -884,11 +869,8 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
                 if (compute_AEproblem_matrices(blk1,blk2))
                 {
-                    // FIXME: Memory leak here? New allocation for each AE but no free
-                    // Setting size of Dense Matrices
+                    // Extracting local problem matrices:
                     LocalAE_Matrices(blk1,blk2) = new DenseMatrix(Local_inds[blk1]->Size(), Local_inds[blk2]->Size());
-
-                    // Obtaining submatrices:
                     Op_blks(blk1,blk2)->GetSubMatrix(*Local_inds[blk1], *Local_inds[blk2], *LocalAE_Matrices(blk1,blk2));
 
                 } // end of the block for non-optimized version
@@ -1021,6 +1003,10 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
             sol.GetBlock(blk).AddElementVector
                     (*Local_inds[blk], sol_loc.GetBlock(blk));
         }
+
+        for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
+            for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
+                delete LocalAE_Matrices(blk1,blk2);
 
     } // end of loop over AEs
 
@@ -1249,7 +1235,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         // a shortcut
         const SparseMatrix * el_dofs_blk = &(el_to_dofs.GetBlock(blk,blk));
 
-#ifdef IMPROVEMENT
         SparseMatrix d_td_diag;
         SparseMatrix td_d_diag;
         HypreParMatrix * td_d;
@@ -1269,7 +1254,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
             td_d->GetOffd(td_d_offd, cmap_td_d);
         }
 
-#endif
         // creating dofs_to_AE relation table
         SparseMatrix * dofs_AE = Transpose(*mfem::Mult(AE_e, *el_dofs_blk));
         int ndofs = dofs_AE->Height();
@@ -1281,11 +1265,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         }
 #endif
 
-#ifndef IMPROVEMENT
-        int * dofs_AE_i = dofs_AE->GetI();
-        int * dofs_AE_j = dofs_AE->GetJ();
-        double * dofs_AE_data = dofs_AE->GetData();
-#endif
         int * innerdofs_AE_i = new int [ndofs + 1];
 
         // computing the number of internal degrees of freedom in all AEs
@@ -1294,7 +1273,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         {
             innerdofs_AE_i[dof]= nnz;
 
-#ifdef IMPROVEMENT
             bool dof_is_shared = false;
 
             if (num_procs > 1)
@@ -1316,28 +1294,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
             {
                 nnz++;
             }
-#else
-            for (int j = dofs_AE_i[dof]; j < dofs_AE_i[dof+1]; ++j)
-            {
-                // if a dof belongs to only one fine-grid element and is not at the domain boundary
-                bool inside_finegrid_el = (higher_order &&
-                                           (*dof_is_bdr[blk])[dof] == 0 && dofs_AE_data[j] == 1);
-                //bool on_noness_bdr = false;
-                bool on_noness_bdr = ( (*dof_is_essbdr[blk])[dof] == 0 &&
-                                      (*dof_is_bdr[blk])[dof]!= 0);
-                MFEM_ASSERT( !inside_finegrid_el,
-                        "Remove this assert in Get_AE_eintdofs() before using higher-order elements");
-                MFEM_ASSERT( ( !inside_finegrid_el || (dofs_AE_i[dof+1] - dofs_AE_i[dof] == 1) ),
-                        "A fine-grid dof inside a fine-grid element cannot belong to more than one AE");
-                // if a dof is shared by two fine grid elements inside a single AE
-                // OR a dof is strictly internal to a fine-grid element,
-                // OR a dof belongs to the non-essential part of the domain boundary,
-                // then it is an internal dof for this AE
-                if (dofs_AE_data[j] == 2 || inside_finegrid_el || on_noness_bdr )
-                    nnz++;
-            }
-#endif
-
 
         }
         innerdofs_AE_i[ndofs] = nnz;
@@ -1349,7 +1305,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         int nnz_count = 0;
         for (int dof = 0; dof < ndofs; ++dof)
         {
-#ifdef IMPROVEMENT
             bool dof_is_shared = false;
 
             if (num_procs > 1)
@@ -1369,45 +1324,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
 
             if (( (dofs_AE->RowSize(dof) == 1 && !dof_on_bdr) || dof_on_nonessbdr) && (!dof_is_shared) )
                 innerdofs_AE_j[nnz_count++] = dofs_AE->GetRowColumns(dof)[0];
-
-#else
-            for (int j = dofs_AE_i[dof]; j < dofs_AE_i[dof+1]; ++j)
-            {
-#ifdef DEBUG_INFO
-                dofs_check[dof] = 0;
-#endif
-                bool inside_finegrid_el = (higher_order &&
-                                           (*dof_is_bdr[blk])[dof] == 0 && dofs_AE_data[j] == 1);
-                //bool on_noness_bdr = false;
-                bool on_noness_bdr = ( (*dof_is_essbdr[blk])[dof] == 0 &&
-                                      (*dof_is_bdr[blk])[dof]!= 0);
-                if (dofs_AE_data[j] == 2 || inside_finegrid_el || on_noness_bdr )
-                {
-                    innerdofs_AE_j[nnz_count++] = dofs_AE_j[j];
-#ifdef DEBUG_INFO
-                    dofs_check[dof] = 1;
-#endif
-                }
-#ifdef DEBUG_INFO
-                if ( (*dof_is_essbdr[blk])[dof] != 0)
-                {
-                    if (dofs_check[dof] > 0)
-                        std::cout << "Error: Smth wrong in dofs \n";
-                    else
-                        dofs_check[dof] = 2;
-                }
-                if (dofs_AE_data[j] == 1 && dofs_AE_i[dof+1] - dofs_AE_i[dof] == 2)
-                {
-                    if (dofs_check[dof] > 0)
-                        std::cout << "Error: Smth wrong in dofs \n";
-                    else
-                        dofs_check[dof] = 3;
-                }
-#endif
-            }
-#endif
-
-
         }
 
         std::fill_n(innerdofs_AE_data, nnz, 1);
