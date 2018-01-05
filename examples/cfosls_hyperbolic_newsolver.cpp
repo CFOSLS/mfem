@@ -4426,7 +4426,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
     if (verbose)
         NewSolver.PrintAllOptions();

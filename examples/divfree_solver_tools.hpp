@@ -4395,6 +4395,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     next_sol = previous_sol;
 
+    /*
     // checking that the boundary conditions are not violated for the previous sol
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -4408,6 +4409,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             }
         }
     }
+    */
 
     // FIXME: Remove
     CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs, offsets_global, next_sol,
@@ -4531,6 +4533,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             for (int i = 0; i < essbdrtruedofs_Func[l][blk]->Size(); ++i)
             {
                 int ind = (*essbdrtruedofs_Func[l][blk])[i];
+                if (fabs(trueresfunc_lvls[l]->GetBlock(blk)[ind]) > 1.0e-16)
+                    std::cout << "Wrong boundary value for the residual will be corrected " <<
+                                 "block = " << blk << ", value = " << trueresfunc_lvls[l]->GetBlock(blk)[ind] << "\n";
                 trueresfunc_lvls[l]->GetBlock(blk)[ind] = 0.0;
             }
         }
@@ -4547,6 +4552,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
                              "after local solve at level 0: ", print_level);
 
+    /*
     // checking that the boundary conditions are not violated for the local update
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -4560,7 +4566,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             }
         }
     }
+    */
 
+    /*
     // a check of the rhs for the coarsest level problem
     {
         BlockVector temp(offsets_global);
@@ -4584,6 +4592,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         std::cout << "norm of (trueresfunc[0] - (F - Funct * current sol)) = " << temp.Norml2() / sqrt (temp.Size()) << "\n";
     }
+    */
 
     next_sol -= *truesolupdate_lvls[0];
 
@@ -4592,6 +4601,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // righthand side  (from rhsfunc) on true dofs
 
     // trying to organize the coarsest solver right here
+    /*
     // manually creating the operator at the coarsest level from Funct_lvls[0]
     SparseMatrix * P_RT = new SparseMatrix(P_Func[0]->GetBlock(0,0));
     SparseMatrix *P_H1;
@@ -4744,11 +4754,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         truesolupdate_lvls[num_levels - 1]->GetBlock(blk) = coarsesol.GetBlock(blk);
 
     *truetempvec_lvls[1] = *truesolupdate_lvls[num_levels - 1];
+    */
 
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
-    //truesolupdate_lvls[1]->GetBlock(1) *= -1;
-
+    /*
     // checking that the boundary conditions are not violated for the coarse update
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -4770,9 +4780,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     //*truesolupdate_lvls[1] = *truetempvec_lvls[1];
     //*truesolupdate_lvls[num_levels - 1] = 0.0;
+    */
 
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
 
+    /*
     // checking that the boundary conditions are not violated for P * coarse update
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -4786,9 +4798,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             }
         }
     }
+    */
 
+    /*
     //checking that P * coarse update satisfies the divergence constraint
     MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_lvls[0], NULL, "for P * coarsest update"),"");
+    */
 
     std::cout << "coarsest level update norm = " << truesolupdate_lvls[1]->Norml2() / sqrt (truesolupdate_lvls[1]->Size()) << "\n";
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
@@ -4812,21 +4827,35 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
+            // imposing bnd conditions
+            for ( int blk = 0; blk < numblocks; ++blk)
+            {
+                for (int i = 0; i < essbdrtruedofs_Func[l - 1][blk]->Size(); ++i)
+                {
+                    int ind = (*essbdrtruedofs_Func[l - 1][blk])[i];
+                    if (fabs(trueresfunc_lvls[l - 1]->GetBlock(blk)[ind]) > 1.0e-16)
+                        std::cout << "Wrong boundary value for the residual will be corrected " <<
+                                     "block = " << blk << ", value = " << trueresfunc_lvls[l - 1]->GetBlock(blk)[ind] << "\n";
+                    trueresfunc_lvls[l - 1]->GetBlock(blk)[ind] = 0.0;
+                }
+            }
+
             UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
+
 
             // smooth at the finer level
             if (Smoothers_lvls[l - 1])
             {
                 Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
                 *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
-                UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec_lvls[l - 1] );
+                UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             }
 
             if (LocalSolvers_lvls[l - 1])
             {
-                LocalSolvers_lvls[l - 1]->Mult(*truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1]);
-                *truesolupdate_lvls[l - 1] += *truetempvec2_lvls[l - 1];
+                LocalSolvers_lvls[l - 1]->Mult(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1]);
+                *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
             }
 
         }
