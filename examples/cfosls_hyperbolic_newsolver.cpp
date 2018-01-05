@@ -16,7 +16,7 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-//#define WITH_SMOOTHERS
+#define WITH_SMOOTHERS
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
@@ -2552,25 +2552,6 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (l < num_levels - 1)
-        {
-#ifdef WITH_SMOOTHERS
-            Array<int> SweepsNum(numblocks_funct);
-            Array<int> offsets_global(numblocks_funct + 1);
-            offsets_global[0] = 0;
-            for ( int blk = 0; blk < numblocks_funct; ++blk)
-                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
-            offsets_global.PartialSum();
-            SweepsNum = 5;
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
-                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
-                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
-                                                     &SweepsNum, offsets_global);
-#else
-            Smoothers_lvls[l] = NULL;
-#endif
-        }
-
     } // end of loop over all levels
 
     for ( int l = 0; l < num_levels - 1; ++l)
@@ -2582,9 +2563,28 @@ int main(int argc, char *argv[])
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
     }
 
-#ifdef WITH_LOCALSOLVERS
     for (int l = num_levels - 1; l >=0; --l)
     {
+        if (l < num_levels - 1)
+        {
+    #ifdef WITH_SMOOTHERS
+            Array<int> SweepsNum(numblocks_funct);
+            Array<int> offsets_global(numblocks_funct + 1);
+            offsets_global[0] = 0;
+            for ( int blk = 0; blk < numblocks_funct; ++blk)
+                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
+            offsets_global.PartialSum();
+            SweepsNum = 5;
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
+                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
+                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
+                                                     &SweepsNum, offsets_global);
+    #else
+            Smoothers_lvls[l] = NULL;
+    #endif
+        }
+
+#ifdef WITH_LOCALSOLVERS
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -2625,8 +2625,8 @@ int main(int argc, char *argv[])
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
-    }
 #endif
+    }
 
     // Creating the coarsest problem solver
     CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
@@ -4426,7 +4426,7 @@ int main(int argc, char *argv[])
 
     //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
 
     if (verbose)
         NewSolver.PrintAllOptions();
