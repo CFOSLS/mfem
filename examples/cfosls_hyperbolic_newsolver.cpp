@@ -933,7 +933,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;

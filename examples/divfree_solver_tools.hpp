@@ -1241,12 +1241,8 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         SparseMatrix td_d_offd;
         if (num_procs > 1)
         {
-            // FIXME: Memory clean-up needed or not here?
             // things from dof_truedof relation tables required to determine shared dofs
             d_td_blocks[blk]->GetDiag(d_td_diag);
-            //SparseMatrix d_td_blocks_offd;
-            //HYPRE_Int * cmap_d_td;
-            //d_td_blocks[blk]->GetOffd(d_td_blocks_offd, cmap_d_td);
 
             td_d = d_td_blocks[blk]->Transpose();
             td_d->GetDiag(td_d_diag);
@@ -1336,7 +1332,9 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
 
         res->SetBlock(blk, blk, Transpose(*innerdofs_AE));
 
-    }
+        delete td_d;
+
+    } // end of the loop over blocks
 
     return res;
 }
@@ -1727,8 +1725,6 @@ protected:
 
     virtual void Setup(bool verbose = false) const;
 
-    virtual void ComputeTrueResFunc(const BlockVector& x_l, BlockVector& rhs_l) const;
-
     virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
@@ -1922,7 +1918,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     Vector workfvec(rhs_constr.Size());       // used only in ComputeLocalRhsConstr()
 
     // 0. Compute rhs in the functional for the finest level
-    ComputeTrueResFunc(truestart_guess, *trueresfunc_lvls[0]);
+    UpdateTrueResidual(0, NULL, truestart_guess, *trueresfunc_lvls[0] );
 
     Qlminus1_f = rhs_constr;
 
@@ -2022,28 +2018,6 @@ void DivConstraintSolver::Setup(bool verbose) const
         std::cout << "DivConstraintSolver setup completed \n";
 }
 
-void DivConstraintSolver::ComputeTrueResFunc(const BlockVector& x_l, BlockVector &rhs_l) const
-{
-    // FIXME: Get rid of temp1 and temp2
-    BlockVector temp1(Funct_lvls[0]->ColOffsets());
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[0][blk]->Mult(x_l.GetBlock(blk), temp1.GetBlock(blk));
-    }
-
-    BlockVector temp2(Funct_lvls[0]->RowOffsets());
-    Funct_lvls[0]->Mult(temp1, temp2);
-
-    temp2 *= -1.0;
-
-    temp2 += *Funct_rhs_lvls[0];
-
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[0][blk]->MultTranspose(temp2.GetBlock(blk), rhs_l.GetBlock(blk));
-    }
-}
-
 void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {
     // FIXME: Get rid of temp1 and temp2
@@ -2076,32 +2050,11 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
         BlockMatrix * P_FuncT = Transpose(*P_Func[lvl]);
         Funct_PR = mfem::Mult(*Funct_lvls[lvl],*P_Func[lvl]);
 
-        // checking the difference between coarsened and true
-        // (from bilinear form) functional operators
-        /*
-        std::cout << "level = " << lvl << "\n";
-        BlockMatrix * tempdiff = mfem::Mult(*P_FuncT, *Funct_PR);
-        for ( int blk = 0; blk < numblocks; blk++)
-        {
-            std::cout << "blk = " << blk << "\n";
-            SparseMatrix * tempdiffblk = new SparseMatrix(tempdiff->GetBlock(blk,blk));
-            tempdiffblk->Add(-1.0,Funct_lvls[lvl + 1]->GetBlock(blk,blk));
-            std::cout << tempdiffblk->MaxNorm() << "\n";
-        }
-        */
         Funct_lvls[lvl + 1] = mfem::Mult(*P_FuncT, *Funct_PR);
 
         SparseMatrix *P_L2T = Transpose(*P_L2[lvl]);
         SparseMatrix *Constr_PR;
         Constr_PR = mfem::Mult(*Constr_lvls[lvl], P_Func[lvl]->GetBlock(0,0));
-
-        // checking the difference between coarsened and true
-        // (from bilinear form) constraint operators
-        /*
-        SparseMatrix * tempdiffsp = mfem::Mult(*P_L2T, *Constr_PR);
-        tempdiffsp->Add(-1.0, *Constr_lvls[lvl + 1]);
-        std::cout << tempdiffsp->MaxNorm() << "\n";
-        */
 
         Constr_lvls[lvl + 1] = mfem::Mult(*P_L2T, *Constr_PR);
 
@@ -2110,11 +2063,6 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
         delete P_FuncT;
         delete P_L2T;
     }
-
-    //tempvec_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
-    //tempvec2_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
-    //solupdate_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
-    //rhsfunc_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 
     trueoffsets_lvls[lvl + 1] = new Array<int>(numblocks + 1);
     (*trueoffsets_lvls[lvl + 1])[0] = 0;
