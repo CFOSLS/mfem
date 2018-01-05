@@ -2083,7 +2083,7 @@ int main(int argc, char *argv[])
     if (!withDiv && verbose)
         std::cout << "Multilevel code cannot be used without withDiv flag \n";
 
-    for (int l = num_levels - 1; l >=0; --l)
+    for (int l = num_levels - 1; l >= 0; --l)
     {
         // creating pmesh for level l
         if (l == num_levels - 1)
@@ -3816,6 +3816,27 @@ int main(int argc, char *argv[])
     */
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+
+    // checking that the computed particular solution satisfies essential boundary conditions
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), Xinit_truedofs.GetBlock(blk), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+                                  "for the particular solution");
+    }
+
+    // checking that the boundary conditions are not violated for the initial guess
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][blk]->Size(); ++i)
+        {
+            int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][blk])[i];
+            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for the ParticSol! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << ParticSol.GetBlock(blk)[tdofind] << "\n";
+            }
+        }
+    }
 
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());

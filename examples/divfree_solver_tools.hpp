@@ -100,8 +100,8 @@ double CheckFunctValue(MPI_Comm comm, const BlockOperator& Funct, const BlockVec
     double local_func_norm;
     if (truefunctrhs)
     {
-        trueres -= *truefunctrhs;
-        local_func_norm = truevec * trueres / sqrt (trueres.Size()) + (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
+        trueres.Add(-2.0, *truefunctrhs);
+        local_func_norm = truevec * trueres / sqrt (trueres.Size()); // incorrect, different f should be used + (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
     }
     else // NULL case assumed to denote zero righthand side
         local_func_norm = truevec * trueres / sqrt (trueres.Size());
@@ -1026,6 +1026,15 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         }
         */
 
+        /*
+        for (int j = 0; j < Local_inds[1]->Size(); ++j)
+            if ( (*Local_inds[1])[j] == 0)
+            {
+                std::cout << "AE = " << AE << "\n";
+                std::cout << "Caught ya! It is an ess boundary dof \n";
+            }
+        */
+
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
 
@@ -1147,9 +1156,15 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
     } // end of loop over AEs
 
+    //std::cout << "sol block 1 \n";
+    //sol.GetBlock(1).Print();
+
     for (int blk = 0; blk < numblocks; ++blk)
         //d_td_blocks[blk]->MultTranspose(1.0, sol_update.GetBlock(blk), 1.0, truesol.GetBlock(blk));
         d_td_blocks[blk]->MultTranspose(sol.GetBlock(blk), truesol.GetBlock(blk));
+
+    //std::cout << "truesol block 1 \n";
+    //truesol.GetBlock(1).Print();
 
     return;
 
@@ -3961,7 +3976,7 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
 {
     bool already_printed = false;
     if (monotone_check)
-        if (value_curr > value_prev && fabs(value_prev - value_curr) / value_scalefactor > 1.0e-10 )
+        if (value_curr > value_prev && fabs(value_prev - value_curr) / fabs(value_scalefactor) > 1.0e-10 )
         {
             std::cout << "criteria: " << name << " is increasing! \n";
             std::cout << "current " << name << ": " << value_curr << "\n";
@@ -3984,7 +3999,7 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
                       << " (rel.tol = " << stop_tol << ")\n";
         }
 
-        if ( fabs(value_prev - value_curr) / value_scalefactor < stop_tol )
+        if ( fabs(value_prev - value_curr) / fabs(value_scalefactor) < stop_tol )
             return true;
         else
             return false;
@@ -4001,7 +4016,7 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
                       << " (rel.tol = " << stop_tol << ")\n";
         }
 
-        if ( fabs(value_curr) / value_scalefactor < stop_tol )
+        if ( fabs(value_curr) / fabs(value_scalefactor) < stop_tol )
             return true;
         else
             return false;
@@ -4214,6 +4229,20 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     // tempblock is the initial guess (on true dofs)
     *tempblock_truedofs = *init_guess;
 
+    // checking that the boundary conditions are not violated for the initial guess
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < essbdrtruedofs_Func[0][blk]->Size(); ++i)
+        {
+            int tdofind = (*essbdrtruedofs_Func[0][blk])[i];
+            if ( fabs(init_guess->GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for the initial guess! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << init_guess->GetBlock(blk)[tdofind] << "\n";
+            }
+        }
+    }
+
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
@@ -4366,6 +4395,20 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     next_sol = previous_sol;
 
+    // checking that the boundary conditions are not violated for the previous sol
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < essbdrtruedofs_Func[0][blk]->Size(); ++i)
+        {
+            int tdofind = (*essbdrtruedofs_Func[0][blk])[i];
+            if ( fabs(previous_sol.GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for the previous sol! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << previous_sol.GetBlock(blk)[tdofind] << "\n";
+            }
+        }
+    }
+
     // FIXME: Remove
     CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs, offsets_global, next_sol,
                              "at the beginning of Solve: ", print_level);
@@ -4449,9 +4492,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         if (LocalSolvers_lvls[l])
         {
-            //std::cout << "Temporarily not solving the local problems! \n";
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
             // FIXME: comment this
+            //std::cout << "Temporarily not solving the local problems! \n";
             //*truetempvec_lvls[l] = 0.0;
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
         }
@@ -4504,8 +4547,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
                              "after local solve at level 0: ", print_level);
 
+    // checking that the boundary conditions are not violated for the local update
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < essbdrtruedofs_Func[0][blk]->Size(); ++i)
+        {
+            int tdofind = (*essbdrtruedofs_Func[0][blk])[i];
+            if ( fabs(truesolupdate_lvls[0]->GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for the local update! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << truesolupdate_lvls[0]->GetBlock(blk)[tdofind] << "\n";
+            }
+        }
+    }
+
     // a check of the rhs for the coarsest level problem
-    /*
     {
         BlockVector temp(offsets_global);
         MultTrueFunc(0,-1.0, next_sol, temp);
@@ -4528,7 +4584,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         std::cout << "norm of (trueresfunc[0] - (F - Funct * current sol)) = " << temp.Norml2() / sqrt (temp.Size()) << "\n";
     }
-    */
 
     next_sol -= *truesolupdate_lvls[0];
 
@@ -4537,7 +4592,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // righthand side  (from rhsfunc) on true dofs
 
     // trying to organize the coarsest solver right here
-    /*
     // manually creating the operator at the coarsest level from Funct_lvls[0]
     SparseMatrix * P_RT = new SparseMatrix(P_Func[0]->GetBlock(0,0));
     SparseMatrix *P_H1;
@@ -4690,11 +4744,25 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         truesolupdate_lvls[num_levels - 1]->GetBlock(blk) = coarsesol.GetBlock(blk);
 
     *truetempvec_lvls[1] = *truesolupdate_lvls[num_levels - 1];
-    * */
 
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
-    /*
+    //truesolupdate_lvls[1]->GetBlock(1) *= -1;
+
+    // checking that the boundary conditions are not violated for the coarse update
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < essbdrtruedofs_Func[1][blk]->Size(); ++i)
+        {
+            int tdofind = (*essbdrtruedofs_Func[1][blk])[i];
+            if ( fabs(truesolupdate_lvls[1]->GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for the coarsest update! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << truesolupdate_lvls[1]->GetBlock(blk)[tdofind] << "\n";
+            }
+        }
+    }
+
     *truetempvec2_lvls[1] = *truetempvec_lvls[1];
     *truetempvec2_lvls[1] -= *truesolupdate_lvls[1];
     std::cout << "norm of difference between coarsest updates = " << truetempvec2_lvls[1]->Norml2() / sqrt (truetempvec2_lvls[1]->Size()) << "\n";
@@ -4702,9 +4770,26 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     //*truesolupdate_lvls[1] = *truetempvec_lvls[1];
     //*truesolupdate_lvls[num_levels - 1] = 0.0;
-    */
 
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
+
+    // checking that the boundary conditions are not violated for P * coarse update
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        for (int i = 0; i < essbdrtruedofs_Func[0][blk]->Size(); ++i)
+        {
+            int tdofind = (*essbdrtruedofs_Func[0][blk])[i];
+            if ( fabs(truetempvec_lvls[0]->GetBlock(blk)[tdofind]) > 1.0e-16 )
+            {
+                std::cout << "blk = " << blk << ": bnd cnd is violated for P * coarsest update! \n";
+                std::cout << "tdofind = " << tdofind << ", value = " << truetempvec_lvls[0]->GetBlock(blk) << "\n";
+            }
+        }
+    }
+
+    //checking that P * coarse update satisfies the divergence constraint
+    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_lvls[0], NULL, "for P * coarsest update"),"");
+
     std::cout << "coarsest level update norm = " << truesolupdate_lvls[1]->Norml2() / sqrt (truesolupdate_lvls[1]->Size()) << "\n";
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
