@@ -719,7 +719,13 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
     Array2D<const SparseMatrix *> Op_blks(numblocks, numblocks);
     Array2D<DenseMatrix*> LocalAE_Matrices(numblocks, numblocks);
+    std::vector<SparseMatrix*> AE_eintdofs_blks(numblocks);
     std::vector<Array<int>*> Local_inds(numblocks);
+
+    for ( int blk = 0; blk < numblocks; ++blk )
+    {
+        AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
+    }
 
 #ifdef COMPUTE_EXACTDISCRETESOL
     /*
@@ -808,13 +814,9 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         sub_Func_offsets[0] = 0;
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            SparseMatrix AE_eintdofs_blk = AE_eintdofs_blocks->GetBlock(blk,blk);
-
-            // FIXME: Is this necessary?
-            // For each AE new memory?
-            Array<int> tempview_inds(AE_eintdofs_blk.GetRowColumns(AE), AE_eintdofs_blk.RowSize(AE));
-            Local_inds[blk] = new Array<int>;
-            tempview_inds.Copy(*Local_inds[blk]);
+            // no memory allocation here, it's just a viewer which is created
+            Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+                                             AE_eintdofs_blks[blk]->RowSize(AE));
 
             if (blk == 0) // degeneracy comes from Constraint matrix which involves only sigma = the first block
             {
@@ -3140,9 +3142,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     } // end of loop over finer levels
 
     // BOTTOM: solve the global problem at the coarsest level
-    // imposes boundary conditions and assembles the coarsests level's
-    // righthand side  (from rhsfunc) on true dofs
-
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
@@ -3159,7 +3158,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
-
 
             // smooth at the finer level
             if (Smoothers_lvls[l - 1])
