@@ -4264,10 +4264,10 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         funct_firstnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs, offsets_global, *init_guess,
                                  "for the initial guess: ", print_level);
 
-
     // tempblock is the initial guess (on true dofs)
     *tempblock_truedofs = *init_guess;
 
+    /*
     // checking that the boundary conditions are not violated for the initial guess
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -4281,6 +4281,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             }
         }
     }
+    */
 
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
@@ -4296,7 +4297,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+            MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                        "before the iteration"),"");
             MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
                                        "before the iteration"),"");
