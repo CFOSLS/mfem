@@ -485,17 +485,6 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
     xblock->Update(x.GetData(), block_offsets);
     yblock->Update(y.GetData(), block_offsets);
 
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        Array<int> * temp = essbdrtruedofs_blocks[blk];
-
-        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-        {
-            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-        }
-    }
-
-
     // 1. set up solution and righthand side vectors
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
@@ -505,6 +494,18 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         MFEM_ASSERT(coarsetrueRhs->GetBlock(blk).Size() == xblock->GetBlock(blk).Size(),
                     "Sizes mismatch when finalizing rhs at the coarsest level!\n");
         coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
+
+        // imposing boundary conditions on true dofs
+        for ( int blk = 0; blk < numblocks; ++blk)
+        {
+            Array<int> * temp = essbdrtruedofs_blocks[blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+
     }
 
     if (rhs_constr)
@@ -525,7 +526,6 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
 
 // ~ Non-overlapping Schwarz smoother based on agglomerated elements
 // which provides zeros at the interfaces in the output
-// TODO: Rename all the variables appropriately: now it's a mess of Op, Funct etc.
 class LocalProblemSolver : public Operator
 {
 private:
@@ -533,10 +533,6 @@ private:
 
 protected:
     int numblocks;
-
-    // a parameter used in Get_AE_eintdofs to identify if one should additionally look
-    // for fine-grid dofs which are internal to the fine-grid elements
-    bool higher_order;
 
     const BlockMatrix& Op_blkspmat;
     const SparseMatrix& Constr_spmat;
@@ -546,7 +542,7 @@ protected:
     // Relation tables which represent agglomerated elements-to-elements relation
     const SparseMatrix& AE_e;
 
-    const BlockMatrix& el_to_dofs_Func;
+    const BlockMatrix& el_to_dofs_Op;
     const SparseMatrix& el_to_dofs_L2;
 
     mutable SparseMatrix* AE_edofs_L2;
@@ -605,28 +601,26 @@ public:
                        const SparseMatrix& Constr_Spmat,
                        const std::vector<HypreParMatrix*>& D_tD_blks,
                        const SparseMatrix& AE_el,
-                       const BlockMatrix& El_to_Dofs_Func,
+                       const BlockMatrix& El_to_Dofs_Op,
                        const SparseMatrix& El_to_Dofs_L2,
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
 #ifdef COMPUTE_EXACTDISCRETESOL
                        Vector * sigma_input, Vector * S_input, Vector * lambda_input,
 #endif
-                       bool Optimized_LocalSolve,
-                       bool Higher_Order)
+                       bool Optimized_LocalSolve)
         : Operator(),
           numblocks(Op_Blksmat.NumRowBlocks()),
           Op_blkspmat(Op_Blksmat), Constr_spmat(Constr_Spmat),
           d_td_blocks(D_tD_blks),
           AE_e(AE_el),
-          el_to_dofs_Func(El_to_Dofs_Func),
+          el_to_dofs_Op(El_to_Dofs_Op),
           el_to_dofs_L2(El_to_Dofs_L2),
           bdrdofs_blocks(BdrDofs_blks),
           essbdrdofs_blocks(EssBdrDofs_blks)
     {
         finalized = 0;
         optimized_localsolve = Optimized_LocalSolve;
-        higher_order = Higher_Order;
         compute_AEproblem_matrices.SetSize(numblocks + 1, numblocks + 1);
         compute_AEproblem_matrices = true;
 
@@ -686,7 +680,7 @@ void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) c
 void LocalProblemSolver::Setup()
 {
     AE_edofs_L2 = mfem::Mult(AE_e, el_to_dofs_L2);
-    AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Func, essbdrdofs_blocks, bdrdofs_blocks);
+    AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Op, essbdrdofs_blocks, bdrdofs_blocks);
 
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
@@ -1366,25 +1360,24 @@ public:
                        const SparseMatrix& Constr_Spmat,
                        const std::vector<HypreParMatrix*>& D_tD_blks,
                        const SparseMatrix& AE_el,
-                       const BlockMatrix& El_to_Dofs_Func,
+                       const BlockMatrix& El_to_Dofs_Op,
                        const SparseMatrix& El_to_Dofs_L2,
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
 #ifdef COMPUTE_EXACTDISCRETESOL
                        Vector * sigma, Vector * S, Vector * lambda,
 #endif
-                       bool Optimized_LocalSolve,
-                       bool Higher_Order)
+                       bool Optimized_LocalSolve)
         : LocalProblemSolver(Op_Blksmat,
                               Constr_Spmat,
                               D_tD_blks,
                               AE_el,
-                              El_to_Dofs_Func, El_to_Dofs_L2,
+                              El_to_Dofs_Op, El_to_Dofs_L2,
                               BdrDofs_blks, EssBdrDofs_blks,
 #ifdef COMPUTE_EXACTDISCRETESOL
                               sigma, S, lambda,
 #endif
-                              Optimized_LocalSolve, Higher_Order)
+                              Optimized_LocalSolve)
     {
     }
 
@@ -2109,7 +2102,7 @@ void DivConstraintSolver::ProjectFinerL2ToCoarser(int level, const Vector& in,
     out.SetSize(Proj->Height());
     Proj->Mult(ProjTin, out);
 
-    // TODO: We need either to use additional memory for storing
+    // We need either to use additional memory for storing
     // result of the previous division in a temporary vector or
     // to multiply the output (ProjTin) back as in the loop below
     // in order to get correct output ProjTin in the end
@@ -2151,7 +2144,6 @@ void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f, V
     return;
 }
 
-// TODO: Implement a separate class for Hcurl smoother at level l in the block form
 class HcurlGSSSmoother : public BlockOperator
 {
 private:
@@ -2485,13 +2477,12 @@ void HcurlGSSSmoother::Setup() const
 }
 
 // TODO: Add as an option using blas and lapack versions for solving local problems
-// TODO: Test after all  with nonzero boundary conditions for sigma
+// TODO: Test after all with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
 // TODO: Add destructors for the new classes which deallocates all the memory
 // TODO: Run a valgrind check
 // TODO: Clean up the function descriptions
 // TODO: Clean up the variables names
-// TODO: Update HcurlSmoother class
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
 // TODO: Make dof_truedof an optional data member so that either dof_truedof or
 // TODO: global funct matrices (and offsets) are given at all level, maybe via two different constructors

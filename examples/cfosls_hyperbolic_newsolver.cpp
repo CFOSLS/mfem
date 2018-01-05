@@ -28,7 +28,7 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-#define COMPUTE_EXACTDISCRETESOL
+//#define COMPUTE_EXACTDISCRETESOL
 
 #include "divfree_solver_tools.hpp"
 
@@ -1337,10 +1337,10 @@ int main(int argc, char *argv[])
     std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
-    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels); // FIXME: Proably, minus 1 for all Hcurl entries?
-    std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels);
+    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels - 1); // FIXME: Proably, minus 1 for all Hcurl entries?
+    std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels - 1);
     Array< SparseMatrix* > P_C_lvls(num_levels - 1);
-    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
+    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels - 1);
 
     std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
     Array< SparseMatrix* > P_H_lvls(num_levels - 1);
@@ -1366,8 +1366,11 @@ int main(int argc, char *argv[])
        BdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
-       EssBdrDofs_Hcurl[l] = new Array<int>;
-       EssBdrTrueDofs_Hcurl[l] = new Array<int>;
+       if (l < num_levels - 1)
+       {
+           EssBdrDofs_Hcurl[l] = new Array<int>;
+           EssBdrTrueDofs_Hcurl[l] = new Array<int>;
+       }
        Funct_mat_offsets_lvls[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        {
@@ -2142,8 +2145,11 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
-        C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
-        C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+        if (l < num_levels - 1)
+        {
+            C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
+            C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+        }
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
@@ -2272,7 +2278,8 @@ int main(int argc, char *argv[])
         */
 
         // getting pointers to dof_truedof matrices
-        Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+        if (l < num_levels - 1)
+            Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
@@ -2343,7 +2350,7 @@ int main(int argc, char *argv[])
 
             // computing projectors assembled on true dofs
 
-            // FIXME: Rewrite these ugly computations
+            // TODO: Rewrite these ugly computations
             auto d_td_coarse_R = R_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             unique_ptr<SparseMatrix>RP_R_local(
                         Mult(*R_space_lvls[l]->GetRestrictionMatrix(), *P_R[l]));
@@ -2617,8 +2624,7 @@ int main(int argc, char *argv[])
 #ifdef COMPUTE_EXACTDISCRETESOL
                                                          sigma_vec, S_vec, lambda_vec,
 #endif
-                                                         optimized_localsolve,
-                                                         false);
+                                                         optimized_localsolve);
             }
             else // no S
             {
@@ -2633,8 +2639,7 @@ int main(int argc, char *argv[])
 #ifdef COMPUTE_EXACTDISCRETESOL
                                                          sigma_vec, NULL, lambda_vec,
 #endif
-                                                         optimized_localsolve,
-                                                         false);
+                                                         optimized_localsolve);
             }
 
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
@@ -3766,7 +3771,6 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    //const bool higher_order = false;
     const bool construct_coarseops = true;
     int stopcriteria_type = 1;
 
@@ -3865,6 +3869,7 @@ int main(int argc, char *argv[])
     temp_constr -= Floc;
 
 #ifdef COMPUTE_EXACTDISCRETESOL
+    /*
     // checking that the sigma, S and lambda satisfy all the equations on dofs level
     SparseMatrix Ablocktemp = Funct_mat_lvls[0]->GetBlock(0,0);
     SparseMatrix Constrtemp = *Constraint_mat_lvls[0];
@@ -3936,12 +3941,11 @@ int main(int argc, char *argv[])
         res2 -= Funct_rhs_lvls[0]->GetBlock(1);
 
         /*
-        for ( int i = 0; i < EssBdrDofs_Funct_lvls[0][1]->Size(); ++i )
-        {
-            int bdrtdof = (*EssBdrDofs_Funct_lvls[0][1])[i];
-            res2[bdrtdof] = 0.0;
-        }
-        */
+        //for ( int i = 0; i < EssBdrDofs_Funct_lvls[0][1]->Size(); ++i )
+        //{
+            //int bdrtdof = (*EssBdrDofs_Funct_lvls[0][1])[i];
+            //res2[bdrtdof] = 0.0;
+        //}
 
         for ( int i = 0; i < res2.Size(); ++i )
         {
@@ -4008,7 +4012,7 @@ int main(int argc, char *argv[])
     res3 -= Floc;
 
     std::cout << "res3 norm = " << res3.Norml2() << "\n";
-
+    */
 #endif
 
     // 3.1 if not, computing the particular solution
@@ -4523,7 +4527,7 @@ int main(int argc, char *argv[])
         ParLinearForm *secondeqn_rhs;
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
         {
-            secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
+            secondeqn_rhs = new ParLinearForm(H_space_lvls[0]);
             secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
             secondeqn_rhs->Assemble();
             secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
@@ -4543,22 +4547,11 @@ int main(int argc, char *argv[])
     BlockVector NewX(new_trueoffsets);
     NewX = 0.0;
 
-    //NewRhs = 0.02;
     NewSolver.SetInitialGuess(ParticSol);
-    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, while debugging parallel version!!!
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, for debugging purposes!
 
     if (verbose)
         NewSolver.PrintAllOptions();
-
-    /*
-    if (numblocks > 1)
-    {
-        ofstream ofs3("Gblock1_before solver.txt");
-        ofs3 << NewRhs.GetBlock(1).Size() << "\n";
-        NewRhs.GetBlock(1).Print(ofs3,1);
-        ofs3.close();
-    }
-    */
 
     NewSolver.Mult(NewRhs, NewX);
 
