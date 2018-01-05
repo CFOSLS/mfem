@@ -2700,12 +2700,16 @@ protected:
     mutable HypreParMatrix* Curlh_global;
 #endif
 
+    // FIXME: Fix the documentation
     // Projection of the system matrix onto discrete Hcurl space
     // Curl_hT * A_l * Curlh matrices at all levels
     mutable SparseMatrix* CTMC;
 
     // global CTMC as HypreParMatrices at all levels;
     mutable HypreParMatrix* CTMC_global;
+
+    // stores global Funct blocks for all blocks except row = 0 or col = 0
+    mutable Array2D<HypreParMatrix *> Funct_restblocks_global;
 
     // structures used when all dofs are relaxed (via HypreSmoothers):
     mutable Array<Operator*> Smoothers;
@@ -2725,6 +2729,9 @@ protected:
     // but take care about the fact that GetTrueVDofs is different from GetVDofs()
     const Array<int> & essbdrtruedofs_Hcurl;
 
+    const std::vector<Array<int>*> & essbdrdofs_Funct;
+    const std::vector<Array<int>*> & essbdrtruedofs_Funct;
+
     mutable Array<int> block_offsets;
     mutable BlockVector * xblock;
     mutable BlockVector * yblock;
@@ -2736,6 +2743,8 @@ public:
                      const HypreParMatrix& Dof_TrueDof_Hcurl,
                      const std::vector<HypreParMatrix*> & Dof_TrueDof_Funct,
                      const Array<int>& EssBdrdofs_Hcurl, const Array<int> &EssBdrtruedofs_Hcurl,
+                     const std::vector<Array<int>* >& EssBdrDofs_Funct,
+                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                      const Array<int> * SweepsNum, const Array<int> &Block_Offsets);
 
     // FIXME: Implement this
@@ -2760,6 +2769,8 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                                     const std::vector<HypreParMatrix *> &Dof_TrueDof_Funct,
                                     const Array<int>& EssBdrdofs_Hcurl,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
+                                    const std::vector<Array<int>* >& EssBdrDofs_Funct,
+                                    const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                     const Array<int> * SweepsNum,
                                     const Array<int>& Block_Offsets)
     : BlockOperator(Block_Offsets),
@@ -2769,7 +2780,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
       d_td_Hcurl(Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
       essbdrdofs_Hcurl(EssBdrdofs_Hcurl),
-      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl)
+      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
+      essbdrdofs_Funct(EssBdrDofs_Funct),
+      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
 {
     Curlh = &Discrete_Curl;
 
@@ -2799,6 +2812,12 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
             sweeps_num[blk] = (*SweepsNum)[blk];
     else
         sweeps_num = 1;
+
+    Funct_restblocks_global.SetSize(numblocks, numblocks);
+    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
+        Funct_restblocks_global(rowblk,0) = NULL;
+    for (int colblk = 0; colblk < numblocks; ++colblk)
+        Funct_restblocks_global(0,colblk) = NULL;
 
     Setup();
 }
@@ -2841,11 +2860,20 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     }
 
 
-    // imposing boundary conditions in Hcurl on the righthand side
+    // imposing boundary conditions in Hcurl on the righthand side (block 0)
     for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
     {
-        truerhs->GetBlock(0)[essbdrtruedofs_Hcurl[tdofind]] = 0.0;
+        int tdof = essbdrtruedofs_Hcurl[tdofind];
+        truerhs->GetBlock(0)[tdof] = 0.0;
     }
+
+    // imposing boundary conditions for the rest of the blocks in the righthand side
+    for ( int blk = 1; blk < numblocks; ++blk)
+        for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+        {
+            int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+            truerhs->GetBlock(blk)[tdof] = 0.0;
+        }
 
 
     /*
@@ -2887,7 +2915,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
         }
         else
-            yblock->GetBlock(blk) += truex->GetBlock(blk);
+            yblock->GetBlock(blk) = truex->GetBlock(blk);
     }
 
 
@@ -2947,16 +2975,27 @@ void HcurlGSSSmoother::Setup() const
     if (numblocks > 1)
     {
         int blk = 1;
-        const SparseMatrix * Funct_blk = &(Funct_mat.GetBlock(blk,blk));
+        SparseMatrix * Funct_blk = new SparseMatrix(Funct_mat.GetBlock(blk,blk));
+
+        for ( int dof = 0; dof < essbdrdofs_Funct[blk]->Size(); ++dof)
+        {
+            if ( (*essbdrdofs_Funct[blk])[dof] != 0)
+            {
+                Funct_blk->EliminateRowCol(dof);
+            }
+        }
+
+
         HypreParMatrix* Functblk_d_td_blk = d_td_Funct_blocks[blk]->LeftDiagMult(*Funct_blk, d_td_Funct_blocks[blk]->GetRowStarts() );
         HypreParMatrix * d_td_blk_T = d_td_Funct_blocks[blk]->Transpose();
-        HypreParMatrix * Functblk_global = ParMult(d_td_blk_T, Functblk_d_td_blk);
-        Functblk_global->CopyRowStarts();
-        Functblk_global->CopyColStarts();
+        Funct_restblocks_global(1,1) = ParMult(d_td_blk_T, Functblk_d_td_blk);
+        Funct_restblocks_global(1,1)->CopyRowStarts();
+        Funct_restblocks_global(1,1)->CopyColStarts();
         delete Functblk_d_td_blk;
+        delete Funct_blk;
 
-        Smoothers[1] = new HypreBoomerAMG(*Functblk_global);
-        delete Functblk_global;
+        // FIXME: Should we store the matrix which is the argument?
+        Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
     }
 
     truex = new BlockVector(trueblock_offsets);
@@ -4517,6 +4556,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
         */
 
+        std::cout << "level 0 local update norm = " << truesolupdate_lvls[0]->Norml2() / sqrt (truesolupdate_lvls[0]->Size()) << "\n";
+        next_sol += *truesolupdate_lvls[0];
+        funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
+                                 "after local solve at level 0: ", print_level);
+        next_sol -= *truesolupdate_lvls[0];
+
         // smooth
         if (Smoothers_lvls[l])
         {
@@ -4524,6 +4569,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
+
+        std::cout << "level 0 smoother update norm = " << truetempvec2_lvls[0]->Norml2() / sqrt (truetempvec2_lvls[0]->Size()) << "\n";
+        next_sol += *truesolupdate_lvls[0];
+        funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
+                                 "after smoother update at level 0: ", print_level);
+        next_sol -= *truesolupdate_lvls[0];
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
@@ -4533,9 +4584,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             for (int i = 0; i < essbdrtruedofs_Func[l][blk]->Size(); ++i)
             {
                 int ind = (*essbdrtruedofs_Func[l][blk])[i];
-                if (fabs(trueresfunc_lvls[l]->GetBlock(blk)[ind]) > 1.0e-16)
-                    std::cout << "Wrong boundary value for the residual will be corrected " <<
-                                 "block = " << blk << ", value = " << trueresfunc_lvls[l]->GetBlock(blk)[ind] << "\n";
+                //if (fabs(trueresfunc_lvls[l]->GetBlock(blk)[ind]) > 1.0e-16)
+                    //std::cout << "Wrong boundary value for the residual will be corrected " <<
+                                 //"block = " << blk << ", value = " << trueresfunc_lvls[l]->GetBlock(blk)[ind] << "\n";
                 trueresfunc_lvls[l]->GetBlock(blk)[ind] = 0.0;
             }
         }
@@ -4543,14 +4594,14 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     } // end of loop over finer levels
 
-    // FIXME: Only for debugging, the functional in blocked case is not being minimized
+    // FIXME: Only for debugging
     // 4. update the global iterate by the resulting update at the finest level
 
-    std::cout << "level 0 update norm = " << truesolupdate_lvls[0]->Norml2() / sqrt (truesolupdate_lvls[0]->Size()) << "\n";
+    //std::cout << "level 0 update norm = " << truesolupdate_lvls[0]->Norml2() / sqrt (truesolupdate_lvls[0]->Size()) << "\n";
 
-    next_sol += *truesolupdate_lvls[0];
-    funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
-                             "after local solve at level 0: ", print_level);
+    //next_sol += *truesolupdate_lvls[0];
+    //funct_currnorm = CheckFunctValue(comm, Funct_global, Funct_rhsglobal_truedofs,  offsets_global, next_sol,
+                             //"after local solve at level 0: ", print_level);
 
     /*
     // checking that the boundary conditions are not violated for the local update
@@ -4594,7 +4645,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     }
     */
 
-    next_sol -= *truesolupdate_lvls[0];
+    //next_sol -= *truesolupdate_lvls[0];
 
     // BOTTOM: solve the global problem at the coarsest level
     // imposes boundary conditions and assembles the coarsests level's

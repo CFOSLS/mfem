@@ -2567,7 +2567,7 @@ int main(int argc, char *argv[])
     {
         if (l < num_levels - 1)
         {
-    #ifdef WITH_SMOOTHERS
+#ifdef WITH_SMOOTHERS
             Array<int> SweepsNum(numblocks_funct);
             Array<int> offsets_global(numblocks_funct + 1);
             offsets_global[0] = 0;
@@ -2578,10 +2578,11 @@ int main(int argc, char *argv[])
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
+                                                     EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
-    #else
+#else
             Smoothers_lvls[l] = NULL;
-    #endif
+#endif
         }
 
 #ifdef WITH_LOCALSOLVERS
