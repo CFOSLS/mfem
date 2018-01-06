@@ -980,8 +980,6 @@ int main(int argc, char *argv[])
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
-    args.AddOption(&space_for_S, "-sspace", "--sspace",
-                   "Space for S (H1 or L2).");
     args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
                    "--no-eliminateS",
                    "Turn on/off elimination of S in L2 formulation.");

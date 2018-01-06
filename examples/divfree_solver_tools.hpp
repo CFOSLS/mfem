@@ -2462,6 +2462,8 @@ void HcurlGSSSmoother::Setup() const
         delete Funct_blk;
 
         Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
+        ((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
+        ((HypreBoomerAMG*)(Smoothers[1]))->iterative_mode = false;
     }
 
     truex = new BlockVector(trueblock_offsets);
