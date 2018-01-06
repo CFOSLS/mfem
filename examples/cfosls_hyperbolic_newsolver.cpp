@@ -998,7 +998,8 @@ int main(int argc, char *argv[])
     args.AddOption(&refine_t_first, "-refine-t-first", "--refine-time-first",
                    "-refine-x-first", "--refine-space-first",
                    "Refine time or space first in anisotropic refinement.");
-
+    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
+                   "Space for S: L2 or H1.");
     args.Parse();
     if (!args.Good())
     {

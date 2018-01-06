@@ -1686,9 +1686,8 @@ protected:
 
     const Array<Operator*>& Smoothers_lvls;
 
-    // a given blockvector which satisfies essential bdr conditions
-    // imposed for the initial problem
-    // on true dofs
+    // a given blockvector (on true dofs) which satisfies
+    // essential bdr conditions imposed for the initial problem
     const BlockVector& bdrdata_truedofs;
 
     // stores Functional matrix on all levels except the finest
@@ -2581,7 +2580,7 @@ protected:
     mutable Array<SparseMatrix*> Constr_lvls; // can be removed since it's used only for debugging
 
     const BlockOperator& Funct_global;
-    const BlockVector& Functrhs_global;
+    const BlockVector& Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
     // a required input since MFEM cannot give out offsets out of the const BlockOperator which is ugly imo
     const Array<int>& offsets_global;
