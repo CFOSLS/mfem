@@ -1405,7 +1405,7 @@ HypreParMatrix *Add(double alpha, const HypreParMatrix &A,
    return C;
 }
 
-HypreParMatrix * ParMult(HypreParMatrix *A, HypreParMatrix *B)
+HypreParMatrix * ParMult(const HypreParMatrix *A, const HypreParMatrix *B)
 {
    hypre_ParCSRMatrix * ab;
    ab = hypre_ParMatmul(*A,*B);
@@ -1448,7 +1448,7 @@ HypreParMatrix * RAP(HypreParMatrix *A, HypreParMatrix *P)
    return new HypreParMatrix(rap);
 }
 
-HypreParMatrix * RAP(HypreParMatrix * Rt, HypreParMatrix *A, HypreParMatrix *P)
+HypreParMatrix * RAP(const HypreParMatrix * Rt, const HypreParMatrix *A, const HypreParMatrix *P)
 {
    HYPRE_Int P_owns_its_col_starts =
       hypre_ParCSRMatrixOwnsColStarts((hypre_ParCSRMatrix*)(*P));
