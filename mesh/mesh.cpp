@@ -2697,6 +2697,17 @@ Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
    }
    mesh.faces_info.Copy(faces_info);
 
+   // Duplicate the planars.
+   if (Dim == 4)
+   {
+       planars.SetSize(mesh.planars.Size());
+       for (int i = 0; i < planars.Size(); i++)
+       {
+          Element *planar = mesh.planars[i];
+          planars[i] = (planar) ? planar->Duplicate(this) : NULL;
+       }
+   }
+
    // Do NOT copy the element-to-element Table, el_to_el
    el_to_el = NULL;
 
