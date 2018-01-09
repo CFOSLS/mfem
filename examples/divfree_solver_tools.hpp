@@ -11,7 +11,7 @@ using std::unique_ptr;
 // PLAN:
 // 1) ...
 
-//#define MEMORY_OPTIMIZED
+#define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 #define CHECK_LOCALSOLVE
