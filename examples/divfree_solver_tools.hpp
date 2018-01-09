@@ -11,7 +11,7 @@ using std::unique_ptr;
 // PLAN:
 // 1) ...
 
-#define MEMORY_OPTIMIZED
+//#define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 #define CHECK_LOCALSOLVE
@@ -367,34 +367,59 @@ void CoarsestProblemSolver::Setup() const
     */
 
     // 2. Creating the block matrix from the local parts using dof_truedof relation
+    HYPRE_Int glob_num_rows = dof_trueDof_L2.M();
+    HYPRE_Int glob_num_cols = dof_trueDof_blocks[0]->M();
+    HYPRE_Int * row_starts = dof_trueDof_L2.GetRowStarts();
+    HYPRE_Int * col_starts = dof_trueDof_blocks[0]->GetRowStarts();;
+    HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, Constr_spmat);
+    //temp->CopyRowStarts();
+    //temp->CopyColStarts();
+    HypreParMatrix * Constr_global = RAP(&dof_trueDof_L2, temphpmat, dof_trueDof_blocks[0]);
 
-    HypreParMatrix * Constr_d_td = dof_trueDof_blocks[0]->LeftDiagMult(
-                *Constr_spmat, dof_trueDof_L2.GetColStarts());
-    HypreParMatrix * d_td_L2_T = dof_trueDof_L2.Transpose();
+    // old way
+    //HypreParMatrix * Constr_d_td = dof_trueDof_blocks[0]->LeftDiagMult(
+                //*Constr_spmat, dof_trueDof_L2.GetColStarts());
+    //HypreParMatrix * d_td_L2_T = dof_trueDof_L2.Transpose();
+    //HypreParMatrix * Constr_global = ParMult(d_td_L2_T, Constr_d_td);
 
-    HypreParMatrix * Constr_global = ParMult(d_td_L2_T, Constr_d_td);
     Constr_global->CopyRowStarts();
     Constr_global->CopyColStarts();
 
     HypreParMatrix *ConstrT_global = Constr_global->Transpose();
 
-    delete Constr_d_td;
-    delete d_td_L2_T;
+    //delete Constr_d_td;
+    //delete d_td_L2_T;
+    delete temphpmat;
 
     Array2D<HypreParMatrix*> Funct_global(numblocks, numblocks);
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
         {
-            auto Funct_d_td = dof_trueDof_blocks[blk2]->LeftDiagMult(Op_blkspmat->GetBlock(blk1,blk2),
-                                                                     dof_trueDof_blocks[blk1]->GetRowStarts() );
-            auto d_td_T = dof_trueDof_blocks[blk1]->Transpose();
+            // alternative way
+            HYPRE_Int glob_num_rows = dof_trueDof_blocks[blk1]->M();
+            HYPRE_Int glob_num_cols = dof_trueDof_blocks[blk2]->M();
+            HYPRE_Int * row_starts = dof_trueDof_blocks[blk1]->GetRowStarts();
+            HYPRE_Int * col_starts = dof_trueDof_blocks[blk2]->GetRowStarts();;
+            //std::cout << "row_starts: " << row_starts[0] << ", " << row_starts[1] << "\n";
+            //std::cout << "col_starts: " << col_starts[0] << ", " << col_starts[1] << "\n";
+            //HypreParMatrix * temp = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+            HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+            //temp->CopyRowStarts();
+            //temp->CopyColStarts();
+            Funct_global(blk1, blk2) = RAP(dof_trueDof_blocks[blk1], temphpmat, dof_trueDof_blocks[blk2]);
 
-            Funct_global(blk1, blk2) = ParMult(d_td_T, Funct_d_td);
+            // old way
+            //auto Funct_d_td = dof_trueDof_blocks[blk2]->LeftDiagMult(Op_blkspmat->GetBlock(blk1,blk2),
+            //                                                         dof_trueDof_blocks[blk1]->GetRowStarts() );
+            //auto d_td_T = dof_trueDof_blocks[blk1]->Transpose();
+            //Funct_global(blk1, blk2) = ParMult(d_td_T, Funct_d_td);
+
             Funct_global(blk1, blk2)->CopyRowStarts();
             Funct_global(blk1, blk2)->CopyColStarts();
 
-            delete Funct_d_td;
-            delete d_td_T;
+            delete temphpmat;
+            //delete Funct_d_td;
+            //delete d_td_T;
         }
 
     coarse_offsets[0] = 0;
@@ -2293,6 +2318,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     if (print_level)
         std::cout << "Smoothing with HcurlGSS smoother \n";
 
+    //std::cout << "Checkpoint 0 \n";
+    //MPI_Barrier(MPI_COMM_WORLD);
+
     if (x.GetData() == y.GetData())
         mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
@@ -2315,6 +2343,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
             d_td_Hcurl.MultTranspose(*temp_Hcurl_dofs, truerhs->GetBlock(0));
 #else
+            std::cout << "xblock(0) size = " << xblock->GetBlock(0).Size() << "\n";
             Curlh_global->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
 #endif
         }
@@ -2324,6 +2353,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         }
 
     }
+
+    //std::cout << "Checkpoint 1 \n";
+    //MPI_Barrier(MPI_COMM_WORLD);
 
 
     // imposing boundary conditions in Hcurl on the righthand side (block 0)
@@ -2427,7 +2459,11 @@ void HcurlGSSSmoother::Setup() const
     temp_Hdiv_dofs = new Vector(Curlh->Height());
     temp_Hcurl_dofs = new Vector(Curlh->Width());
 #else
-    // FIXME : RowStarts or ColStarts()?
+    // Cannot use RAP directly because Curl should be multiplied obly by a diagonal of the d_td_Hdiv
+    // FIXME : RowStarts or ColStarts()? Probably wrong row_starts n LeftDiagMult, thus a replacement code has been written but not tested
+
+    /*
+    // old variant
     HypreParMatrix* C_d_td = d_td_Hcurl.LeftDiagMult(*Curlh, d_td_Funct_blocks[0]->GetRowStarts() );
     SparseMatrix d_td_Hdiv_diag;
     d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
@@ -2435,6 +2471,46 @@ void HcurlGSSSmoother::Setup() const
     Curlh_global->CopyRowStarts();
     Curlh_global->CopyColStarts();
     delete C_d_td;
+    */
+
+    // alternative way
+    HypreParMatrix * temphpmat;
+    SparseMatrix * Curlh_copy;
+    {
+        HYPRE_Int glob_num_rows = d_td_Funct_blocks[0]->M();
+        HYPRE_Int glob_num_cols = d_td_Hcurl.M();
+        HYPRE_Int * row_starts = d_td_Funct_blocks[0]->GetRowStarts();
+        HYPRE_Int * col_starts = d_td_Hcurl.GetRowStarts();
+        Curlh_copy = new SparseMatrix(*Curlh);
+        temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, Curlh_copy);
+    }
+
+    HypreParMatrix * d_td_hdiv_diaghpmat;
+    {
+        HYPRE_Int glob_size = d_td_Funct_blocks[0]->M();
+        HYPRE_Int * row_starts = d_td_Funct_blocks[0]->GetRowStarts();
+        SparseMatrix d_td_Hdiv_diag;
+        d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
+        d_td_hdiv_diaghpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, &d_td_Hdiv_diag) ;
+        d_td_hdiv_diaghpmat->CopyRowStarts();
+        d_td_hdiv_diaghpmat->CopyColStarts();
+    }
+
+    //HypreParMatrix * temphp = d_td_hdiv_diaghpmat->Transpose();
+    //HypreParMatrix * C_d_td = ParMult(temphpmat, &d_td_Hcurl);
+    //Curlh_global = ParMult(temphp, C_d_td);
+
+    Curlh_global = RAP(d_td_hdiv_diaghpmat, temphpmat, &d_td_Hcurl);
+    Curlh_global->CopyRowStarts();
+    Curlh_global->CopyColStarts();
+
+    std::cout << "Curlh_global = " << Curlh_global->Height() << " x " << Curlh_global->Width() << "\n";
+
+    delete Curlh_copy;
+    delete temphpmat;
+    //delete C_d_td;
+    delete d_td_hdiv_diaghpmat;
+    //delete temphp;
 #endif
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
@@ -2452,14 +2528,21 @@ void HcurlGSSSmoother::Setup() const
             }
         }
 
+        // alternative way
+        HYPRE_Int glob_size = d_td_Funct_blocks[blk]->M();
+        HYPRE_Int * row_starts = d_td_Funct_blocks[blk]->GetRowStarts();
+        HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, Funct_blk);
+        Funct_restblocks_global(1,1) = RAP(temphpmat, d_td_Funct_blocks[blk]);
 
-        HypreParMatrix* Functblk_d_td_blk = d_td_Funct_blocks[blk]->LeftDiagMult(*Funct_blk, d_td_Funct_blocks[blk]->GetRowStarts() );
-        HypreParMatrix * d_td_blk_T = d_td_Funct_blocks[blk]->Transpose();
-        Funct_restblocks_global(1,1) = ParMult(d_td_blk_T, Functblk_d_td_blk);
+        // old way
+        //HypreParMatrix* Functblk_d_td_blk = d_td_Funct_blocks[blk]->LeftDiagMult(*Funct_blk, d_td_Funct_blocks[blk]->GetRowStarts() );
+        //HypreParMatrix * d_td_blk_T = d_td_Funct_blocks[blk]->Transpose();
+        //Funct_restblocks_global(1,1) = ParMult(d_td_blk_T, Functblk_d_td_blk);
         Funct_restblocks_global(1,1)->CopyRowStarts();
         Funct_restblocks_global(1,1)->CopyColStarts();
-        delete Functblk_d_td_blk;
-        delete Funct_blk;
+
+        //delete Functblk_d_td_blk;
+        //delete Funct_blk;
 
         Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
         ((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);

@@ -2091,7 +2091,8 @@ int main(int argc, char *argv[])
         // creating pmesh for level l
         if (l == num_levels - 1)
         {
-            pmesh_lvls[l] = pmesh.get();
+            pmesh_lvls[l] = new ParMesh(*pmesh);
+            //pmesh_lvls[l] = pmesh.get();
         }
         else
         {
