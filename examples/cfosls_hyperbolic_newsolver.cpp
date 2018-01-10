@@ -1611,9 +1611,13 @@ int main(int argc, char *argv[])
         }
 
         delete Ablock;
-        delete Cblock;
         delete Bblock;
-        delete BTblock;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            delete Cblock;
+            delete BTblock;
+            delete secondeqn_rhs;
+        }
     } // end of loop over all levels
 
     for ( int l = 0; l < num_levels - 1; ++l)
@@ -1727,7 +1731,10 @@ int main(int argc, char *argv[])
         }
 
         delete Funct_rhs_lvls[l];
-        delete Funct_mat_lvls[l];
+        for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+            for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+                delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+
         delete Constraint_mat_lvls[l];
 
         delete Divfree_mat_lvls[l];
@@ -1745,9 +1752,13 @@ int main(int argc, char *argv[])
             delete P_WT[l];
             delete P_R[l];
             delete P_C_lvls[l];
+            delete P_H_lvls[l];
             delete TrueP_R[l];
             delete TrueP_C[l];
             delete TrueP_H[l];
+
+            delete Element_dofs_R[l];
+            delete Element_dofs_W[l];
         }
 
         if (l < num_levels - 1)
