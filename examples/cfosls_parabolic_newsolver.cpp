@@ -1605,9 +1605,6 @@ int main(int argc, char *argv[])
                                                      *Element_dofs_W[l],
                                                      BdrDofs_Funct_lvls[l],
                                                      EssBdrDofs_Funct_lvls[l],
-#ifdef COMPUTE_EXACTDISCRETESOL
-                                                     sigma_vec, S_vec, lambda_vec,
-#endif
                                                      optimized_localsolve);
 
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];

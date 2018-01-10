@@ -539,7 +539,7 @@ public:
     void SetNumCurl(int NumCurl) { numcurl = NumCurl;}
     bool CheckTestConfig();
 
-    ~Transport_test_divfree () {}
+    ~Transport_test_divfree();
 private:
     template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
              void(*bvec)(const Vector & x, Vector & vec), double (*divbvec)(const Vector & xt), \
@@ -667,6 +667,26 @@ bool Transport_test_divfree::CheckTestConfig()
     else
         return false;
 
+}
+
+Transport_test_divfree::~Transport_test_divfree()
+{
+    delete scalarS;
+    delete scalardivsigma;
+    delete bTb;
+    delete bsigmahat;
+    delete sigma;
+    delete sigmahat;
+    delete b;
+    delete minb;
+    delete bf;
+    delete bdivsigma;
+    delete Ktilda;
+    delete bbT;
+    delete divfreepart;
+    delete opdivfreepart;
+    delete minKsigmahat;
+    delete minsigmahat;
 }
 
 Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl)

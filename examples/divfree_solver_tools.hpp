@@ -1187,7 +1187,6 @@ public:
 
 };
 
-// TODO: Implement this after the non-optimized version starts working
 void LocalProblemSolverWithS::SaveLocalLUFactors() const
 {
     MFEM_ASSERT(optimized_localsolve,
@@ -2269,7 +2268,6 @@ public:
                      const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                      const Array<int> * SweepsNum, const Array<int> &Block_Offsets);
 
-    // TODO: Implement this routine
     //void PrintAllOptions() const;
 
     virtual void Setup() const;
@@ -2676,8 +2674,6 @@ protected:
 
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
-    //const Array<int>& block_offsets;
-    //mutable Array<int> block_trueoffsets;
 
     // Righthand side of  the divergence contraint on dofs
     // (remains unchanged throughout the solving process)
@@ -2778,7 +2774,7 @@ public:
                           double stop_tol, bool monotone_check = true, char const * name = NULL,
                           bool print = false) const;
 
-    int GetStopCriteriaType () {return stopcriteria_type;} const
+    int GetStopCriteriaType () const {return stopcriteria_type;}
     void SetStopCriteriaType (int StopCriteria_Type) const {stopcriteria_type = StopCriteria_Type;}
 
     void SetAsPreconditioner(bool yes_or_no) const
