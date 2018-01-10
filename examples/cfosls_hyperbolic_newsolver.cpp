@@ -1222,16 +1222,27 @@ int main(int argc, char *argv[])
    CoarsestProblemSolver* CoarsestSolver_partfinder;
 
    Array<BlockMatrix*> Element_dofs_Func(num_levels - 1);
-   Array<int>* row_offsets_El_dofs = new Array<int>[num_levels - 1];
-   Array<int>* col_offsets_El_dofs = new Array<int>[num_levels - 1];
+   std::vector<Array<int>*> row_offsets_El_dofs(num_levels - 1);
+   std::vector<Array<int>*> col_offsets_El_dofs(num_levels - 1);
 
    Array<BlockMatrix*> P_Func(ref_levels);
-   Array<int> * row_offsets_P_Func = new Array<int>[num_levels - 1];
-   Array<int> * col_offsets_P_Func = new Array<int>[num_levels - 1];
+   std::vector<Array<int>*> row_offsets_P_Func(num_levels - 1);
+   std::vector<Array<int>*> col_offsets_P_Func(num_levels - 1);
 
    Array<BlockOperator*> TrueP_Func(ref_levels);
-   Array<int> * row_offsets_TrueP_Func = new Array<int>[num_levels - 1];
-   Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
+   std::vector<Array<int>*> row_offsets_TrueP_Func(num_levels - 1);
+   std::vector<Array<int>*> col_offsets_TrueP_Func(num_levels - 1);
+
+   for (int l = 0; l < num_levels; ++l)
+       if (l < num_levels - 1)
+       {
+           row_offsets_El_dofs[l] = new Array<int>(numblocks_funct + 1);
+           col_offsets_El_dofs[l] = new Array<int>(numblocks_funct + 1);
+           row_offsets_P_Func[l] = new Array<int>(numblocks_funct + 1);
+           col_offsets_P_Func[l] = new Array<int>(numblocks_funct + 1);
+           row_offsets_TrueP_Func[l] = new Array<int>(numblocks_funct + 1);
+           col_offsets_TrueP_Func[l] = new Array<int>(numblocks_funct + 1);
+       }
 
    Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
 
@@ -1505,59 +1516,53 @@ int main(int argc, char *argv[])
         // creating additional structures required for local problem solvers
         if (l < num_levels - 1)
         {
-            row_offsets_El_dofs[l].SetSize(numblocks_funct + 1);
-            row_offsets_El_dofs[l][0] = 0;
-            row_offsets_El_dofs[l][1] = Element_dofs_R[l]->Height();
+            (*row_offsets_El_dofs[l])[0] = 0;
+            (*row_offsets_El_dofs[l])[1] = Element_dofs_R[l]->Height();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                row_offsets_El_dofs[l][2] = Element_dofs_H[l]->Height();
-            row_offsets_El_dofs[l].PartialSum();
+                (*row_offsets_El_dofs[l])[2] = Element_dofs_H[l]->Height();
+            row_offsets_El_dofs[l]->PartialSum();
 
-            col_offsets_El_dofs[l].SetSize(numblocks_funct + 1);
-            col_offsets_El_dofs[l][0] = 0;
-            col_offsets_El_dofs[l][1] = Element_dofs_R[l]->Width();
+            (*col_offsets_El_dofs[l])[0] = 0;
+            (*col_offsets_El_dofs[l])[1] = Element_dofs_R[l]->Width();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                col_offsets_El_dofs[l][2] = Element_dofs_H[l]->Width();
-            col_offsets_El_dofs[l].PartialSum();
+                (*col_offsets_El_dofs[l])[2] = Element_dofs_H[l]->Width();
+            col_offsets_El_dofs[l]->PartialSum();
 
-            Element_dofs_Func[l] = new BlockMatrix(row_offsets_El_dofs[l], col_offsets_El_dofs[l]);
+            Element_dofs_Func[l] = new BlockMatrix(*row_offsets_El_dofs[l], *col_offsets_El_dofs[l]);
             Element_dofs_Func[l]->SetBlock(0,0, Element_dofs_R[l]);
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
                 Element_dofs_Func[l]->SetBlock(1,1, Element_dofs_H[l]);
 
-            row_offsets_P_Func[l].SetSize(numblocks_funct + 1);
-            row_offsets_P_Func[l][0] = 0;
-            row_offsets_P_Func[l][1] = P_R[l]->Height();
+            (*row_offsets_P_Func[l])[0] = 0;
+            (*row_offsets_P_Func[l])[1] = P_R[l]->Height();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                row_offsets_P_Func[l][2] = P_H_lvls[l]->Height();
-            row_offsets_P_Func[l].PartialSum();
+                (*row_offsets_P_Func[l])[2] = P_H_lvls[l]->Height();
+            row_offsets_P_Func[l]->PartialSum();
 
-            col_offsets_P_Func[l].SetSize(numblocks_funct + 1);
-            col_offsets_P_Func[l][0] = 0;
-            col_offsets_P_Func[l][1] = P_R[l]->Width();
+            (*col_offsets_P_Func[l])[0] = 0;
+            (*col_offsets_P_Func[l])[1] = P_R[l]->Width();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                col_offsets_P_Func[l][2] = P_H_lvls[l]->Width();
-            col_offsets_P_Func[l].PartialSum();
+                (*col_offsets_P_Func[l])[2] = P_H_lvls[l]->Width();
+            col_offsets_P_Func[l]->PartialSum();
 
-            P_Func[l] = new BlockMatrix(row_offsets_P_Func[l], col_offsets_P_Func[l]);
+            P_Func[l] = new BlockMatrix(*row_offsets_P_Func[l], *col_offsets_P_Func[l]);
             P_Func[l]->SetBlock(0,0, P_R[l]);
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
                 P_Func[l]->SetBlock(1,1, P_H_lvls[l]);
 
-            row_offsets_TrueP_Func[l].SetSize(numblocks_funct + 1);
-            row_offsets_TrueP_Func[l][0] = 0;
-            row_offsets_TrueP_Func[l][1] = TrueP_R[l]->Height();
+            (*row_offsets_TrueP_Func[l])[0] = 0;
+            (*row_offsets_TrueP_Func[l])[1] = TrueP_R[l]->Height();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                row_offsets_TrueP_Func[l][2] = TrueP_H[num_levels - 2 - l]->Height();
-            row_offsets_TrueP_Func[l].PartialSum();
+                (*row_offsets_TrueP_Func[l])[2] = TrueP_H[num_levels - 2 - l]->Height();
+            row_offsets_TrueP_Func[l]->PartialSum();
 
-            col_offsets_TrueP_Func[l].SetSize(numblocks_funct + 1);
-            col_offsets_TrueP_Func[l][0] = 0;
-            col_offsets_TrueP_Func[l][1] = TrueP_R[l]->Width();
+            (*col_offsets_TrueP_Func[l])[0] = 0;
+            (*col_offsets_TrueP_Func[l])[1] = TrueP_R[l]->Width();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                col_offsets_TrueP_Func[l][2] = TrueP_H[num_levels - 2 - l]->Width();
-            col_offsets_TrueP_Func[l].PartialSum();
+                (*col_offsets_TrueP_Func[l])[2] = TrueP_H[num_levels - 2 - l]->Width();
+            col_offsets_TrueP_Func[l]->PartialSum();
 
-            TrueP_Func[l] = new BlockOperator(row_offsets_TrueP_Func[l], col_offsets_TrueP_Func[l]);
+            TrueP_Func[l] = new BlockOperator(*row_offsets_TrueP_Func[l], *col_offsets_TrueP_Func[l]);
             TrueP_Func[l]->SetBlock(0,0, TrueP_R[l]);
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
                 TrueP_Func[l]->SetBlock(1,1, TrueP_H[num_levels - 2 - l]);
@@ -1739,19 +1744,23 @@ int main(int argc, char *argv[])
             delete P_W[l];
             delete P_WT[l];
             delete P_R[l];
+            delete P_C_lvls[l];
             delete TrueP_R[l];
             delete TrueP_C[l];
             delete TrueP_H[l];
         }
 
-    }
+        if (l < num_levels - 1)
+        {
+            delete row_offsets_El_dofs[l];
+            delete col_offsets_El_dofs[l];
+            delete row_offsets_P_Func[l];
+            delete col_offsets_P_Func[l];
+            delete row_offsets_TrueP_Func[l];
+            delete col_offsets_TrueP_Func[l];
+        }
 
-    //delete row_offsets_El_dofs;
-    //delete col_offsets_El_dofs;
-    //delete row_offsets_P_Func;
-    //delete col_offsets_P_Func;
-    //delete row_offsets_TrueP_Func;
-    //delete col_offsets_TrueP_Func;
+    }
 
     for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
         for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
