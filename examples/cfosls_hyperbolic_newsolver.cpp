@@ -1717,6 +1717,8 @@ int main(int argc, char *argv[])
         delete Funct_mat_lvls[l];
         delete Constraint_mat_lvls[l];
 
+        delete Divfree_mat_lvls[l];
+
         delete H_space_lvls[l];
         delete R_space_lvls[l];
         delete W_space_lvls[l];
@@ -1731,7 +1733,11 @@ int main(int argc, char *argv[])
     //delete row_offsets_TrueP_Func;
     //delete col_offsets_TrueP_Func;
 
+    for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+        for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+            delete &(Funct_global->GetBlock(blk1,blk2));
     delete Funct_global;
+
     delete Functrhs_global;
 
     delete hdiv_coll;
