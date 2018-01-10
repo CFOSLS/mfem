@@ -1472,40 +1472,37 @@ int main(int argc, char *argv[])
 
             // TODO: Rewrite these ugly computations
             auto d_td_coarse_R = R_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            unique_ptr<SparseMatrix>RP_R_local(
-                        Mult(*R_space_lvls[l]->GetRestrictionMatrix(), *P_R[l]));
+            SparseMatrix * RP_R_local = Mult(*R_space_lvls[l]->GetRestrictionMatrix(), *P_R[l]);
             TrueP_R[l] = d_td_coarse_R->LeftDiagMult(
                         *RP_R_local, R_space_lvls[l]->GetTrueDofOffsets());
             TrueP_R[l]->CopyColStarts();
             TrueP_R[l]->CopyRowStarts();
 
-            RP_R_local.release();
+            delete RP_R_local;
 
             if (prec_is_MG)
             {
                 auto d_td_coarse_C = C_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-                unique_ptr<SparseMatrix>RP_C_local(
-                            Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *P_C_lvls[l]));
+                SparseMatrix * RP_C_local = Mult(*C_space_lvls[l]->GetRestrictionMatrix(), *P_C_lvls[l]);
                 TrueP_C[num_levels - 2 - l] = d_td_coarse_C->LeftDiagMult(
                             *RP_C_local, C_space_lvls[l]->GetTrueDofOffsets());
                 TrueP_C[num_levels - 2 - l]->CopyColStarts();
                 TrueP_C[num_levels - 2 - l]->CopyRowStarts();
 
-                RP_C_local.release();
+                delete RP_C_local;
                 //delete d_td_coarse_C;
             }
 
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
                 auto d_td_coarse_H = H_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-                unique_ptr<SparseMatrix>RP_H_local(
-                            Mult(*H_space_lvls[l]->GetRestrictionMatrix(), *P_H_lvls[l]));
+                SparseMatrix * RP_H_local = Mult(*H_space_lvls[l]->GetRestrictionMatrix(), *P_H_lvls[l]);
                 TrueP_H[num_levels - 2 - l] = d_td_coarse_H->LeftDiagMult(
                             *RP_H_local, H_space_lvls[l]->GetTrueDofOffsets());
                 TrueP_H[num_levels - 2 - l]->CopyColStarts();
                 TrueP_H[num_levels - 2 - l]->CopyRowStarts();
 
-                RP_H_local.release();
+                delete RP_H_local;
                 //delete d_td_coarse_H;
             }
 
@@ -1623,8 +1620,10 @@ int main(int argc, char *argv[])
     for ( int l = 0; l < num_levels - 1; ++l)
     {
         BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
-        Funct_mat_lvls[l + 1] = mfem::Mult(*Transpose(*P_Func[l]), *temp);
+        SparseMatrix * PT_temp = Transpose(*P_Func[l]);
+        Funct_mat_lvls[l + 1] = mfem::Mult(PT_temp, *temp);
         delete temp;
+        delete PT_temp;
 
         SparseMatrix * temp_sp = mfem::Mult(*Constraint_mat_lvls[l], P_Func[l]->GetBlock(0,0));
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
@@ -1759,6 +1758,7 @@ int main(int argc, char *argv[])
 
             delete Element_dofs_R[l];
             delete Element_dofs_W[l];
+            delete Element_dofs_H[l];
         }
 
         if (l < num_levels - 1)
