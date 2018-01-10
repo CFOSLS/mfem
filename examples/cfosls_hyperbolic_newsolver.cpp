@@ -754,165 +754,6 @@ Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl
     } // end of setting test coefficients in correct case
 }
 
-
-void test_function(DenseMatrix *A, DenseMatrix * DT, DenseMatrix * C, DenseMatrix * D, DenseMatrix& B,
-                   Vector& G0, Vector& G1, Vector &F,
-                   Vector Sol0, Vector Sol1, Vector Sol2,
-                   bool is_degenerate)
-{
-    // creating inv_C
-    //std::cout << "inv_C \n";
-    //C->Print();
-    DenseMatrixInverse inv_C(*C);
-
-    // creating D * inv_C * DT
-    DenseMatrix invCD;
-    inv_C.Mult(*D, invCD);
-
-    DenseMatrix DTinvCD(DT->Height(), D->Width());
-    mfem::Mult(*DT, invCD, DTinvCD);
-
-    // creating inv Atilda = inv(A - D * inv_C * DT)
-    DenseMatrix Atilda(A->Height(), A->Width());
-    Atilda = *A;
-    Atilda -= DTinvCD;
-
-    //std::cout << "inv_Atilda \n";
-    //Atilda.Print();
-    DenseMatrixInverse inv_Atilda(Atilda);
-
-    // computing Schur = B * inv_Atilda * BT
-    DenseMatrix inv_AtildaBT;
-    DenseMatrix BT(B.Width(), B.Height());
-    BT.Transpose(B);
-    inv_Atilda.Mult(BT, inv_AtildaBT);
-
-    DenseMatrix Schur(B.Height(), B.Height());
-    mfem::Mult(B, inv_AtildaBT, Schur);
-
-    // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
-    if (is_degenerate)
-    {
-        //std::cout << "degenerate! \n";
-        Schur.SetRow(0,0);
-        Schur.SetCol(0,0);
-        Schur(0,0) = 1.;
-    }
-
-    //std::cout << "inv_Schur \n";
-    //Schur.Print();
-    DenseMatrixInverse inv_Schur(Schur);
-
-    // creating DT * invC * F_S
-    Vector invCF2;
-    inv_C.Mult(G1, invCF2);
-
-    Vector DTinvCF2(DT->Height());
-    DT->Mult(invCF2, DTinvCF2);
-
-    // creating F1tilda = F_sigma - DT * invC * F_S
-    Vector F1tilda(DT->Height());
-    F1tilda = G0;
-    F1tilda -= DTinvCF2;
-
-    // creating invAtildaFtilda = inv(Atilda) * Ftilda =
-    // = inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S)
-    Vector invAtildaFtilda(Atilda.Height());
-    inv_Atilda.Mult(F1tilda, invAtildaFtilda);
-
-    Vector FinalFlam(B.Height());
-    B.Mult(invAtildaFtilda, FinalFlam);
-    FinalFlam -= F;
-
-    if (is_degenerate)
-        FinalFlam(0) = 0;
-
-    // lambda = inv_Schur * ( F_lam - B * inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S) )
-    inv_Schur.Mult(FinalFlam, Sol2);
-
-    // changing Ftilda so that Ftilda_new = Ftilda_old - BT * lambda
-    // = F_sigma - DT * invC * F_S - BT * lambda
-    Vector temp(B.Width());
-    B.MultTranspose(Sol2, temp);
-    F1tilda -= temp;
-
-    // sigma = inv_Atilda * Ftilda(new)
-    // = inv(A - D * inv_C * DT) * ( F_sigma - DT * invC * F_S - BT * lambda )
-    inv_Atilda.Mult(F1tilda, Sol0);
-
-    // temp2 = F_S - D * sigma
-    Vector temp2(D->Height());
-    D->Mult(Sol0, temp2);
-    temp2 *= -1.0;
-    temp2 += G1;
-
-    inv_C.Mult(temp2, Sol1);
-
-    std::cout << "F (local constraint rhs): \n";
-    F.Print();
-
-    std::cout << "Sol0 \n";
-    Sol0.Print();
-
-    std::cout << "Sol1 \n";
-    Sol1.Print();
-
-    std::cout << "Sol2 \n";
-    Sol2.Print();
-
-#ifdef CHECK_LOCALSOLVE
-    // checking that the system was solved correctly
-    Vector res1(G0.Size());
-    Vector temp1res1(G0.Size());
-    A->Mult(Sol0, temp1res1);
-    Vector temp2res1(G0.Size());
-    DT->Mult(Sol1, temp2res1);
-    Vector temp3res1(G0.Size());
-    B.MultTranspose(Sol2, temp3res1);
-    res1 = 0.0;
-    res1 += temp1res1;
-    res1 += temp2res1;
-    res1 += temp3res1;
-    res1 -= G0;
-
-    //std::cout << "res1 norm = " << res1.Norml2() << "\n";
-    MFEM_ASSERT(res1.Norml2() < 1.0e-16, "Local system was solved incorrectly, res1 != 0 \n");
-
-    Vector res2(G1.Size());
-    Vector temp1res2(G1.Size());
-    D->Mult(Sol0, temp1res2);
-    Vector temp2res2(G1.Size());
-    C->Mult(Sol1, temp2res2);
-    res2 = 0.0;
-    res2 += temp1res2;
-    res2 += temp2res2;
-    res2 -= G1;
-
-    //std::cout << "res2 norm = " << res2.Norml2() << "\n";
-    MFEM_ASSERT(res2.Norml2() < 1.0e-16, "Local system was solved incorrectly, res2 != 0 \n");
-
-    Vector res3(F.Size());
-    B.Mult(Sol0, res3);
-    res3 -= F;
-
-    std::cout << "res3: \n";
-    res3.Print();
-
-    /*
-    //std::cout << "res3 norm = " << res3.Norml2() << "\n";
-    std::cout << "sigma: \n";
-    Sol0.Print();
-    std::cout << "S: \n";
-    Sol1.Print();
-    std::cout << "lambda: \n";
-    Sol2.Print();
-    std::cout << "res3: \n";
-    res3.Print();
-    */
-    MFEM_ASSERT(res3.Norml2() < 1.0e-16, "Local system was solved incorrectly, res3 != 0 \n");
-#endif
-}
-
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -933,7 +774,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -964,7 +805,7 @@ int main(int argc, char *argv[])
     kappa = freq * M_PI;
 
     if (verbose)
-        cout << "Solving CFOSLS Transport equation with MFEM & hypre, div-free approach \n";
+        cout << "Solving CFOSLS Transport equation with MFEM & hypre, div-free approach, minimization solver \n";
 
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file, "-m", "--mesh",
@@ -2610,7 +2451,7 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
-            bool optimized_localsolve = false;
+            bool optimized_localsolve = true;
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
                 (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],

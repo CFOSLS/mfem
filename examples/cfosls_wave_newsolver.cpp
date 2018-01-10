@@ -1374,7 +1374,7 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
-            bool optimized_localsolve = false;
+            bool optimized_localsolve = true;
             (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
                                                      *Constraint_mat_lvls[l],
                                                      Dof_TrueDof_Func_lvls[l],

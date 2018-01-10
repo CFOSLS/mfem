@@ -1025,7 +1025,8 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
         for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
             for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
-                delete LocalAE_Matrices(blk1,blk2);
+                if (compute_AEproblem_matrices(blk1,blk2))
+                    delete LocalAE_Matrices(blk1,blk2);
 
     } // end of loop over AEs
 
@@ -1141,8 +1142,9 @@ void LocalProblemSolver::SolveLocalProblemOpt(DenseMatrixInverse * inv_A, DenseM
 
 void LocalProblemSolver::SaveLocalLUFactors() const
 {
-    if (!optimized_localsolve)
-        return;
+    MFEM_ASSERT(optimized_localsolve,
+                "Error: Unnecessary saving of the LU factors for the local problems"
+                " with optimized_localsolve deactivated \n");
 
     int nAE = AE_edofs_L2->Height();
     LUfactors.resize(nAE);
@@ -1163,9 +1165,6 @@ void LocalProblemSolver::SaveLocalLUFactors() const
         //std::cout << "AE = " << AE << "\n";
         bool is_degenerate = true;
 
-        //Array<int> tempview_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
-        //Local_inds = new Array<int>;
-        //tempview_inds.Copy(Local_inds[0]);
         Array<int> Local_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
 
         Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
@@ -1214,8 +1213,8 @@ void LocalProblemSolver::SaveLocalLUFactors() const
 
     } // end of loop over AEs
 
-    compute_AEproblem_matrices = false;
-    compute_AEproblem_matrices(numblocks, numblocks) = true;
+    //compute_AEproblem_matrices = false;
+    //compute_AEproblem_matrices(numblocks, numblocks) = true;
 }
 
 // Returns a pointer to a BlockMatrix which stores
@@ -1372,9 +1371,10 @@ class LocalProblemSolverWithS : public LocalProblemSolver
 #endif
     // Optimized version of SolveLocalProblem where LU factors for the local
     // problem's matrices were computed during the setup via SaveLocalLUFactors()
-    void SolveLocalProblemOpt(DenseMatrixInverse * inv_A, DenseMatrixInverse * inv_Schur,
-                                               std::vector<DenseMatrix> &FunctBlks, DenseMatrix& B, BlockVector &G,
-                                               Vector& F, BlockVector &sol, bool is_degenerate) const;
+    void SolveLocalProblemOpt(DenseMatrixInverse * inv_AorAtilda,
+                              DenseMatrixInverse * inv_C, DenseMatrixInverse * inv_Schur,
+                              DenseMatrix& B, DenseMatrix &D, BlockVector &G, Vector& F,
+                              BlockVector &sol, bool is_degenerate) const;
     // an optional routine which can save LU factors for the local problems
     // solved at finer levels if needed. Should be redefined in the inheriting
     // classes in order to speed up iterations
@@ -1402,8 +1402,22 @@ public:
 #ifdef COMPUTE_EXACTDISCRETESOL
                               sigma, S, lambda,
 #endif
-                              Optimized_LocalSolve)
+                              false)
     {
+        optimized_localsolve = Optimized_LocalSolve;
+        compute_AEproblem_matrices.SetSize(numblocks + 1, numblocks + 1);
+        compute_AEproblem_matrices = true;
+
+        if (optimized_localsolve)
+        {
+            compute_AEproblem_matrices = false;
+            compute_AEproblem_matrices(1,0) = true;
+            compute_AEproblem_matrices(numblocks, numblocks) = true;
+
+            SaveLocalLUFactors();
+        }
+
+
     }
 
 };
@@ -1411,7 +1425,156 @@ public:
 // TODO: Implement this after the non-optimized version starts working
 void LocalProblemSolverWithS::SaveLocalLUFactors() const
 {
-    MFEM_ABORT("LocalProblemSolverWithS::SaveLocalLUFactors is not implemented!");
+    MFEM_ASSERT(optimized_localsolve,
+                "Error: Unnecessary saving of the LU factors for the local problems"
+                " with optimized_localsolve deactivated \n");
+
+    DenseMatrix sub_Constr;
+    Array<int> sub_Func_offsets(numblocks + 1);
+
+    Array2D<const SparseMatrix *> Op_blks(numblocks, numblocks);
+    Array2D<DenseMatrix*> LocalAE_Matrices(numblocks, numblocks);
+    std::vector<SparseMatrix*> AE_eintdofs_blks(numblocks);
+    std::vector<Array<int>*> Local_inds(numblocks);
+
+    for ( int blk = 0; blk < numblocks; ++blk )
+    {
+        AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
+    }
+
+    // loop over all AE, solving a local problem in each AE
+    int nAE = AE_edofs_L2->Height();
+    LUfactors.resize(nAE);
+
+    for( int AE = 0; AE < nAE; ++AE)
+    {
+        // for each AE we will store A^(-1), Schur^(-1) or Atilda^(-1), C^(-1) and Schur^(-1)
+        LUfactors[AE].resize(3);
+
+        //std::cout << "AE = " << AE << "\n";
+        bool is_degenerate = true;
+        sub_Func_offsets[0] = 0;
+        for ( int blk = 0; blk < numblocks; ++blk )
+        {
+            // no memory allocation here, it's just a viewer which is created
+            Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+                                             AE_eintdofs_blks[blk]->RowSize(AE));
+
+            if (blk == 0) // degeneracy comes from Constraint matrix which involves only sigma = the first block
+            {
+                for (int i = 0; i < Local_inds[blk]->Size(); ++i)
+                {
+                    if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
+                         (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                    {
+                        is_degenerate = false;
+                        break;
+                    }
+                }
+            } // end of if blk == 0
+        } // end of loop over blocks
+
+        for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
+        {
+            for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
+            {
+                if (blk1 == 0 && blk2 == 0) // handling L2 block (constraint)
+                {
+                    Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
+                    if (compute_AEproblem_matrices(numblocks, numblocks))
+                    {
+                        sub_Constr.SetSize(Wtmp_j.Size(), Local_inds[blk1]->Size());
+                        Constr_spmat.GetSubMatrix(Wtmp_j, *Local_inds[blk1], sub_Constr);
+                    }
+
+                } // end of special treatment of the first block involved into constraint
+
+                sub_Func_offsets[blk1 + 1] = sub_Func_offsets[blk1] + Local_inds[blk1]->Size();
+
+                Op_blks(blk1,blk2) = &(Op_blkspmat.GetBlock(blk1,blk2));
+
+                // Extracting local problem matrices:
+                LocalAE_Matrices(blk1,blk2) = new DenseMatrix(Local_inds[blk1]->Size(), Local_inds[blk2]->Size());
+                Op_blks(blk1,blk2)->GetSubMatrix(*Local_inds[blk1], *Local_inds[blk2], *LocalAE_Matrices(blk1,blk2));
+
+            }
+        } // end of loop over all blocks in the functional
+
+
+        if (Local_inds[1]->Size() == 0) // this means no internal dofs for S in the current AE
+        {
+            // then only a 2x2 block system is to be solved
+
+            LUfactors[AE][0] = new DenseMatrixInverse(*LocalAE_Matrices(0,0));
+            LUfactors[AE][1] = NULL;
+
+            DenseMatrix sub_ConstrT(sub_Constr.Width(), sub_Constr.Height());
+            sub_ConstrT.Transpose(sub_Constr);
+
+            DenseMatrix invABT;
+            LUfactors[AE][0]->Mult(sub_ConstrT, invABT);
+
+            // Schur = BinvABT
+            DenseMatrix Schur(sub_Constr.Height(), invABT.Width());
+            mfem::Mult(sub_Constr, invABT, Schur);
+
+            // getting rid of the one-dimensional kernel which exists for lambda if the problem is degenerate
+            if (is_degenerate)
+            {
+                Schur.SetRow(0,0);
+                Schur.SetCol(0,0);
+                Schur(0,0) = 1.;
+            }
+
+            LUfactors[AE][2] = new DenseMatrixInverse(Schur);
+
+        }
+        else // then it is 3x3 block matrix under consideration
+        {
+            LUfactors[AE][1] = new DenseMatrixInverse(*LocalAE_Matrices(1,1));
+
+            // creating D * inv_C * DT
+            DenseMatrix invCD;
+            LUfactors[AE][1]->Mult(*LocalAE_Matrices(1,0), invCD);
+
+            DenseMatrix DTinvCD(Local_inds[0]->Size(), Local_inds[0]->Size());
+            mfem::Mult(*LocalAE_Matrices(0,1), invCD, DTinvCD);
+
+            // creating inv Atilda = inv(A - D * inv_C * DT)
+            DenseMatrix Atilda(Local_inds[0]->Size(), Local_inds[0]->Size());
+            Atilda = *LocalAE_Matrices(0,0);
+            Atilda -= DTinvCD;
+
+            LUfactors[AE][0] = new DenseMatrixInverse(Atilda);
+
+            // computing Schur = B * inv_Atilda * BT
+            DenseMatrix inv_AtildaBT;
+            DenseMatrix sub_ConstrT(sub_Constr.Width(), sub_Constr.Height());
+            sub_ConstrT.Transpose(sub_Constr);
+            LUfactors[AE][0]->Mult(sub_ConstrT, inv_AtildaBT);
+
+            DenseMatrix Schur(sub_Constr.Height(), sub_Constr.Height());
+            mfem::Mult(sub_Constr, inv_AtildaBT, Schur);
+
+            // getting rid of the one-dimensional kernel which exists
+            // for lambda if the problem is degenerate
+            if (is_degenerate)
+            {
+                Schur.SetRow(0,0);
+                Schur.SetCol(0,0);
+                Schur(0,0) = 1.;
+            }
+
+            LUfactors[AE][2] = new DenseMatrixInverse(Schur);
+        }
+
+        for ( int blk1 = 0; blk1 < numblocks; ++blk1 )
+            for ( int blk2 = 0; blk2 < numblocks; ++blk2 )
+                delete LocalAE_Matrices(blk1, blk2);
+
+    } // end of loop over AEs
+
+    return;
 }
 
 #ifdef COMPUTE_EXACTDISCRETESOL
@@ -1426,10 +1589,12 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
 {
     if (optimized_localsolve)
     {
-        MFEM_ABORT("Optimized local problem solving routine was not implemented yet \n");
-        //DenseMatrixInverse * inv_A = LUfactors[AE][0];
-        //DenseMatrixInverse * inv_Schur = LUfactors[AE][1];
-        //SolveLocalProblemOpt(inv_A, inv_Schur, B, G, F, sol, is_degenerate);
+        //MFEM_ABORT("Optimized local problem solving routine was not implemented yet \n");
+        DenseMatrixInverse * inv_AorAtilda = LUfactors[AE][0];
+        DenseMatrixInverse * inv_C = LUfactors[AE][1];
+        DenseMatrixInverse * inv_Schur = LUfactors[AE][2];
+        DenseMatrix * D = FunctBlks(1,0);
+        SolveLocalProblemOpt(inv_AorAtilda, inv_C, inv_Schur, B, *D, G, F, sol, is_degenerate);
     }
     else // an expensive variant with computations of lu each time
     {
@@ -1658,6 +1823,113 @@ void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &F
     }
 
     return;
+}
+
+// Optimized version of SolveLocalProblem where LU factors for the local
+// problem's matrices were computed during the setup via SaveLocalLUFactors()
+void LocalProblemSolverWithS::SolveLocalProblemOpt(DenseMatrixInverse * inv_AorAtilda,
+                                                   DenseMatrixInverse * inv_C, DenseMatrixInverse * inv_Schur,
+                                                   DenseMatrix& B, DenseMatrix& D, BlockVector &G,
+                                                   Vector& F, BlockVector &sol, bool is_degenerate) const
+{
+    Vector lambda(B.Height());
+
+    if (G.GetBlock(1).Size() == 0) // this means no internal dofs for S in the current AE
+    {
+        // invAG = invA * G
+        Vector invAG;
+        inv_AorAtilda->Mult(G, invAG);
+
+        DenseMatrix BT(B.Width(), B.Height());
+        BT.Transpose(B);
+
+        DenseMatrix invABT;
+        inv_AorAtilda->Mult(BT, invABT);
+
+        // temp = ( B * invA * G - F )
+        Vector temp(B.Height());
+        B.Mult(invAG, temp);
+        temp -= F;
+
+        if (is_degenerate)
+            temp(0) = 0;
+
+        // lambda = inv(BinvABT) * ( B * invA * G - F )
+        inv_Schur->Mult(temp, lambda);
+
+        // temp2 = (G - BT * lambda)
+        Vector temp2(B.Width());
+        B.MultTranspose(lambda,temp2);
+        temp2 *= -1;
+        temp2 += G;
+
+        // sig = invA * temp2 = invA * (G - BT * lambda)
+        inv_AorAtilda->Mult(temp2, sol.GetBlock(0));
+    }
+    else // then it is 3x3 block matrix under consideration
+    {
+
+        /*
+        // creating D * inv_C * DT
+        DenseMatrix invCD;
+        inv_C->Mult(*D, invCD);
+
+        DenseMatrix DTinvCD(DT->Height(), D->Width());
+        mfem::Mult(*DT, invCD, DTinvCD);
+
+        // computing Schur = B * inv_Atilda * BT
+        DenseMatrix inv_AtildaBT;
+        DenseMatrix BT(B.Width(), B.Height());
+        BT.Transpose(B);
+        inv_Atilda->Mult(BT, inv_AtildaBT);
+        */
+
+
+        // creating DT * invC * F_S
+        Vector invCF2;
+        inv_C->Mult(G.GetBlock(1), invCF2);
+
+        Vector DTinvCF2(D.Width());
+        D.MultTranspose(invCF2, DTinvCF2);
+
+        // creating F1tilda = F_sigma - DT * invC * F_S
+        Vector F1tilda(D.Width());
+        F1tilda = G.GetBlock(0);
+        F1tilda -= DTinvCF2;
+
+        // creating invAtildaFtilda = inv(Atilda) * Ftilda =
+        // = inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S)
+        Vector invAtildaFtilda(G.GetBlock(0).Size());
+        inv_AorAtilda->Mult(F1tilda, invAtildaFtilda);
+
+        Vector FinalFlam(B.Height());
+        B.Mult(invAtildaFtilda, FinalFlam);
+        FinalFlam -= F;
+
+        if (is_degenerate)
+            FinalFlam(0) = 0;
+
+        // lambda = inv_Schur * ( F_lam - B * inv(A - D * inv_C * DT) * (F_sigma - DT * invC * F_S) )
+        inv_Schur->Mult(FinalFlam, lambda);
+
+        // changing Ftilda so that Ftilda_new = Ftilda_old - BT * lambda
+        // = F_sigma - DT * invC * F_S - BT * lambda
+        Vector temp(B.Width());
+        B.MultTranspose(lambda, temp);
+        F1tilda -= temp;
+
+        // sigma = inv_Atilda * Ftilda(new)
+        // = inv(A - D * inv_C * DT) * ( F_sigma - DT * invC * F_S - BT * lambda )
+        inv_AorAtilda->Mult(F1tilda, sol.GetBlock(0));
+
+        // temp2 = F_S - D * sigma
+        Vector temp2(D.Height());
+        D.Mult(sol.GetBlock(0), temp2);
+        temp2 *= -1.0;
+        temp2 += G.GetBlock(1);
+
+        inv_C->Mult(temp2, sol.GetBlock(1));
+    }
 }
 
 
