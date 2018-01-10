@@ -1468,6 +1468,8 @@ int main(int argc, char *argv[])
             TrueP_R[l]->CopyColStarts();
             TrueP_R[l]->CopyRowStarts();
 
+            RP_R_local.release();
+
             if (prec_is_MG)
             {
                 auto d_td_coarse_C = C_space_lvls[l + 1]->Dof_TrueDof_Matrix();
@@ -1477,6 +1479,9 @@ int main(int argc, char *argv[])
                             *RP_C_local, C_space_lvls[l]->GetTrueDofOffsets());
                 TrueP_C[num_levels - 2 - l]->CopyColStarts();
                 TrueP_C[num_levels - 2 - l]->CopyRowStarts();
+
+                RP_C_local.release();
+                //delete d_td_coarse_C;
             }
 
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1488,6 +1493,9 @@ int main(int argc, char *argv[])
                             *RP_H_local, H_space_lvls[l]->GetTrueDofOffsets());
                 TrueP_H[num_levels - 2 - l]->CopyColStarts();
                 TrueP_H[num_levels - 2 - l]->CopyRowStarts();
+
+                RP_H_local.release();
+                //delete d_td_coarse_H;
             }
 
         }
@@ -1719,11 +1727,23 @@ int main(int argc, char *argv[])
 
         delete Divfree_mat_lvls[l];
 
-        delete H_space_lvls[l];
         delete R_space_lvls[l];
         delete W_space_lvls[l];
         delete C_space_lvls[l];
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            delete H_space_lvls[l];
         delete pmesh_lvls[l];
+
+        if (l < num_levels - 1)
+        {
+            delete P_W[l];
+            delete P_WT[l];
+            delete P_R[l];
+            delete TrueP_R[l];
+            delete TrueP_C[l];
+            delete TrueP_H[l];
+        }
+
     }
 
     //delete row_offsets_El_dofs;
