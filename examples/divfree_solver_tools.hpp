@@ -589,22 +589,13 @@ protected:
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-    Vector * sigma, * S, * lambda;
-#endif
-
 protected:
     mutable bool optimized_localsolve;
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-    virtual void SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
-                                   BlockVector &G, Vector& F, BlockVector &sol,
-                                   bool is_degenerate, Vector* sigma_loc = NULL, Vector* S_loc = NULL, Vector* lambda_loc = NULL) const;
-#else
     virtual void SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol,
                                    bool is_degenerate) const;
-#endif
+
     // Optimized version of SolveLocalProblem where LU factors for the local
     // problem's matrices were computed during the setup via SaveLocalLUFactors()
     void SolveLocalProblemOpt(DenseMatrixInverse * inv_A, DenseMatrixInverse * inv_Schur, DenseMatrix& B, BlockVector &G,
@@ -630,9 +621,6 @@ public:
                        const SparseMatrix& El_to_Dofs_L2,
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
-#ifdef COMPUTE_EXACTDISCRETESOL
-                       Vector * sigma_input, Vector * S_input, Vector * lambda_input,
-#endif
                        bool Optimized_LocalSolve)
         : Operator(),
           numblocks(Op_Blksmat.NumRowBlocks()),
@@ -661,11 +649,6 @@ public:
             compute_AEproblem_matrices(numblocks, numblocks) = true;
         }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-        sigma = sigma_input;
-        S = S_input;
-        lambda = lambda_input;
-#endif
         Setup();
     }
 
@@ -680,11 +663,7 @@ public:
     virtual void Mult(const Vector &x, Vector &y, Vector* rhs_constr) const;
 
     // is public since one might want to use that to compute particular solution witn nonzero righthand side in the constraint
-#ifdef COMPUTE_EXACTDISCRETESOL
-    void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr, Vector * sigma = NULL, Vector * S = NULL, Vector * lambda = NULL) const;
-#else
     void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const;
-#endif
 };
 
 void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
@@ -694,11 +673,7 @@ void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) c
     // y will be accessed through yblock as its view
     yblock->Update(y.GetData(), block_offsets);
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-    SolveTrueLocalProblems( *xblock, *yblock, rhs_constr, sigma, S, lambda);
-#else
     SolveTrueLocalProblems( *xblock, *yblock, rhs_constr);
-#endif
 }
 
 
@@ -719,11 +694,7 @@ void LocalProblemSolver::Setup()
 
 }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol, Vector* localrhs_constr, Vector * sigma, Vector * S, Vector * lambda) const
-#else
 void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol, Vector* localrhs_constr) const
-#endif
 {
     // FIXME: Get rid of temporary vectors;
     BlockVector lvlrhs_func(Op_blkspmat.ColOffsets());
@@ -746,88 +717,10 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
     }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-    /*
-    // a preliminary check
-    const SparseMatrix * Atemp = &(Op_blkspmat.GetBlock(0,0));
-
-    Vector Asigma(Atemp->Height());
-    Atemp->Mult(*sigma, Asigma);
-
-    Vector BTlambda(Constr_spmat.Width());
-    Constr_spmat.MultTranspose(*lambda, BTlambda);
-
-    Vector vectemp1(Asigma.Size());
-    vectemp1 = Asigma;
-    vectemp1 += BTlambda;
-
-    Vector Dsigma, DTS, CS;
-
-    if (numblocks > 1)
-    {
-        const SparseMatrix * Dtemp = &(Op_blkspmat.GetBlock(1,0));
-        const SparseMatrix * DTtemp = &(Op_blkspmat.GetBlock(0,1));
-        const SparseMatrix * Ctemp = &(Op_blkspmat.GetBlock(1,1));
-
-        Dsigma.SetSize(Dtemp->Height());
-        Dtemp->Mult(*sigma, Dsigma);
-
-        CS.SetSize(Ctemp->Height());
-        Ctemp->Mult(*S, CS);
-
-        Vector vectemp2(Dsigma.Size());
-        vectemp2 = Dsigma;
-        vectemp2 += CS;
-        vectemp2 -= lvlrhs_func.GetBlock(1);
-
-        ofstream ofs("Dsigma_inside local.txt");
-        ofs << Dsigma.Size() << "\n";
-        Dsigma.Print(ofs,1);
-        ofs.close();
-
-        ofstream ofs2("CS_inside local.txt");
-        ofs2 << CS.Size() << "\n";
-        CS.Print(ofs2,1);
-        ofs2.close();
-
-        ofstream ofs3("Gblock1_inside local.txt");
-        ofs3 << lvlrhs_func.GetBlock(1).Size() << "\n";
-        lvlrhs_func.GetBlock(1).Print(ofs3,1);
-        ofs3.close();
-
-        std::cout << "lvlrhsfunc, second block \n";
-        lvlrhs_func.GetBlock(1).Print();
-
-        vectemp2.Print();
-        std::cout << "vectemp2 norm = " << vectemp2.Norml2() << "\n";
-
-        DTS.SetSize(DTtemp->Height());
-        DTtemp->Mult(*S, DTS);
-        vectemp1 += DTS;
-    }
-
-    vectemp1.Print();
-    std::cout << "vectemp1 norm = " << vectemp1.Norml2() << "\n";
-
-    if (numblocks > 1)
-    {
-        std::cout << "lvlrhsfunc, second block \n";
-        //for ( int i = 0; i < lvlrhs_func.GetBlock(1).Size(); ++i )
-            //std::cout << lvlrhs_func.GetBlock(1)[i] << " " << (*bdrdofs_blocks[1])][i] << "\n";
-        lvlrhs_func.GetBlock(1).Print();
-    }
-    */
-
-
-#endif
     // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2->Height();
     for( int AE = 0; AE < nAE; ++AE)
     {
-#ifdef COMPUTE_EXACTDISCRETESOL
-        Vector sigma_loc, S_loc, lambda_loc;
-#endif
-
         //std::cout << "AE = " << AE << "\n";
         bool is_degenerate = true;
         sub_Func_offsets[0] = 0;
@@ -874,11 +767,6 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                         sub_rhsconstr = 0.0;
                     }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-                    lambda_loc.SetSize(Wtmp_j.Size());
-                    lambda->GetSubVector(Wtmp_j, lambda_loc);
-#endif
-
                 } // end of special treatment of the first block involved into constraint
 
                 sub_Func_offsets[blk1 + 1] = sub_Func_offsets[blk1] + Local_inds[blk1]->Size();
@@ -908,114 +796,9 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-        /*
-        sigma_loc.SetSize(sol_loc.GetBlock(0).Size());
-        sigma->GetSubVector(*Local_inds[0], sigma_loc);
-        if (numblocks == 2)
-        {
-            S_loc.SetSize(sol_loc.GetBlock(1).Size());
-            S->GetSubVector(*Local_inds[1], S_loc);
-        }
-
-        Vector vectemp1_loc(sol_loc.GetBlock(0).Size());
-        vectemp1.GetSubVector(*Local_inds[0], vectemp1_loc);
-
-        std::cout << "vectemp1_loc \n";
-        vectemp1_loc.Print();
-
-        Vector Asigma_loc(sol_loc.GetBlock(0).Size());
-        Asigma.GetSubVector(*Local_inds[0], Asigma_loc);
-
-        Vector BTlambda_loc(sol_loc.GetBlock(0).Size());
-        BTlambda.GetSubVector(*Local_inds[0], BTlambda_loc);
-
-        Vector v1(Asigma_loc.Size());
-        v1 = Asigma_loc;
-        v1 += BTlambda_loc;
-
-        if (numblocks > 1)
-        {
-            Vector DTS_loc(sol_loc.GetBlock(0).Size());
-            DTS.GetSubVector(*Local_inds[0], DTS_loc);
-            v1 += DTS_loc;
-            std::cout << "Asigma_loc  + BTlambda_loc + DTS_loc \n";
-        }
-        else
-        {
-            std::cout << "Asigma_loc  + BTlambda_loc \n";
-        }
-        v1.Print();
-
-        Vector Aloc_sigmaloc(sol_loc.GetBlock(0).Size());
-        LocalAE_Matrices(0,0)->Mult(sigma_loc, Aloc_sigmaloc);
-
-        Vector v2(Aloc_sigmaloc.Size());
-        v2 = Aloc_sigmaloc;
-        v2 -= Asigma_loc;
-        std::cout << "Asigma_loc - Aloc * sigmaloc \n";
-        std::cout << "Should not be 0 actually \n";
-        v2.Print();
-
-        Vector BTloc_lambdaloc(sol_loc.GetBlock(0).Size());
-        sub_Constr.MultTranspose(lambda_loc, BTloc_lambdaloc);
-
-        Vector v3(BTloc_lambdaloc.Size());
-        v3 = BTloc_lambdaloc;
-        v3 -= BTlambda_loc;
-        std::cout << "BTlambda_loc - BTloc * lambdaloc \n";
-        v3.Print();
-
-        if (numblocks > 1)
-        {
-            Vector DTS_loc(sol_loc.GetBlock(0).Size());
-            DTS.GetSubVector(*Local_inds[0], DTS_loc);
-
-            Vector DTloc_Sloc(sol_loc.GetBlock(0).Size());
-            LocalAE_Matrices(0,1)->Mult(S_loc, DTloc_Sloc);
-
-            Vector v4(DTloc_Sloc.Size());
-            v4 = DTloc_Sloc;
-            v4 -= DTS_loc;
-            std::cout << "DTS_loc - DTloc * Sloc \n";
-            v4.Print();
-
-            Vector Dloc_sigmaloc(sol_loc.GetBlock(1).Size());
-            LocalAE_Matrices(1,0)->Mult(sigma_loc, Dloc_sigmaloc);
-
-            Vector Dsigma_loc(sol_loc.GetBlock(1).Size());
-            Dsigma.GetSubVector(*Local_inds[1], Dsigma_loc);
-
-            Vector v5(Dloc_sigmaloc.Size());
-            v5 = Dloc_sigmaloc;
-            v5 -= Dsigma_loc;
-            std::cout << "Dsigma_loc - Dloc * sigmaloc \n";
-            v5.Print();
-
-            Vector Cloc_Sloc(sol_loc.GetBlock(1).Size());
-            LocalAE_Matrices(1,1)->Mult(S_loc, Cloc_Sloc);
-
-            Vector CS_loc(sol_loc.GetBlock(1).Size());
-            CS.GetSubVector(*Local_inds[1], CS_loc);
-
-            Vector v6(sol_loc.GetBlock(1).Size());
-            v6 = Dsigma_loc;
-            v6 += CS_loc;
-            std::cout << "Dsigma_loc + CS_loc \n";
-            v6.Print();
-
-        }
-        */
-#endif
-
         // solving local problem at the agglomerate element AE
-#ifdef COMPUTE_EXACTDISCRETESOL
-        SolveLocalProblem(AE, LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr,
-                          sol_loc, is_degenerate, &sigma_loc, &S_loc, &lambda_loc);
-#else
         SolveLocalProblem(AE, LocalAE_Matrices, sub_Constr, sub_Func, sub_rhsconstr,
                           sol_loc, is_degenerate);
-#endif
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
         {
@@ -1037,15 +820,9 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
 }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
-                               BlockVector &G, Vector& F, BlockVector &sol,
-                               bool is_degenerate, Vector * sigma_loc, Vector * S_loc, Vector * lambda_loc) const
-#else
 void LocalProblemSolver::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
                                BlockVector &G, Vector& F, BlockVector &sol,
                                bool is_degenerate) const
-#endif
 {
     if (optimized_localsolve)
     {
@@ -1360,15 +1137,9 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
 
 class LocalProblemSolverWithS : public LocalProblemSolver
 {
-#ifdef COMPUTE_EXACTDISCRETESOL
-    virtual void SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
-                                   BlockVector &G, Vector& F, BlockVector &sol,
-                                   bool is_degenerate, Vector* sigma_loc = NULL, Vector * S_loc = NULL, Vector * lambda_loc = NULL) const override;
-#else
     virtual void SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
                                    BlockVector &G, Vector& F, BlockVector &sol,
                                    bool is_degenerate) const override;
-#endif
     // Optimized version of SolveLocalProblem where LU factors for the local
     // problem's matrices were computed during the setup via SaveLocalLUFactors()
     void SolveLocalProblemOpt(DenseMatrixInverse * inv_AorAtilda,
@@ -1389,9 +1160,6 @@ public:
                        const SparseMatrix& El_to_Dofs_L2,
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
-#ifdef COMPUTE_EXACTDISCRETESOL
-                       Vector * sigma, Vector * S, Vector * lambda,
-#endif
                        bool Optimized_LocalSolve)
         : LocalProblemSolver(Op_Blksmat,
                               Constr_Spmat,
@@ -1399,9 +1167,6 @@ public:
                               AE_el,
                               El_to_Dofs_Op, El_to_Dofs_L2,
                               BdrDofs_blks, EssBdrDofs_blks,
-#ifdef COMPUTE_EXACTDISCRETESOL
-                              sigma, S, lambda,
-#endif
                               false)
     {
         optimized_localsolve = Optimized_LocalSolve;
@@ -1577,15 +1342,9 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
     return;
 }
 
-#ifdef COMPUTE_EXACTDISCRETESOL
-void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
-                               BlockVector &G, Vector& F, BlockVector &sol,
-                               bool is_degenerate, Vector * sigma_loc, Vector * S_loc, Vector * lambda_loc) const
-#else
 void LocalProblemSolverWithS::SolveLocalProblem(int AE, Array2D<DenseMatrix*> &FunctBlks, DenseMatrix& B,
                                BlockVector &G, Vector& F, BlockVector &sol,
                                bool is_degenerate) const
-#endif
 {
     if (optimized_localsolve)
     {
@@ -3004,9 +2763,6 @@ public:
                            const BlockVector& Bdrdata_TrueDofs,
                            Array<Operator*>* LocalSolvers = NULL,
                            Operator* CoarseSolver = NULL,
-#ifdef COMPUTE_EXACTDISCRETESOL
-                           Vector * sigma = NULL, Vector * S = NULL, Vector * lambda = NULL,
-#endif
                            bool Construct_CoarseOps = true,
                            int StopCriteria_Type = 1);
 
@@ -3148,10 +2904,6 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const BlockVector& Bdrdata_TrueDofs,
                        Array<Operator*>* LocalSolvers,
                        Operator *CoarsestSolver,
-#ifdef COMPUTE_EXACTDISCRETESOL
-                       Vector * sigma, Vector * S, Vector * lambda,
-#endif
-
                        bool Construct_CoarseOps, int StopCriteria_Type)
      : Solver(Offsets_Global[Offsets_Global.Size()-1]),
        construct_coarseops(Construct_CoarseOps),
