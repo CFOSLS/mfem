@@ -161,90 +161,6 @@ bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const 
     return passed;
 }
 
-
-#if 0
-class MultilevelSmoother : public Operator
-{
-protected:
-    // number of levels where MultLevel is to be called
-    const int num_levels;
-    mutable Array<bool> finalized_lvls;
-    mutable int print_level;
-public:
-    // constructor
-    MultilevelSmoother (int Num_Levels) : num_levels(Num_Levels)
-    {
-        finalized_lvls.SetSize(num_levels);
-        finalized_lvls = 0;
-    }
-
-    // general setup functions
-    virtual void SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) const = 0;
-
-    // general functions for setting righthand side at the given level
-    //virtual void ComputeRhsLevel(int level, const BlockVector& res_lvl);
-    virtual void ComputeTrueRhsLevel(int level, const BlockVector& res_lvl);
-
-    // main function which applies the smoother at the given level
-    //virtual void MultLevel(int level, Vector& in, Vector& out) = 0;
-    virtual void MultTrueLevel(int level, Vector& in, Vector& out) = 0;
-
-    // legacy of the Operator class
-    virtual void Mult (const Vector& x, Vector& y) const
-    {
-        MFEM_ABORT("Mult() should never be called from MultilevelSmoother and its descendants \n");
-    }
-
-    void SetPrintLevel(int PrintLevel)  {print_level = PrintLevel;}
-    // getters
-    int GetNumLevels() {return num_levels;}
-    int GetPrintLevel() const { return print_level;}
-
-    virtual void PrintAllOptions() const;
-
-    virtual void Setup() const = 0;
-};
-
-
-void MultilevelSmoother::PrintAllOptions() const
-{
-    std::cout << "Multilevel smoother base options: \n";
-    std::cout << "num_levels: " << num_levels << "\n";
-    std::cout << "print_level: " << print_level << "\n";
-    std::cout << "\n";
-}
-
-void MultilevelSmoother::SetUpSmoother(int level, const BlockMatrix& SysMat_lvl) const
-{
-    MFEM_ABORT("SetUpSmoother for a BlockMatrix argument is called from the abstract base"
-                 " class but must have been redefined \n");
-}
-
-/*
-void MultilevelSmoother::MultLevel(int level, Vector& in, Vector& out)
-{
-    MFEM_ABORT("MultLevel is called from the abstract base class but must have been redefined \n");
-}
-
-void MultilevelSmoother::ComputeRhsLevel(int level, const BlockVector& res_lvl)
-{
-    std::cout << "ComputeRhsLevel for a BlockVector argument is called from the abstract base"
-                 " class but must have been redefined \n";
-}
-*/
-
-void MultilevelSmoother::MultTrueLevel(int level, Vector& in, Vector& out)
-{
-    MFEM_ABORT("MultTrueLevel is called from the abstract base class but must have been redefined \n");
-}
-
-void MultilevelSmoother::ComputeTrueRhsLevel(int level, const BlockVector& res_lvl)
-{
-    std::cout << "ComputeTrueRhsLevel for a BlockVector argument is called from the abstract base"
-                 " class but must have been redefined \n";
-}
-#endif
-
 // TODO: Implement an abstract base for the coarsest problem solver. Maybe unnecessary now
 // TODO: Implement an abstract base for the local problems solver. Maybe unnecessary now
 
@@ -287,6 +203,7 @@ protected:
     void Setup() const;
 
 public:
+    ~CoarsestProblemSolver();
     CoarsestProblemSolver(BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
                           const std::vector<HypreParMatrix*>& D_tD_blks,
                           const HypreParMatrix& D_tD_L2,
@@ -326,6 +243,20 @@ CoarsestProblemSolver::CoarsestProblemSolver(BlockMatrix& Op_Blksmat,
     coarse_offsets.SetSize(numblocks + 2);
 
     Setup();
+}
+
+CoarsestProblemSolver::~CoarsestProblemSolver()
+{
+    delete xblock;
+    delete yblock;
+
+    delete coarseSolver;
+    delete coarsetrueRhs;
+    delete coarsetrueX;
+    delete coarse_rhsfunc;
+    delete coarse_prec;
+    delete coarse_matrix;
+
 }
 
 void CoarsestProblemSolver::Setup() const
@@ -612,6 +543,7 @@ protected:
     void Setup();
 
 public:
+    ~LocalProblemSolver();
     // main constructor
     LocalProblemSolver(const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
@@ -665,6 +597,21 @@ public:
     // is public since one might want to use that to compute particular solution witn nonzero righthand side in the constraint
     void SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol_update, Vector* localrhs_constr) const;
 };
+
+LocalProblemSolver::~LocalProblemSolver()
+{
+    delete AE_edofs_L2;
+    delete AE_eintdofs_blocks;
+
+    delete xblock;
+    delete yblock;
+
+    if (optimized_localsolve)
+        for (unsigned int i = 0; i < LUfactors.size(); ++i)
+            for (unsigned int j = 0; j < LUfactors[i].size(); ++j)
+                if (LUfactors[i][j])
+                    delete LUfactors[i][j];
+}
 
 void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
 {
@@ -1151,6 +1098,8 @@ class LocalProblemSolverWithS : public LocalProblemSolver
     // classes in order to speed up iterations
     virtual void SaveLocalLUFactors() const override;
 public:
+    // ~LocalProblemSolverWithS() : ~LocalProblemSolver() {} will call LocalProblemSolver destructor as I understand
+
     // main constructor
     LocalProblemSolverWithS(const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
@@ -1784,6 +1733,7 @@ protected:
     void UpdateTrueResidual(int level, const BlockVector* rhs_l,  const BlockVector& solupd_l, BlockVector& out_l) const;
 
 public:
+    ~DivConstraintSolver();
     DivConstraintSolver(int NumLevels,
                            const Array< SparseMatrix*> &AE_to_e,
                            const std::vector<std::vector<HypreParMatrix*> >& Dof_TrueDof_Func_lvls,
@@ -1822,6 +1772,26 @@ public:
     void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
 
 };
+
+DivConstraintSolver::~DivConstraintSolver()
+{
+    delete xblock_truedofs;
+    delete yblock_truedofs;
+    delete tempblock_truedofs;
+
+    for (int i = 0; i < trueoffsets_lvls.Size(); ++i)
+        if (i > 0) // for i = 0 it is an input parameter
+            delete trueoffsets_lvls[i];
+    for (int i = 0; i < truetempvec_lvls.Size(); ++i)
+        delete truetempvec_lvls[i];
+    for (int i = 0; i < truetempvec2_lvls.Size(); ++i)
+        delete truetempvec2_lvls[i];
+    for (int i = 0; i < trueresfunc_lvls.Size(); ++i)
+        delete trueresfunc_lvls[i];
+    for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
+        delete truesolupdate_lvls[i];
+
+}
 
 DivConstraintSolver::DivConstraintSolver(int NumLevels,
                        const Array< SparseMatrix*> &AE_to_e,
@@ -2258,6 +2228,7 @@ protected:
     mutable BlockVector * yblock;
 
 public:
+    ~HcurlGSSSmoother();
     // constructor
     HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                      const SparseMatrix& Discrete_Curl,
@@ -2282,6 +2253,22 @@ public:
     int GetSweepsNumber(int block) const {return sweeps_num[block];}
 
 };
+
+HcurlGSSSmoother::~HcurlGSSSmoother()
+{
+    delete xblock;
+    delete yblock;
+    delete truerhs;
+    delete truex;
+
+    delete CTMC;
+    delete CTMC_global;
+
+    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
+        for (int colblk = 0; colblk < numblocks; ++colblk)
+            if (Funct_restblocks_global(rowblk,colblk))
+                delete Funct_restblocks_global(rowblk,colblk);
+}
 
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                                     const SparseMatrix& Discrete_Curl,
@@ -2742,6 +2729,7 @@ protected:
     void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
+    ~GeneralMinConstrSolver();
     // constructor
     GeneralMinConstrSolver(int NumLevels,
                            const std::vector<std::vector<HypreParMatrix *> > &Dof_TrueDof_Func_lvls,
@@ -2799,6 +2787,25 @@ public:
             LocalSolvers_lvls[l] = LocalSolvers[l];
     }
 };
+
+GeneralMinConstrSolver::~GeneralMinConstrSolver()
+{
+    delete xblock_truedofs;
+    delete yblock_truedofs;
+    delete tempblock_truedofs;
+    delete init_guess;
+
+    for (int i = 0; i < trueoffsets_lvls.Size(); ++i)
+        delete trueoffsets_lvls[i];
+    for (int i = 0; i < truetempvec_lvls.Size(); ++i)
+        delete truetempvec_lvls[i];
+    for (int i = 0; i < truetempvec2_lvls.Size(); ++i)
+        delete truetempvec2_lvls[i];
+    for (int i = 0; i < trueresfunc_lvls.Size(); ++i)
+        delete trueresfunc_lvls[i];
+    for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
+        delete truesolupdate_lvls[i];
+}
 
 void GeneralMinConstrSolver::PrintAllOptions() const
 {
