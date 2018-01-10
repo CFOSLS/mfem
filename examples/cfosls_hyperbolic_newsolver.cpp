@@ -1324,9 +1324,9 @@ int main(int argc, char *argv[])
         // curl or divskew operator from C_space into R_space
         ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
         if (dim == 3)
-            Divfree_op.AddDomainInterpolator(new CurlInterpolator());
+            Divfree_op.AddDomainInterpolator(new CurlInterpolator);
         else // dim == 4
-            Divfree_op.AddDomainInterpolator(new DivSkewInterpolator());
+            Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
         Divfree_op.Assemble();
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
@@ -1597,15 +1597,21 @@ int main(int argc, char *argv[])
             }
         }
 
+        delete Ablock;
+        delete Cblock;
+        delete Bblock;
+        delete BTblock;
     } // end of loop over all levels
 
     for ( int l = 0; l < num_levels - 1; ++l)
     {
         BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
         Funct_mat_lvls[l + 1] = mfem::Mult(*Transpose(*P_Func[l]), *temp);
+        delete temp;
 
         SparseMatrix * temp_sp = mfem::Mult(*Constraint_mat_lvls[l], P_Func[l]->GetBlock(0,0));
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
+        delete temp_sp;
     }
 
     for (int l = num_levels - 1; l >=0; --l)
@@ -1665,6 +1671,86 @@ int main(int argc, char *argv[])
         }
 #endif
     }
+
+    for (int l = 0; l < num_levels; ++l)
+    {
+        delete BdrDofs_Funct_lvls[l][0];
+        delete EssBdrDofs_Funct_lvls[l][0];
+        delete EssBdrTrueDofs_Funct_lvls[l][0];
+        delete Funct_mat_offsets_lvls[l];
+        if (l < num_levels - 1)
+        {
+            delete EssBdrDofs_Hcurl[l];
+            delete EssBdrTrueDofs_Hcurl[l];
+        }
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            delete BdrDofs_Funct_lvls[l][1];
+            delete EssBdrDofs_Funct_lvls[l][1];
+            delete EssBdrTrueDofs_Funct_lvls[l][1];
+            delete EssBdrDofs_H1[l];
+        }
+
+#ifdef WITH_LOCALSOLVERS
+        if (l < num_levels - 1)
+        {
+            if (LocalSolver_partfinder_lvls)
+                if ((*LocalSolver_partfinder_lvls)[l])
+                    delete (*LocalSolver_partfinder_lvls)[l];
+            delete LocalSolver_partfinder_lvls;
+        }
+#endif
+
+#ifdef WITH_SMOOTHERS
+        if (l < num_levels - 1)
+            if (Smoothers_lvls[l])
+                delete Smoothers_lvls[l];
+#endif
+        if (l < num_levels - 1)
+        {
+            delete Element_dofs_Func[l];
+            delete P_Func[l];
+            delete TrueP_Func[l];
+        }
+
+        delete Funct_rhs_lvls[l];
+        delete Funct_mat_lvls[l];
+        delete Constraint_mat_lvls[l];
+
+        delete H_space_lvls[l];
+        delete R_space_lvls[l];
+        delete W_space_lvls[l];
+        delete C_space_lvls[l];
+        delete pmesh_lvls[l];
+    }
+
+    //delete row_offsets_El_dofs;
+    //delete col_offsets_El_dofs;
+    //delete row_offsets_P_Func;
+    //delete col_offsets_P_Func;
+    //delete row_offsets_TrueP_Func;
+    //delete col_offsets_TrueP_Func;
+
+    delete Funct_global;
+    delete Functrhs_global;
+
+    delete hdiv_coll;
+    delete R_space;
+    if (withDiv)
+    {
+        delete l2_coll;
+        delete W_space;
+    }
+    delete hdivfree_coll;
+    delete C_space;
+
+    delete h1_coll;
+    delete H_space;
+
+
+    MPI_Finalize();
+    return 0;
+
 
     // Creating the coarsest problem solver
     CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
