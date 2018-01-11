@@ -1701,6 +1701,7 @@ int main(int argc, char *argv[])
                 if ((*LocalSolver_partfinder_lvls)[l])
                     delete (*LocalSolver_partfinder_lvls)[l];
             delete LocalSolver_partfinder_lvls;
+            delete LocalSolver_lvls;
         }
 #endif
 

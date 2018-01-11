@@ -998,7 +998,10 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         }
 
         // creating dofs_to_AE relation table
-        SparseMatrix * dofs_AE = Transpose(*mfem::Mult(AE_e, *el_dofs_blk));
+        SparseMatrix * tempprod = mfem::Mult(AE_e, *el_dofs_blk);
+        SparseMatrix * dofs_AE = Transpose(*tempprod);
+        delete tempprod;
+
         int ndofs = dofs_AE->Height();
 #ifdef DEBUG_INFO
         if (blk == 0)
@@ -1081,6 +1084,8 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
 
         if (num_procs > 1)
             delete td_d;
+
+        delete innerdofs_AE;
 
     } // end of the loop over blocks
 
