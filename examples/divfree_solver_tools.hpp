@@ -584,8 +584,6 @@ public:
         Setup();
     }
 
-    void SetUp();
-
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const override { Mult(x,y, NULL); }
 
@@ -601,6 +599,8 @@ public:
 LocalProblemSolver::~LocalProblemSolver()
 {
     delete AE_edofs_L2;
+    for (int blk = 0; blk < numblocks; ++blk)
+        delete &(AE_eintdofs_blocks->GetBlock(blk,blk));
     delete AE_eintdofs_blocks;
 
     delete xblock;
