@@ -1675,6 +1675,18 @@ int main(int argc, char *argv[])
 #endif
     }
 
+    // Creating the coarsest problem solver
+    CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
+                                                     *Constraint_mat_lvls[num_levels - 1],
+                                                     Dof_TrueDof_Func_lvls[num_levels - 1],
+                                                     *Dof_TrueDof_L2_lvls[num_levels - 1],
+                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
+                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1]);
+    CoarsestSolver = CoarsestSolver_partfinder;
+
+    if (verbose)
+        std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
+
     for (int l = 0; l < num_levels; ++l)
     {
         delete BdrDofs_Funct_lvls[l][0];
@@ -1782,22 +1794,11 @@ int main(int argc, char *argv[])
     delete h1_coll;
     delete H_space;
 
+    delete CoarsestSolver;
 
     MPI_Finalize();
     return 0;
 
-
-    // Creating the coarsest problem solver
-    CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
-                                                     *Constraint_mat_lvls[num_levels - 1],
-                                                     Dof_TrueDof_Func_lvls[num_levels - 1],
-                                                     *Dof_TrueDof_L2_lvls[num_levels - 1],
-                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
-                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1]);
-    CoarsestSolver = CoarsestSolver_partfinder;
-
-    if (verbose)
-        std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
 
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space_lvls[0]);

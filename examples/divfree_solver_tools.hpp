@@ -2276,6 +2276,17 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
         for (int colblk = 0; colblk < numblocks; ++colblk)
             if (Funct_restblocks_global(rowblk,colblk))
                 delete Funct_restblocks_global(rowblk,colblk);
+
+    for (int i = 0; i < Smoothers.Size(); ++i)
+        delete Smoothers[i];
+
+#ifdef MEMORY_OPTIMIZED
+    delete temp_Hdiv_dofs;
+    delete temp_Hcurl_dofs;
+#else
+    delete Curlh_global;
+#endif
+
 }
 
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
@@ -2345,7 +2356,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     //std::cout << "Checkpoint 0 \n";
     //MPI_Barrier(MPI_COMM_WORLD);
 
-    if (x.GetData() == y.GetData())
+    if (x.GetData() == y.GetData() && x.GetData() != NULL)
         mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
     // x will be accessed through xblock as its view
@@ -2567,6 +2578,8 @@ void HcurlGSSSmoother::Setup() const
 
         //delete Functblk_d_td_blk;
         //delete Funct_blk;
+
+        delete temphpmat;
 
         Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
         ((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
