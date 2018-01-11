@@ -1716,10 +1716,11 @@ int main(int argc, char *argv[])
             delete TrueP_Func[l];
         }
 
-        for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
-            for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
-                delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
-        //delete Funct_mat_lvls[l];
+        if (l == 0)
+            for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+                for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+                    delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+        delete Funct_mat_lvls[l];
 
         delete Constraint_mat_lvls[l];
 
