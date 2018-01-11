@@ -672,6 +672,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     for ( int blk = 0; blk < numblocks; ++blk )
     {
         AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
+        Local_inds[blk] = new Array<int>();
     }
 
     // loop over all AE, solving a local problem in each AE
@@ -683,8 +684,10 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         sub_Func_offsets[0] = 0;
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            // no memory allocation here, it's just a viewer which is created
-            Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+            // no memory allocation here, it's just a viewer which is created. no valgrind suggests allocation here
+            //Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+                                             //AE_eintdofs_blks[blk]->RowSize(AE));
+            Local_inds[blk]->MakeRef(AE_eintdofs_blks[blk]->GetRowColumns(AE),
                                              AE_eintdofs_blks[blk]->RowSize(AE));
 
             if (blk == 0) // degeneracy comes from Constraint matrix which involves only sigma = the first block
@@ -772,6 +775,9 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
     for (int blk = 0; blk < numblocks; ++blk)
         d_td_blocks[blk]->MultTranspose(sol.GetBlock(blk), truesol.GetBlock(blk));
+
+    for ( int blk = 0; blk < numblocks; ++blk )
+        delete Local_inds[blk];
 
     return;
 
@@ -2095,8 +2101,8 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
         Constr_lvls[lvl + 1] = mfem::Mult(*P_L2T, *Constr_PR);
 
         delete Funct_PR;
-        delete Constr_PR;
         delete P_FuncT;
+        delete Constr_PR;
         delete P_L2T;
     }
 
@@ -3501,6 +3507,8 @@ public:
 
             SparseMatrix * P_WT = Transpose(*P_W[l]);
             SparseMatrix * P_WTxP_W = Mult(*P_WT,*P_W[l]);
+
+            delete P_WT;
             Vector Diag(P_WTxP_W->Size());
             Vector invDiag(P_WTxP_W->Size());
             P_WTxP_W->GetDiag(Diag);
@@ -3510,6 +3518,8 @@ public:
                 //std::cout << "Diag(m) = " << Diag(m) << "\n";
                 invDiag(m) = comp(m)/Diag(m);
             }
+
+            delete P_WTxP_W;
 
             //std::cout << "Diag(100) = " << Diag(100);
             //std::cout << "Diag(200) = " << Diag(200);
@@ -3541,7 +3551,14 @@ public:
                 {
                     SparseMatrix *M_PR = Mult(*M_fine, *P_R[l-1]);
                     M_fine = Mult(*P_RT2, *M_PR);
+
+                    delete M_PR;
                 }
+
+                delete B_PR;
+                delete P_WT2;
+                if (M_fine)
+                    delete P_RT2;
             }
 
             //5. Setting for the coarse problem
@@ -3669,6 +3686,11 @@ public:
                     M_coarse->EliminateRowCol(k);
         }
 
+        delete P_WT2;
+        if (M_fine)
+            delete P_RT2;
+        delete B_PR;
+
         Vector sig_c(B_coarse->Width());
 
         auto B_Global = d_td_coarse_R->LeftDiagMult(*B_coarse,d_td_coarse_W->GetColStarts());
@@ -3747,6 +3769,13 @@ public:
 //            cout << "MINRES converged in " << solver.GetNumIterations() << " iterations" <<endl;
 //            cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
             Truesig_c = trueX.GetBlock(0);
+
+            for ( int blk = 0; blk < darcyPr->NumBlocks(); ++blk)
+                    if (&(darcyPr->GetDiagonalBlock(blk)))
+                        delete &(darcyPr->GetDiagonalBlock(blk));
+            delete darcyPr;
+            delete M_Global;
+            delete BT;
         }
         else
         {
@@ -3756,6 +3785,10 @@ public:
 
             HypreParMatrix *MinvBt = B_Global->Transpose();
             HypreParMatrix *S = ParMult(B_Global, MinvBt);
+            S->CopyColStarts();
+            S->CopyRowStarts();
+
+            delete MinvBt;
 
             auto invS = new HypreBoomerAMG(*S);
             invS->SetPrintLevel(0);
@@ -3777,7 +3810,15 @@ public:
 //            cout << "CG converged in " << solver.GetNumIterations() << " iterations" <<endl;
 //            cout << "CG solver took " << chrono.RealTime() << "s. \n";
             MinvBt->Mult(tmp_c, Truesig_c);
+
+            delete invS;
+            delete S;
         }
+
+        delete B_coarse;
+        if (M_fine)
+            delete M_coarse;
+        delete B_Global;
 
         d_td_coarse_R->Mult(Truesig_c,sig_c);
 
@@ -3802,6 +3843,9 @@ public:
         SparseMatrix *Dofs_AE = Mult(*R_T,Element_Element_coarse);
         SparseMatrix *AeDofs = Transpose(*Dofs_AE);
         Dofs_Ae = *AeDofs;
+
+        delete R_T;
+        delete Dofs_AE;
     }
 
 

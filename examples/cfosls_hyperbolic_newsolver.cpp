@@ -2446,7 +2446,7 @@ int main(int argc, char *argv[])
     double norm_S;
     //if (withS)
     {
-        S_exact = new ParGridFunction(S_space);
+        ParGridFunction * S_exact = new ParGridFunction(S_space);
         S_exact->ProjectCoefficient(*Mytest.scalarS);
 
         double err_S = S->ComputeL2Error(*Mytest.scalarS, irs);
@@ -2495,6 +2495,8 @@ int main(int argc, char *argv[])
                 delete GradSpace;
                 delete hcurl_coll;
             }
+
+            delete S_exact;
         }
 
 #ifdef USE_CURLMATRIX
@@ -2980,9 +2982,40 @@ int main(int argc, char *argv[])
         delete BT;
     }
 #endif
+    if(dim<=4)
+    {
+        if (prec_is_MG)
+        {
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                if (monolithicMG)
+                {
+
+                }
+                else
+                {
+                    for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                            if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                                delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+                }
+            }
+            else
+                for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                        if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                            delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+        }
+        else
+        {
+            for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                    if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                        delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+        }
+    }
+
     delete prec;
     for (int i = 0; i < P.Size(); ++i)
         delete P[i];
+
 #endif // end of #ifdef OLD_CODE in the memory deallocating
 
     MPI_Finalize();
