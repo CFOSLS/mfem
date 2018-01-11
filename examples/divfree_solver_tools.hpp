@@ -879,6 +879,8 @@ void LocalProblemSolver::SaveLocalLUFactors() const
     SparseMatrix * AE_eintdofs = &(AE_eintdofs_blocks->GetBlock(0,0));
     const SparseMatrix * Op_blk = &(Op_blkspmat.GetBlock(0,0));
 
+    Array<int> * Local_inds = new Array<int>();
+
     // loop over all AE, computing and saving factorization
     // of local saddle point matrices in each AE
     for( int AE = 0; AE < nAE; ++AE)
@@ -889,16 +891,17 @@ void LocalProblemSolver::SaveLocalLUFactors() const
         //std::cout << "AE = " << AE << "\n";
         bool is_degenerate = true;
 
-        Array<int> Local_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
+        //Array<int> Local_inds(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
+        Local_inds->MakeRef(AE_eintdofs->GetRowColumns(AE), AE_eintdofs->RowSize(AE));
 
         Array<int> Wtmp_j(AE_edofs_L2->GetRowColumns(AE), AE_edofs_L2->RowSize(AE));
-        sub_Constr.SetSize(Wtmp_j.Size(), Local_inds.Size());
-        Constr_spmat.GetSubMatrix(Wtmp_j, Local_inds, sub_Constr);
+        sub_Constr.SetSize(Wtmp_j.Size(), Local_inds->Size());
+        Constr_spmat.GetSubMatrix(Wtmp_j, *Local_inds, sub_Constr);
 
-        for (int i = 0; i < Local_inds.Size(); ++i)
+        for (int i = 0; i < Local_inds->Size(); ++i)
         {
-            if ( (*bdrdofs_blocks[0])[Local_inds[i]] != 0 &&
-                 (*essbdrdofs_blocks[0])[Local_inds[i]] == 0)
+            if ( (*bdrdofs_blocks[0])[(*Local_inds[i])] != 0 &&
+                 (*essbdrdofs_blocks[0])[(*Local_inds)[i]] == 0)
             {
                 //std::cout << "then local problem is non-degenerate \n";
                 is_degenerate = false;
@@ -907,10 +910,10 @@ void LocalProblemSolver::SaveLocalLUFactors() const
         }
 
         // Setting size of Dense Matrices
-        sub_Func.SetSize(Local_inds.Size());
+        sub_Func.SetSize(Local_inds->Size());
 
         // Obtaining submatrices:
-        Op_blk->GetSubMatrix(Local_inds, Local_inds, sub_Func);
+        Op_blk->GetSubMatrix(*Local_inds, *Local_inds, sub_Func);
 
         LUfactors[AE][0] = new DenseMatrixInverse(sub_Func);
 
@@ -936,6 +939,8 @@ void LocalProblemSolver::SaveLocalLUFactors() const
         LUfactors[AE][1] = new DenseMatrixInverse(Schur);
 
     } // end of loop over AEs
+
+    delete Local_inds;
 
     //compute_AEproblem_matrices = false;
     //compute_AEproblem_matrices(numblocks, numblocks) = true;
@@ -1153,6 +1158,7 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
     for ( int blk = 0; blk < numblocks; ++blk )
     {
         AE_eintdofs_blks[blk] = &(AE_eintdofs_blocks->GetBlock(blk,blk));
+        Local_inds[blk] = new Array<int>();
     }
 
     // loop over all AE, solving a local problem in each AE
@@ -1169,8 +1175,10 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
         sub_Func_offsets[0] = 0;
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            // no memory allocation here, it's just a viewer which is created
-            Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+            // no memory allocation here, it's just a viewer which is created. no valgrind suggests allocation here
+            //Local_inds[blk] = new Array<int>(AE_eintdofs_blks[blk]->GetRowColumns(AE),
+                                             //AE_eintdofs_blks[blk]->RowSize(AE));
+            Local_inds[blk]->MakeRef(AE_eintdofs_blks[blk]->GetRowColumns(AE),
                                              AE_eintdofs_blks[blk]->RowSize(AE));
 
             if (blk == 0) // degeneracy comes from Constraint matrix which involves only sigma = the first block
@@ -1286,6 +1294,9 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
                 delete LocalAE_Matrices(blk1, blk2);
 
     } // end of loop over AEs
+
+    for ( int blk = 0; blk < numblocks; ++blk )
+        delete Local_inds[blk];
 
     return;
 }
