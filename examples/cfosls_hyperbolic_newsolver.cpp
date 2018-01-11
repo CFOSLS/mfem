@@ -1398,14 +1398,16 @@ int main(int argc, char *argv[])
                 Funct_mat_lvls[l]->SetBlock(1,0,BTblock->LoseMat());
                 Funct_mat_lvls[l]->SetBlock(0,1,Transpose(Funct_mat_lvls[l]->GetBlock(1,0)));
             }
-        }
 
-        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
-        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-        Bblock->Assemble();
-        //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
-        Bblock->Finalize();
-        Constraint_mat_lvls[l] = Bblock->LoseMat();
+            ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
+            Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Bblock->Assemble();
+            //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
+            Bblock->Finalize();
+            Constraint_mat_lvls[l] = Bblock->LoseMat();
+
+            delete Bblock;
+        }
 
         Funct_rhs_lvls[l] = new BlockVector(*Funct_mat_offsets_lvls[l]);
         Funct_rhs_lvls[l]->GetBlock(0) = 0.0;
@@ -1608,7 +1610,6 @@ int main(int argc, char *argv[])
         }
 
         delete Ablock;
-        delete Bblock;
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             delete Cblock;
@@ -1730,10 +1731,10 @@ int main(int argc, char *argv[])
         }
 
         delete Funct_rhs_lvls[l];
-        //for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
-            //for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
-                //delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
-        delete Funct_mat_lvls[l];
+        for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+            for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+                delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+        //delete Funct_mat_lvls[l];
 
         delete Constraint_mat_lvls[l];
 
