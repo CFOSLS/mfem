@@ -2968,6 +2968,8 @@ int main(int argc, char *argv[])
     delete rhside_Hdiv;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         delete qform;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        delete S;
     delete MainOp;
     delete Mblock;
     delete M;

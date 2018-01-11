@@ -3735,6 +3735,8 @@ public:
 
             MinvBt->InvScaleRows(*Md);
             HypreParMatrix *S = ParMult(B_Global, MinvBt);
+            S->CopyColStarts();
+            S->CopyRowStarts();
 
             //HypreSolver *invM, *invS;
             auto invM = new HypreDiagScale(*M_Global);
@@ -3773,9 +3775,14 @@ public:
             for ( int blk = 0; blk < darcyPr->NumBlocks(); ++blk)
                     if (&(darcyPr->GetDiagonalBlock(blk)))
                         delete &(darcyPr->GetDiagonalBlock(blk));
+            delete MinvBt;
+            delete Md;
             delete darcyPr;
             delete M_Global;
             delete BT;
+            delete S;
+            delete d_td_T;
+            delete d_td_M;
         }
         else
         {
@@ -4279,6 +4286,10 @@ public:
             delete Smoothers_[l];
             delete correction[l];
             delete residual[l];
+            if (l < Operators_.Size() - 1)
+                delete Operators_[l];
+            if (CoarsePrec_)
+                delete CoarseSolver;
         }
     }
 
