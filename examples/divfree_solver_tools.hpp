@@ -254,7 +254,14 @@ CoarsestProblemSolver::~CoarsestProblemSolver()
     delete coarsetrueRhs;
     delete coarsetrueX;
     delete coarse_rhsfunc;
+    for ( int blk = 0; blk < numblocks; ++blk)
+            if (&(coarse_prec->GetDiagonalBlock(blk)))
+                delete &(coarse_prec->GetDiagonalBlock(blk));
     delete coarse_prec;
+    for ( int blk1 = 0; blk1 < numblocks + 1; ++blk1)
+        for ( int blk2 = 0; blk2 < numblocks + 1; ++blk2)
+            if (coarse_matrix->IsZeroBlock(blk1, blk2) == false)
+                delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
 
 }
@@ -2579,6 +2586,7 @@ void HcurlGSSSmoother::Setup() const
         //delete Functblk_d_td_blk;
         //delete Funct_blk;
 
+        delete Funct_blk;
         delete temphpmat;
 
         Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
