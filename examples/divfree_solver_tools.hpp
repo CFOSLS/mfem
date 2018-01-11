@@ -1699,8 +1699,6 @@ protected:
     mutable Array<BlockMatrix*> Funct_lvls;
     mutable Array<SparseMatrix*> Constr_lvls;
 
-    mutable Array<BlockVector*> Funct_rhs_lvls;
-
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
     mutable BlockVector* yblock_truedofs;
@@ -1744,7 +1742,6 @@ public:
                            const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix*> & FunctOp_lvls,
                            const Array<SparseMatrix*> &ConstrOp_lvls,
-                           const Array<BlockVector*> & FunctRhs_lvls,
                            const Vector& ConstrRhsVec,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
@@ -1803,7 +1800,6 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
-                       const Array<BlockVector*> & FunctRhs_lvls,
                        const Vector& ConstrRhsVec,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
@@ -1844,10 +1840,6 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     Funct_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Funct_lvls[l] = FunctOp_lvls[l];
-
-    Funct_rhs_lvls.SetSize(num_levels);
-    for (int l = 0; l < num_levels; ++l)
-        Funct_rhs_lvls[l] = FunctRhs_lvls[l];
 
     Constr_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
