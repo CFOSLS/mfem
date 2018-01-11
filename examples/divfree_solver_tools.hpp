@@ -254,12 +254,12 @@ CoarsestProblemSolver::~CoarsestProblemSolver()
     delete coarsetrueRhs;
     delete coarsetrueX;
     delete coarse_rhsfunc;
-    for ( int blk = 0; blk < numblocks; ++blk)
+    for ( int blk = 0; blk < coarse_prec->NumBlocks(); ++blk)
             if (&(coarse_prec->GetDiagonalBlock(blk)))
                 delete &(coarse_prec->GetDiagonalBlock(blk));
     delete coarse_prec;
-    for ( int blk1 = 0; blk1 < numblocks + 1; ++blk1)
-        for ( int blk2 = 0; blk2 < numblocks + 1; ++blk2)
+    for ( int blk1 = 0; blk1 < coarse_matrix->NumRowBlocks(); ++blk1)
+        for ( int blk2 = 0; blk2 < coarse_matrix->NumColBlocks(); ++blk2)
             if (coarse_matrix->IsZeroBlock(blk1, blk2) == false)
                 delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
@@ -411,6 +411,9 @@ void CoarsestProblemSolver::Setup() const
     HypreParMatrix *Schur = ParMult(Constr_global, MinvBt);
     Schur->CopyRowStarts();
     Schur->CopyColStarts();
+
+    delete MinvBt;
+    delete Md;
 
     HypreBoomerAMG * invSchur = new HypreBoomerAMG(*Schur);
     invSchur->SetPrintLevel(0);
@@ -606,7 +609,7 @@ public:
 LocalProblemSolver::~LocalProblemSolver()
 {
     delete AE_edofs_L2;
-    for (int blk = 0; blk < numblocks; ++blk)
+    for (int blk = 0; blk < AE_eintdofs_blocks->NumRowBlocks(); ++blk)
         delete &(AE_eintdofs_blocks->GetBlock(blk,blk));
     delete AE_eintdofs_blocks;
 
@@ -2279,8 +2282,8 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     delete CTMC;
     delete CTMC_global;
 
-    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
-        for (int colblk = 0; colblk < numblocks; ++colblk)
+    for (int rowblk = 0; rowblk < Funct_restblocks_global.NumRows(); ++rowblk)
+        for (int colblk = 0; colblk < Funct_restblocks_global.NumCols(); ++colblk)
             if (Funct_restblocks_global(rowblk,colblk))
                 delete Funct_restblocks_global(rowblk,colblk);
 
