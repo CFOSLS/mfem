@@ -2837,6 +2837,13 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
         delete trueresfunc_lvls[i];
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
+
+    for ( int l = 0; l < num_levels; ++l)
+        if (l > 0 && Funct_lvls[l]) // only for l > 0 new memory is allocated for these pointers
+            delete Funct_lvls[l];
+    for ( int l = 0; l < num_levels; ++l)
+        if (l > 0 && Constr_lvls[l])
+            delete Constr_lvls[l];
 }
 
 void GeneralMinConstrSolver::PrintAllOptions() const
@@ -3654,6 +3661,8 @@ public:
             SparseMatrix *M_PR = Mult(*M_fine, *P_R[ref_levels-1]);
 
             M_coarse =  Mult(*P_RT2, *M_PR);
+
+            delete M_PR;
 
             for ( int k = 0; k < ess_dof_coarsestlvl_list.Size(); ++k)
                 if (ess_dof_coarsestlvl_list[k] !=0)

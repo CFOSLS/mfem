@@ -1791,8 +1791,8 @@ int main(int argc, char *argv[])
     ParLinearForm *gform;
     HypreParMatrix *Bdiv;
 
-    SparseMatrix *M_local;
-    SparseMatrix *B_local;
+    //SparseMatrix *M_local;
+    //SparseMatrix *B_local;
     Vector F_fine(P_W[0]->Height());
     Vector G_fine(P_R[0]->Height());
     Vector sigmahat_pau;
@@ -1805,10 +1805,11 @@ int main(int argc, char *argv[])
 
             ConstantCoefficient k(1.0);
 
-            //SparseMatrix *M_local;
+            SparseMatrix *M_local;
+            ParBilinearForm *mVarf;
             if (useM_in_divpart)
             {
-                ParBilinearForm *mVarf(new ParBilinearForm(R_space));
+                mVarf = new ParBilinearForm(R_space);
                 mVarf->AddDomainIntegrator(new VectorFEMassIntegrator(k));
                 mVarf->Assemble();
                 mVarf->Finalize();
@@ -1826,7 +1827,7 @@ int main(int argc, char *argv[])
             bVarf->Finalize();
             Bdiv = bVarf->ParallelAssemble();
             SparseMatrix &B_fine = bVarf->SpMat();
-            B_local = &B_fine;
+            SparseMatrix *B_local = &B_fine;
 
             //Right hand size
 
@@ -1859,6 +1860,11 @@ int main(int argc, char *argv[])
             std::cout << "sth.Norml2() = " << sth.Norml2() << "\n";
             MFEM_ASSERT(sth.Norml2()<1e-8, "The particular solution does not satisfy the divergence constraint");
     #endif
+
+            //delete M_local;
+            //delete B_local;
+            delete bVarf;
+            delete mVarf;
 
             *Sigmahat = sigmahat_pau;
         }
@@ -2006,6 +2012,8 @@ int main(int argc, char *argv[])
     // either as DivfreeT_dop * M * Divfree_dop
     auto tempmat = ParMult(DivfreeT_dop,M);
     auto A = ParMult(tempmat, Divfree_dop);
+    A->CopyRowStarts();
+    A->CopyColStarts();
 
     HypreParMatrix *C, *CH, *CHT, *B, *BT;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -2038,7 +2046,12 @@ int main(int argc, char *argv[])
         B = BT->Transpose();
 
         CHT = ParMult(DivfreeT_dop, B);
+        CHT->CopyColStarts();
+        CHT->CopyRowStarts();
         CH = CHT->Transpose();
+
+        delete Cblock;
+        delete BTblock;
     }
 
     // additional temporary vectors on true dofs required for various matvec
@@ -2078,6 +2091,9 @@ int main(int argc, char *argv[])
     MPI_Finalize();
     return -1;
 #endif
+
+    delete Divfree_dop;
+    delete DivfreeT_dop;
 
     if (verbose)
         cout << "Discretized problem is assembled \n";
@@ -2217,35 +2233,34 @@ int main(int argc, char *argv[])
         if (verbose)
             cout << "Using no preconditioner \n";
 
-    IterativeSolver * solver;
-    solver = new CGSolver(comm);
+    CGSolver solver(comm);
     if (verbose)
         cout << "Linear solver: CG \n";
     //solver = new MINRESSolver(comm);
     //if (verbose)
         //cout << "Linear solver: MINRES \n";
 
-    solver->SetAbsTol(sqrt(atol));
-    solver->SetRelTol(sqrt(rtol));
-    solver->SetMaxIter(max_num_iter);
-    solver->SetOperator(*MainOp);
+    solver.SetAbsTol(sqrt(atol));
+    solver.SetRelTol(sqrt(rtol));
+    solver.SetMaxIter(max_num_iter);
+    solver.SetOperator(*MainOp);
 
     if (with_prec)
-        solver->SetPreconditioner(*prec);
-    solver->SetPrintLevel(0);
+        solver.SetPreconditioner(*prec);
+    solver.SetPrintLevel(0);
     trueX = 0.0;
-    solver->Mult(trueRhs, trueX);
+    solver.Mult(trueRhs, trueX);
 
     chrono.Stop();
 
     if (verbose)
     {
-        if (solver->GetConverged())
-            std::cout << "Linear solver converged in " << solver->GetNumIterations()
-                      << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
+        if (solver.GetConverged())
+            std::cout << "Linear solver converged in " << solver.GetNumIterations()
+                      << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
         else
-            std::cout << "Linear solver did not converge in " << solver->GetNumIterations()
-                      << " iterations. Residual norm is " << solver->GetFinalNorm() << ".\n";
+            std::cout << "Linear solver did not converge in " << solver.GetNumIterations()
+                      << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
 
@@ -2448,11 +2463,11 @@ int main(int argc, char *argv[])
         if (strcmp(space_for_S,"H1") == 0)
         {
             ParFiniteElementSpace * GradSpace;
+            FiniteElementCollection *hcurl_coll;
             if (dim == 3)
                 GradSpace = C_space;
             else // dim == 4
             {
-                FiniteElementCollection *hcurl_coll;
                 hcurl_coll = new ND1_4DFECollection;
                 GradSpace = new ParFiniteElementSpace(pmesh.get(), hcurl_coll);
             }
@@ -2475,6 +2490,11 @@ int main(int argc, char *argv[])
                              sqrt(err_S*err_S + err_GradS*err_GradS) / sqrt(norm_S*norm_S + norm_GradS*norm_GradS) << "\n";
             }
 
+            if (dim != 3)
+            {
+                delete GradSpace;
+                delete hcurl_coll;
+            }
         }
 
 #ifdef USE_CURLMATRIX
@@ -2492,19 +2512,6 @@ int main(int argc, char *argv[])
 
             Vector GtrueSigma(S_space->TrueVSize());
             GtrueSigma = 0.0;
-
-            /*
-            ParMixedBilinearForm *BTblock(new ParMixedBilinearForm(R_space, S_space));
-            if (strcmp(space_for_S,"L2") == 0 && eliminateS) // S was not present in the system
-            {
-                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
-                BTblock->Assemble();
-                BTblock->EliminateTrialDofs(ess_bdrSigma, xblks.GetBlock(0), *qform);
-                BTblock->EliminateTestDofs(ess_bdrS);
-                BTblock->Finalize();
-                BT = BTblock->ParallelAssemble();
-            }
-            */
 
             BT->Mult(trueSigma, GtrueSigma);
             localFunctional += 2.0*(trueX.GetBlock(1)*GtrueSigma);
@@ -2596,37 +2603,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
 
-#if 0
-    /*
-    double smooth_abstol = 1.0e-12;
-    double smooth_reltol = 1.0e-12;
-
-    if (verbose)
-    {
-        std::cout << "smooth_abstol = " << smooth_abstol << "\n";
-        std::cout << "smooth_reltol = " << smooth_reltol << "\n";
-    }
-
-    HCurlSmoother NewSmoother(num_levels - 1, Divfree_mat_lvls[0],
-                   Proj_Hcurl, Dof_TrueDof_Hcurl,
-                   EssBdrDofs_Hcurl);
-    NewSmoother.SetAbsTol(smooth_abstol);//(1.0e-10);//(new_abstol);
-    NewSmoother.SetRelTol(smooth_reltol);//(1.0e-10);//(new_reltol);
-    NewSmoother.SetMaxIterInt(20000);
-    NewSmoother.SetPrintLevel(0);
-    */
-
-    MultilevelHCurlGSSmoother NewGSSmoother(num_levels - 1, Funct_mat_lvls, Divfree_mat_lvls,
-                   Dof_TrueDof_Hcurl_lvls, Dof_TrueDof_Hdiv_lvls,
-                   EssBdrDofs_Hcurl);
-    //NewGSSmoother.SetSweepsNumber(5*(num_levels-1));
-    NewGSSmoother.SetSweepsNumber(5);
-    NewGSSmoother.SetPrintLevel(0);
-
-    if (verbose)
-        std::cout << "Number of smoothing steps: " << NewGSSmoother.GetSweepsNumber() << "\n";
-#endif
-
     if (verbose)
         std::cout << "\nCreating an instance of the new multilevel solver \n";
 
@@ -2636,14 +2612,18 @@ int main(int argc, char *argv[])
     constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
     constrfform->Assemble();
 
+    /*
     ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space, W_space));
     Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
     Bblock->Assemble();
     //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
     Bblock->Finalize();
+    */
 
     Vector Floc(P_W[0]->Height());
     Floc = *constrfform;
+
+    delete constrfform;
 
     BlockVector Xinit(Funct_mat_lvls[0]->ColOffsets());
     Xinit.GetBlock(0) = 0.0;
@@ -3000,7 +2980,10 @@ int main(int argc, char *argv[])
         delete BT;
     }
 #endif
-#endif
+    delete prec;
+    for (int i = 0; i < P.Size(); ++i)
+        delete P[i];
+#endif // end of #ifdef OLD_CODE in the memory deallocating
 
     MPI_Finalize();
     return 0;
@@ -3781,21 +3764,6 @@ int main(int argc, char *argv[])
         MPI_Barrier(pmesh->GetComm());
     }
 #endif
-
-    // 17. Free the used memory.
-
-    delete C_space;
-    delete hdivfree_coll;
-    delete R_space;
-    delete hdiv_coll;
-    delete H_space;
-    delete h1_coll;
-
-    if (withDiv)
-    {
-        delete W_space;
-        delete l2_coll;
-    }
 
     MPI_Finalize();
     return 0;
