@@ -1400,7 +1400,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]));
+        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
         Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
         Bblock->Assemble();
         //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
@@ -1620,8 +1620,8 @@ int main(int argc, char *argv[])
     for ( int l = 0; l < num_levels - 1; ++l)
     {
         BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
-        SparseMatrix * PT_temp = Transpose(*P_Func[l]);
-        Funct_mat_lvls[l + 1] = mfem::Mult(PT_temp, *temp);
+        BlockMatrix * PT_temp = Transpose(*P_Func[l]);
+        Funct_mat_lvls[l + 1] = mfem::Mult(*PT_temp, *temp);
         delete temp;
         delete PT_temp;
 
@@ -1730,9 +1730,10 @@ int main(int argc, char *argv[])
         }
 
         delete Funct_rhs_lvls[l];
-        for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
-            for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
-                delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+        //for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+            //for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+                //delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+        delete Funct_mat_lvls[l];
 
         delete Constraint_mat_lvls[l];
 
