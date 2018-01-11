@@ -1171,7 +1171,6 @@ int main(int argc, char *argv[])
     std::vector<Array<int>*> Funct_mat_offsets_lvls(num_levels);
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
-    Array<BlockVector*> Funct_rhs_lvls(num_levels);
 
     BlockOperator* Funct_global;
     BlockVector* Functrhs_global;
@@ -1352,44 +1351,56 @@ int main(int argc, char *argv[])
         //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
 
-        ParBilinearForm *Cblock;
-        ParMixedBilinearForm *BTblock;
+        // getting pointers to dof_truedof matrices
+        if (l < num_levels - 1)
+            Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
+        Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
-            MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Case when S is from L2 but is not"
-                                                       " eliminated is not supported currently! \n");
-
-            // diagonal block for H^1
-            Cblock = new ParBilinearForm(H_space_lvls[l]);
-            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-            Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
-            Cblock->Assemble();
-            // FIXME: What about boundary conditons here?
-            //Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
-            Cblock->Finalize();
-
-            // off-diagonal block for (H(div), Space_for_S) block
-            // you need to create a new integrator here to swap the spaces
-            BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
-            BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
-            BTblock->Assemble();
-            // FIXME: What about boundary conditons here?
-            //BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
-            //BTblock->EliminateTestDofs(ess_bdrS);
-            BTblock->Finalize();
+            Dof_TrueDof_H1_lvls[l] = H_space_lvls[l]->Dof_TrueDof_Matrix();
+            Dof_TrueDof_Func_lvls[l][1] = Dof_TrueDof_H1_lvls[l];
         }
-
-        Funct_mat_offsets_lvls[l]->SetSize(numblocks_funct + 1);
-        //SparseMatrix Aloc = Ablock->SpMat();
-        //Array<int> offsets(2);
-        (*Funct_mat_offsets_lvls[l])[0] = 0;
-        (*Funct_mat_offsets_lvls[l])[1] = Ablock->Height();
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            (*Funct_mat_offsets_lvls[l])[2] = Cblock->Height();
-        Funct_mat_offsets_lvls[l]->PartialSum();
 
         if (l == 0)
         {
+            ParBilinearForm *Cblock;
+            ParMixedBilinearForm *BTblock;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Case when S is from L2 but is not"
+                                                           " eliminated is not supported currently! \n");
+
+                // diagonal block for H^1
+                Cblock = new ParBilinearForm(H_space_lvls[l]);
+                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+                Cblock->Assemble();
+                // FIXME: What about boundary conditons here?
+                //Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
+                Cblock->Finalize();
+
+                // off-diagonal block for (H(div), Space_for_S) block
+                // you need to create a new integrator here to swap the spaces
+                BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
+                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+                BTblock->Assemble();
+                // FIXME: What about boundary conditons here?
+                //BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
+                //BTblock->EliminateTestDofs(ess_bdrS);
+                BTblock->Finalize();
+            }
+
+            Funct_mat_offsets_lvls[l]->SetSize(numblocks_funct + 1);
+            //SparseMatrix Aloc = Ablock->SpMat();
+            //Array<int> offsets(2);
+            (*Funct_mat_offsets_lvls[l])[0] = 0;
+            (*Funct_mat_offsets_lvls[l])[1] = Ablock->Height();
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                (*Funct_mat_offsets_lvls[l])[2] = Cblock->Height();
+            Funct_mat_offsets_lvls[l]->PartialSum();
+
             Funct_mat_lvls[l] = new BlockMatrix(*Funct_mat_offsets_lvls[l]);
             Funct_mat_lvls[l]->SetBlock(0,0,Ablock->LoseMat());
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1406,32 +1417,53 @@ int main(int argc, char *argv[])
             Bblock->Finalize();
             Constraint_mat_lvls[l] = Bblock->LoseMat();
 
+            // Creating global functional matrix
+            offsets_global[0] = 0;
+            for ( int blk = 0; blk < numblocks_funct; ++blk)
+                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
+            offsets_global.PartialSum();
+
+            Funct_global = new BlockOperator(offsets_global);
+
+            Functrhs_global = new BlockVector(offsets_global);
+
+            Functrhs_global->GetBlock(0) = 0.0;
+
+            ParLinearForm *secondeqn_rhs;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+            {
+                secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
+                secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+                secondeqn_rhs->Assemble();
+
+                secondeqn_rhs->ParallelAssemble(Functrhs_global->GetBlock(1));
+                for (int tdofind = 0; tdofind < EssBdrDofs_Funct_lvls[0][1]->Size(); ++tdofind)
+                {
+                    int tdof = (*EssBdrDofs_Funct_lvls[0][1])[tdofind];
+                    Functrhs_global->GetBlock(1)[tdof] = 0.0;
+                }
+            }
+
+            Ablock->Assemble();
+            Ablock->Finalize();
+            Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
+
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                Cblock->Assemble();
+                Cblock->Finalize();
+                Funct_global->SetBlock(1,1, Cblock->ParallelAssemble());
+                BTblock->Assemble();
+                BTblock->Finalize();
+                HypreParMatrix * BT = BTblock->ParallelAssemble();
+                Funct_global->SetBlock(1,0, BT);
+                Funct_global->SetBlock(0,1, BT->Transpose());
+            }
+
+            delete Cblock;
             delete Bblock;
-        }
-
-        Funct_rhs_lvls[l] = new BlockVector(*Funct_mat_offsets_lvls[l]);
-        Funct_rhs_lvls[l]->GetBlock(0) = 0.0;
-
-        ParLinearForm *secondeqn_rhs;
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
-        {
-            secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
-            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
-            secondeqn_rhs->Assemble();
-            Funct_rhs_lvls[l]->GetBlock(1) = *secondeqn_rhs;
-            //Funct_rhs_lvls[l]->GetBlock(1) = 0.0;
-        }
-
-        // getting pointers to dof_truedof matrices
-        if (l < num_levels - 1)
-            Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
-        Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
-        Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
-        Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        {
-            Dof_TrueDof_H1_lvls[l] = H_space_lvls[l]->Dof_TrueDof_Matrix();
-            Dof_TrueDof_Func_lvls[l][1] = Dof_TrueDof_H1_lvls[l];
+            delete BTblock;
+            delete secondeqn_rhs;
         }
 
         // for all but one levels we create projection matrices between levels
@@ -1569,53 +1601,7 @@ int main(int argc, char *argv[])
             P_WT[l] = Transpose(*P_W[l]);
         }
 
-        // Creating global functional matrix
-        if (l == 0)
-        {
-            offsets_global[0] = 0;
-            for ( int blk = 0; blk < numblocks_funct; ++blk)
-                offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
-            offsets_global.PartialSum();
-
-            Funct_global = new BlockOperator(offsets_global);
-
-            Functrhs_global = new BlockVector(offsets_global);
-
-            Functrhs_global->GetBlock(0) = 0.0;
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                secondeqn_rhs->ParallelAssemble(Functrhs_global->GetBlock(1));
-                for (int tdofind = 0; tdofind < EssBdrDofs_Funct_lvls[0][1]->Size(); ++tdofind)
-                {
-                    int tdof = (*EssBdrDofs_Funct_lvls[0][1])[tdofind];
-                    Functrhs_global->GetBlock(1)[tdof] = 0.0;
-                }
-            }
-
-            Ablock->Assemble();
-            Ablock->Finalize();
-            Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
-
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                Cblock->Assemble();
-                Cblock->Finalize();
-                Funct_global->SetBlock(1,1, Cblock->ParallelAssemble());
-                BTblock->Assemble();
-                BTblock->Finalize();
-                HypreParMatrix * BT = BTblock->ParallelAssemble();
-                Funct_global->SetBlock(1,0, BT);
-                Funct_global->SetBlock(0,1, BT->Transpose());
-            }
-        }
-
         delete Ablock;
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        {
-            delete Cblock;
-            delete BTblock;
-            delete secondeqn_rhs;
-        }
     } // end of loop over all levels
 
     for ( int l = 0; l < num_levels - 1; ++l)
@@ -1730,7 +1716,6 @@ int main(int argc, char *argv[])
             delete TrueP_Func[l];
         }
 
-        delete Funct_rhs_lvls[l];
         for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
             for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
                 delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
@@ -2930,7 +2915,7 @@ int main(int argc, char *argv[])
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Funct_rhs_lvls, Floc,
+                                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
                                       Smoothers_lvls,
                                       Xinit_truedofs,
                                       LocalSolver_partfinder_lvls,
