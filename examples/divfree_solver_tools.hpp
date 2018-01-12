@@ -4066,7 +4066,6 @@ private:
         {
             delete B00;
             delete B11;
-            delete S;
         }
 
     private:
@@ -4074,7 +4073,6 @@ private:
         HypreSmoother *B11;
         HypreParMatrix &A01;
         HypreParMatrix &A10;
-        HypreParMatrix *S;
 
         const Array<int> &offsets;
         mutable BlockVector xblock;

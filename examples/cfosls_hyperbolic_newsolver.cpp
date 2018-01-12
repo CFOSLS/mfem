@@ -23,7 +23,7 @@
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -805,7 +805,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -3742,6 +3742,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         delete NewS;
 
+#ifdef USE_AS_A_PREC
     delete Atest;
     if (strcmp(space_for_S,"H1") == 0)
     {
@@ -3750,6 +3751,7 @@ int main(int argc, char *argv[])
         delete BTtest;
     }
     delete BlockMattest;
+#endif
 
 #ifdef OLD_CODE
     if (withDiv)
