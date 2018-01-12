@@ -2133,9 +2133,6 @@ int main(int argc, char *argv[])
                     }
                     else
                     {
-                        Operator * testprecU = new Multigrid(*A, TrueP_C);
-                        delete testprecU;
-
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
                         Operator * precU = new Multigrid(*A, TrueP_C);
 
@@ -3372,6 +3369,255 @@ int main(int argc, char *argv[])
         }
         /////////////////////////////////////////////////////////
     }
+#else // for USE_AS_A_PREC
+
+    chrono.Clear();
+    chrono.Start();
+
+    BlockVector NewRhs(new_trueoffsets);
+    NewRhs = 0.0;
+
+    if (numblocks > 1)
+    {
+        if (verbose)
+            std::cout << "This place works only for homogeneous boundary conditions \n";
+        ParLinearForm *secondeqn_rhs;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+        {
+            secondeqn_rhs = new ParLinearForm(H_space_lvls[0]);
+            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+            secondeqn_rhs->Assemble();
+            secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
+
+            for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][1]->Size(); ++i)
+            {
+                int bdrtdof = (*EssBdrTrueDofs_Funct_lvls[0][1])[i];
+                NewRhs.GetBlock(1)[bdrtdof] = 0.0;
+            }
+
+        }
+    }
+
+    BlockVector NewX(new_trueoffsets);
+    NewX = 0.0;
+
+    NewSolver.SetInitialGuess(ParticSol);
+    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, for debugging purposes!
+
+    if (verbose)
+        NewSolver.PrintAllOptions();
+
+    NewSolver.Mult(NewRhs, NewX);
+
+    NewSigmahat->Distribute(&(NewX.GetBlock(0)));
+
+    std::cout << "Solution computed via the new solver \n";
+
+    double max_bdr_error = 0;
+    for ( int dof = 0; dof < Xinit.GetBlock(0).Size(); ++dof)
+    {
+        if ( (*EssBdrDofs_Funct_lvls[0][0])[dof] != 0.0)
+        {
+            //std::cout << "ess dof index: " << dof << "\n";
+            double bdr_error_dof = fabs(Xinit.GetBlock(0)[dof] - (*NewSigmahat)[dof]);
+            if ( bdr_error_dof > max_bdr_error )
+                max_bdr_error = bdr_error_dof;
+        }
+    }
+
+    if (max_bdr_error > 1.0e-14)
+        std::cout << "Error, boundary values for the solution (sigma) are wrong:"
+                     " max_bdr_error = " << max_bdr_error << "\n";
+    {
+        int order_quad = max(2, 2*feorder+1);
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i = 0; i < Geometry::NumGeom; ++i)
+        {
+            irs[i] = &(IntRules.Get(i, order_quad));
+        }
+
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
+        if (verbose)
+        {
+            if ( norm_sigma > MYZEROTOL )
+                cout << "|| new sigma_h - sigma_ex || / || sigma_ex || = " << err_newsigmahat / norm_sigma << endl;
+            else
+                cout << "|| new sigma_h || = " << err_newsigmahat << " (sigma_ex = 0)" << endl;
+        }
+
+        DiscreteLinearOperator Div(R_space, W_space);
+        Div.AddDomainInterpolator(new DivergenceInterpolator());
+        ParGridFunction DivSigma(W_space);
+        Div.Assemble();
+        Div.Mult(*NewSigmahat, DivSigma);
+
+        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
+
+        if (verbose)
+        {
+            cout << "|| div (new sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                      << err_div/norm_div  << "\n";
+        }
+    }
+
+    //////////////////////////////////////////////////////
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        NewS->Distribute(&(NewX.GetBlock(1)));
+
+        double max_bdr_error = 0;
+        for ( int dof = 0; dof < Xinit.GetBlock(1).Size(); ++dof)
+        {
+            if ( (*EssBdrDofs_Funct_lvls[0][1])[dof] != 0.0)
+            {
+                //std::cout << "ess dof index: " << dof << "\n";
+                double bdr_error_dof = fabs(Xinit.GetBlock(1)[dof] - (*NewS)[dof]);
+                if ( bdr_error_dof > max_bdr_error )
+                    max_bdr_error = bdr_error_dof;
+            }
+        }
+
+        if (max_bdr_error > 1.0e-14)
+            std::cout << "Error, boundary values for the solution (S) are wrong:"
+                         " max_bdr_error = " << max_bdr_error << "\n";
+
+        // 13. Extract the parallel grid function corresponding to the finite element
+        //     approximation X. This is the local solution on each processor. Compute
+        //     L2 error norms.
+
+        int order_quad = max(2, 2*feorder+1);
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i=0; i < Geometry::NumGeom; ++i)
+        {
+           irs[i] = &(IntRules.Get(i, order_quad));
+        }
+
+        // Computing error for S
+
+        double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
+        double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+        if (verbose)
+        {
+            std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                         err_S / norm_S << "\n";
+        }
+    }
+    /////////////////////////////////////////////////////////
+
+    chrono.Stop();
+
+
+    if (verbose)
+        std::cout << "\n";
+#endif // for else for USE_AS_A_PREC
+
+#ifdef VISUALIZATION
+    if (visualization && nDimensions < 4)
+    {
+        char vishost[] = "localhost";
+        int  visport   = 19916;
+
+        if (!withDiv)
+        {
+            socketstream uex_sock(vishost, visport);
+            uex_sock << "parallel " << num_procs << " " << myid << "\n";
+            uex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            uex_sock << "solution\n" << *pmesh << *u_exact << "window_title 'u_exact'"
+                   << endl;
+
+            socketstream uh_sock(vishost, visport);
+            uh_sock << "parallel " << num_procs << " " << myid << "\n";
+            uh_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            uh_sock << "solution\n" << *pmesh << *u << "window_title 'u_h'"
+                   << endl;
+
+            *u -= *u_exact;
+            socketstream udiff_sock(vishost, visport);
+            udiff_sock << "parallel " << num_procs << " " << myid << "\n";
+            udiff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            udiff_sock << "solution\n" << *pmesh << *u << "window_title 'u_h - u_exact'"
+                   << endl;
+
+            socketstream opdivfreepartex_sock(vishost, visport);
+            opdivfreepartex_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepartex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepartex_sock << "solution\n" << *pmesh << *opdivfreepart_exact << "window_title 'curl u_exact'"
+                   << endl;
+
+            socketstream opdivfreepart_sock(vishost, visport);
+            opdivfreepart_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepart_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepart_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h'"
+                   << endl;
+
+            *opdivfreepart -= *opdivfreepart_exact;
+            socketstream opdivfreepartdiff_sock(vishost, visport);
+            opdivfreepartdiff_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepartdiff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepartdiff_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h - curl u_exact'"
+                   << endl;
+        }
+
+        //if (withS)
+        {
+            socketstream S_ex_sock(vishost, visport);
+            S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_ex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_ex_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
+                   << endl;
+
+            socketstream S_h_sock(vishost, visport);
+            S_h_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_h_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
+                   << endl;
+
+            *S -= *S_exact;
+            socketstream S_diff_sock(vishost, visport);
+            S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_diff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
+                   << endl;
+        }
+
+        socketstream sigma_sock(vishost, visport);
+        sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigma_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigma_sock << "solution\n" << *pmesh << *sigma_exact
+               << "window_title 'sigma_exact'" << endl;
+        // Make sure all ranks have sent their 'u' solution before initiating
+        // another set of GLVis connections (one from each rank):
+
+        socketstream sigmah_sock(vishost, visport);
+        sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigmah_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigmah_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
+                << endl;
+
+        *sigma_exact -= *sigma;
+        socketstream sigmadiff_sock(vishost, visport);
+        sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigmadiff_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact
+                 << "window_title 'sigma_ex - sigma_h'" << endl;
+
+        MPI_Barrier(pmesh->GetComm());
+    }
+#endif
 
     for (int l = 0; l < num_levels; ++l)
     {
@@ -3551,14 +3797,16 @@ int main(int argc, char *argv[])
                 else
                 {
                     for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                            if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                                delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+                        delete ((Multigrid*)(&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk))));
+                            //if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                                //delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
                 }
             }
             else
                 for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                        if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                            delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+                    delete ((Multigrid*)(&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk))));
+                        //if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                            //delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
         }
         else
         {
@@ -3573,260 +3821,6 @@ int main(int argc, char *argv[])
         delete P[i];
 
 #endif // end of #ifdef OLD_CODE in the memory deallocating
-
-    MPI_Finalize();
-    return 0;
-#endif // for USE_AS_A_PREC
-
-    chrono.Clear();
-    chrono.Start();
-
-    BlockVector NewRhs(new_trueoffsets);
-    NewRhs = 0.0;
-
-    if (numblocks > 1)
-    {
-        if (verbose)
-            std::cout << "This place works only for homogeneous boundary conditions \n";
-        ParLinearForm *secondeqn_rhs;
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
-        {
-            secondeqn_rhs = new ParLinearForm(H_space_lvls[0]);
-            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
-            secondeqn_rhs->Assemble();
-            secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
-
-            for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][1]->Size(); ++i)
-            {
-                int bdrtdof = (*EssBdrTrueDofs_Funct_lvls[0][1])[i];
-                NewRhs.GetBlock(1)[bdrtdof] = 0.0;
-            }
-
-        }
-    }
-
-    BlockVector NewX(new_trueoffsets);
-    NewX = 0.0;
-
-    NewSolver.SetInitialGuess(ParticSol);
-    //NewSolver.SetUnSymmetric(); // FIXME: temporarily, for debugging purposes!
-
-    if (verbose)
-        NewSolver.PrintAllOptions();
-
-    NewSolver.Mult(NewRhs, NewX);
-
-    NewSigmahat->Distribute(&(NewX.GetBlock(0)));
-
-    std::cout << "Solution computed via the new solver \n";
-
-    double max_bdr_error = 0;
-    for ( int dof = 0; dof < Xinit.GetBlock(0).Size(); ++dof)
-    {
-        if ( (*EssBdrDofs_Funct_lvls[0][0])[dof] != 0.0)
-        {
-            //std::cout << "ess dof index: " << dof << "\n";
-            double bdr_error_dof = fabs(Xinit.GetBlock(0)[dof] - (*NewSigmahat)[dof]);
-            if ( bdr_error_dof > max_bdr_error )
-                max_bdr_error = bdr_error_dof;
-        }
-    }
-
-    if (max_bdr_error > 1.0e-14)
-        std::cout << "Error, boundary values for the solution (sigma) are wrong:"
-                     " max_bdr_error = " << max_bdr_error << "\n";
-    {
-        int order_quad = max(2, 2*feorder+1);
-        const IntegrationRule *irs[Geometry::NumGeom];
-        for (int i = 0; i < Geometry::NumGeom; ++i)
-        {
-            irs[i] = &(IntRules.Get(i, order_quad));
-        }
-
-        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
-        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
-        if (verbose)
-        {
-            if ( norm_sigma > MYZEROTOL )
-                cout << "|| new sigma_h - sigma_ex || / || sigma_ex || = " << err_newsigmahat / norm_sigma << endl;
-            else
-                cout << "|| new sigma_h || = " << err_newsigmahat << " (sigma_ex = 0)" << endl;
-        }
-
-        DiscreteLinearOperator Div(R_space, W_space);
-        Div.AddDomainInterpolator(new DivergenceInterpolator());
-        ParGridFunction DivSigma(W_space);
-        Div.Assemble();
-        Div.Mult(*NewSigmahat, DivSigma);
-
-        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
-
-        if (verbose)
-        {
-            cout << "|| div (new sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                      << err_div/norm_div  << "\n";
-        }
-    }
-
-    //////////////////////////////////////////////////////
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-    {
-        NewS->Distribute(&(NewX.GetBlock(1)));
-
-        double max_bdr_error = 0;
-        for ( int dof = 0; dof < Xinit.GetBlock(1).Size(); ++dof)
-        {
-            if ( (*EssBdrDofs_Funct_lvls[0][1])[dof] != 0.0)
-            {
-                //std::cout << "ess dof index: " << dof << "\n";
-                double bdr_error_dof = fabs(Xinit.GetBlock(1)[dof] - (*NewS)[dof]);
-                if ( bdr_error_dof > max_bdr_error )
-                    max_bdr_error = bdr_error_dof;
-            }
-        }
-
-        if (max_bdr_error > 1.0e-14)
-            std::cout << "Error, boundary values for the solution (S) are wrong:"
-                         " max_bdr_error = " << max_bdr_error << "\n";
-
-        // 13. Extract the parallel grid function corresponding to the finite element
-        //     approximation X. This is the local solution on each processor. Compute
-        //     L2 error norms.
-
-        int order_quad = max(2, 2*feorder+1);
-        const IntegrationRule *irs[Geometry::NumGeom];
-        for (int i=0; i < Geometry::NumGeom; ++i)
-        {
-           irs[i] = &(IntRules.Get(i, order_quad));
-        }
-
-        // Computing error for S
-
-        double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
-        double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
-        if (verbose)
-        {
-            std::cout << "|| S_h - S_ex || / || S_ex || = " <<
-                         err_S / norm_S << "\n";
-        }
-    }
-    /////////////////////////////////////////////////////////
-
-    chrono.Stop();
-
-
-    if (verbose)
-        std::cout << "\n";
-
-    MPI_Finalize();
-    return 0;
-
-#ifdef VISUALIZATION
-    if (visualization && nDimensions < 4)
-    {
-        char vishost[] = "localhost";
-        int  visport   = 19916;
-
-        if (!withDiv)
-        {
-            socketstream uex_sock(vishost, visport);
-            uex_sock << "parallel " << num_procs << " " << myid << "\n";
-            uex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            uex_sock << "solution\n" << *pmesh << *u_exact << "window_title 'u_exact'"
-                   << endl;
-
-            socketstream uh_sock(vishost, visport);
-            uh_sock << "parallel " << num_procs << " " << myid << "\n";
-            uh_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            uh_sock << "solution\n" << *pmesh << *u << "window_title 'u_h'"
-                   << endl;
-
-            *u -= *u_exact;
-            socketstream udiff_sock(vishost, visport);
-            udiff_sock << "parallel " << num_procs << " " << myid << "\n";
-            udiff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            udiff_sock << "solution\n" << *pmesh << *u << "window_title 'u_h - u_exact'"
-                   << endl;
-
-            socketstream opdivfreepartex_sock(vishost, visport);
-            opdivfreepartex_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepartex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepartex_sock << "solution\n" << *pmesh << *opdivfreepart_exact << "window_title 'curl u_exact'"
-                   << endl;
-
-            socketstream opdivfreepart_sock(vishost, visport);
-            opdivfreepart_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepart_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepart_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h'"
-                   << endl;
-
-            *opdivfreepart -= *opdivfreepart_exact;
-            socketstream opdivfreepartdiff_sock(vishost, visport);
-            opdivfreepartdiff_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepartdiff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepartdiff_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h - curl u_exact'"
-                   << endl;
-        }
-
-        //if (withS)
-        {
-            socketstream S_ex_sock(vishost, visport);
-            S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_ex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            S_ex_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
-                   << endl;
-
-            socketstream S_h_sock(vishost, visport);
-            S_h_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_h_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
-                   << endl;
-
-            *S -= *S_exact;
-            socketstream S_diff_sock(vishost, visport);
-            S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_diff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
-                   << endl;
-        }
-
-        socketstream sigma_sock(vishost, visport);
-        sigma_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigma_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigma_sock << "solution\n" << *pmesh << *sigma_exact
-               << "window_title 'sigma_exact'" << endl;
-        // Make sure all ranks have sent their 'u' solution before initiating
-        // another set of GLVis connections (one from each rank):
-
-        socketstream sigmah_sock(vishost, visport);
-        sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigmah_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigmah_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
-                << endl;
-
-        *sigma_exact -= *sigma;
-        socketstream sigmadiff_sock(vishost, visport);
-        sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigmadiff_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact
-                 << "window_title 'sigma_ex - sigma_h'" << endl;
-
-        MPI_Barrier(pmesh->GetComm());
-    }
-#endif
 
     MPI_Finalize();
     return 0;
