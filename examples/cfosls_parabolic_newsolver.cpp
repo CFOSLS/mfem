@@ -12,7 +12,7 @@
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-#define OLD_CODE
+//#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -2576,9 +2576,9 @@ int main(int argc, char *argv[])
             Xinit.GetBlock(0)[i] = (*sigma_exact_finest)[i];
     }
 
-    Array<int> new_trueoffsets(numblocks + 1);
+    Array<int> new_trueoffsets(numblocks_funct + 1);
     new_trueoffsets[0] = 0;
-    for ( int blk = 0; blk < numblocks; ++blk)
+    for ( int blk = 0; blk < numblocks_funct; ++blk)
         new_trueoffsets[blk + 1] = Dof_TrueDof_Func_lvls[0][blk]->Width();
     new_trueoffsets.PartialSum();
     BlockVector Xinit_truedofs(new_trueoffsets);
@@ -2656,14 +2656,14 @@ int main(int argc, char *argv[])
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
     // checking that the computed particular solution satisfies essential boundary conditions
-    for ( int blk = 0; blk < numblocks; ++blk)
+    for ( int blk = 0; blk < numblocks_funct; ++blk)
     {
         MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), Xinit_truedofs.GetBlock(blk), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
     }
 
     // checking that the boundary conditions are not violated for the initial guess
-    for ( int blk = 0; blk < numblocks; ++blk)
+    for ( int blk = 0; blk < numblocks_funct; ++blk)
     {
         for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][blk]->Size(); ++i)
         {
@@ -2678,7 +2678,7 @@ int main(int argc, char *argv[])
 
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
-    for ( int blk = 0; blk < numblocks; ++blk)
+    for ( int blk = 0; blk < numblocks_funct; ++blk)
     {
         Dof_TrueDof_Func_lvls[0][blk]->Mult(ParticSol.GetBlock(blk), temp_dofs.GetBlock(blk));
     }
@@ -2857,7 +2857,7 @@ int main(int argc, char *argv[])
     DTtest = DTblocktest->ParallelAssemble();
     Dtest = DTtest->Transpose();
 
-    Array<int> blocktest_offsets(numblocks + 1);
+    Array<int> blocktest_offsets(numblocks_funct + 1);
     blocktest_offsets[0] = 0;
     blocktest_offsets[1] = Atest->Height();
     blocktest_offsets[2] = Ctest->Height();
@@ -3072,7 +3072,7 @@ int main(int argc, char *argv[])
     BlockVector NewRhs(new_trueoffsets);
     NewRhs = 0.0;
 
-    if (numblocks > 1)
+    if (numblocks_funct > 1)
     {
         if (verbose)
             std::cout << "This place works only for homogeneous boundary conditions \n";

@@ -1993,6 +1993,9 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         // smooth
         if (Smoothers_lvls[l])
         {
+            std::cout << "l = " << l << "\n";
+            std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+            MPI_Barrier(comm);
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
@@ -2381,8 +2384,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     //std::cout << "Checkpoint 0 \n";
     //MPI_Barrier(MPI_COMM_WORLD);
 
-    if (x.GetData() == y.GetData() && x.GetData() != NULL)
-        mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
+    //if (x.GetData() == y.GetData() && x.GetData() != NULL)
+        //mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
     // x will be accessed through xblock as its view
     xblock->Update(x.GetData(), block_offsets);
@@ -3286,6 +3289,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // smooth
         if (Smoothers_lvls[l])
         {
+            std::cout << "l = " << l << "\n";
+            std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
