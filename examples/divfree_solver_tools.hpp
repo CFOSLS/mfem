@@ -311,7 +311,7 @@ void CoarsestProblemSolver::Setup() const
     HYPRE_Int glob_num_cols = dof_trueDof_blocks[0]->M();
     HYPRE_Int * row_starts = dof_trueDof_L2.GetRowStarts();
     HYPRE_Int * col_starts = dof_trueDof_blocks[0]->GetRowStarts();;
-    HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, Constr_spmat);
+    HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, Constr_spmat);
     //temp->CopyRowStarts();
     //temp->CopyColStarts();
     HypreParMatrix * Constr_global = RAP(&dof_trueDof_L2, temphpmat, dof_trueDof_blocks[0]);
@@ -343,7 +343,7 @@ void CoarsestProblemSolver::Setup() const
             //std::cout << "row_starts: " << row_starts[0] << ", " << row_starts[1] << "\n";
             //std::cout << "col_starts: " << col_starts[0] << ", " << col_starts[1] << "\n";
             //HypreParMatrix * temp = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
-            HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+            HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
             //temp->CopyRowStarts();
             //temp->CopyColStarts();
             Funct_global(blk1, blk2) = RAP(dof_trueDof_blocks[blk1], temphpmat, dof_trueDof_blocks[blk2]);
@@ -2215,6 +2215,8 @@ private:
     int print_level;
 
 protected:
+    const MPI_Comm comm;
+
     const BlockMatrix& Funct_mat;
 
     // discrete curl operator;
@@ -2330,6 +2332,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
     : BlockOperator(Block_Offsets),
       numblocks(Funct_Mat.NumRowBlocks()),
       print_level(0),
+      comm(Dof_TrueDof_Hcurl.GetComm()),
       Funct_mat(Funct_Mat),
       d_td_Hcurl(Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
@@ -2381,9 +2384,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     if (print_level)
         std::cout << "Smoothing with HcurlGSS smoother \n";
 
-    //std::cout << "Checkpoint 0 \n";
-    //MPI_Barrier(MPI_COMM_WORLD);
-
     //if (x.GetData() == y.GetData() && x.GetData() != NULL)
         //mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
@@ -2416,10 +2416,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         }
 
     }
-
-    //std::cout << "Checkpoint 1 \n";
-    //MPI_Barrier(MPI_COMM_WORLD);
-
 
     // imposing boundary conditions in Hcurl on the righthand side (block 0)
     for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
@@ -2545,7 +2541,7 @@ void HcurlGSSSmoother::Setup() const
         HYPRE_Int * row_starts = d_td_Funct_blocks[0]->GetRowStarts();
         HYPRE_Int * col_starts = d_td_Hcurl.GetRowStarts();
         Curlh_copy = new SparseMatrix(*Curlh);
-        temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_num_rows, glob_num_cols, row_starts, col_starts, Curlh_copy);
+        temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, Curlh_copy);
     }
 
     HypreParMatrix * d_td_hdiv_diaghpmat;
@@ -2554,7 +2550,7 @@ void HcurlGSSSmoother::Setup() const
         HYPRE_Int * row_starts = d_td_Funct_blocks[0]->GetRowStarts();
         SparseMatrix d_td_Hdiv_diag;
         d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
-        d_td_hdiv_diaghpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, &d_td_Hdiv_diag) ;
+        d_td_hdiv_diaghpmat = new HypreParMatrix(comm, glob_size, row_starts, &d_td_Hdiv_diag) ;
         d_td_hdiv_diaghpmat->CopyRowStarts();
         d_td_hdiv_diaghpmat->CopyColStarts();
     }
@@ -2594,7 +2590,7 @@ void HcurlGSSSmoother::Setup() const
         // alternative way
         HYPRE_Int glob_size = d_td_Funct_blocks[blk]->M();
         HYPRE_Int * row_starts = d_td_Funct_blocks[blk]->GetRowStarts();
-        HypreParMatrix * temphpmat = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, Funct_blk);
+        HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_size, row_starts, Funct_blk);
         Funct_restblocks_global(1,1) = RAP(temphpmat, d_td_Funct_blocks[blk]);
 
         // old way

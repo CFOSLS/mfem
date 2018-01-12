@@ -322,7 +322,7 @@ void BlockMatrix::EliminateZeroRows()
 
 void BlockMatrix::Mult(const Vector & x, Vector & y) const
 {
-   if (x.GetData() == y.GetData())
+   if (x.GetData() == y.GetData() && x.GetData() != NULL)
    {
       mfem_error("Error: x and y can't point to the same datas \n");
    }
