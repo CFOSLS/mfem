@@ -324,7 +324,10 @@ void BlockMatrix::Mult(const Vector & x, Vector & y) const
 {
    if (x.GetData() == y.GetData() && x.GetData() != NULL)
    {
-      mfem_error("Error: x and y can't point to the same datas \n");
+      std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
+      if (x.GetData() == NULL)
+          std::cout << "x data = null \n" << std::flush;
+      mfem_error("Error in BlockMatrix::Mult: x and y can't point to the same datas \n");
    }
 
    MFEM_ASSERT(width == x.Size(),
@@ -341,7 +344,10 @@ void BlockMatrix::AddMult(const Vector & x, Vector & y, const double val) const
 {
    if (x.GetData() == y.GetData())
    {
-      mfem_error("Error: x and y can't point to the same datas \n");
+       std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
+       if (x.GetData() == NULL)
+           std::cout << "x data = null \n" << std::flush;
+      mfem_error("Error in BlockMatrix::AddMult: x and y can't point to the same datas \n");
    }
 
    Vector xblockview, yblockview;
@@ -369,7 +375,10 @@ void BlockMatrix::MultTranspose(const Vector & x, Vector & y) const
 {
    if (x.GetData() == y.GetData())
    {
-      mfem_error("Error: x and y can't point to the same datas \n");
+       std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
+       if (x.GetData() == NULL)
+           std::cout << "x data = null \n" << std::flush;
+      mfem_error("Error in BlockMatrix::MultTranspose: x and y can't point to the same datas \n");
    }
 
    y = 0.;
@@ -381,7 +390,10 @@ void BlockMatrix::AddMultTranspose(const Vector & x, Vector & y,
 {
    if (x.GetData() == y.GetData())
    {
-      mfem_error("Error: x and y can't point to the same datas \n");
+       std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
+       if (x.GetData() == NULL)
+           std::cout << "x data = null \n" << std::flush;
+      mfem_error("Error in BlockMatrix::AddMultTranspose: x and y can't point to the same datas \n");
    }
 
    Vector xblockview, yblockview;
