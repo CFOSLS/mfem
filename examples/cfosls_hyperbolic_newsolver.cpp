@@ -792,7 +792,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -805,7 +805,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -3691,14 +3691,18 @@ int main(int argc, char *argv[])
             delete P_WT[l];
             delete P_R[l];
             delete P_C_lvls[l];
-            delete P_H_lvls[l];
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                delete P_H_lvls[l];
             delete TrueP_R[l];
-            delete TrueP_C[l];
-            delete TrueP_H[l];
+            if (prec_is_MG)
+                delete TrueP_C[l];
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                delete TrueP_H[l];
 
             delete Element_dofs_R[l];
             delete Element_dofs_W[l];
-            delete Element_dofs_H[l];
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                delete Element_dofs_H[l];
         }
 
         if (l < num_levels - 1)

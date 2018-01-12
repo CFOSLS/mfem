@@ -918,7 +918,7 @@ void LocalProblemSolver::SaveLocalLUFactors() const
 
         for (int i = 0; i < Local_inds->Size(); ++i)
         {
-            if ( (*bdrdofs_blocks[0])[(*Local_inds[i])] != 0 &&
+            if ( (*bdrdofs_blocks[0])[(*Local_inds)[i]] != 0 &&
                  (*essbdrdofs_blocks[0])[(*Local_inds)[i]] == 0)
             {
                 //std::cout << "then local problem is non-degenerate \n";
