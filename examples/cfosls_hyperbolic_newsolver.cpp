@@ -1084,11 +1084,8 @@ int main(int argc, char *argv[])
 
     R_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
 
-    if (withDiv)
-    {
-        l2_coll = new L2_FECollection(feorder, nDimensions);
-        W_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
-    }
+    l2_coll = new L2_FECollection(feorder, nDimensions);
+    W_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
 
     FiniteElementCollection *hdivfree_coll;
     ParFiniteElementSpace *C_space;
@@ -2407,7 +2404,7 @@ int main(int argc, char *argv[])
                 double RTOLERANCE, double ATOLERANCE)
         */
 
-        CGSolver cg;
+        CGSolver cg(comm);
         cg.SetPrintLevel(0);
         cg.SetMaxIter(5000);
         cg.SetRelTol(sqrt(1.0e-9));
