@@ -2135,6 +2135,10 @@ int main(int argc, char *argv[])
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
                         Operator * precU = new Multigrid(*A, TrueP_C);
+
+                        Operator * testprecU = new Multigrid(*A, TrueP_C);
+                        delete testprecU;
+
                         Operator * precS = new Multigrid(*C, TrueP_H);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
@@ -2836,198 +2840,6 @@ int main(int argc, char *argv[])
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
-
-    for (int l = 0; l < num_levels; ++l)
-    {
-        delete BdrDofs_Funct_lvls[l][0];
-        delete EssBdrDofs_Funct_lvls[l][0];
-        delete EssBdrTrueDofs_Funct_lvls[l][0];
-        delete Funct_mat_offsets_lvls[l];
-        if (l < num_levels - 1)
-        {
-            delete EssBdrDofs_Hcurl[l];
-            delete EssBdrTrueDofs_Hcurl[l];
-        }
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        {
-            delete BdrDofs_Funct_lvls[l][1];
-            delete EssBdrDofs_Funct_lvls[l][1];
-            delete EssBdrTrueDofs_Funct_lvls[l][1];
-            delete EssBdrDofs_H1[l];
-        }
-
-#ifdef WITH_LOCALSOLVERS
-        if (l < num_levels - 1)
-        {
-            if (LocalSolver_partfinder_lvls)
-                if ((*LocalSolver_partfinder_lvls)[l])
-                    delete (*LocalSolver_partfinder_lvls)[l];
-            delete LocalSolver_partfinder_lvls;
-            delete LocalSolver_lvls;
-        }
-#endif
-
-#ifdef WITH_SMOOTHERS
-        if (l < num_levels - 1)
-            if (Smoothers_lvls[l])
-                delete Smoothers_lvls[l];
-#endif
-        if (l < num_levels - 1)
-        {
-            delete Element_dofs_Func[l];
-            delete P_Func[l];
-            delete TrueP_Func[l];
-        }
-
-        if (l == 0)
-            // this happens because for l = 0 object is created in a different way,
-            // thus it doesn't own the blocks and cannot delete it from destructor
-            for (int blk1 = 0; blk1 < Funct_mat_lvls[l]->NumRowBlocks(); ++blk1)
-                for (int blk2 = 0; blk2 < Funct_mat_lvls[l]->NumColBlocks(); ++blk2)
-                    delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
-        delete Funct_mat_lvls[l];
-
-        delete Constraint_mat_lvls[l];
-
-        delete Divfree_mat_lvls[l];
-
-        delete R_space_lvls[l];
-        delete W_space_lvls[l];
-        delete C_space_lvls[l];
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            delete H_space_lvls[l];
-        delete pmesh_lvls[l];
-
-        if (l < num_levels - 1)
-        {
-            delete P_W[l];
-            delete P_WT[l];
-            delete P_R[l];
-            delete P_C_lvls[l];
-            delete P_H_lvls[l];
-            delete TrueP_R[l];
-            delete TrueP_C[l];
-            delete TrueP_H[l];
-
-            delete Element_dofs_R[l];
-            delete Element_dofs_W[l];
-            delete Element_dofs_H[l];
-        }
-
-        if (l < num_levels - 1)
-        {
-            delete row_offsets_El_dofs[l];
-            delete col_offsets_El_dofs[l];
-            delete row_offsets_P_Func[l];
-            delete col_offsets_P_Func[l];
-            delete row_offsets_TrueP_Func[l];
-            delete col_offsets_TrueP_Func[l];
-        }
-
-    }
-
-    for (int blk1 = 0; blk1 < Funct_global->NumRowBlocks(); ++blk1)
-        for (int blk2 = 0; blk2 < Funct_global->NumColBlocks(); ++blk2)
-            if (Funct_global->IsZeroBlock(blk1, blk2) == false)
-                delete &(Funct_global->GetBlock(blk1,blk2));
-    delete Funct_global;
-
-    delete Functrhs_global;
-
-    delete hdiv_coll;
-    delete R_space;
-    if (withDiv)
-    {
-        delete l2_coll;
-        delete W_space;
-    }
-    delete hdivfree_coll;
-    delete C_space;
-
-    delete h1_coll;
-    delete H_space;
-
-    delete CoarsestSolver;
-
-    delete sigma_exact_finest;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        delete S_exact_finest;
-
-    delete Sigmahat;
-    delete u;
-
-#ifdef OLD_CODE
-    if (withDiv)
-    {
-        delete gform;
-        delete Bdiv;
-    }
-
-    delete u_exact;
-    delete S_exact;
-    delete sigma_exact;
-    delete opdivfreepart;
-    delete sigma;
-
-#ifdef   USE_CURLMATRIX
-    delete rhside_Hdiv;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        delete qform;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        delete S;
-    delete MainOp;
-    delete Mblock;
-    delete M;
-    delete tempmat;
-    delete A;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-    {
-        delete C;
-        delete CHT;
-        delete CH;
-        delete B;
-        delete BT;
-    }
-#endif
-    if(dim<=4)
-    {
-        if (prec_is_MG)
-        {
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                if (monolithicMG)
-                {
-
-                }
-                else
-                {
-                    for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                            if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                                delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
-                }
-            }
-            else
-                for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                        if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                            delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
-        }
-        else
-        {
-            for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                    if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                        delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
-        }
-    }
-
-    delete prec;
-    for (int i = 0; i < P.Size(); ++i)
-        delete P[i];
-
-#endif // end of #ifdef OLD_CODE in the memory deallocating
-
-    MPI_Finalize();
-    return 0;
-
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -3550,6 +3362,194 @@ int main(int argc, char *argv[])
         }
         /////////////////////////////////////////////////////////
     }
+
+    for (int l = 0; l < num_levels; ++l)
+    {
+        delete BdrDofs_Funct_lvls[l][0];
+        delete EssBdrDofs_Funct_lvls[l][0];
+        delete EssBdrTrueDofs_Funct_lvls[l][0];
+        delete Funct_mat_offsets_lvls[l];
+        if (l < num_levels - 1)
+        {
+            delete EssBdrDofs_Hcurl[l];
+            delete EssBdrTrueDofs_Hcurl[l];
+        }
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            delete BdrDofs_Funct_lvls[l][1];
+            delete EssBdrDofs_Funct_lvls[l][1];
+            delete EssBdrTrueDofs_Funct_lvls[l][1];
+            delete EssBdrDofs_H1[l];
+        }
+
+#ifdef WITH_LOCALSOLVERS
+        if (l < num_levels - 1)
+        {
+            if (LocalSolver_partfinder_lvls)
+                if ((*LocalSolver_partfinder_lvls)[l])
+                    delete (*LocalSolver_partfinder_lvls)[l];
+            delete LocalSolver_partfinder_lvls;
+            delete LocalSolver_lvls;
+        }
+#endif
+
+#ifdef WITH_SMOOTHERS
+        if (l < num_levels - 1)
+            if (Smoothers_lvls[l])
+                delete Smoothers_lvls[l];
+#endif
+        if (l < num_levels - 1)
+        {
+            delete Element_dofs_Func[l];
+            delete P_Func[l];
+            delete TrueP_Func[l];
+        }
+
+        if (l == 0)
+            // this happens because for l = 0 object is created in a different way,
+            // thus it doesn't own the blocks and cannot delete it from destructor
+            for (int blk1 = 0; blk1 < Funct_mat_lvls[l]->NumRowBlocks(); ++blk1)
+                for (int blk2 = 0; blk2 < Funct_mat_lvls[l]->NumColBlocks(); ++blk2)
+                    delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
+        delete Funct_mat_lvls[l];
+
+        delete Constraint_mat_lvls[l];
+
+        delete Divfree_mat_lvls[l];
+
+        delete R_space_lvls[l];
+        delete W_space_lvls[l];
+        delete C_space_lvls[l];
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            delete H_space_lvls[l];
+        delete pmesh_lvls[l];
+
+        if (l < num_levels - 1)
+        {
+            delete P_W[l];
+            delete P_WT[l];
+            delete P_R[l];
+            delete P_C_lvls[l];
+            delete P_H_lvls[l];
+            delete TrueP_R[l];
+            delete TrueP_C[l];
+            delete TrueP_H[l];
+
+            delete Element_dofs_R[l];
+            delete Element_dofs_W[l];
+            delete Element_dofs_H[l];
+        }
+
+        if (l < num_levels - 1)
+        {
+            delete row_offsets_El_dofs[l];
+            delete col_offsets_El_dofs[l];
+            delete row_offsets_P_Func[l];
+            delete col_offsets_P_Func[l];
+            delete row_offsets_TrueP_Func[l];
+            delete col_offsets_TrueP_Func[l];
+        }
+
+    }
+
+    for (int blk1 = 0; blk1 < Funct_global->NumRowBlocks(); ++blk1)
+        for (int blk2 = 0; blk2 < Funct_global->NumColBlocks(); ++blk2)
+            if (Funct_global->IsZeroBlock(blk1, blk2) == false)
+                delete &(Funct_global->GetBlock(blk1,blk2));
+    delete Funct_global;
+
+    delete Functrhs_global;
+
+    delete hdiv_coll;
+    delete R_space;
+    if (withDiv)
+    {
+        delete l2_coll;
+        delete W_space;
+    }
+    delete hdivfree_coll;
+    delete C_space;
+
+    delete h1_coll;
+    delete H_space;
+
+    delete CoarsestSolver;
+
+    delete sigma_exact_finest;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        delete S_exact_finest;
+
+    delete Sigmahat;
+    delete u;
+
+#ifdef OLD_CODE
+    if (withDiv)
+    {
+        delete gform;
+        delete Bdiv;
+    }
+
+    delete u_exact;
+    delete S_exact;
+    delete sigma_exact;
+    delete opdivfreepart;
+    delete sigma;
+
+#ifdef   USE_CURLMATRIX
+    delete rhside_Hdiv;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        delete qform;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        delete S;
+    delete MainOp;
+    delete Mblock;
+    delete M;
+    delete tempmat;
+    delete A;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        delete C;
+        delete CHT;
+        delete CH;
+        delete B;
+        delete BT;
+    }
+#endif
+    if(dim<=4)
+    {
+        if (prec_is_MG)
+        {
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                if (monolithicMG)
+                {
+
+                }
+                else
+                {
+                    for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                            if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                                delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+                }
+            }
+            else
+                for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                        if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                            delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+        }
+        else
+        {
+            for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
+                    if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
+                        delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
+        }
+    }
+
+    delete prec;
+    for (int i = 0; i < P.Size(); ++i)
+        delete P[i];
+
+#endif // end of #ifdef OLD_CODE in the memory deallocating
 
     MPI_Finalize();
     return 0;

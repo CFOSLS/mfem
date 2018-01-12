@@ -3485,6 +3485,9 @@ public:
             SparseMatrix *W_AE = Mult(*W_t,*Element_Elementc[l]);
             SparseMatrix *R_AE = Mult(*R_t,*Element_Elementc[l]);
 
+            delete R_t;
+            delete W_t;
+
             // 2. For RT elements, we impose boundary condition equal zero,
             //   see the function: GetInternalDofs2AE to obtained them
 
@@ -4303,7 +4306,7 @@ public:
             delete residual[l];
             if (l < Operators_.Size() - 1)
                 delete Operators_[l];
-            if (CoarsePrec_)
+            if (CoarseSolver)
                 delete CoarseSolver;
         }
     }
