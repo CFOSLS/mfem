@@ -4102,7 +4102,13 @@ public:
         for (int l = Operators_.Size()-1; l >= 0; l--)
         {
             Array<int>& Offsets = Operators_[l]->RowOffsets();
-            correction[l] = new Vector(Offsets.Last());
+
+            if (l < Operators_.Size() - 1)
+                correction[l] = new Vector(Offsets.Last());
+            else // exist because of SetDataAndSize call to correction.Last() in MonolithicMultigrid::Mult
+                 // which drops the  data (if allocated here, i.e. if no if-clause)
+                correction[l] = new Vector();
+
             residual[l] = new Vector(Offsets.Last());
 
             HypreParMatrix &A00 = (HypreParMatrix&)Operators_[l]->GetBlock(0,0);
@@ -4165,6 +4171,9 @@ public:
             delete Smoothers_[l];
             delete correction[l];
             delete residual[l];
+
+            if (l < Operators_.Size() - 1)
+                delete Operators_[l];
         }
     }
 
@@ -4278,9 +4287,7 @@ public:
             Smoothers_[l] = new HypreSmoother(*Operators_[l]);
             residual[l] = new Vector(Operators_[l]->GetNumRows());
             if (l < Operators_.Size() - 1)
-            {
                 correction[l] = new Vector(Operators_[l]->GetNumRows());
-            }
             else // exist because of SetDataAndSize call to correction.Last() in Multigrid::Mult
                  // which drops the  data (if allocated here, i.e. if no if-clause)
                 correction[l] = new Vector();

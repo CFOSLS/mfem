@@ -2103,6 +2103,8 @@ int main(int argc, char *argv[])
 
     Solver *prec;
     Array<BlockOperator*> P;
+    Array<int> * offsets_f;
+    Array<int> * offsets_c;
     if (with_prec)
     {
         if(dim<=4)
@@ -2115,10 +2117,11 @@ int main(int argc, char *argv[])
                     {
                         P.SetSize(TrueP_C.Size());
 
+                        offsets_f = new Array<int>(3);
+                        offsets_c = new Array<int>(3);
+
                         for (int l = 0; l < P.Size(); l++)
                         {
-                            auto offsets_f  = new Array<int>(3);
-                            auto offsets_c  = new Array<int>(3);
                             (*offsets_f)[0] = (*offsets_c)[0] = 0;
                             (*offsets_f)[1] = TrueP_C[l]->Height();
                             (*offsets_c)[1] = TrueP_C[l]->Width();
@@ -3389,6 +3392,8 @@ int main(int argc, char *argv[])
             secondeqn_rhs->Assemble();
             secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
 
+            delete secondeqn_rhs;
+
             for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][1]->Size(); ++i)
             {
                 int bdrtdof = (*EssBdrTrueDofs_Funct_lvls[0][1])[i];
@@ -3794,7 +3799,8 @@ int main(int argc, char *argv[])
             {
                 if (monolithicMG)
                 {
-
+                    delete offsets_f;
+                    delete offsets_c;
                 }
                 else
                 {
