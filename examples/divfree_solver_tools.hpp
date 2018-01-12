@@ -199,6 +199,7 @@ private:
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
+    mutable HypreParMatrix *Schur;
 protected:
     void Setup() const;
 
@@ -264,6 +265,7 @@ CoarsestProblemSolver::~CoarsestProblemSolver()
                 delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
 
+    delete Schur;
 }
 
 void CoarsestProblemSolver::Setup() const
@@ -408,7 +410,7 @@ void CoarsestProblemSolver::Setup() const
                                             Funct_global(0,0)->GetRowStarts());
     Funct_global(0,0)->GetDiag(*Md);
     MinvBt->InvScaleRows(*Md);
-    HypreParMatrix *Schur = ParMult(Constr_global, MinvBt);
+    Schur = ParMult(Constr_global, MinvBt);
     Schur->CopyRowStarts();
     Schur->CopyColStarts();
 
@@ -1819,6 +1821,13 @@ DivConstraintSolver::~DivConstraintSolver()
         delete trueresfunc_lvls[i];
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
+
+    for (int l = 0; l < Funct_lvls.Size(); ++l)
+        if (l > 0)
+            delete Funct_lvls[l];
+    for (int l = 0; l < Constr_lvls.Size(); ++l)
+        if (l > 0)
+            delete Constr_lvls[l];
 
 }
 
@@ -3486,6 +3495,9 @@ public:
             SparseMatrix *AE_R =  Transpose(intDofs_R_AE);
             SparseMatrix *AE_W = Transpose(*W_AE);
 
+            delete W_AE;
+            delete R_AE;
+
 
             // 3. Right hand size at each level is of the form:
             //
@@ -3627,6 +3639,9 @@ public:
                 p_loc_vec.AddElementVector(Rtmp_j,sig);
 
             } // end of loop over all elements at level l
+
+            delete AE_R;
+            delete AE_W;
 
 #ifdef MFEM_DEBUG
             Vector fcheck2(u_loc_vec.Size());

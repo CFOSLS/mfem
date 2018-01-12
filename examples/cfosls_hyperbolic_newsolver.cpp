@@ -2553,6 +2553,8 @@ int main(int argc, char *argv[])
                        MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
             if (verbose)
                 cout << "Sum of local mass loss = " << mass_loss<< "\n";
+
+            delete trueRhs_part;
         }
 #endif
     }
@@ -2952,6 +2954,7 @@ int main(int argc, char *argv[])
         delete S_exact_finest;
 
     delete Sigmahat;
+    delete u;
 
 #ifdef OLD_CODE
     if (withDiv)
@@ -2963,6 +2966,8 @@ int main(int argc, char *argv[])
     delete u_exact;
     delete S_exact;
     delete sigma_exact;
+    delete opdivfreepart;
+    delete sigma;
 
 #ifdef   USE_CURLMATRIX
     delete rhside_Hdiv;
