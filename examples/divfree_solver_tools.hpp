@@ -4278,11 +4278,14 @@ public:
         for (int l = 0; l < Operators_.Size(); l++)
         {
             Smoothers_[l] = new HypreSmoother(*Operators_[l]);
-            correction[l] = new Vector(Operators_[l]->GetNumRows());
             residual[l] = new Vector(Operators_[l]->GetNumRows());
-            //std::cout << "l = " << l << "\n";
-            //std::cout << "correction[l] of size" << correction[l]->Size() << " allocated \n";
-            //std::cout << "residual[l] of size" << residual[l]->Size() << " allocated \n";
+            if (l < Operators_.Size() - 1)
+            {
+                correction[l] = new Vector(Operators_[l]->GetNumRows());
+            }
+            else // exist because of SetDataAndSize call to correction.Last() in Multigrid::Mult
+                 // which drops the  data (if allocated here, i.e. if no if-clause)
+                correction[l] = new Vector();
         }
 
         if (CoarsePrec)
@@ -4305,12 +4308,7 @@ public:
         for (int l = 0; l < Operators_.Size(); l++)
         {
             delete Smoothers_[l];
-            //std::cout << "l = " << l << "\n";
-            //if (correction[l])
-                //std::cout << "correction[l] of size" << correction[l]->Size() << " deleted \n";
             delete correction[l];
-            //if (residual[l])
-                //std::cout << "residual[l] of size" << residual[l]->Size() << " deleted \n";
             delete residual[l];
             if (l < Operators_.Size() - 1)
                 delete Operators_[l];
