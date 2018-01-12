@@ -3813,8 +3813,6 @@ public:
             S->CopyColStarts();
             S->CopyRowStarts();
 
-            delete MinvBt;
-
             auto invS = new HypreBoomerAMG(*S);
             invS->SetPrintLevel(0);
             invS->iterative_mode = false;
@@ -3836,6 +3834,7 @@ public:
 //            cout << "CG solver took " << chrono.RealTime() << "s. \n";
             MinvBt->Mult(tmp_c, Truesig_c);
 
+            delete MinvBt;
             delete invS;
             delete S;
         }
