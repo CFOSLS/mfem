@@ -2397,6 +2397,7 @@ int main(int argc, char *argv[])
         B->Mult(trueSigma,bTsigma);
 
         Vector trueS(C->Height());
+        trueS = 0.0;
 
         /*
         void CG(const Operator &A, const Vector &b, Vector &x,
@@ -2466,7 +2467,7 @@ int main(int argc, char *argv[])
                   << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
     }
 
-    double norm_S;
+    double norm_S = 0.0;
     //if (withS)
     {
         ParGridFunction * S_exact = new ParGridFunction(S_space);
