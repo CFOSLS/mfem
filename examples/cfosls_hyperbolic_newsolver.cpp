@@ -1968,13 +1968,13 @@ int main(int argc, char *argv[])
     ParGridFunction* rhside_Hdiv = new ParGridFunction(R_space);  // rhside for the first equation in the original cfosls system
     *rhside_Hdiv = 0.0;
 
-    ParLinearForm *qform(new ParLinearForm);
+    ParLinearForm *qform;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
-        qform->Update(S_space, rhsblks.GetBlock(1), 0);
+        qform = new ParLinearForm(S_space);
         if (strcmp(space_for_S,"H1") == 0) // S is from H1
             qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
-        else // S is from L2
+        else // S is from L2 but is not eliminated
             qform->AddDomainIntegrator(new DomainLFIntegrator(zero));
         qform->Assemble();
     }
@@ -2401,12 +2401,27 @@ int main(int argc, char *argv[])
 
         Vector trueS(C->Height());
 
-        CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+        /*
+        void CG(const Operator &A, const Vector &b, Vector &x,
+                int print_iter, int max_num_iter,
+                double RTOLERANCE, double ATOLERANCE)
+        */
+
+        CGSolver cg;
+        cg.SetPrintLevel(0);
+        cg.SetMaxIter(5000);
+        cg.SetRelTol(sqrt(1.0e-9));
+        cg.SetAbsTol(sqrt(1.0e-12));
+        cg.SetOperator(*C);
+        cg.Mult(bTsigma, trueS);
+
+        //CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
         S->Distribute(trueS);
 
         delete B;
         delete C;
         delete Bblock;
+        delete Cblock;
     }
 
     double err_sigma = sigma->ComputeL2Error(*Mytest.sigma, irs);
@@ -2507,7 +2522,6 @@ int main(int argc, char *argv[])
                 delete hcurl_coll;
             }
 
-            delete S_exact;
         }
 
 #ifdef USE_CURLMATRIX
@@ -2568,6 +2582,7 @@ int main(int argc, char *argv[])
             delete trueRhs_part;
         }
 #endif
+        delete S_exact;
     }
 
     if (verbose)
@@ -3781,6 +3796,7 @@ int main(int argc, char *argv[])
     delete sigma_exact;
     delete opdivfreepart;
     delete sigma;
+    delete S;
 
 #ifdef   USE_CURLMATRIX
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
