@@ -2133,11 +2133,11 @@ int main(int argc, char *argv[])
                     }
                     else
                     {
-                        prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, TrueP_C);
-
                         Operator * testprecU = new Multigrid(*A, TrueP_C);
                         delete testprecU;
+
+                        prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+                        Operator * precU = new Multigrid(*A, TrueP_C);
 
                         Operator * precS = new Multigrid(*C, TrueP_H);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
@@ -3062,6 +3062,8 @@ int main(int argc, char *argv[])
     Ablocktest->Finalize();
     Atest = Ablocktest->ParallelAssemble();
 
+    delete Ablocktest;
+
     HypreParMatrix *Ctest;
     if (strcmp(space_for_S,"H1") == 0)
     {
@@ -3076,6 +3078,8 @@ int main(int argc, char *argv[])
         Cblocktest->Finalize();
 
         Ctest = Cblocktest->ParallelAssemble();
+
+        delete Cblocktest;
     }
 
     HypreParMatrix *Btest;
@@ -3091,6 +3095,8 @@ int main(int argc, char *argv[])
 
         Btest = Bblocktest->ParallelAssemble();
         BTtest = Btest->Transpose();
+
+        delete Bblocktest;
     }
 
     Array<int> blocktest_offsets(numblocks + 1);
@@ -3107,6 +3113,10 @@ int main(int argc, char *argv[])
     fformtest->ParallelAssemble(trueRhstest.GetBlock(0));
     if (strcmp(space_for_S,"H1") == 0)
         qformtest->ParallelAssemble(trueRhstest.GetBlock(1));
+
+    delete fformtest;
+    if (strcmp(space_for_S,"H1") == 0)
+        delete qformtest;
 
     BlockOperator *BlockMattest = new BlockOperator(blocktest_offsets);
     BlockMattest->SetBlock(0,0, Atest);
@@ -3481,6 +3491,19 @@ int main(int argc, char *argv[])
 
     delete Sigmahat;
     delete u;
+
+    delete NewSigmahat;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        delete NewS;
+
+    delete Atest;
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        delete Ctest;
+        delete Btest;
+        delete BTtest;
+    }
+    delete BlockMattest;
 
 #ifdef OLD_CODE
     if (withDiv)
