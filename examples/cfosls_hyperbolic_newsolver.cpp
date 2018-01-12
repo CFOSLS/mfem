@@ -1460,10 +1460,13 @@ int main(int argc, char *argv[])
                 Funct_global->SetBlock(0,1, BT->Transpose());
             }
 
-            delete Cblock;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                delete Cblock;
+                delete BTblock;
+                delete secondeqn_rhs;
+            }
             delete Bblock;
-            delete BTblock;
-            delete secondeqn_rhs;
         }
 
         // for all but one levels we create projection matrices between levels
@@ -2094,6 +2097,7 @@ int main(int argc, char *argv[])
 
     delete Divfree_dop;
     delete DivfreeT_dop;
+    delete rhside_Hdiv;
 
     if (verbose)
         cout << "Discretized problem is assembled \n";
@@ -2400,6 +2404,9 @@ int main(int argc, char *argv[])
         CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
         S->Distribute(trueS);
 
+        delete B;
+        delete C;
+        delete Bblock;
     }
 
     double err_sigma = sigma->ComputeL2Error(*Mytest.sigma, irs);
@@ -3776,7 +3783,6 @@ int main(int argc, char *argv[])
     delete sigma;
 
 #ifdef   USE_CURLMATRIX
-    delete rhside_Hdiv;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         delete qform;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
