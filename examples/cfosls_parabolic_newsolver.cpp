@@ -12,7 +12,7 @@
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-//#define OLD_CODE
+#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -2255,8 +2255,8 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Linear solver: CG" << endl << flush;
 
-    solver->SetAbsTol(atol);
-    solver->SetRelTol(rtol);
+    solver.SetAbsTol(sqrt(atol));
+    solver.SetRelTol(sqrt(rtol));
     solver->SetMaxIter(max_num_iter);
     solver->SetOperator(*MainOp);
 
