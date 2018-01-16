@@ -8,11 +8,12 @@
 #include <memory>
 #include <iomanip>
 #include <list>
+#include <unistd.h>
 
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-//#define OLD_CODE
+#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -23,7 +24,7 @@
 #define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -947,6 +948,10 @@ int main(int argc, char *argv[])
     }
 
     StopWatch chrono;
+    StopWatch chrono_total;
+
+    chrono_total.Clear();
+    chrono_total.Start();
 
     //DEFAULTED LINEAR SOLVER OPTIONS
     int max_num_iter = 150000;
@@ -1066,6 +1071,12 @@ int main(int argc, char *argv[])
     int ref_levels = par_ref_levels;
 
     int num_levels = ref_levels + 1;
+
+    chrono.Clear();
+    chrono.Start();
+
+    //sleep(10);
+
     Array<ParMesh*> pmesh_lvls(num_levels);
     Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
     Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
@@ -1241,9 +1252,6 @@ int main(int argc, char *argv[])
        }
 
    Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
-
-    chrono.Clear();
-    chrono.Start();
 
     //const int finest_level = 0;
     //const int coarsest_level = num_levels - 1;
@@ -1705,9 +1713,16 @@ int main(int argc, char *argv[])
 
     //if(dim==3) pmesh->ReorientTetMesh();
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Hierarchy of f.e. spaces and stuff was constructed in "<< chrono.RealTime() <<" seconds.\n";
+
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
 
 #ifdef OLD_CODE
+    chrono.Clear();
+    chrono.Start();
+
     // 6. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
 
@@ -1785,8 +1800,12 @@ int main(int argc, char *argv[])
         ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
     }
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Small things in OLD_CODE were done in "<< chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
+
     ParGridFunction * Sigmahat = new ParGridFunction(R_space);
     ParLinearForm *gform;
     HypreParMatrix *Bdiv;
@@ -1933,9 +1952,13 @@ int main(int argc, char *argv[])
             std::cout << "Using exact sigma minus curl of a given function from H(curl,0) (in 3D) as a particular solution \n";
         Sigmahat->ProjectCoefficient(*Mytest.sigmahat);
     }
+    // in either way now Sigmahat is a function from H(div) s.t. div Sigmahat = div sigma = f
+
+    chrono.Stop();
     if (verbose)
         cout<<"Particular solution found in "<< chrono.RealTime() <<" seconds.\n";
-    // in either way now Sigmahat is a function from H(div) s.t. div Sigmahat = div sigma = f
+    chrono.Clear();
+    chrono.Start();
 
     // the div-free part
     ParGridFunction *u_exact = new ParGridFunction(C_space);
@@ -2096,9 +2119,9 @@ int main(int argc, char *argv[])
     delete DivfreeT_dop;
     delete rhside_Hdiv;
 
+    chrono.Stop();
     if (verbose)
-        cout << "Discretized problem is assembled \n";
-
+        cout<<"Discretized problem is assembled in "<< chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
 
@@ -2238,6 +2261,13 @@ int main(int argc, char *argv[])
         if (verbose)
             cout << "Using no preconditioner \n";
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
+
     CGSolver solver(comm);
     if (verbose)
         cout << "Linear solver: CG \n";
@@ -2268,6 +2298,9 @@ int main(int argc, char *argv[])
                       << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
+
+    chrono.Clear();
+    chrono.Start();
 
     ParGridFunction * u = new ParGridFunction(C_space);
     ParGridFunction * S;
@@ -2623,16 +2656,17 @@ int main(int argc, char *argv[])
                 cout << "|| Pi_h S_ex ||  = " << projection_error_S << " (S_ex = 0) \n";
         }
     }
+
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
 #endif
 
-    if (verbose)
-        std::cout << "\nCreating an instance of the new Hcurl smoother \n";
+    chrono.Clear();
+    chrono.Start();
 
     if (verbose)
-        std::cout << "Calling constructor of the new solver \n";
-
-    if (verbose)
-        std::cout << "\nCreating an instance of the new multilevel solver \n";
+        std::cout << "\nCreating an instance of the new Hcurl smoother and the minimization solver \n";
 
     //ParLinearForm *fform = new ParLinearForm(R_space);
 
@@ -2806,13 +2840,14 @@ int main(int argc, char *argv[])
         std::cout << "error1 norm special = " << global_norm1 << "\n";
     */
 
-
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Intermediate allocations for the new solver were done in "<< chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
 
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
-
-    chrono.Clear();
-    chrono.Start();
 
     const bool construct_coarseops = true;
     int stopcriteria_type = 1;
@@ -2845,9 +2880,7 @@ int main(int argc, char *argv[])
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)
-    {
         std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
-    }
 
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(40);
@@ -2858,7 +2891,20 @@ int main(int argc, char *argv[])
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "New solver and PartSolFinder were created in "<< chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Particular solution was found in " << chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
 
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks_funct; ++blk)
@@ -2960,11 +3006,11 @@ int main(int argc, char *argv[])
 #endif
     */
 
+    chrono.Stop();
     if (verbose)
-        std::cout << "New solver was set up in " << chrono.RealTime() << " seconds.\n";
-
-    if (verbose)
-        std::cout << "\nCalling the new multilevel solver for the first iteration \n";
+        std::cout << "Intermediate things were done in " << chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
 
     ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
 
@@ -3057,6 +3103,9 @@ int main(int argc, char *argv[])
 #ifdef USE_AS_A_PREC
     if (verbose)
         std::cout << "Using the new solver as a preconditioner for CG for the correction \n";
+
+    chrono.Clear();
+    chrono.Start();
 
     ParLinearForm *fformtest = new ParLinearForm(R_space_lvls[0]);
     ConstantCoefficient zerotest(.0);
@@ -3154,7 +3203,7 @@ int main(int argc, char *argv[])
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
     Testsolver.SetOperator(*BlockMattest);
-    Testsolver.SetPrintLevel(1);
+    Testsolver.SetPrintLevel(0);
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetPrintLevel(0);
@@ -3169,6 +3218,9 @@ int main(int argc, char *argv[])
     BlockMattest->Mult(ParticSol, truetemp);
     trueRhstest -= truetemp;
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Global system for the CG was built in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
 
@@ -3184,8 +3236,11 @@ int main(int argc, char *argv[])
         else
             std::cout << "Linear solver did not converge in " << Testsolver.GetNumIterations()
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
-        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+        std::cout << "Linear solver (CG + new solver) took " << chrono.RealTime() << "s. \n";
     }
+
+    chrono.Clear();
+    chrono.Start();
 
     trueXtest += ParticSol;
     NewSigmahat->Distribute(trueXtest.GetBlock(0));
@@ -3392,7 +3447,17 @@ int main(int argc, char *argv[])
         }
         /////////////////////////////////////////////////////////
     }
+
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Errors in USE_AS_A_PREC were computed in " << chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
 #else // for USE_AS_A_PREC
+
+    if (verbose)
+        std::cout << "\nCalling the new multilevel solver \n";
 
     chrono.Clear();
     chrono.Start();
@@ -3652,6 +3717,12 @@ int main(int argc, char *argv[])
     }
 #endif
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Deallocating memory \n";
+    chrono.Clear();
+    chrono.Start();
+
     for (int l = 0; l < num_levels; ++l)
     {
         delete BdrDofs_Funct_lvls[l][0];
@@ -3861,6 +3932,16 @@ int main(int argc, char *argv[])
         delete P[i];
 
 #endif // end of #ifdef OLD_CODE in the memory deallocating
+
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Deallocation of memory was done in " << chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
+    chrono_total.Stop();
+    if (verbose)
+        std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
 
     MPI_Finalize();
     return 0;
