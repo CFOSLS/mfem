@@ -2082,7 +2082,9 @@ void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x
     }
 
     BlockVector temp2(Funct_lvls[l]->RowOffsets());
-    Funct_lvls[l]->Mult(temp1, temp2);
+
+    if (temp1.Size() > 0)
+        Funct_lvls[l]->Mult(temp1, temp2);
 
     temp2 *= coeff;
 
