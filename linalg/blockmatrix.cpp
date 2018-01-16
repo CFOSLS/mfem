@@ -342,7 +342,7 @@ void BlockMatrix::Mult(const Vector & x, Vector & y) const
 
 void BlockMatrix::AddMult(const Vector & x, Vector & y, const double val) const
 {
-   if (x.GetData() == y.GetData())
+   if (x.GetData() == y.GetData() && x.GetData() != NULL)
    {
        std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
        if (x.GetData() == NULL)
@@ -373,7 +373,7 @@ void BlockMatrix::AddMult(const Vector & x, Vector & y, const double val) const
 
 void BlockMatrix::MultTranspose(const Vector & x, Vector & y) const
 {
-   if (x.GetData() == y.GetData())
+   if (x.GetData() == y.GetData() && x.GetData() != NULL)
    {
        std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
        if (x.GetData() == NULL)
@@ -388,7 +388,7 @@ void BlockMatrix::MultTranspose(const Vector & x, Vector & y) const
 void BlockMatrix::AddMultTranspose(const Vector & x, Vector & y,
                                    const double val) const
 {
-   if (x.GetData() == y.GetData())
+   if (x.GetData() == y.GetData() && x.GetData() != NULL)
    {
        std::cout << "x.GetData = " << x.GetData() << " y.GetData = " << y.GetData() << "\n" << std::flush;
        if (x.GetData() == NULL)
