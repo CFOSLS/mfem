@@ -16,6 +16,14 @@ using std::unique_ptr;
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 #define CHECK_LOCALSOLVE
 
+// activates constraint residual check after each tieration of the minimization solver
+//#define CHECK_CONSTR
+
+//#define TIMING
+#ifdef TIMING
+#undef CHECK_LOCALSOLVE
+#endif
+
 // activates some additional checks
 //#define DEBUG_INFO
 
@@ -532,6 +540,9 @@ protected:
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
+    mutable BlockVector* rhs_func;
+    mutable BlockVector* sol;
+
 protected:
     mutable bool optimized_localsolve;
 
@@ -623,6 +634,9 @@ LocalProblemSolver::~LocalProblemSolver()
             for (unsigned int j = 0; j < LUfactors[i].size(); ++j)
                 if (LUfactors[i][j])
                     delete LUfactors[i][j];
+
+    delete rhs_func;
+    delete sol;
 }
 
 void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
@@ -644,6 +658,9 @@ void LocalProblemSolver::Setup()
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
 
+    rhs_func = new BlockVector(Op_blkspmat.ColOffsets());
+    sol = new BlockVector(Op_blkspmat.RowOffsets());
+
     // (optionally) saves LU factors related to the local problems to be solved
     // for each agglomerate element
     if (optimized_localsolve)
@@ -655,12 +672,11 @@ void LocalProblemSolver::Setup()
 
 void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol, Vector* localrhs_constr) const
 {
-    // FIXME: Get rid of temporary vectors;
-    BlockVector lvlrhs_func(Op_blkspmat.ColOffsets());
+    //BlockVector rhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
-        d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), lvlrhs_func.GetBlock(blk));
-    BlockVector sol(Op_blkspmat.RowOffsets());
-    sol = 0.0;
+        d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), rhs_func->GetBlock(blk));
+    //BlockVector sol(Op_blkspmat.RowOffsets());
+    *sol = 0.0;
 
     DenseMatrix sub_Constr;
     Vector sub_rhsconstr;
@@ -751,9 +767,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         BlockVector sub_Func(sub_Func_offsets);
 
         for ( int blk = 0; blk < numblocks; ++blk )
-        {
-            lvlrhs_func.GetBlock(blk).GetSubVector(*Local_inds[blk], sub_Func.GetBlock(blk));
-        }
+            rhs_func->GetBlock(blk).GetSubVector(*Local_inds[blk], sub_Func.GetBlock(blk));
 
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
@@ -764,7 +778,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            sol.GetBlock(blk).AddElementVector
+            sol->GetBlock(blk).AddElementVector
                     (*Local_inds[blk], sol_loc.GetBlock(blk));
         }
 
@@ -776,7 +790,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     } // end of loop over AEs
 
     for (int blk = 0; blk < numblocks; ++blk)
-        d_td_blocks[blk]->MultTranspose(sol.GetBlock(blk), truesol.GetBlock(blk));
+        d_td_blocks[blk]->MultTranspose(sol->GetBlock(blk), truesol.GetBlock(blk));
 
     for ( int blk = 0; blk < numblocks; ++blk )
         delete Local_inds[blk];
@@ -1744,6 +1758,9 @@ protected:
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
 
+    mutable Array<BlockVector*> tempvec1_lvls; // on dofs, used in MultTrueFunc()
+    mutable Array<BlockVector*> tempvec2_lvls;
+
     mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
     mutable CoarsestProblemSolver* CoarseSolver;
 
@@ -1821,6 +1838,11 @@ DivConstraintSolver::~DivConstraintSolver()
         delete trueresfunc_lvls[i];
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
+
+    for (int i = 0; i < tempvec1_lvls.Size(); ++i)
+        delete tempvec1_lvls[i];
+    for (int i = 0; i < tempvec2_lvls.Size(); ++i)
+        delete tempvec2_lvls[i];
 
     for (int l = 0; l < Funct_lvls.Size(); ++l)
         if (l > 0)
@@ -1907,6 +1929,12 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     truetempvec2_lvls[0] = new BlockVector(block_trueoffsets);
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
+
+    tempvec1_lvls.SetSize(num_levels);
+    tempvec1_lvls[0] = new BlockVector(Funct_lvls[0]->ColOffsets());
+
+    tempvec2_lvls.SetSize(num_levels);
+    tempvec2_lvls[0] = new BlockVector(Funct_lvls[0]->RowOffsets());
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -2074,23 +2102,15 @@ void DivConstraintSolver::Setup(bool verbose) const
 
 void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {
-    // FIXME: Get rid of temp1 and temp2
-    BlockVector temp1(Funct_lvls[l]->ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[l][blk]->Mult(x_l.GetBlock(blk), temp1.GetBlock(blk));
-    }
+        dof_trueDof_Func_lvls[l][blk]->Mult(x_l.GetBlock(blk), tempvec1_lvls[l]->GetBlock(blk));
 
-    BlockVector temp2(Funct_lvls[l]->RowOffsets());
+    Funct_lvls[l]->Mult(*tempvec1_lvls[l], *tempvec2_lvls[l]);
 
-    Funct_lvls[l]->Mult(temp1, temp2);
-
-    temp2 *= coeff;
+    *tempvec2_lvls[l] *= coeff;
 
     for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[l][blk]->MultTranspose(temp2.GetBlock(blk), rhs_l.GetBlock(blk));
-    }
+        dof_trueDof_Func_lvls[l][blk]->MultTranspose(tempvec2_lvls[l]->GetBlock(blk), rhs_l.GetBlock(blk));
 }
 
 // Computes prerequisites required for solving local problems at level l
@@ -2131,6 +2151,9 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
     truetempvec2_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     truesolupdate_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     trueresfunc_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+
+    tempvec1_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->ColOffsets());
+    tempvec2_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 }
 
 
@@ -2749,6 +2772,9 @@ protected:
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
 
+    mutable Array<BlockVector*> tempvec1_lvls; // on dofs
+    mutable Array<BlockVector*> tempvec2_lvls;
+
     mutable Array<Operator*> LocalSolvers_lvls;
     mutable Operator* CoarseSolver;
 
@@ -2852,6 +2878,11 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
         delete trueresfunc_lvls[i];
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
+
+    for (int i = 0; i < tempvec1_lvls.Size(); ++i)
+        delete tempvec1_lvls[i];
+    for (int i = 0; i < tempvec2_lvls.Size(); ++i)
+        delete tempvec2_lvls[i];
 
     for ( int l = 0; l < num_levels; ++l)
         if (l > 0 && Funct_lvls[l]) // only for l > 0 new memory is allocated for these pointers
@@ -3021,6 +3052,11 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(offsets_global);
 
+    tempvec1_lvls.SetSize(num_levels);
+    tempvec1_lvls[0] = new BlockVector(Funct_lvls[0]->ColOffsets());
+    tempvec2_lvls.SetSize(num_levels);
+    tempvec2_lvls[0] = new BlockVector(Funct_lvls[0]->RowOffsets());
+
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
     else
@@ -3088,8 +3124,11 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
 void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
-#ifdef MFEM_DEBUG
-    BlockVector temp_dofs(Funct_lvls[0]->RowOffsets());
+
+#ifdef CHECK_CONSTR
+    BlockVector * temp_dofs;
+    if (!preconditioner_mode)
+        temp_dofs = new BlockVector(Funct_lvls[0]->RowOffsets());
 #endif
 
     // start iteration
@@ -3118,19 +3157,24 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(CheckBdrError(*tempblock_truedofs, bdrdata_truedofs,
                                   *essbdrtruedofs_Func[0][0], true), "before the iteration");
 
-#ifdef MFEM_DEBUG
-        for ( int blk = 0; blk < numblocks; ++blk)
-            dof_trueDof_Func_lvls[0][blk]->Mult(tempblock_truedofs->GetBlock(blk), temp_dofs.GetBlock(blk));
-
+#ifdef CHECK_CONSTR
+        // unnecessary checking block
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
-                                       "before the iteration"),"");
-            MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], &ConstrRhs,
-                                       "before the iteration"),"");
+            for ( int blk = 0; blk < numblocks; ++blk)
+                dof_trueDof_Func_lvls[0][blk]->Mult(tempblock_truedofs->GetBlock(blk), temp_dofs->GetBlock(blk));
+
+            if (!preconditioner_mode)
+            {
+                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+                                           "before the iteration"),"");
+                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
+                                           "before the iteration"),"");
+            }
+            else
+                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
+
         }
-        else
-            MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
 #endif
 
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
@@ -3213,22 +3257,15 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
 void GeneralMinConstrSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {
-    // FIXME: Get rid of temp1 and temp2
-    BlockVector temp1(Funct_lvls[l]->ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[l][blk]->Mult(x_l.GetBlock(blk), temp1.GetBlock(blk));
-    }
+        dof_trueDof_Func_lvls[l][blk]->Mult(x_l.GetBlock(blk), tempvec1_lvls[l]->GetBlock(blk));
 
-    BlockVector temp2(Funct_lvls[l]->RowOffsets());
-    Funct_lvls[l]->Mult(temp1, temp2);
+    Funct_lvls[l]->Mult(*tempvec1_lvls[l], *tempvec2_lvls[l]);
 
-    temp2 *= coeff;
+    *tempvec2_lvls[l] *= coeff;
 
     for (int blk = 0; blk < numblocks; ++blk)
-    {
-        dof_trueDof_Func_lvls[l][blk]->MultTranspose(temp2.GetBlock(blk), rhs_l.GetBlock(blk));
-    }
+        dof_trueDof_Func_lvls[l][blk]->MultTranspose(tempvec2_lvls[l]->GetBlock(blk), rhs_l.GetBlock(blk));
 }
 
 // Computes out_l as an updated rhs in the functional part for the given level
@@ -3436,6 +3473,9 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     truetempvec2_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     truesolupdate_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     trueresfunc_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+
+    tempvec1_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->ColOffsets());
+    tempvec2_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
 }
 
 class DivPart
