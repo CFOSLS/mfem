@@ -628,7 +628,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 3;
 
     bool aniso_refine = false;
     bool refine_t_first = true;
@@ -856,6 +856,7 @@ int main(int argc, char *argv[])
 
     Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
     ess_bdrSigma = 0;
+    ess_bdrSigma[0] = 1;
 
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
     ess_bdrS = 0;
@@ -1678,8 +1679,8 @@ int main(int argc, char *argv[])
     // mass matrix for H(div)
     ParBilinearForm *Mblock(new ParBilinearForm(R_space));
     Mblock->AddDomainIntegrator(new VectorFEMassIntegrator);
-    Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Assemble();
+    Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Finalize();
 
     HypreParMatrix *M = Mblock->ParallelAssemble();

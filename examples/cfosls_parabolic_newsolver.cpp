@@ -1900,8 +1900,8 @@ int main(int argc, char *argv[])
     // mass matrix for H(div)
     ParBilinearForm *Mblock(new ParBilinearForm(R_space));
     Mblock->AddDomainIntegrator(new VectorFEMassIntegrator);
-    Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Assemble();
+    Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Finalize();
 
     HypreParMatrix *M = Mblock->ParallelAssemble();
