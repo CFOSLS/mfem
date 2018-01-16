@@ -2255,8 +2255,8 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Linear solver: CG" << endl << flush;
 
-    solver.SetAbsTol(sqrt(atol));
-    solver.SetRelTol(sqrt(rtol));
+    solver->SetAbsTol(sqrt(atol));
+    solver->SetRelTol(sqrt(rtol));
     solver->SetMaxIter(max_num_iter);
     solver->SetOperator(*MainOp);
 
