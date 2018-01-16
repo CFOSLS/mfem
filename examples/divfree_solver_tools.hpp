@@ -1993,8 +1993,8 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         // smooth
         if (Smoothers_lvls[l])
         {
-            std::cout << "l = " << l << "\n";
-            std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+            //std::cout << "l = " << l << "\n";
+            //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             MPI_Barrier(comm);
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
@@ -2083,8 +2083,7 @@ void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x
 
     BlockVector temp2(Funct_lvls[l]->RowOffsets());
 
-    if (temp1.Size() > 0)
-        Funct_lvls[l]->Mult(temp1, temp2);
+    Funct_lvls[l]->Mult(temp1, temp2);
 
     temp2 *= coeff;
 
@@ -3287,8 +3286,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // smooth
         if (Smoothers_lvls[l])
         {
-            std::cout << "l = " << l << "\n";
-            std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+            //std::cout << "l = " << l << "\n";
+            //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
