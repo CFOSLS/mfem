@@ -19,7 +19,6 @@ using std::unique_ptr;
 // activates constraint residual check after each tieration of the minimization solver
 //#define CHECK_CONSTR
 
-//#define TIMING
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
 #endif
@@ -672,10 +671,10 @@ void LocalProblemSolver::Setup()
 
 void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, BlockVector& truesol, Vector* localrhs_constr) const
 {
-    //BlockVector rhs_func(Op_blkspmat.ColOffsets());
+    //BlockVector lrhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
         d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), rhs_func->GetBlock(blk));
-    //BlockVector sol(Op_blkspmat.RowOffsets());
+    //BlockVector lsol(Op_blkspmat.RowOffsets());
     *sol = 0.0;
 
     DenseMatrix sub_Constr;
@@ -2688,6 +2687,24 @@ private:
     mutable int max_iter;
     mutable int converged;
 
+#ifdef TIMING
+    mutable StopWatch chrono;
+    mutable StopWatch chrono2;
+    mutable StopWatch chrono3;
+    mutable double time_solve;
+    mutable double time_localsolve;
+    mutable double time_smoother;
+    mutable double time_coarsestproblem;
+    mutable double time_fw;
+    mutable double time_up;
+    mutable std::list<double>* times_solve;
+    mutable std::list<double>* times_localsolve;
+    mutable std::list<double>* times_smoother;
+    mutable std::list<double>* times_coarsestproblem;
+    mutable std::list<double>* times_fw;
+    mutable std::list<double>* times_up;
+#endif
+
 protected:
     int num_levels;
 
@@ -2818,6 +2835,15 @@ public:
                            const Array<int>& Offsets_Global,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
+#ifdef TIMING
+                            std::list<double>* Times_solve,
+                            std::list<double>* Times_localsolve,
+                            std::list<double>* Times_smoother,
+                            std::list<double>* Times_coarsestproblem,
+                            std::list<double>* Times_fw,
+                            std::list<double>* Times_up,
+#endif
+
                            Array<Operator*>* LocalSolvers = NULL,
                            Operator* CoarseSolver = NULL,
                            bool Construct_CoarseOps = true,
@@ -2990,6 +3016,14 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Array<int>& Offsets_Global,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
+#ifdef TIMING
+                        std::list<double>* Times_solve,
+                        std::list<double>* Times_localsolve,
+                        std::list<double>* Times_smoother,
+                        std::list<double>* Times_coarsestproblem,
+                        std::list<double>* Times_fw,
+                        std::list<double>* Times_up,
+#endif
                        Array<Operator*>* LocalSolvers,
                        Operator *CoarsestSolver,
                        bool Construct_CoarseOps, int StopCriteria_Type)
@@ -3007,6 +3041,14 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
        ConstrRhs(ConstrRhsVec),
        Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs),
+#ifdef TIMING
+       times_solve(Times_solve),
+       times_localsolve(Times_localsolve),
+       times_smoother(Times_smoother),
+       times_coarsestproblem(Times_coarsestproblem),
+       times_fw(Times_fw),
+       times_up(Times_up),
+#endif
        Funct_global(Funct_Global),
        Functrhs_global(Functrhs_Global),
        offsets_global(Offsets_Global)
@@ -3090,6 +3132,15 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
         for (int l = 0; l < num_levels - 1; ++l)
             LocalSolvers_lvls[l] = (*LocalSolvers)[l];
     }
+
+#ifdef TIMING
+    time_solve = 0.0;
+    time_localsolve = 0.0;
+    time_smoother = 0.0;
+    time_coarsestproblem = 0.0;
+    time_fw = 0.0;
+    time_up = 0.0;
+#endif
 
     Setup();
 }
@@ -3253,6 +3304,15 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
             std::cout << "Solver didn't converge in " << itnum << " iterations. \n";
     }
 
+#ifdef TIMING
+    times_solve->push_back(time_solve);
+    times_localsolve->push_back(time_localsolve);
+    times_smoother->push_back(time_smoother);
+    times_coarsestproblem->push_back(time_coarsestproblem);
+    times_fw->push_back(time_fw);
+    times_up->push_back(time_up);
+#endif
+
 }
 
 void GeneralMinConstrSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
@@ -3289,6 +3349,11 @@ void GeneralMinConstrSolver::UpdateTrueResidual(int level, const BlockVector* rh
 void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                        const BlockVector& previous_sol, BlockVector& next_sol) const
 {
+#ifdef TIMING
+    chrono3.Clear();
+    chrono3.Start();
+#endif
+
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
@@ -3305,10 +3370,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
+#ifdef TIMING
+    chrono2.Clear();
+    chrono2.Start();
+#endif
+
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
+
+#ifdef TIMING
+        chrono.Clear();
+        chrono.Start();
+#endif
+
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
 
@@ -3320,6 +3396,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
+#ifdef TIMING
+        chrono.Stop();
+        time_localsolve += chrono.RealTime();
+        chrono.Clear();
+        chrono.Start();
+#endif
+
         // smooth
         if (Smoothers_lvls[l])
         {
@@ -3330,16 +3413,42 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
 
+#ifdef TIMING
+        chrono.Stop();
+        time_smoother += chrono.RealTime();
+#endif
+
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
     } // end of loop over finer levels
 
-    // BOTTOM: solve the global problem at the coarsest level
+#ifdef TIMING
+    chrono2.Stop();
+    time_fw  += chrono2.RealTime();
+#endif
+
+#ifdef TIMING
+    chrono.Clear();
+    chrono.Start();
+#endif
+        // BOTTOM: solve the global problem at the coarsest level
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
+#ifdef TIMING
+    chrono.Stop();
+    std::cout << "before: " << time_coarsestproblem << "\n";
+    time_coarsestproblem += chrono.RealTime();
+    std::cout << "after: " << time_coarsestproblem << "\n";
+#endif
+
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
+
+#ifdef TIMING
+    chrono2.Clear();
+    chrono2.Start();
+#endif
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
@@ -3354,6 +3463,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
 
+#ifdef TIMING
+            chrono.Clear();
+            chrono.Start();
+#endif
             // smooth at the finer level
             if (Smoothers_lvls[l - 1])
             {
@@ -3361,6 +3474,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
                 UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             }
+#ifdef TIMING
+            chrono.Stop();
+            time_smoother += chrono.RealTime();
+            chrono.Clear();
+            chrono.Start();
+#endif
 
             if (LocalSolvers_lvls[l - 1])
             {
@@ -3368,6 +3487,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
             }
 
+#ifdef TIMING
+            chrono.Stop();
+            time_localsolve += chrono.RealTime();
+#endif
         }
 
     }
@@ -3384,6 +3507,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
 
     }
+
+#ifdef TIMING
+    chrono2.Stop();
+    time_up  += chrono2.RealTime();
+#endif
 
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
@@ -3431,6 +3559,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         solupdate_firstmgnorm = solupdate_currmgnorm;
 
     ++current_iteration;
+
+#ifdef TIMING
+    chrono3.Stop();
+    time_solve  += chrono3.RealTime();
+#endif
 
     return;
 }

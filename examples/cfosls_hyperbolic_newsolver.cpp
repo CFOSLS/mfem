@@ -29,6 +29,8 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
+//#define TIMING
+
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -37,6 +39,7 @@
 //#define BAD_TEST
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
+
 
 
 
@@ -791,7 +794,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2852,6 +2855,15 @@ int main(int argc, char *argv[])
     const bool construct_coarseops = true;
     int stopcriteria_type = 1;
 
+#ifdef TIMING
+    std::list<double>* Times_solve = new std::list<double>;
+    std::list<double>* Times_localsolve = new std::list<double>;
+    std::list<double>* Times_smoother = new std::list<double>;
+    std::list<double>* Times_coarsestproblem = new std::list<double>;
+    std::list<double>* Times_fw = new std::list<double>;
+    std::list<double>* Times_up = new std::list<double>;
+#endif
+
     DivConstraintSolver PartsolFinder(num_levels, P_WT,
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
@@ -2872,6 +2884,9 @@ int main(int argc, char *argv[])
                      *Funct_global, *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
+#ifdef TIMING
+                     Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
+#endif
                      LocalSolver_lvls,
                      CoarsestSolver,
                      construct_coarseops, stopcriteria_type);
@@ -3240,6 +3255,48 @@ int main(int argc, char *argv[])
     }
 
     chrono.Clear();
+
+#ifdef TIMING
+    double temp_sum;
+
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_solve->begin(); i != Times_solve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_solve = " << temp_sum << "\n";
+    delete Times_solve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_localsolve->begin(); i != Times_localsolve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_localsolve = " << temp_sum << "\n";
+    delete Times_localsolve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_smoother->begin(); i != Times_smoother->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_smoother = " << temp_sum << "\n";
+    delete Times_smoother;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_coarsestproblem = " << temp_sum << "\n";
+    delete Times_coarsestproblem;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_fw->begin(); i != Times_fw->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_fw = " << temp_sum << "\n";
+    delete Times_fw;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_up->begin(); i != Times_up->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_up = " << temp_sum << "\n";
+    delete Times_up;
+#endif
+
     chrono.Start();
 
     trueXtest += ParticSol;
