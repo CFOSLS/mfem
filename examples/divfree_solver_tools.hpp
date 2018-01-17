@@ -2052,7 +2052,6 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
         *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
-
     }
 
     // 4. update the global iterate by the computed update (interpolated to the finest level)
@@ -2842,7 +2841,6 @@ public:
                             std::list<double>* Times_fw,
                             std::list<double>* Times_up,
 #endif
-
                            Array<Operator*>* LocalSolvers = NULL,
                            Operator* CoarseSolver = NULL,
                            bool Construct_CoarseOps = true,
@@ -3125,12 +3123,12 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
     init_guess = new BlockVector(offsets_global);
     *init_guess = 0.0;
 
-    if (LocalSolvers)
-    {
-        LocalSolvers_lvls.SetSize(num_levels - 1);
-        for (int l = 0; l < num_levels - 1; ++l)
+    LocalSolvers_lvls.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        if (LocalSolvers)
             LocalSolvers_lvls[l] = (*LocalSolvers)[l];
-    }
+        else
+            LocalSolvers_lvls[l] = NULL;
 
 #ifdef TIMING
     time_solve = 0.0;

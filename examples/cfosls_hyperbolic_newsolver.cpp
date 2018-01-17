@@ -21,7 +21,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define WITH_LOCALSOLVERS
+//#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
@@ -1212,20 +1212,12 @@ int main(int argc, char *argv[])
 
    //Actually this and LocalSolver_partfinder_lvls handle the same objects
    Array<Operator*>* LocalSolver_lvls;
-#ifdef WITH_LOCALSOLVERS
    LocalSolver_lvls = new Array<Operator*>(num_levels - 1);
-#else
-   LocalSolver_lvls = NULL;
-#endif
 
    Array<LocalProblemSolver*>* LocalSolver_partfinder_lvls;
-#ifdef WITH_LOCALSOLVERS
    LocalSolver_partfinder_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
-#else
-   LocalSolver_partfinder_lvls = NULL;
-#endif
 
-    Array<Operator*> Smoothers_lvls(num_levels - 1);
+   Array<Operator*> Smoothers_lvls(num_levels - 1);
 
 
    Operator* CoarsestSolver;
@@ -1658,7 +1650,6 @@ int main(int argc, char *argv[])
 #endif
         }
 
-#ifdef WITH_LOCALSOLVERS
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -1691,7 +1682,6 @@ int main(int argc, char *argv[])
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
-#endif
     }
 
     // Creating the coarsest problem solver
@@ -2895,7 +2885,11 @@ int main(int argc, char *argv[])
 #ifdef TIMING
                      Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
 #endif
+#ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
+#else
+                     NULL,
+#endif
                      CoarsestSolver,
                      construct_coarseops, stopcriteria_type);
 
@@ -3807,14 +3801,12 @@ int main(int argc, char *argv[])
             delete EssBdrDofs_H1[l];
         }
 
-#ifdef WITH_LOCALSOLVERS
         if (l < num_levels - 1)
         {
             if (LocalSolver_partfinder_lvls)
                 if ((*LocalSolver_partfinder_lvls)[l])
                     delete (*LocalSolver_partfinder_lvls)[l];
         }
-#endif
 
 #ifdef WITH_SMOOTHERS
         if (l < num_levels - 1)
