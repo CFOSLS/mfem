@@ -2629,9 +2629,10 @@ void HcurlGSSSmoother::Setup() const
         delete Funct_blk;
         delete temphpmat;
 
-        Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
-        ((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
-        ((HypreBoomerAMG*)(Smoothers[1]))->iterative_mode = false;
+        //Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
+        //((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
+        //((HypreBoomerAMG*)(Smoothers[1]))->iterative_mode = false;
+        Smoothers[1] = new HypreSmoother(*Funct_restblocks_global(1,1), HypreSmoother::Type::l1GS, sweeps_num[1]);
     }
 
     truex = new BlockVector(trueblock_offsets);

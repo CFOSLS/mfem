@@ -794,9 +794,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -809,7 +809,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -1639,7 +1639,7 @@ int main(int argc, char *argv[])
             for ( int blk = 0; blk < numblocks_funct; ++blk)
                 offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
             offsets_global.PartialSum();
-            SweepsNum = 5;
+            SweepsNum = 1;
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
@@ -3936,8 +3936,6 @@ int main(int argc, char *argv[])
 #ifdef   USE_CURLMATRIX
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         delete qform;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        delete S;
     delete MainOp;
     delete Mblock;
     delete M;

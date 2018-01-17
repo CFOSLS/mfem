@@ -1581,7 +1581,7 @@ int main(int argc, char *argv[])
             for ( int blk = 0; blk < numblocks_funct; ++blk)
                 offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
             offsets_global.PartialSum();
-            SweepsNum = 5;
+            SweepsNum = 1;
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
