@@ -21,7 +21,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-#define WITH_LOCALSOLVERS
+//#define WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
@@ -796,7 +796,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1640,6 +1640,14 @@ int main(int argc, char *argv[])
                 offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
             offsets_global.PartialSum();
             SweepsNum = 1;
+            if (l == 0)
+            {
+                if (verbose)
+                {
+                    std::cout << "Sweeps num: \n";
+                    SweepsNum.Print();
+                }
+            }
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],

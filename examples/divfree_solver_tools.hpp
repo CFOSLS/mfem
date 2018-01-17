@@ -1942,12 +1942,12 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
 
     SetPrintLevel(0);
 
-    if (LocalSolvers)
-    {
-        LocalSolvers_lvls.SetSize(num_levels - 1);
-        for (int l = 0; l < num_levels - 1; ++l)
+    LocalSolvers_lvls.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        if (LocalSolvers)
             LocalSolvers_lvls[l] = (*LocalSolvers)[l];
-    }
+        else
+            LocalSolvers_lvls[l] = NULL;
 
     Setup();
 }
@@ -2062,9 +2062,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     particular_solution += *truesolupdate_lvls[0];
 
     for ( int blk = 0; blk < numblocks; ++blk)
-    {
         dof_trueDof_Func_lvls[0][blk]->Mult(particular_solution.GetBlock(blk), temp_dofs.GetBlock(blk));
-    }
 
     MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
                 &constr_rhs, "for the particular solution"),"");
@@ -4459,7 +4457,7 @@ public:
 
         for (int l = 0; l < Operators_.Size(); l++)
         {
-            Smoothers_[l] = new HypreSmoother(*Operators_[l]);
+            Smoothers_[l] = new HypreSmoother(*Operators_[l], HypreSmoother::Type::l1GS, 1);
             residual[l] = new Vector(Operators_[l]->GetNumRows());
             if (l < Operators_.Size() - 1)
                 correction[l] = new Vector(Operators_[l]->GetNumRows());
