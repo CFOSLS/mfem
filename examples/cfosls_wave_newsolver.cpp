@@ -14,13 +14,12 @@
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
-// switches on/off usage of smoother in the new minimization solver
+// switches on/off usage of smoother
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-// activates using the new interface to local problem solvers
-// via a separated class called LocalProblemSolver
-#define WITH_LOCALSOLVERS
+// activates local problem solvers in the general minimization solver class
+#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -997,20 +996,12 @@ int main(int argc, char *argv[])
 
    //Actually this and LocalSolver_partfinder_lvls handle the same objects
    Array<Operator*>* LocalSolver_lvls;
-#ifdef WITH_LOCALSOLVERS
    LocalSolver_lvls = new Array<Operator*>(num_levels - 1);
-#else
-   LocalSolver_lvls = NULL;
-#endif
 
    Array<LocalProblemSolver*>* LocalSolver_partfinder_lvls;
-#ifdef WITH_LOCALSOLVERS
    LocalSolver_partfinder_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
-#else
-   LocalSolver_partfinder_lvls = NULL;
-#endif
 
-    Array<Operator*> Smoothers_lvls(num_levels - 1);
+   Array<Operator*> Smoothers_lvls(num_levels - 1);
 
 
    Operator* CoarsestSolver;
@@ -1371,7 +1362,6 @@ int main(int argc, char *argv[])
 #endif
         }
 
-#ifdef WITH_LOCALSOLVERS
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -1389,7 +1379,6 @@ int main(int argc, char *argv[])
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
-#endif
     }
 
     // Creating the coarsest problem solver
@@ -2210,7 +2199,11 @@ int main(int argc, char *argv[])
                      *Funct_global, *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
+#ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
+#else
+                     NULL,
+#endif
                      CoarsestSolver,
                      construct_coarseops, stopcriteria_type);
 
