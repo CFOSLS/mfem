@@ -2265,8 +2265,6 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
-    chrono.Clear();
-    chrono.Start();
 
 
     CGSolver solver(comm);
@@ -2285,8 +2283,10 @@ int main(int argc, char *argv[])
         solver.SetPreconditioner(*prec);
     solver.SetPrintLevel(0);
     trueX = 0.0;
-    solver.Mult(trueRhs, trueX);
 
+    chrono.Clear();
+    chrono.Start();
+    solver.Mult(trueRhs, trueX);
     chrono.Stop();
 
     if (verbose)

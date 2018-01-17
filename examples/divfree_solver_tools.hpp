@@ -2646,8 +2646,6 @@ void HcurlGSSSmoother::Setup() const
 // TODO: Add as an option using blas and lapack versions for solving local problems
 // TODO: Test after all with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
-// TODO: Add destructors for the new classes which deallocates all the memory
-// TODO: Run a valgrind check
 // TODO: Clean up the function descriptions
 // TODO: Clean up the variables names
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
@@ -3173,6 +3171,16 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
 
+#ifdef TIMING
+    time_solve = 0.0;
+    time_localsolve = 0.0;
+    time_smoother = 0.0;
+    time_coarsestproblem = 0.0;
+    time_fw = 0.0;
+    time_up = 0.0;
+#endif
+
+
 #ifdef CHECK_CONSTR
     BlockVector * temp_dofs;
     if (!preconditioner_mode)
@@ -3225,7 +3233,17 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         }
 #endif
 
+#ifdef TIMING
+        chrono3.Clear();
+        chrono3.Start();
+#endif
+
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
+
+#ifdef TIMING
+        chrono3.Stop();
+        time_solve  += chrono3.RealTime();
+#endif
 
         // monitoring convergence
         bool monotone_check = (i != 0);
@@ -3346,11 +3364,6 @@ void GeneralMinConstrSolver::UpdateTrueResidual(int level, const BlockVector* rh
 void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                        const BlockVector& previous_sol, BlockVector& next_sol) const
 {
-#ifdef TIMING
-    chrono3.Clear();
-    chrono3.Start();
-#endif
-
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
@@ -3556,11 +3569,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         solupdate_firstmgnorm = solupdate_currmgnorm;
 
     ++current_iteration;
-
-#ifdef TIMING
-    chrono3.Stop();
-    time_solve  += chrono3.RealTime();
-#endif
 
     return;
 }

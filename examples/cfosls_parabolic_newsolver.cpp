@@ -29,6 +29,8 @@
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
+#define TIMING
+
 #include "divfree_solver_tools.hpp"
 
 #define MYZEROTOL (1.0e-13)
@@ -2253,6 +2255,9 @@ int main(int argc, char *argv[])
         solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
     trueX = 0.0;
+
+    chrono.Clear();
+    chrono.Start();
     solver->Mult(trueRhs, trueX);
     chrono.Stop();
 
@@ -2601,6 +2606,16 @@ int main(int argc, char *argv[])
     const bool construct_coarseops = true;
     int stopcriteria_type = 1;
 
+#ifdef TIMING
+    std::list<double>* Times_solve = new std::list<double>;
+    std::list<double>* Times_localsolve = new std::list<double>;
+    std::list<double>* Times_smoother = new std::list<double>;
+    std::list<double>* Times_coarsestproblem = new std::list<double>;
+    std::list<double>* Times_fw = new std::list<double>;
+    std::list<double>* Times_up = new std::list<double>;
+#endif
+
+
     DivConstraintSolver PartsolFinder(num_levels, P_WT,
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
@@ -2621,6 +2636,10 @@ int main(int argc, char *argv[])
                      *Funct_global, *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
+#ifdef TIMING
+                     Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
+#endif
+
 #ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
 #else
@@ -2983,6 +3002,47 @@ int main(int argc, char *argv[])
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
+
+#ifdef TIMING
+    double temp_sum;
+
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_solve->begin(); i != Times_solve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_solve = " << temp_sum << "\n";
+    delete Times_solve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_localsolve->begin(); i != Times_localsolve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_localsolve = " << temp_sum << "\n";
+    delete Times_localsolve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_smoother->begin(); i != Times_smoother->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_smoother = " << temp_sum << "\n";
+    delete Times_smoother;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_coarsestproblem = " << temp_sum << "\n";
+    delete Times_coarsestproblem;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_fw->begin(); i != Times_fw->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_fw = " << temp_sum << "\n";
+    delete Times_fw;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_up->begin(); i != Times_up->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_up = " << temp_sum << "\n";
+    delete Times_up;
+#endif
 
     trueXtest += ParticSol;
     NewSigmahat->Distribute(trueXtest.GetBlock(0));
