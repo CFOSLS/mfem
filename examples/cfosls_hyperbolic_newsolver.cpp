@@ -21,7 +21,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define SOLVE_WITH_LOCALSOLVERS
+#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
@@ -29,7 +29,7 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-//#define TIMING
+#define TIMING
 
 #include "divfree_solver_tools.hpp"
 

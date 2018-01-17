@@ -3435,9 +3435,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
 #ifdef TIMING
     chrono.Stop();
-    std::cout << "before: " << time_coarsestproblem << "\n";
+    //std::cout << "before: " << time_coarsestproblem << "\n";
     time_coarsestproblem += chrono.RealTime();
-    std::cout << "after: " << time_coarsestproblem << "\n";
+    //std::cout << "after: " << time_coarsestproblem << "\n";
 #endif
 
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
