@@ -3805,8 +3805,6 @@ int main(int argc, char *argv[])
             if (LocalSolver_partfinder_lvls)
                 if ((*LocalSolver_partfinder_lvls)[l])
                     delete (*LocalSolver_partfinder_lvls)[l];
-            delete LocalSolver_partfinder_lvls;
-            delete LocalSolver_lvls;
         }
 #endif
 
@@ -3872,6 +3870,9 @@ int main(int argc, char *argv[])
         }
 
     }
+
+    delete LocalSolver_partfinder_lvls;
+    delete LocalSolver_lvls;
 
     for (int blk1 = 0; blk1 < Funct_global->NumRowBlocks(); ++blk1)
         for (int blk2 = 0; blk2 < Funct_global->NumColBlocks(); ++blk2)
