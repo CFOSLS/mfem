@@ -2212,6 +2212,11 @@ int main(int argc, char *argv[])
                                       CoarsestSolver_partfinder,
                                       construct_coarseops);
 
+    CoarsestSolver_partfinder->SetMaxIter(70000);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-18);
+    CoarsestSolver_partfinder->ResetSolverParams();
+
     GeneralMinConstrSolver NewSolver(num_levels,
                      Dof_TrueDof_Func_lvls,
                      P_Func, TrueP_Func, P_W,
@@ -2249,7 +2254,23 @@ int main(int argc, char *argv[])
     BlockVector ParticSol(new_trueoffsets);
     //Vector ParticSol(sigma_exact_truedofs.Size());
 
+    if (verbose)
+    {
+        std::cout << "CoarsestSolver parameters for the PartSolFinder: \n" << std::flush;
+        CoarsestSolver_partfinder->PrintSolverParams();
+    }
+
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+
+    CoarsestSolver_partfinder->SetMaxIter(100);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->ResetSolverParams();
+    if (verbose)
+    {
+        std::cout << "CoarsestSolver parameters for the new solver: \n" << std::flush;
+        CoarsestSolver_partfinder->PrintSolverParams();
+    }
 
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks_funct; ++blk)

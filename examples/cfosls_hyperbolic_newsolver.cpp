@@ -31,6 +31,9 @@
 
 #define TIMING
 
+// changes the multigrid code to compare Multigrid with GeneralMinSolver
+//#define COMPARE_MULTIGRID
+
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -796,7 +799,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -875,6 +878,14 @@ int main(int argc, char *argv[])
     {
         args.PrintOptions(cout);
     }
+
+
+#ifdef COMPARE_MULTIGRID
+    prec_option = 3;
+    if (verbose)
+        std::cout << "COMPARE_MULTIGRID falg is active: a modified monolithic MG is used \n" << std::flush;
+    MPI_Barrier(comm);
+#endif
 
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(!(strcmp(space_for_S,"L2") == 0 && !eliminateS), "Case: L2 space for S and S is not eliminated is working incorrectly, non pos.def. matrix. \n");
@@ -959,7 +970,7 @@ int main(int argc, char *argv[])
     //DEFAULTED LINEAR SOLVER OPTIONS
     int max_num_iter = 150000;
     double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-12;//1e-9;//1e-12;
+    double atol = 1e-14;//1e-9;//1e-12;
 
     Mesh *mesh = NULL;
 
@@ -2433,12 +2444,6 @@ int main(int argc, char *argv[])
         Vector trueS(C->Height());
         trueS = 0.0;
 
-        /*
-        void CG(const Operator &A, const Vector &b, Vector &x,
-                int print_iter, int max_num_iter,
-                double RTOLERANCE, double ATOLERANCE)
-        */
-
         CGSolver cg(comm);
         cg.SetPrintLevel(0);
         cg.SetMaxIter(5000);
@@ -2872,6 +2877,10 @@ int main(int argc, char *argv[])
                                       LocalSolver_partfinder_lvls,
                                       CoarsestSolver_partfinder,
                                       construct_coarseops);
+    CoarsestSolver_partfinder->SetMaxIter(70000);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-18);
+    CoarsestSolver_partfinder->ResetSolverParams();
 
     GeneralMinConstrSolver NewSolver(num_levels,
                      Dof_TrueDof_Func_lvls,
@@ -2911,12 +2920,27 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "New solver and PartSolFinder were created in "<< chrono.RealTime() <<" seconds.\n";
+    if (verbose)
+    {
+        std::cout << "CoarsestSolver parameters for the PartSolFinder: \n" << std::flush;
+        CoarsestSolver_partfinder->PrintSolverParams();
+    }
     chrono.Clear();
     chrono.Start();
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
     chrono.Stop();
+
+    CoarsestSolver_partfinder->SetMaxIter(100);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->ResetSolverParams();
+    if (verbose)
+    {
+        std::cout << "CoarsestSolver parameters for the new solver: \n" << std::flush;
+        CoarsestSolver_partfinder->PrintSolverParams();
+    }
     if (verbose)
         std::cout << "Particular solution was found in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();

@@ -208,6 +208,10 @@ private:
 
     mutable HypreParMatrix *Schur;
 protected:
+    mutable int maxIter;
+    mutable double rtol;
+    mutable double atol;
+
     void Setup() const;
 
 public:
@@ -221,6 +225,23 @@ public:
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
 
     void Mult(const Vector &x, Vector &y, Vector* rhs_constr) const;
+
+    void SetMaxIter(int MaxIter) const {maxIter = MaxIter;}
+    void SetAbsTol(double AbsTol) const {atol = AbsTol;}
+    void SetRelTol(double RelTol) const {rtol = RelTol;}
+    void ResetSolverParams() const
+    {
+        coarseSolver->SetAbsTol(atol);
+        coarseSolver->SetRelTol(rtol);
+        coarseSolver->SetMaxIter(maxIter);
+    }
+    void PrintSolverParams() const
+    {
+        std::cout << "maxIter: " << maxIter << "\n";
+        std::cout << "rtol: " << rtol << "\n";
+        std::cout << "atol: " << atol << "\n";
+        std::cout << std::flush;
+    }
 };
 
 CoarsestProblemSolver::CoarsestProblemSolver(BlockMatrix& Op_Blksmat,
@@ -249,6 +270,10 @@ CoarsestProblemSolver::CoarsestProblemSolver(BlockMatrix& Op_Blksmat,
 
     coarse_rhsfunc_offsets.SetSize(numblocks + 1);
     coarse_offsets.SetSize(numblocks + 2);
+
+    maxIter = 50;
+    rtol = 1.e-4;
+    atol = 1.e-4;
 
     Setup();
 }
@@ -434,10 +459,6 @@ void CoarsestProblemSolver::Setup() const
     coarse_prec->SetDiagonalBlock(numblocks, invSchur);
 
     // coarse solver
-    int maxIter(20000);
-    double rtol(1.e-18);
-    double atol(1.e-18);
-
     coarseSolver = new MINRESSolver(comm);
     coarseSolver->SetAbsTol(atol);
     coarseSolver->SetRelTol(rtol);
@@ -2683,24 +2704,6 @@ private:
     mutable int max_iter;
     mutable int converged;
 
-#ifdef TIMING
-    mutable StopWatch chrono;
-    mutable StopWatch chrono2;
-    mutable StopWatch chrono3;
-    mutable double time_solve;
-    mutable double time_localsolve;
-    mutable double time_smoother;
-    mutable double time_coarsestproblem;
-    mutable double time_fw;
-    mutable double time_up;
-    mutable std::list<double>* times_solve;
-    mutable std::list<double>* times_localsolve;
-    mutable std::list<double>* times_smoother;
-    mutable std::list<double>* times_coarsestproblem;
-    mutable std::list<double>* times_fw;
-    mutable std::list<double>* times_up;
-#endif
-
 protected:
     int num_levels;
 
@@ -2756,6 +2759,26 @@ protected:
     // on true dofs
     const BlockVector& bdrdata_truedofs;
 
+#ifdef TIMING
+private:
+    mutable StopWatch chrono;
+    mutable StopWatch chrono2;
+    mutable StopWatch chrono3;
+    mutable double time_solve;
+    mutable double time_localsolve;
+    mutable double time_smoother;
+    mutable double time_coarsestproblem;
+    mutable double time_fw;
+    mutable double time_up;
+    mutable std::list<double>* times_solve;
+    mutable std::list<double>* times_localsolve;
+    mutable std::list<double>* times_smoother;
+    mutable std::list<double>* times_coarsestproblem;
+    mutable std::list<double>* times_fw;
+    mutable std::list<double>* times_up;
+#endif
+
+protected:
     // stores Functional matrix on all levels except the finest
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
     mutable Array<BlockMatrix*> Funct_lvls; // created during SetUpLvl and used only in MultTrueLevel and for constraint residual check
@@ -3443,7 +3466,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono.Clear();
     chrono.Start();
 #endif
-        // BOTTOM: solve the global problem at the coarsest level
+
+    // BOTTOM: solve the global problem at the coarsest level
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
 #ifdef TIMING
@@ -4205,8 +4229,8 @@ private:
             HypreParMatrix &A00 = (HypreParMatrix&)Op.GetBlock(0,0);
             HypreParMatrix &A11 = (HypreParMatrix&)Op.GetBlock(1,1);
 
-            B00 = new HypreSmoother(A00);
-            B11 = new HypreSmoother(A11);
+            B00 = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
+            B11 = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
 
             tmp01.SetSize(A00.Width());
             tmp02.SetSize(A00.Width());
@@ -4284,8 +4308,9 @@ public:
 
             if (l < Operators_.Size() - 1)
                 correction[l] = new Vector(Offsets.Last());
-            else // exist because of SetDataAndSize call to correction.Last() in MonolithicMultigrid::Mult
-                 // which drops the  data (if allocated here, i.e. if no if-clause)
+            else // exist because of SetDataAndSize call to correction.Last()
+                 //in MonolithicMultigrid::Mult which drops the data (= memory leak)
+                 // (if allocated here, i.e. if no if-clause)
                 correction[l] = new Vector();
 
             residual[l] = new Vector(Offsets.Last());
@@ -4327,7 +4352,7 @@ public:
             }
         }
 
-        if (CoarsePrec)
+        //if (CoarsePrec)
         {
             CoarseSolver = new CGSolver(
                         ((HypreParMatrix&)Operator.GetBlock(0,0)).GetComm() );
@@ -4335,7 +4360,8 @@ public:
             CoarseSolver->SetMaxIter(50);
             CoarseSolver->SetPrintLevel(0);
             CoarseSolver->SetOperator(*Operators_[0]);
-            CoarseSolver->SetPreconditioner(*CoarsePrec);
+            if (CoarsePrec)
+                CoarseSolver->SetPreconditioner(*CoarsePrec);
         }
     }
 
@@ -4386,6 +4412,55 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
 
 void MonolithicMultigrid::MG_Cycle() const
 {
+#ifdef COMPARE_MULTIGRID
+    // then no pre- or post-smoothing at the coarsest level
+    const BlockOperator& Operator_l = *Operators_[current_level];
+    const BlockSmoother& Smoother_l = *Smoothers_[current_level];
+
+    Vector& residual_l = *residual[current_level];
+    Vector& correction_l = *correction[current_level];
+    Vector help(residual_l.Size());
+    help = 0.0;
+
+    if (current_level > 0)
+    {
+        // PreSmoothing
+        Smoother_l.Mult(residual_l, correction_l);
+
+        Operator_l.Mult(correction_l, help);
+        residual_l -= help;
+
+        // Coarse grid correction
+        const BlockOperator& P_l = *P_[current_level-1];
+
+        P_l.MultTranspose(residual_l, *residual[current_level-1]);
+
+        current_level--;
+        MG_Cycle();
+        current_level++;
+
+        cor_cor.SetSize(residual_l.Size());
+        P_l.Mult(*correction[current_level-1], cor_cor);
+        correction_l += cor_cor;
+        Operator_l.Mult(cor_cor, help);
+        residual_l -= help;
+
+        // PostSmoothing
+        Smoother_l.MultTranspose(residual_l, cor_cor);
+        correction_l += cor_cor;
+    }
+    else
+    {
+        cor_cor.SetSize(residual_l.Size());
+        if (CoarseSolver)
+        {
+            CoarseSolver->Mult(residual_l, cor_cor);
+            correction_l += cor_cor;
+            Operator_l.Mult(cor_cor, help);
+            residual_l -= help;
+        }
+    }
+#else
     // PreSmoothing
     const BlockOperator& Operator_l = *Operators_[current_level];
     const BlockSmoother& Smoother_l = *Smoothers_[current_level];
@@ -4420,7 +4495,7 @@ void MonolithicMultigrid::MG_Cycle() const
     else
     {
         cor_cor.SetSize(residual_l.Size());
-        if (CoarseSolver)
+        //if (CoarseSolver)
         {
             CoarseSolver->Mult(residual_l, cor_cor);
             correction_l += cor_cor;
@@ -4432,6 +4507,7 @@ void MonolithicMultigrid::MG_Cycle() const
     // PostSmoothing
     Smoother_l.MultTranspose(residual_l, cor_cor);
     correction_l += cor_cor;
+#endif
 }
 
 class Multigrid : public Solver
