@@ -1696,13 +1696,45 @@ int main(int argc, char *argv[])
     }
 
     // Creating the coarsest problem solver
-    CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
+    int size = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        size += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
+    size += Dof_TrueDof_L2_lvls[num_levels - 1]->GetNumCols();
+     
+    CoarsestSolver_partfinder = new CoarsestProblemSolver(size, *Funct_mat_lvls[num_levels - 1],
                                                      *Constraint_mat_lvls[num_levels - 1],
                                                      Dof_TrueDof_Func_lvls[num_levels - 1],
                                                      *Dof_TrueDof_L2_lvls[num_levels - 1],
                                                      EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1]);
     CoarsestSolver = CoarsestSolver_partfinder;
+
+    CoarsestSolver_partfinder->SetMaxIter(100);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->ResetSolverParams();
+
+    StopWatch chrono_debug;
+
+    Vector testRhs(CoarsestSolver_partfinder->Height());
+    testRhs = 1.0;
+    Vector testX(CoarsestSolver_partfinder->Width());
+    testX = 0.0;
+
+    chrono_debug.Clear();
+    chrono_debug.Start();
+    for (int it = 0; it < 40; ++it)
+    {
+        CoarsestSolver_partfinder->DebugMult(testRhs, testX);
+    }
+    chrono_debug.Stop();
+   
+    if (verbose)
+       std::cout << "CoarsestSolver test run is finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+    MPI_Finalize();
+    return 0;
+    
+
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";

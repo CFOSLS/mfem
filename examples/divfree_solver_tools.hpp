@@ -216,13 +216,15 @@ protected:
 
 public:
     ~CoarsestProblemSolver();
-    CoarsestProblemSolver(BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
+    CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
                           const std::vector<HypreParMatrix*>& D_tD_blks,
                           const HypreParMatrix& D_tD_L2,
                           const std::vector<Array<int>* >& EssBdrDofs_blks, const std::vector<Array<int> *> &EssBdrTrueDofs_blks);
 
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
+
+    void DebugMult(Vector& rhs, Vector &sol) const;
 
     void Mult(const Vector &x, Vector &y, Vector* rhs_constr) const;
 
@@ -244,13 +246,13 @@ public:
     }
 };
 
-CoarsestProblemSolver::CoarsestProblemSolver(BlockMatrix& Op_Blksmat,
+CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
                                              SparseMatrix& Constr_Spmat,
                                              const std::vector<HypreParMatrix*>& D_tD_blks,
                                              const HypreParMatrix& D_tD_L2,
                                              const std::vector<Array<int>* >& EssBdrDofs_blks,
                                              const std::vector<Array<int>* >& EssBdrTrueDofs_blks)
-    : Operator(),
+    : Operator(Size),
       numblocks(Op_Blksmat.NumRowBlocks()),
       comm(D_tD_L2.GetComm()),
       Op_blkspmat(&Op_Blksmat),
@@ -437,6 +439,9 @@ void CoarsestProblemSolver::Setup() const
         }
     }
 
+    IdentityOperator * invSchur = new IdentityOperator(Constr_global->Height());
+
+    
     HypreParMatrix *MinvBt = Constr_global->Transpose();
     HypreParVector *Md = new HypreParVector(comm, Funct_global(0,0)->GetGlobalNumRows(),
                                             Funct_global(0,0)->GetRowStarts());
@@ -446,12 +451,19 @@ void CoarsestProblemSolver::Setup() const
     Schur->CopyRowStarts();
     Schur->CopyColStarts();
 
+   
     delete MinvBt;
     delete Md;
+    
+    
+    //HypreBoomerAMG * invSchur = new HypreBoomerAMG(*Schur);
+    //invSchur->SetPrintLevel(0);
+    //invSchur->iterative_mode = false;
+    
 
-    HypreBoomerAMG * invSchur = new HypreBoomerAMG(*Schur);
-    invSchur->SetPrintLevel(0);
-    invSchur->iterative_mode = false;
+    //MPI_Barrier(comm);
+    //std::cout << "I have " << Schur->GetNumRows() << " rows \n" << std::flush;
+    //MPI_Barrier(comm);
 
     coarse_prec = new BlockDiagonalPreconditioner(coarse_offsets);
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -464,9 +476,10 @@ void CoarsestProblemSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    if (coarse_prec)
-        coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(0);
+    //if (coarse_prec)
+        //coarseSolver->SetPreconditioner(*coarse_prec);
+    std::cout << "no prec \n" << std::flush;
+    coarseSolver->SetPrintLevel(2);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
 
@@ -518,6 +531,11 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
 
     return;
+}
+
+void CoarsestProblemSolver::DebugMult(Vector& rhs, Vector &sol) const
+{
+    coarseSolver->Mult(rhs, sol);
 }
 
 // ~ Non-overlapping Schwarz smoother based on agglomerated elements
