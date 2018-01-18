@@ -26,6 +26,8 @@
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
+//#define HCURL_COARSESOLVER
+
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -1176,10 +1178,16 @@ int main(int argc, char *argv[])
     std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
 
     //std::cout << "num_levels - 1 = " << num_levels << "\n";
+    Array< SparseMatrix* > P_C_lvls(num_levels - 1);
+#ifdef HCURL_COARSESOLVER
+    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
+    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels); // FIXME: Proably, minus 1 for all Hcurl entries?
+    std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels);
+#else
+    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels - 1);
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels - 1); // FIXME: Proably, minus 1 for all Hcurl entries?
     std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels - 1);
-    Array< SparseMatrix* > P_C_lvls(num_levels - 1);
-    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels - 1);
+#endif
 
     std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
     Array< SparseMatrix* > P_H_lvls(num_levels - 1);
@@ -1204,11 +1212,16 @@ int main(int argc, char *argv[])
        BdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
+#ifndef HCURL_COARSESOLVER
        if (l < num_levels - 1)
        {
            EssBdrDofs_Hcurl[l] = new Array<int>;
            EssBdrTrueDofs_Hcurl[l] = new Array<int>;
        }
+#else
+       EssBdrDofs_Hcurl[l] = new Array<int>;
+       EssBdrTrueDofs_Hcurl[l] = new Array<int>;
+#endif
        Funct_mat_offsets_lvls[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        {
@@ -1328,11 +1341,16 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
+#ifndef HCURL_COARSESOLVER
         if (l < num_levels - 1)
         {
             C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
             C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
         }
+#else
+        C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
+        C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+#endif
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
@@ -1363,7 +1381,9 @@ int main(int argc, char *argv[])
         Ablock->Finalize();
 
         // getting pointers to dof_truedof matrices
+#ifndef HCURL_COARSESOLVER
         if (l < num_levels - 1)
+#endif
             Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
@@ -1707,32 +1727,60 @@ int main(int argc, char *argv[])
                                                      *Dof_TrueDof_L2_lvls[num_levels - 1],
                                                      EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1]);
-    CoarsestSolver = CoarsestSolver_partfinder;
+#ifdef HCURL_COARSESOLVER
+    if (verbose)
+        std::cout << "Creating the new coarsest solver which works in the div-free subspace \n" << std::flush;
 
+    ParDiscreteLinearOperator Divfreeop_coarse(C_space_lvls[num_levels - 1], R_space_lvls[num_levels - 1]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+    if (dim == 3)
+        Divfreeop_coarse.AddDomainInterpolator(new CurlInterpolator);
+    else // dim == 4
+        Divfreeop_coarse.AddDomainInterpolator(new DivSkewInterpolator);
+    Divfreeop_coarse.Assemble();
+    Divfreeop_coarse.Finalize();
+    HypreParMatrix * Divfreehpmat_coarse = Divfreeop_coarse.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+
+    /*
+    int size_hcurlsolver = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            size_hcurlsolver += Dof_TrueDof_Hcurl_lvls[num_levels - 1]->GetNumCols();
+        else
+            size_hcurlsolver += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
+    */
+
+    CoarsestSolver = new CoarsestProblemHcurlSolver(size, *Funct_mat_lvls[num_levels - 1],
+                                                     *Divfreehpmat_coarse,
+                                                     Dof_TrueDof_Func_lvls[num_levels - 1],
+                                                     *Dof_TrueDof_Hcurl_lvls[num_levels - 1],
+                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
+                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1],
+                                                     *EssBdrTrueDofs_Hcurl[num_levels - 1]);
+#else
+    CoarsestSolver = CoarsestSolver_partfinder;
     CoarsestSolver_partfinder->SetMaxIter(100);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
     CoarsestSolver_partfinder->SetRelTol(1.0e-7);
     CoarsestSolver_partfinder->ResetSolverParams();
+#endif
 
     StopWatch chrono_debug;
 
-    Vector testRhs(CoarsestSolver_partfinder->Height());
+    Vector testRhs(CoarsestSolver->Height());
     testRhs = 1.0;
-    Vector testX(CoarsestSolver_partfinder->Width());
+    Vector testX(CoarsestSolver->Width());
     testX = 0.0;
 
     chrono_debug.Clear();
     chrono_debug.Start();
-    for (int it = 0; it < 40; ++it)
-    {
-        CoarsestSolver_partfinder->DebugMult(testRhs, testX);
-    }
+    for (int it = 0; it < 1; ++it)
+        CoarsestSolver->Mult(testRhs, testX);
     chrono_debug.Stop();
-   
+
     if (verbose)
        std::cout << "CoarsestSolver test run is finished in " << chrono_debug.RealTime() << " \n" << std::flush;
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
     
 
 
@@ -3844,6 +3892,16 @@ int main(int argc, char *argv[])
         delete EssBdrDofs_Funct_lvls[l][0];
         delete EssBdrTrueDofs_Funct_lvls[l][0];
         delete Funct_mat_offsets_lvls[l];
+#ifndef HCURL_COARSESOLVER
+        if (l < num_levels - 1)
+        {
+            delete EssBdrDofs_Hcurl[l];
+            delete EssBdrTrueDofs_Hcurl[l];
+        }
+#else
+        delete EssBdrDofs_Hcurl[l];
+        delete EssBdrTrueDofs_Hcurl[l];
+#endif
         if (l < num_levels - 1)
         {
             delete EssBdrDofs_Hcurl[l];
@@ -3859,9 +3917,9 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
-            if (LocalSolver_partfinder_lvls)
-                if ((*LocalSolver_partfinder_lvls)[l])
-                    delete (*LocalSolver_partfinder_lvls)[l];
+            if (LocalSolver_lvls)
+                if ((*LocalSolver_lvls)[l])
+                    delete (*LocalSolver_lvls)[l];
         }
 
 #ifdef WITH_SMOOTHERS
@@ -3927,7 +3985,6 @@ int main(int argc, char *argv[])
 
     }
 
-    delete LocalSolver_partfinder_lvls;
     delete LocalSolver_lvls;
 
     for (int blk1 = 0; blk1 < Funct_global->NumRowBlocks(); ++blk1)
@@ -3951,7 +4008,10 @@ int main(int argc, char *argv[])
     delete h1_coll;
     delete H_space;
 
+    delete CoarsestSolver_partfinder;
+#ifdef HCURL_COARSESOLVER
     delete CoarsestSolver;
+#endif
 
     delete sigma_exact_finest;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present

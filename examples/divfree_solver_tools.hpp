@@ -171,6 +171,322 @@ bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const 
 // TODO: Implement an abstract base for the coarsest problem solver. Maybe unnecessary now
 // TODO: Implement an abstract base for the local problems solver. Maybe unnecessary now
 
+class CoarsestProblemHcurlSolver : public Operator
+{
+private:
+    const int numblocks;
+
+    mutable int sweeps_num;
+
+    MPI_Comm comm;
+
+    mutable bool finalized;
+
+    // coarsest level local-to-process matrices
+    mutable BlockMatrix* Op_blkspmat;
+
+    const HypreParMatrix& Divfreeop;
+    mutable HypreParMatrix * Divfreeop_T;
+
+    // Dof_TrueDof relation tables for each level for functional-related
+    // variables and the L2 variable (constraint space).
+    const std::vector<HypreParMatrix*> & dof_trueDof_blocks;
+    const HypreParMatrix & dof_trueDof_Hcurl;
+
+    const std::vector<Array<int>* > & essbdrdofs_blocks;
+    const std::vector<Array<int>* > & essbdrtruedofs_blocks;
+    const Array<int> & essbdrtruedofs_Hcurl;
+
+    mutable Array<int> coarse_offsets;
+    mutable BlockOperator* coarse_matrix;
+    mutable BlockDiagonalPreconditioner * coarse_prec;
+    mutable BlockVector * coarse_rhsfunc;
+    mutable BlockVector * coarsetrueX;
+    mutable BlockVector * coarsetrueRhs;
+    mutable IterativeSolver * coarseSolver;
+
+    // all on true dofs
+    mutable Array<int> block_offsets;
+    mutable BlockVector* xblock;
+    mutable BlockVector* yblock;
+
+protected:
+    mutable int maxIter;
+    mutable double rtol;
+    mutable double atol;
+
+    void Setup() const;
+
+public:
+    ~CoarsestProblemHcurlSolver();
+    CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat, const HypreParMatrix& DivfreeOp,
+                               const std::vector<HypreParMatrix*>& D_tD_blks, const HypreParMatrix &D_tD_Hcurl,
+                               const std::vector<Array<int>* >& EssBdrDofs_blks,
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const Array<int>& EssBdrTrueDofs_Hcurl);
+
+    // Operator application: `y=A(x)`.
+    virtual void Mult(const Vector &x, Vector &y) const;
+
+    void SetMaxIter(int MaxIter) const {maxIter = MaxIter;}
+    void SetAbsTol(double AbsTol) const {atol = AbsTol;}
+    void SetRelTol(double RelTol) const {rtol = RelTol;}
+    void ResetSolverParams() const
+    {
+        coarseSolver->SetAbsTol(atol);
+        coarseSolver->SetRelTol(rtol);
+        coarseSolver->SetMaxIter(maxIter);
+    }
+    void PrintSolverParams() const
+    {
+        std::cout << "maxIter: " << maxIter << "\n";
+        std::cout << "rtol: " << rtol << "\n";
+        std::cout << "atol: " << atol << "\n";
+        std::cout << std::flush;
+    }
+};
+
+CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat,
+                                                       const HypreParMatrix& DivfreeOp,
+                                                       const std::vector<HypreParMatrix*>& D_tD_blks,
+                                                       const HypreParMatrix& D_tD_Hcurl,
+                                                       const std::vector<Array<int>* >& EssBdrDofs_blks,
+                                                       const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                                                       const Array<int>& EssBdrTrueDofs_Hcurl)
+    : Operator(Size),
+      numblocks(Op_Blksmat.NumRowBlocks()),
+      comm(DivfreeOp.GetComm()),
+      Op_blkspmat(&Op_Blksmat),
+      Divfreeop(DivfreeOp),
+      dof_trueDof_blocks(D_tD_blks),
+      dof_trueDof_Hcurl(D_tD_Hcurl),
+      essbdrdofs_blocks(EssBdrDofs_blks),
+      essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
+      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl)
+{
+    finalized = false;
+
+    block_offsets.SetSize(numblocks + 1);
+    block_offsets[0] = 0;
+    for (int blk = 0; blk < numblocks; ++blk)
+        block_offsets[blk + 1] = dof_trueDof_blocks[blk]->Width();
+    block_offsets.PartialSum();
+
+    coarse_offsets.SetSize(numblocks + 1);
+
+    maxIter = 50;
+    rtol = 1.e-4;
+    atol = 1.e-4;
+
+    Setup();
+
+}
+
+
+CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
+{
+    MFEM_ABORT("Not implemented \n");
+    delete xblock;
+    delete yblock;
+
+    delete coarseSolver;
+    delete coarsetrueRhs;
+    delete coarsetrueX;
+    for ( int blk = 0; blk < coarse_prec->NumBlocks(); ++blk)
+            if (&(coarse_prec->GetDiagonalBlock(blk)))
+                delete &(coarse_prec->GetDiagonalBlock(blk));
+    delete coarse_prec;
+    for ( int blk1 = 0; blk1 < coarse_matrix->NumRowBlocks(); ++blk1)
+        for ( int blk2 = 0; blk2 < coarse_matrix->NumColBlocks(); ++blk2)
+            if (coarse_matrix->IsZeroBlock(blk1, blk2) == false)
+                delete &(coarse_matrix->GetBlock(blk1, blk2));
+    delete coarse_matrix;
+
+    delete Divfreeop_T;
+}
+
+void CoarsestProblemHcurlSolver::Setup() const
+{
+    xblock = new BlockVector(block_offsets);
+    yblock = new BlockVector(block_offsets);
+
+    // 1. eliminating boundary conditions at coarse level
+
+    // latest version of the bnd conditions imposing code
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+    {
+        const Array<int> * temp1 = essbdrdofs_blocks[blk1];
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+        {
+            const Array<int> * temp2 = essbdrdofs_blocks[blk2];
+            Op_blkspmat->GetBlock(blk1,blk2).EliminateCols(*temp2);
+
+            for ( int dof1 = 0; dof1 < temp1->Size(); ++dof1)
+                if ( (*temp1)[dof1] != 0)
+                {
+                    if (blk1 == blk2)
+                        Op_blkspmat->GetBlock(blk1,blk2).EliminateRow(dof1, 1.0);
+                    else // doesn't set diagonal entry to 1
+                        Op_blkspmat->GetBlock(blk1,blk2).EliminateRow(dof1);
+                }
+        }
+    }
+
+    Divfreeop_T = Divfreeop.Transpose();
+
+    Array2D<HypreParMatrix*> HcurlFunct_global(numblocks, numblocks);
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+    {
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+        {
+            HYPRE_Int glob_num_rows = dof_trueDof_blocks[blk1]->M();
+            HYPRE_Int glob_num_cols = dof_trueDof_blocks[blk2]->M();
+            HYPRE_Int * row_starts = dof_trueDof_blocks[blk1]->GetRowStarts();
+            HYPRE_Int * col_starts = dof_trueDof_blocks[blk2]->GetRowStarts();;
+            HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+
+            HypreParMatrix * Funct_blk = RAP(dof_trueDof_blocks[blk1], temphpmat, dof_trueDof_blocks[blk2]);
+            Funct_blk->CopyRowStarts();
+            Funct_blk->CopyColStarts();
+
+            delete temphpmat;
+
+            if (blk1 == 0)
+            {
+                HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
+                temp1->CopyRowStarts();
+                temp1->CopyColStarts();
+
+                delete Funct_blk;
+
+                if (blk2 == 0)
+                {
+                    HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+                    HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                    HcurlFunct_global(blk1, blk2)->CopyColStarts();
+
+                    delete temp1;
+                }
+                else
+                    HcurlFunct_global(blk1, blk2) = temp1;
+
+            }
+            else if (blk2 == 0)
+            {
+                HcurlFunct_global(blk1, blk2) = ParMult(Funct_blk,
+                                                              &Divfreeop);
+                HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                HcurlFunct_global(blk1, blk2)->CopyColStarts();
+
+                delete Funct_blk;
+            }
+            else
+            {
+                HcurlFunct_global(blk1, blk2)  = Funct_blk;
+            }
+        }
+    }
+
+    coarse_offsets[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+        coarse_offsets[blk + 1] = HcurlFunct_global(blk, blk)->Height();
+    coarse_offsets.PartialSum();
+
+    coarse_offsets.Print();
+
+    BlockOperator * coarse_matrix = new BlockOperator(coarse_offsets);
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+            coarse_matrix->SetBlock(blk1, blk2, HcurlFunct_global(blk1, blk2));
+
+    // coarse solution and righthand side vectors
+    coarsetrueX = new BlockVector(coarse_offsets);
+    coarsetrueRhs = new BlockVector(coarse_offsets);
+
+    // preconditioner for the coarse problem
+    std::vector<Operator*> Prec_blocks(numblocks);
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(numblocks <= 2, "Current implementation of coarsest level solver "
+                                   "knows preconditioners only for sigma or (sigma,S) setups \n");
+        Prec_blocks[blk] = new HypreSmoother(*HcurlFunct_global(blk,blk),
+                                           HypreSmoother::Type::l1GS, sweeps_num);
+    }
+
+    coarse_prec = new BlockDiagonalPreconditioner(coarse_offsets);
+    for ( int blk = 0; blk < numblocks; ++blk)
+        coarse_prec->SetDiagonalBlock(blk, Prec_blocks[blk]);
+
+    // coarse solver
+    coarseSolver = new CGSolver(comm);
+    coarseSolver->SetAbsTol(atol);
+    coarseSolver->SetRelTol(rtol);
+    coarseSolver->SetMaxIter(maxIter);
+    coarseSolver->SetOperator(*coarse_matrix);
+    if (coarse_prec)
+        coarseSolver->SetPreconditioner(*coarse_prec);
+    //std::cout << "no prec \n" << std::flush;
+    coarseSolver->SetPrintLevel(2);
+    //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
+    //coarseSolver->SetOperator(*coarse_id);
+
+    finalized = true;
+}
+
+void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
+{
+    MFEM_ASSERT(finalized, "Mult() must not be called before the coarse solver was finalized \n");
+
+    // x and y will be accessed through xblock and yblock as viewing structures
+    xblock->Update(x.GetData(), block_offsets);
+    yblock->Update(y.GetData(), block_offsets);
+
+    // 1. set up solution and righthand side vectors
+    *coarsetrueX = 0.0;
+    *coarsetrueRhs = 0.0;
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfreeop_T->Mult(xblock->GetBlock(blk), coarsetrueRhs->GetBlock(blk));
+        else
+        {
+            MFEM_ASSERT(coarsetrueRhs->GetBlock(blk).Size() == xblock->GetBlock(blk).Size(),
+                        "Sizes mismatch when finalizing rhs at the coarsest level!\n");
+            coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
+        }
+
+        // imposing boundary conditions on true dofs
+        for ( int blk = 0; blk < numblocks; ++blk)
+        {
+            const Array<int> * temp;
+            if (blk == 0)
+                temp = &essbdrtruedofs_Hcurl;
+            else
+                temp = essbdrtruedofs_blocks[blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+
+    }
+
+    // 2. solve the linear system with preconditioned MINRES.
+    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfreeop.Mult(coarsetrueX->GetBlock(blk), yblock->GetBlock(blk));
+        else
+            yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
+    }
+
+    return;
+}
+
 class CoarsestProblemSolver : public Operator
 {
 private:
@@ -219,7 +535,8 @@ public:
     CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
                           const std::vector<HypreParMatrix*>& D_tD_blks,
                           const HypreParMatrix& D_tD_L2,
-                          const std::vector<Array<int>* >& EssBdrDofs_blks, const std::vector<Array<int> *> &EssBdrTrueDofs_blks);
+                          const std::vector<Array<int>* >& EssBdrDofs_blks,
+                          const std::vector<Array<int> *> &EssBdrTrueDofs_blks);
 
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
@@ -439,7 +756,7 @@ void CoarsestProblemSolver::Setup() const
         }
     }
 
-    IdentityOperator * invSchur = new IdentityOperator(Constr_global->Height());
+    //IdentityOperator * invSchur = new IdentityOperator(Constr_global->Height());
 
     
     HypreParMatrix *MinvBt = Constr_global->Transpose();
@@ -456,9 +773,9 @@ void CoarsestProblemSolver::Setup() const
     delete Md;
     
     
-    //HypreBoomerAMG * invSchur = new HypreBoomerAMG(*Schur);
-    //invSchur->SetPrintLevel(0);
-    //invSchur->iterative_mode = false;
+    HypreBoomerAMG * invSchur = new HypreBoomerAMG(*Schur);
+    invSchur->SetPrintLevel(0);
+    invSchur->iterative_mode = false;
     
 
     //MPI_Barrier(comm);
@@ -476,9 +793,9 @@ void CoarsestProblemSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    //if (coarse_prec)
-        //coarseSolver->SetPreconditioner(*coarse_prec);
-    std::cout << "no prec \n" << std::flush;
+    if (coarse_prec)
+        coarseSolver->SetPreconditioner(*coarse_prec);
+    //std::cout << "no prec \n" << std::flush;
     coarseSolver->SetPrintLevel(2);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
@@ -674,6 +991,7 @@ LocalProblemSolver::~LocalProblemSolver()
                     delete LUfactors[i][j];
 
     delete rhs_func;
+    //sol->Print();
     delete sol;
 }
 
@@ -698,6 +1016,7 @@ void LocalProblemSolver::Setup()
 
     rhs_func = new BlockVector(Op_blkspmat.ColOffsets());
     sol = new BlockVector(Op_blkspmat.RowOffsets());
+    //std:cout << "sol size = " << sol->Size() << "\n";
 
     // (optionally) saves LU factors related to the local problems to be solved
     // for each agglomerate element
