@@ -26,7 +26,7 @@
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
 
-//#define HCURL_COARSESOLVER
+#define HCURL_COARSESOLVER
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -801,7 +801,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1756,6 +1756,11 @@ int main(int argc, char *argv[])
                                                      EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1],
                                                      *EssBdrTrueDofs_Hcurl[num_levels - 1]);
+
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #else
     CoarsestSolver = CoarsestSolver_partfinder;
     CoarsestSolver_partfinder->SetMaxIter(100);
@@ -1764,6 +1769,7 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
 
+    /*
     StopWatch chrono_debug;
 
     Vector testRhs(CoarsestSolver->Height());
@@ -1779,10 +1785,11 @@ int main(int argc, char *argv[])
 
     if (verbose)
        std::cout << "CoarsestSolver test run is finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+
+    //delete CoarsestSolver;
     //MPI_Finalize();
     //return 0;
-    
-
+    */
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
@@ -3012,14 +3019,25 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
 
+#ifndef HCURL_COARSESOLVER
     CoarsestSolver_partfinder->SetMaxIter(100);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
     CoarsestSolver_partfinder->SetRelTol(1.0e-7);
     CoarsestSolver_partfinder->ResetSolverParams();
+#else
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
+#endif
     if (verbose)
     {
         std::cout << "CoarsestSolver parameters for the new solver: \n" << std::flush;
+#ifndef HCURL_COARSESOLVER
         CoarsestSolver_partfinder->PrintSolverParams();
+#else
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->PrintSolverParams();
+#endif
     }
     if (verbose)
         std::cout << "Particular solution was found in " << chrono.RealTime() <<" seconds.\n";
@@ -3880,6 +3898,9 @@ int main(int argc, char *argv[])
     }
 #endif
 
+    //MPI_Finalize();
+    //return 0;
+
     chrono.Stop();
     if (verbose)
         std::cout << "Deallocating memory \n";
@@ -3891,7 +3912,6 @@ int main(int argc, char *argv[])
         delete BdrDofs_Funct_lvls[l][0];
         delete EssBdrDofs_Funct_lvls[l][0];
         delete EssBdrTrueDofs_Funct_lvls[l][0];
-        delete Funct_mat_offsets_lvls[l];
 #ifndef HCURL_COARSESOLVER
         if (l < num_levels - 1)
         {
@@ -3902,11 +3922,6 @@ int main(int argc, char *argv[])
         delete EssBdrDofs_Hcurl[l];
         delete EssBdrTrueDofs_Hcurl[l];
 #endif
-        if (l < num_levels - 1)
-        {
-            delete EssBdrDofs_Hcurl[l];
-            delete EssBdrTrueDofs_Hcurl[l];
-        }
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             delete BdrDofs_Funct_lvls[l][1];
@@ -3917,9 +3932,9 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
-            if (LocalSolver_lvls)
-                if ((*LocalSolver_lvls)[l])
-                    delete (*LocalSolver_lvls)[l];
+            if (LocalSolver_partfinder_lvls)
+                if ((*LocalSolver_partfinder_lvls)[l])
+                    delete (*LocalSolver_partfinder_lvls)[l];
         }
 
 #ifdef WITH_SMOOTHERS
@@ -3941,6 +3956,8 @@ int main(int argc, char *argv[])
                 for (int blk2 = 0; blk2 < Funct_mat_lvls[l]->NumColBlocks(); ++blk2)
                     delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
         delete Funct_mat_lvls[l];
+        if (l == 0)
+            delete Funct_mat_offsets_lvls[l];
 
         delete Constraint_mat_lvls[l];
 
@@ -3985,6 +4002,7 @@ int main(int argc, char *argv[])
 
     }
 
+    delete LocalSolver_partfinder_lvls;
     delete LocalSolver_lvls;
 
     for (int blk1 = 0; blk1 < Funct_global->NumRowBlocks(); ++blk1)

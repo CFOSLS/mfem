@@ -285,11 +285,9 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
 
 CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
 {
-    MFEM_ABORT("Not implemented \n");
     delete xblock;
     delete yblock;
 
-    delete coarseSolver;
     delete coarsetrueRhs;
     delete coarsetrueX;
     for ( int blk = 0; blk < coarse_prec->NumBlocks(); ++blk)
@@ -394,7 +392,7 @@ void CoarsestProblemHcurlSolver::Setup() const
 
     coarse_offsets.Print();
 
-    BlockOperator * coarse_matrix = new BlockOperator(coarse_offsets);
+    coarse_matrix = new BlockOperator(coarse_offsets);
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
             coarse_matrix->SetBlock(blk1, blk2, HcurlFunct_global(blk1, blk2));
@@ -423,10 +421,10 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    if (coarse_prec)
-        coarseSolver->SetPreconditioner(*coarse_prec);
-    //std::cout << "no prec \n" << std::flush;
-    coarseSolver->SetPrintLevel(2);
+    //if (coarse_prec)
+        //coarseSolver->SetPreconditioner(*coarse_prec);
+    std::cout << "no prec in the coarsestproblemhcurlsolver \n" << std::flush;
+    coarseSolver->SetPrintLevel(1);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
 
@@ -473,9 +471,14 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
     }
 
-    // 2. solve the linear system with preconditioned MINRES.
+    //std::cout << "coarsetrueRhs \n";
+    //coarsetrueRhs->Print();
+
+    // 2. solve the linear system with preconditioned CG.
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
+    //std::cout << "coarsetrueX \n";
+    //coarsetrueX->Print();
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
@@ -483,6 +486,9 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         else
             yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
     }
+
+    //std::cout << "yblock, size = " << yblock->Size() << "\n";
+    //yblock->Print();
 
     return;
 }
@@ -895,8 +901,8 @@ protected:
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
-    mutable BlockVector* rhs_func;
-    mutable BlockVector* sol;
+    mutable BlockVector* temprhs_func;
+    mutable BlockVector* tempsol;
 
 protected:
     mutable bool optimized_localsolve;
@@ -976,6 +982,9 @@ public:
 
 LocalProblemSolver::~LocalProblemSolver()
 {
+    delete tempsol;
+    delete temprhs_func;
+
     delete AE_edofs_L2;
     for (int blk = 0; blk < AE_eintdofs_blocks->NumRowBlocks(); ++blk)
         delete &(AE_eintdofs_blocks->GetBlock(blk,blk));
@@ -989,10 +998,6 @@ LocalProblemSolver::~LocalProblemSolver()
             for (unsigned int j = 0; j < LUfactors[i].size(); ++j)
                 if (LUfactors[i][j])
                     delete LUfactors[i][j];
-
-    delete rhs_func;
-    //sol->Print();
-    delete sol;
 }
 
 void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
@@ -1014,8 +1019,8 @@ void LocalProblemSolver::Setup()
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
 
-    rhs_func = new BlockVector(Op_blkspmat.ColOffsets());
-    sol = new BlockVector(Op_blkspmat.RowOffsets());
+    temprhs_func = new BlockVector(Op_blkspmat.ColOffsets());
+    tempsol = new BlockVector(Op_blkspmat.RowOffsets());
     //std:cout << "sol size = " << sol->Size() << "\n";
 
     // (optionally) saves LU factors related to the local problems to be solved
@@ -1031,9 +1036,9 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 {
     //BlockVector lrhs_func(Op_blkspmat.ColOffsets());
     for (int blk = 0; blk < numblocks; ++blk)
-        d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), rhs_func->GetBlock(blk));
+        d_td_blocks[blk]->Mult(truerhs_func.GetBlock(blk), temprhs_func->GetBlock(blk));
     //BlockVector lsol(Op_blkspmat.RowOffsets());
-    *sol = 0.0;
+    *tempsol = 0.0;
 
     DenseMatrix sub_Constr;
     Vector sub_rhsconstr;
@@ -1124,7 +1129,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         BlockVector sub_Func(sub_Func_offsets);
 
         for ( int blk = 0; blk < numblocks; ++blk )
-            rhs_func->GetBlock(blk).GetSubVector(*Local_inds[blk], sub_Func.GetBlock(blk));
+            temprhs_func->GetBlock(blk).GetSubVector(*Local_inds[blk], sub_Func.GetBlock(blk));
 
         BlockVector sol_loc(sub_Func_offsets);
         sol_loc = 0.0;
@@ -1135,7 +1140,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
         // computing solution as a vector at current level
         for ( int blk = 0; blk < numblocks; ++blk )
         {
-            sol->GetBlock(blk).AddElementVector
+            tempsol->GetBlock(blk).AddElementVector
                     (*Local_inds[blk], sol_loc.GetBlock(blk));
         }
 
@@ -1147,7 +1152,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     } // end of loop over AEs
 
     for (int blk = 0; blk < numblocks; ++blk)
-        d_td_blocks[blk]->MultTranspose(sol->GetBlock(blk), truesol.GetBlock(blk));
+        d_td_blocks[blk]->MultTranspose(tempsol->GetBlock(blk), truesol.GetBlock(blk));
 
     for ( int blk = 0; blk < numblocks; ++blk )
         delete Local_inds[blk];
@@ -2610,7 +2615,7 @@ protected:
 
     // Projection of the system matrix M onto discrete Hcurl space
     // stores Curl_hT * M * Curlh
-    mutable SparseMatrix* CTMC;
+    //mutable SparseMatrix* CTMC;
 
     // global CTMC as HypreParMatrix
     mutable HypreParMatrix* CTMC_global;
@@ -2677,7 +2682,7 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     delete truerhs;
     delete truex;
 
-    delete CTMC;
+    //delete CTMC;
     delete CTMC_global;
 
     for (int rowblk = 0; rowblk < Funct_restblocks_global.NumRows(); ++rowblk)
@@ -2766,9 +2771,12 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         //mfem_error("Error in HcurlGSSSmoother::Mult(): x and y can't point to the same data \n");
 
     // x will be accessed through xblock as its view
-    xblock->Update(x.GetData(), block_offsets);
     // y will be accessed through yblock as its view
+    xblock->Update(x.GetData(), block_offsets);
     yblock->Update(y.GetData(), block_offsets);
+
+    //xblock = new BlockVector(x.GetData(), block_offsets);
+    //yblock = new BlockVector(y.GetData(), block_offsets);
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -2870,7 +2878,7 @@ void HcurlGSSSmoother::Setup() const
 
     // form CT*M*C as a SparseMatrix
     SparseMatrix *M_Curlh = mfem::Mult(*M, *Curlh);
-    CTMC = mfem::Mult(*CurlhT, *M_Curlh);
+    SparseMatrix * CTMC = mfem::Mult(*CurlhT, *M_Curlh);
 
     delete M_Curlh;
     delete CurlhT;
@@ -2891,6 +2899,8 @@ void HcurlGSSSmoother::Setup() const
     CTMC_global = ParMult(d_td_Hcurl_T, CTMC_d_td);
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
+
+    delete CTMC;
 
 #ifdef MEMORY_OPTIMIZED
     temp_Hdiv_dofs = new Vector(Curlh->Height());
@@ -2992,10 +3002,6 @@ void HcurlGSSSmoother::Setup() const
 
     truex = new BlockVector(trueblock_offsets);
     truerhs = new BlockVector(trueblock_offsets);
-
-    // allocating memory for local-to-level vector arrays
-    //rhs_lvls[level] = new Vector(Curlh_lvls[level]->Width());
-    //tempvec_lvls[level] = new Vector(Curlh_lvls[level]->Width());
 
     delete CTMC_d_td;
     delete d_td_Hcurl_T;
