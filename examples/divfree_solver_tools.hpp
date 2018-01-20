@@ -200,7 +200,7 @@ private:
     mutable Array<int> coarse_offsets;
     mutable BlockOperator* coarse_matrix;
     mutable BlockDiagonalPreconditioner * coarse_prec;
-    mutable BlockVector * coarse_rhsfunc;
+    //mutable BlockVector * coarse_rhsfunc;
     mutable BlockVector * coarsetrueX;
     mutable BlockVector * coarsetrueRhs;
     mutable IterativeSolver * coarseSolver;
@@ -278,6 +278,7 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
     rtol = 1.e-4;
     atol = 1.e-4;
 
+    sweeps_num = 1;
     Setup();
 
 }
@@ -347,7 +348,13 @@ void CoarsestProblemHcurlSolver::Setup() const
             Funct_blk->CopyRowStarts();
             Funct_blk->CopyColStarts();
 
+            //SparseMatrix diag_debug;
+            //Funct_blk->GetDiag(diag_debug);
+            //diag_debug.Print();
+
             delete temphpmat;
+
+            std::cout << "blk1 = " << blk1 << ", blk2 = " << blk2 << "\n";
 
             if (blk1 == 0)
             {
@@ -421,12 +428,39 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    //if (coarse_prec)
-        //coarseSolver->SetPreconditioner(*coarse_prec);
-    std::cout << "no prec in the coarsestproblemhcurlsolver \n" << std::flush;
+    if (coarse_prec)
+        coarseSolver->SetPreconditioner(*coarse_prec);
+    //std::cout << "no prec in the coarsestproblemhcurlsolver \n" << std::flush;
     coarseSolver->SetPrintLevel(1);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
+
+    /*
+    //testrun
+    Vector testsol(coarseSolver->Width());
+    testsol = 1.0;
+    Vector testrhs(coarseSolver->Height());
+    coarse_matrix->Mult(testsol, testrhs);
+
+    Vector testx(coarseSolver->Width());
+    testx = 0.0;
+
+    coarseSolver->SetAbsTol(1.0e-10);
+    coarseSolver->SetRelTol(1.0e-10);
+    coarseSolver->SetMaxIter(1000);
+    coarseSolver->Mult(testrhs, testx);
+
+    Vector error(coarseSolver->Width());
+    error = testx;
+    error -= testsol;
+
+    std::cout << "error norm = " << error.Norml2() / sqrt (error.Size()) << "\n";
+
+    Vector hdiverror(Divfreeop.Height());
+    Divfreeop.Mult(error, hdiverror);
+
+    std::cout << "hdiverror norm = " << hdiverror.Norml2() / sqrt (hdiverror.Size()) << "\n";
+    */
 
     finalized = true;
 }
@@ -454,21 +488,19 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
         }
 
-        // imposing boundary conditions on true dofs
-        for ( int blk = 0; blk < numblocks; ++blk)
+        const Array<int> * temp;
+        if (blk == 0)
+            temp = &essbdrtruedofs_Hcurl;
+        else
+            temp = essbdrtruedofs_blocks[blk];
+
+        //for (int i = 0; i < temp->Size(); ++i)
+            //std::cout << (*temp)[i] << "\n";
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
-            const Array<int> * temp;
-            if (blk == 0)
-                temp = &essbdrtruedofs_Hcurl;
-            else
-                temp = essbdrtruedofs_blocks[blk];
-
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
+            coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
-
     }
 
     //std::cout << "coarsetrueRhs \n";
@@ -486,6 +518,10 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         else
             yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
     }
+
+    //ofstream ofs("coarsesol_new.txt");
+    //yblock->Print(ofs);
+    //ofs.close();
 
     //std::cout << "yblock, size = " << yblock->Size() << "\n";
     //yblock->Print();
@@ -714,6 +750,10 @@ void CoarsestProblemSolver::Setup() const
             Funct_global(blk1, blk2)->CopyRowStarts();
             Funct_global(blk1, blk2)->CopyColStarts();
 
+            //SparseMatrix diag_debug;
+            //Funct_global(blk1, blk2)->GetDiag(diag_debug);
+            //diag_debug.Print();
+
             delete temphpmat;
             //delete Funct_d_td;
             //delete d_td_T;
@@ -802,7 +842,7 @@ void CoarsestProblemSolver::Setup() const
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
     //std::cout << "no prec \n" << std::flush;
-    coarseSolver->SetPrintLevel(2);
+    coarseSolver->SetPrintLevel(0);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
 
@@ -828,16 +868,12 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
 
         // imposing boundary conditions on true dofs
-        for ( int blk = 0; blk < numblocks; ++blk)
+        Array<int> * temp = essbdrtruedofs_blocks[blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
-            Array<int> * temp = essbdrtruedofs_blocks[blk];
-
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
+            coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
-
     }
 
     if (rhs_constr)
@@ -852,6 +888,10 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
 
     for ( int blk = 0; blk < numblocks; ++blk)
         yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
+
+    //ofstream ofs("coarsesol_old.txt");
+    //yblock->Print(ofs);
+    //ofs.close();
 
     return;
 }

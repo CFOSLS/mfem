@@ -17,16 +17,18 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-#define WITH_SMOOTHERS
+//#define WITH_SMOOTHERS
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
 #define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
+
+//#define COARSESOLVER_COMPARISON
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
@@ -1720,7 +1722,7 @@ int main(int argc, char *argv[])
     for (int blk = 0; blk < numblocks_funct; ++blk)
         size += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
     size += Dof_TrueDof_L2_lvls[num_levels - 1]->GetNumCols();
-     
+
     CoarsestSolver_partfinder = new CoarsestProblemSolver(size, *Funct_mat_lvls[num_levels - 1],
                                                      *Constraint_mat_lvls[num_levels - 1],
                                                      Dof_TrueDof_Func_lvls[num_levels - 1],
@@ -1763,9 +1765,9 @@ int main(int argc, char *argv[])
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #else
     CoarsestSolver = CoarsestSolver_partfinder;
-    CoarsestSolver_partfinder->SetMaxIter(100);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
-    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->SetMaxIter(1000);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-12);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
 
@@ -1790,6 +1792,43 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
     */
+
+
+#ifdef COARSESOLVER_COMPARISON
+#ifndef     HCURL_COARSESOLVER
+    MFEM_ABORT("HCURL_COARSESOLVER must be active \n");
+#endif
+
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
+
+    CoarsestSolver_partfinder->SetMaxIter(100);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->ResetSolverParams();
+
+    Vector testRhs(CoarsestSolver->Height());
+    Vector testX1(CoarsestSolver->Width());
+    testX1 = 0.0;
+    Vector testX2(CoarsestSolver->Width());
+    testX2 = 0.0;
+
+    testRhs = 1.0;
+    CoarsestSolver->Mult(testRhs, testX1);
+    testRhs = 1.0;
+    CoarsestSolver_partfinder->Mult(testRhs, testX2);
+
+    Vector diff(CoarsestSolver->Width());
+    diff = testX1;
+    diff -= testX2;
+    if (verbose)
+        std::cout << "diff norm l2 = " << diff.Norml2() / sqrt (diff.Size()) << "\n";
+
+    MPI_Finalize();
+    return 0;
+#endif
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
@@ -3020,14 +3059,14 @@ int main(int argc, char *argv[])
     chrono.Stop();
 
 #ifndef HCURL_COARSESOLVER
-    CoarsestSolver_partfinder->SetMaxIter(100);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
-    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
+    CoarsestSolver_partfinder->SetMaxIter(200);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-9);
+    CoarsestSolver_partfinder->SetRelTol(1.0e-9);
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(200);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-5));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-5));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #endif
     if (verbose)
