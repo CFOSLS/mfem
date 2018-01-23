@@ -801,7 +801,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1412,7 +1412,7 @@ int main(int argc, char *argv[])
         else // dim == 4
             Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
         Divfree_op.Assemble();
-        Divfree_op.EliminateTestDofs(ess_bdrSigma);
+        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
 
@@ -1815,6 +1815,7 @@ int main(int argc, char *argv[])
     */
 
     CoarsestSolver = new CoarsestProblemHcurlSolver(size, *Funct_mat_lvls[num_levels - 1],
+                                                     *Divfree_mat_lvls[num_levels - 1],
                                                      *Divfreehpmat_coarse,
                                                      Dof_TrueDof_Func_lvls[num_levels - 1],
                                                      *Dof_TrueDof_Hcurl_lvls[num_levels - 1],
@@ -3506,7 +3507,7 @@ int main(int argc, char *argv[])
         delete Bblocktest;
     }
 
-    Array<int> blocktest_offsets(numblocks + 1);
+    Array<int> blocktest_offsets(numblocks_funct + 1);
     blocktest_offsets[0] = 0;
     blocktest_offsets[1] = Atest->Height();
     if (strcmp(space_for_S,"H1") == 0)

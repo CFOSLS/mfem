@@ -17,9 +17,9 @@ using std::unique_ptr;
 //#define CHECK_LOCALSOLVE
 
 // activates constraint residual check after each iteration of the minimization solver
-//#define CHECK_CONSTR
+#define CHECK_CONSTR
 
-//#define CHECK_BNDCND
+#define CHECK_BNDCND
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
@@ -190,6 +190,7 @@ private:
     // coarsest level local-to-process matrices
     mutable BlockMatrix* Op_blkspmat;
 
+    const SparseMatrix& Divfreeop_sp;
     const HypreParMatrix& Divfreeop;
     mutable HypreParMatrix * Divfreeop_T;
 
@@ -224,7 +225,7 @@ protected:
 
 public:
     ~CoarsestProblemHcurlSolver();
-    CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat, const HypreParMatrix& DivfreeOp,
+    CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat, const SparseMatrix &DivfreeOpSpMat, const HypreParMatrix& DivfreeOp,
                                const std::vector<HypreParMatrix*>& D_tD_blks, const HypreParMatrix &D_tD_Hcurl,
                                const std::vector<Array<int>* >& EssBdrDofs_blks,
                                const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
@@ -252,6 +253,7 @@ public:
 };
 
 CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat,
+                                                       const SparseMatrix& DivfreeOpSpMat,
                                                        const HypreParMatrix& DivfreeOp,
                                                        const std::vector<HypreParMatrix*>& D_tD_blks,
                                                        const HypreParMatrix& D_tD_Hcurl,
@@ -262,6 +264,7 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
       numblocks(Op_Blksmat.NumRowBlocks()),
       comm(DivfreeOp.GetComm()),
       Op_blkspmat(&Op_Blksmat),
+      Divfreeop_sp(DivfreeOpSpMat),
       Divfreeop(DivfreeOp),
       dof_trueDof_blocks(D_tD_blks),
       dof_trueDof_Hcurl(D_tD_Hcurl),
@@ -375,13 +378,14 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                     SparseMatrix diagg;
                     HcurlFunct_global(blk1,blk2)->GetDiag(diagg);
-                    diagg.SetDiagIdentity();
+                    diagg.EliminateZeroRows();
+                    //diagg.SetDiagIdentity();
+
                     /*
                     for (int row = 0; row < diagg.Height(); ++row)
                     {
                         if (GetRowNorml2(row) < 1.0e-15)
-                            diagg.
-                        for (int j = 0; j < diagg.RowSize())
+                            std::cout << ""
                     }
                     */
                     //diagg.Print();
@@ -3026,7 +3030,8 @@ void HcurlGSSSmoother::Setup() const
 
     SparseMatrix diagg;
     CTMC_global->GetDiag(diagg);
-    diagg.SetDiagIdentity();
+    diagg.EliminateZeroRows();
+    //diagg.SetDiagIdentity();
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1)
