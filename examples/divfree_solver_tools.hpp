@@ -446,7 +446,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(0);
+    coarseSolver->SetPrintLevel(1);
 
     finalized = true;
 }
@@ -3023,6 +3023,10 @@ void HcurlGSSSmoother::Setup() const
     delete d_td_hdiv_diaghpmat;
     //delete temphp;
 #endif
+
+    SparseMatrix diagg;
+    CTMC_global->GetDiag(diagg);
+    diagg.SetDiagIdentity();
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1)
