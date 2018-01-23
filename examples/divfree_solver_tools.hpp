@@ -191,6 +191,7 @@ private:
     mutable BlockMatrix* Op_blkspmat;
 
     const SparseMatrix& Divfreeop_sp;
+    mutable HypreParMatrix * CTMC_global;
     const HypreParMatrix& Divfreeop;
     mutable HypreParMatrix * Divfreeop_T;
 
@@ -201,6 +202,7 @@ private:
 
     const std::vector<Array<int>* > & essbdrdofs_blocks;
     const std::vector<Array<int>* > & essbdrtruedofs_blocks;
+    const Array<int> & essbdrdofs_Hcurl;
     const Array<int> & essbdrtruedofs_Hcurl;
 
     mutable Array<int> coarse_offsets;
@@ -228,7 +230,7 @@ public:
     CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat, const SparseMatrix &DivfreeOpSpMat, const HypreParMatrix& DivfreeOp,
                                const std::vector<HypreParMatrix*>& D_tD_blks, const HypreParMatrix &D_tD_Hcurl,
                                const std::vector<Array<int>* >& EssBdrDofs_blks,
-                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
                                const Array<int>& EssBdrTrueDofs_Hcurl);
 
     // Operator application: `y=A(x)`.
@@ -259,6 +261,7 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
                                                        const HypreParMatrix& D_tD_Hcurl,
                                                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                                                        const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                                                       const Array<int>& EssBdrDofs_Hcurl,
                                                        const Array<int>& EssBdrTrueDofs_Hcurl)
     : Operator(Size),
       numblocks(Op_Blksmat.NumRowBlocks()),
@@ -270,6 +273,7 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
       dof_trueDof_Hcurl(D_tD_Hcurl),
       essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
+      essbdrdofs_Hcurl(EssBdrDofs_Hcurl),
       essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl)
 {
     finalized = false;
@@ -316,6 +320,42 @@ void CoarsestProblemHcurlSolver::Setup() const
 {
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
+
+
+    // shortcuts
+    const SparseMatrix* Curlh = &(Divfreeop_sp);
+    SparseMatrix *CurlhT = Transpose(*Curlh);
+    const SparseMatrix * M = &(Op_blkspmat->GetBlock(0,0));
+
+    HypreParMatrix * d_td_Hcurl_T = dof_trueDof_Hcurl.Transpose();
+
+    // form CT*M*C as a SparseMatrix
+    SparseMatrix *M_Curlh = mfem::Mult(*M, *Curlh);
+    SparseMatrix * CTMC = mfem::Mult(*CurlhT, *M_Curlh);
+
+    delete M_Curlh;
+    delete CurlhT;
+
+    // imposing essential boundary conditions
+    for ( int dof = 0; dof < essbdrdofs_Hcurl.Size(); ++dof)
+    {
+        if ( essbdrdofs_Hcurl[dof] != 0)
+        {
+            CTMC->EliminateRowCol(dof);
+        }
+    }
+
+    // form CT*M*C as HypreParMatrices
+    HypreParMatrix* CTMC_d_td;
+    CTMC_d_td = dof_trueDof_Hcurl.LeftDiagMult( *CTMC );
+
+    CTMC_global = ParMult(d_td_Hcurl_T, CTMC_d_td);
+    CTMC_global->CopyRowStarts();
+    CTMC_global->CopyColStarts();
+
+    delete CTMC;
+    delete CTMC_d_td;
+
 
     // 1. eliminating boundary conditions at coarse level
 
@@ -372,6 +412,8 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                 if (blk2 == 0)
                 {
+                    HcurlFunct_global(blk1, blk2) = CTMC_global;
+                    /*
                     HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
                     HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                     HcurlFunct_global(blk1, blk2)->CopyColStarts();
@@ -381,14 +423,8 @@ void CoarsestProblemHcurlSolver::Setup() const
                     diagg.EliminateZeroRows();
                     //diagg.SetDiagIdentity();
 
-                    /*
-                    for (int row = 0; row < diagg.Height(); ++row)
-                    {
-                        if (GetRowNorml2(row) < 1.0e-15)
-                            std::cout << ""
-                    }
-                    */
                     //diagg.Print();
+                    */
 
                     delete temp1;
                 }
