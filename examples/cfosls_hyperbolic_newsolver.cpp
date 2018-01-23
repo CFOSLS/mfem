@@ -801,7 +801,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -3214,10 +3214,20 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
+    }
+    else // L2 case requires more iterations
+    {
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(50);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
+    }
 #endif
     if (verbose)
     {
