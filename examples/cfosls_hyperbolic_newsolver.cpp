@@ -803,7 +803,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1784,7 +1784,7 @@ int main(int argc, char *argv[])
     else // dim == 4
         Divfreeop_coarse.AddDomainInterpolator(new DivSkewInterpolator);
     Divfreeop_coarse.Assemble();
-    Divfreeop_coarse.EliminateTestDofs(ess_bdrSigma);
+    //Divfreeop_coarse.EliminateTestDofs(ess_bdrSigma);
     Vector tempsol(Divfreeop_coarse.Width());
     tempsol = 0.0;
     Vector temprhs(Divfreeop_coarse.Height());
@@ -1793,9 +1793,9 @@ int main(int argc, char *argv[])
     Divfreeop_coarse.Finalize();
     HypreParMatrix * Divfreehpmat_coarse = Divfreeop_coarse.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
 
-    /*
     // checking that Divfreeop_coarse, interpolated back to the finer level, is orthogonal to the divergence
 
+    /*
     ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]);
     Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
     Bblock->Assemble();
@@ -1812,15 +1812,6 @@ int main(int argc, char *argv[])
     std::cout << "Constraint[0] * TrueP * Curl[1] norm = " << diagg.MaxNorm() << "\n";
     MPI_Finalize();
     return 0;
-    */
-
-    /*
-    int size_hcurlsolver = 0;
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-        if (blk == 0)
-            size_hcurlsolver += Dof_TrueDof_Hcurl_lvls[num_levels - 1]->GetNumCols();
-        else
-            size_hcurlsolver += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
     */
 
     CoarsestSolver = new CoarsestProblemHcurlSolver(size, *Funct_mat_lvls[num_levels - 1],

@@ -373,6 +373,19 @@ void CoarsestProblemHcurlSolver::Setup() const
                     HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                     HcurlFunct_global(blk1, blk2)->CopyColStarts();
 
+                    SparseMatrix diagg;
+                    HcurlFunct_global(blk1,blk2)->GetDiag(diagg);
+                    diagg.SetDiagIdentity();
+                    /*
+                    for (int row = 0; row < diagg.Height(); ++row)
+                    {
+                        if (GetRowNorml2(row) < 1.0e-15)
+                            diagg.
+                        for (int j = 0; j < diagg.RowSize())
+                    }
+                    */
+                    //diagg.Print();
+
                     delete temp1;
                 }
                 else
@@ -400,7 +413,7 @@ void CoarsestProblemHcurlSolver::Setup() const
         coarse_offsets[blk + 1] = HcurlFunct_global(blk, blk)->Height();
     coarse_offsets.PartialSum();
 
-    coarse_offsets.Print();
+    //coarse_offsets.Print();
 
     coarse_matrix = new BlockOperator(coarse_offsets);
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
