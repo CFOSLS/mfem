@@ -14,14 +14,19 @@ using std::unique_ptr;
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
-#define CHECK_LOCALSOLVE
+//#define CHECK_LOCALSOLVE
 
-// activates constraint residual check after each tieration of the minimization solver
+// activates constraint residual check after each iteration of the minimization solver
 //#define CHECK_CONSTR
+
+//#define CHECK_BNDCND
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
+#undef CHECK_CONSTR
+#undef CHECK_BNDCND
 #endif
+
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -118,7 +123,7 @@ bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector* Con
     if (ConstrRhs)
         res_constr -= *ConstrRhs;
     double constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
-    if (fabs(constr_norm) > 1.0e-13)
+    if (fabs(constr_norm) > 1.0e-12)
     {
         std::cout << "Constraint residual norm " << string << ": "
                   << constr_norm << " ... \n";
@@ -354,8 +359,6 @@ void CoarsestProblemHcurlSolver::Setup() const
 
             delete temphpmat;
 
-            std::cout << "blk1 = " << blk1 << ", blk2 = " << blk2 << "\n";
-
             if (blk1 == 0)
             {
                 HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
@@ -430,37 +433,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    //std::cout << "no prec in the coarsestproblemhcurlsolver \n" << std::flush;
-    coarseSolver->SetPrintLevel(1);
-    //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
-    //coarseSolver->SetOperator(*coarse_id);
-
-    /*
-    //testrun
-    Vector testsol(coarseSolver->Width());
-    testsol = 1.0;
-    Vector testrhs(coarseSolver->Height());
-    coarse_matrix->Mult(testsol, testrhs);
-
-    Vector testx(coarseSolver->Width());
-    testx = 0.0;
-
-    coarseSolver->SetAbsTol(1.0e-10);
-    coarseSolver->SetRelTol(1.0e-10);
-    coarseSolver->SetMaxIter(1000);
-    coarseSolver->Mult(testrhs, testx);
-
-    Vector error(coarseSolver->Width());
-    error = testx;
-    error -= testsol;
-
-    std::cout << "error norm = " << error.Norml2() / sqrt (error.Size()) << "\n";
-
-    Vector hdiverror(Divfreeop.Height());
-    Divfreeop.Mult(error, hdiverror);
-
-    std::cout << "hdiverror norm = " << hdiverror.Norml2() / sqrt (hdiverror.Size()) << "\n";
-    */
+    coarseSolver->SetPrintLevel(0);
 
     finalized = true;
 }
@@ -480,6 +453,28 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
+        {
+            const Array<int> * temp;
+            temp = essbdrtruedofs_blocks[blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+
+#ifdef CHECK_BNDCND
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                    std::cout << "bnd cnd is violated for xblock! blk = " << blk << ", value = "
+                              << xblock->GetBlock(blk)[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+            }
+#endif
+        }
+
+
+        if (blk == 0)
             Divfreeop_T->Mult(xblock->GetBlock(blk), coarsetrueRhs->GetBlock(blk));
         else
         {
@@ -494,23 +489,29 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         else
             temp = essbdrtruedofs_blocks[blk];
 
-        //for (int i = 0; i < temp->Size(); ++i)
-            //std::cout << (*temp)[i] << "\n";
-
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
     }
 
-    //std::cout << "coarsetrueRhs \n";
-    //coarsetrueRhs->Print();
-
     // 2. solve the linear system with preconditioned CG.
+
+    /*
+    if (coarsetrueRhs->Norml2() / sqrt(coarsetrueRhs->Size()) < atol * atol)
+    {
+        std::cout << "norm = " << coarsetrueRhs->Norml2() / sqrt(coarsetrueRhs->Size()) << ", atol^2 = " << atol * atol << "\n";
+        std::cout << "Resetting max iter num to 1 \n";
+        coarseSolver->SetMaxIter(1);
+        coarseSolver->SetAbsTol(1.0e-15);
+    }
+    */
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
-    //std::cout << "coarsetrueX \n";
-    //coarsetrueX->Print();
+    //if (coarseSolver->GetConverged())
+        //std::cout << "coarseSolver converged in " << coarseSolver->GetNumIterations()
+                  //<< " iterations with a residual norm of " << coarseSolver->GetFinalNorm() << ".\n";
+
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
@@ -519,12 +520,22 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
     }
 
-    //ofstream ofs("coarsesol_new.txt");
-    //yblock->Print(ofs);
-    //ofs.close();
+#ifdef CHECK_BNDCND
+    // checking bnd conditions for the resulting output vector
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> * temp;
+        temp = essbdrtruedofs_blocks[blk];
 
-    //std::cout << "yblock, size = " << yblock->Size() << "\n";
-    //yblock->Print();
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
+                          << yblock->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
 
     return;
 }
@@ -888,10 +899,6 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
 
     for ( int blk = 0; blk < numblocks; ++blk)
         yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
-
-    //ofstream ofs("coarsesol_old.txt");
-    //yblock->Print(ofs);
-    //ofs.close();
 
     return;
 }
@@ -2386,8 +2393,10 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         return;
     }
 
+#ifdef CHECK_BNDCND
     MFEM_ASSERT(CheckBdrError(truestart_guess, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
                               "for the initial guess");
+#endif
 
     // variable-size vectors (initialized with the finest level sizes) on dofs
     Vector rhs_constr((Constr_lvls[0]->Height()));     // righthand side (from the divergence constraint) at level l
@@ -2858,17 +2867,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             truerhs->GetBlock(blk)[tdof] = 0.0;
         }
 
-
-    /*
-    for ( int tdof = 0; tdof < temp->Size(); ++tdof)
-    {
-        if ( (*temp)[tdof] != 0)
-        {
-            truerhs->GetBlock(0)[tdof] = 0.0;
-        }
-    }
-    */
-
     *truex = 0.0;
     //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
     //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
@@ -2901,6 +2899,19 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             yblock->GetBlock(blk) = truex->GetBlock(blk);
     }
 
+#ifdef CHECK_BNDCND
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
+                          << yblock->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
 
 }
 
@@ -3616,8 +3627,10 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     {
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
+#ifdef CHECK_BNDCND
         MFEM_ASSERT(CheckBdrError(*tempblock_truedofs, bdrdata_truedofs,
                                   *essbdrtruedofs_Func[0][0], true), "before the iteration");
+#endif
 
 #ifdef CHECK_CONSTR
         // unnecessary checking block
@@ -3773,7 +3786,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
-#ifndef CHECK_SPDSOLVER
+#ifdef CHECK_BNDCND
     MFEM_ASSERT(CheckBdrError(previous_sol, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
             "at the start of Solve()");
 #endif
@@ -3860,8 +3873,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     //std::cout << "after: " << time_coarsestproblem << "\n";
 #endif
 
-    TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0] );
-
 #ifdef TIMING
     chrono2.Clear();
     chrono2.Start();
@@ -3933,11 +3944,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
 
+#ifdef CHECK_BNDCND
     if (print_level && !preconditioner_mode)
     {
         MFEM_ASSERT(CheckBdrError(next_sol, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
                 "after all levels update");
     }
+#endif
 
     if (print_level > 10)
     {

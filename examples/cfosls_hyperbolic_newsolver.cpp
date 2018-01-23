@@ -17,14 +17,14 @@
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
-//#define WITH_SMOOTHERS
+#define WITH_SMOOTHERS
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
 #define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
 
@@ -803,7 +803,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -883,13 +883,56 @@ int main(int argc, char *argv[])
         args.PrintOptions(cout);
     }
 
-
 #ifdef COMPARE_MULTIGRID
     prec_option = 3;
     if (verbose)
         std::cout << "COMPARE_MULTIGRID falg is active: a modified monolithic MG is used \n" << std::flush;
     MPI_Barrier(comm);
 #endif
+
+#ifdef WITH_SMOOTHERS
+    if (verbose)
+        std::cout << "WITH_SMOOTHERS active \n";
+#else
+    if (verbose)
+        std::cout << "WITH_SMOOTHERS passive \n";
+#endif
+
+#ifdef SOLVE_WITH_LOCALSOLVERS
+    if (verbose)
+        std::cout << "SOLVE_WITH_LOCALSOLVERS active \n";
+#else
+    if (verbose)
+        std::cout << "SOLVE_WITH_LOCALSOLVERS passive \n";
+#endif
+
+#ifdef HCURL_COARSESOLVER
+    if (verbose)
+        std::cout << "HCURL_COARSESOLVER active \n";
+#else
+    if (verbose)
+        std::cout << "HCURL_COARSESOLVER passive \n";
+#endif
+
+#ifdef USE_AS_A_PREC
+    if (verbose)
+        std::cout << "USE_AS_A_PREC active \n";
+#else
+    if (verbose)
+        std::cout << "USE_AS_A_PREC passive \n";
+#endif
+
+#ifdef OLD_CODE
+    if (verbose)
+        std::cout << "OLD_CODE active \n";
+#endif
+#ifdef TIMING
+    if (verbose)
+        std::cout << "TIMING active \n";
+#endif
+
+    std::cout << std::flush;
+    MPI_Barrier(MPI_COMM_WORLD);
 
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(!(strcmp(space_for_S,"L2") == 0 && !eliminateS), "Case: L2 space for S and S is not eliminated is working incorrectly, non pos.def. matrix. \n");
@@ -1369,6 +1412,7 @@ int main(int argc, char *argv[])
         else // dim == 4
             Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
         Divfree_op.Assemble();
+        Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
 
@@ -1379,14 +1423,14 @@ int main(int argc, char *argv[])
         else
             Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
         Ablock->Assemble();
-        //Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+        Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
 
         // getting pointers to dof_truedof matrices
 #ifndef HCURL_COARSESOLVER
         if (l < num_levels - 1)
 #endif
-            Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+          Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
@@ -1447,6 +1491,7 @@ int main(int argc, char *argv[])
             Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
             Bblock->Assemble();
             //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
+            Bblock->EliminateTestDofs(ess_bdrSigma);
             Bblock->Finalize();
             Constraint_mat_lvls[l] = Bblock->LoseMat();
 
@@ -1739,8 +1784,35 @@ int main(int argc, char *argv[])
     else // dim == 4
         Divfreeop_coarse.AddDomainInterpolator(new DivSkewInterpolator);
     Divfreeop_coarse.Assemble();
+    Divfreeop_coarse.EliminateTestDofs(ess_bdrSigma);
+    Vector tempsol(Divfreeop_coarse.Width());
+    tempsol = 0.0;
+    Vector temprhs(Divfreeop_coarse.Height());
+    temprhs = 0.0;
+    Divfreeop_coarse.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
     Divfreeop_coarse.Finalize();
     HypreParMatrix * Divfreehpmat_coarse = Divfreeop_coarse.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+
+    /*
+    // checking that Divfreeop_coarse, interpolated back to the finer level, is orthogonal to the divergence
+
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]);
+    Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+    Bblock->Assemble();
+    Bblock->EliminateTestDofs(ess_bdrSigma);
+    Bblock->Finalize();
+    HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
+
+    HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfreehpmat_coarse);
+    HypreParMatrix * checkprod = ParMult(Constraint_global, temprod);
+
+    SparseMatrix diagg;
+    checkprod->GetDiag(diagg);
+
+    std::cout << "Constraint[0] * TrueP * Curl[1] norm = " << diagg.MaxNorm() << "\n";
+    MPI_Finalize();
+    return 0;
+    */
 
     /*
     int size_hcurlsolver = 0;
@@ -1770,6 +1842,36 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
+
+    // must be the other way around
+    /*
+    // checking if truepfunct holds the boundary condition
+    Vector vec1(TrueP_R[0]->Height());
+    vec1 = 1.0;
+
+    for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][0]->Size(); ++i)
+    {
+        int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][0])[i];
+        vec1[tdofind] = 0.0;
+    }
+
+    Vector vec2(TrueP_R[0]->Width());
+
+    TrueP_R[0]->MultTranspose(vec1, vec2);
+
+    for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[1][0]->Size(); ++i)
+    {
+        int tdofind = (*EssBdrTrueDofs_Funct_lvls[1][0])[i];
+        if ( fabs(vec2[tdofind]) > 1.0e-14 )
+        {
+            std::cout << "bnd cnd is violated for vec2! \n";
+            std::cout << "tdofind = " << tdofind << ", value = " << vec2[tdofind] << "\n";
+        }
+    }
+
+    MPI_Finalize();
+    return 0;
+    */
 
     /*
     StopWatch chrono_debug;
@@ -2109,6 +2211,19 @@ int main(int argc, char *argv[])
     ParGridFunction * sigma_exact = new ParGridFunction(R_space);
     sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
+    // FIXME: remove this
+    {
+        const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
+
+        for ( int tdof = 0; tdof < temp->Size(); ++tdof)
+        {
+            if ( (*temp)[tdof] != 0 && fabs( (*Sigmahat)[tdof]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for Sigmahat! value = "
+                          << (*Sigmahat)[tdof]
+                          << "exact val = " << (*sigma_exact)[tdof] << ", index = " << tdof << "\n";
+        }
+    }
+
     if (withDiv)
         xblks.GetBlock(0) = 0.0;
     else
@@ -2148,8 +2263,16 @@ int main(int argc, char *argv[])
     Divfree_op.Assemble();
     //Divfree_op.EliminateTestDofs(ess_bdrSigma); is it needed here? I think no, we have bdr conditions for sigma already applied to M
     //ParGridFunction* rhside_Hcurl = new ParGridFunction(C_space);
-    //Divfree_op.EliminateTrialDofs(ess_bdrU, xblks.GetBlock(0), *rhside_Hcurl);
-    //Divfree_op.EliminateTestDofs(ess_bdrU);
+    /*
+    {
+        Vector temprhs(Divfree_op.Height());
+        temprhs = 0.0;
+        Vector tempsol(Divfree_op.Width());
+        tempsol = 0.0;
+        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);//xblks.GetBlock(0), temprhs);
+    }
+    */
+    //Divfree_op.EliminateTestDofs(ess_bdrSigma);
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
@@ -2481,7 +2604,28 @@ int main(int argc, char *argv[])
     else // dim == 4
         Divfree_h.AddDomainInterpolator(new DivSkewInterpolator());
     Divfree_h.Assemble();
+    Vector tmp1(Divfree_h.Width());
+    tmp1 = 0.0;
+    Vector tmp2(Divfree_h.Height());
+    tmp1 = 0.0;
+    Divfree_h.EliminateTrialDofs(ess_bdrSigma, tmp1, tmp2);
     Divfree_h.Mult(*u, *opdivfreepart);
+
+    // FIXME: remove this
+    {
+        const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
+
+        for ( int tdof = 0; tdof < temp->Size(); ++tdof)
+        {
+            if ( (*temp)[tdof] != 0 && fabs( (*opdivfreepart)[tdof]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for opdivfreepart! value = "
+                          << (*opdivfreepart)[tdof]
+                          << ", index = " << tdof << "\n";
+            }
+        }
+    }
+
 
     ParGridFunction * opdivfreepart_exact;
     double err_opdivfreepart, norm_opdivfreepart;
@@ -2509,6 +2653,20 @@ int main(int argc, char *argv[])
     ParGridFunction * sigma = new ParGridFunction(R_space);
     *sigma = *Sigmahat;         // particular solution
     *sigma += *opdivfreepart;   // plus div-free guy
+
+
+    // FIXME: remove this
+    {
+        const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
+
+        for ( int tdof = 0; tdof < temp->Size(); ++tdof)
+        {
+            if ( (*temp)[tdof] != 0 && fabs( (*sigma)[tdof]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for sigma! value = "
+                          << (*sigma)[tdof]
+                          << "exact val = " << (*sigma_exact)[tdof] << ", index = " << tdof << "\n";
+        }
+    }
 
     /*
     // checking the divergence of sigma
@@ -2614,6 +2772,7 @@ int main(int argc, char *argv[])
     Div.AddDomainInterpolator(new DivergenceInterpolator());
     ParGridFunction DivSigma(W_space);
     Div.Assemble();
+    Div.EliminateTestDofs(ess_bdrSigma);
     Div.Mult(*sigma, DivSigma);
 
     double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
@@ -3060,13 +3219,13 @@ int main(int argc, char *argv[])
 
 #ifndef HCURL_COARSESOLVER
     CoarsestSolver_partfinder->SetMaxIter(200);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-9);
-    CoarsestSolver_partfinder->SetRelTol(1.0e-9);
+    CoarsestSolver_partfinder->SetAbsTol(1.0e-9); // -9
+    CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(200);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-5));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-5));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #endif
     if (verbose)
@@ -3728,6 +3887,34 @@ int main(int argc, char *argv[])
     NewSolver.Mult(NewRhs, NewX);
 
     NewSigmahat->Distribute(&(NewX.GetBlock(0)));
+
+
+    /*
+    // FIXME: Remove this
+    ParGridFunction * SolDofs = new ParGridFunction(R_space_lvls[0]);
+    SolDofs->Distribute(NewSigmahat);
+
+    MFEM_ASSERT(CheckConstrRes(*SolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the newsigmahat"), "Failure");
+
+    if (verbose)
+        std::cout << "Success \n";
+    MPI_Finalize();
+    return 0;
+    */
+
+
+    // FIXME: remove this
+    {
+        const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
+
+        for ( int tdof = 0; tdof < temp->Size(); ++tdof)
+        {
+            if ( (*temp)[tdof] != 0 && fabs( (*NewSigmahat)[tdof]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for NewSigmahat! value = "
+                          << (*NewSigmahat)[tdof]
+                          << "exact val = " << (*sigma_exact_finest)[tdof] << ", index = " << tdof << "\n";
+        }
+    }
 
     std::cout << "Solution computed via the new solver \n";
 
