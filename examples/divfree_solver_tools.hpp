@@ -3806,18 +3806,21 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     } // end of main iterative loop
 
     // describing the reason for the stop:
-    if (print_level)
+    //if (print_level)
     {
-        if (converged == 1)
-            std::cout << "Solver converged in " << itnum << " iterations. \n";
-        else // -1
-            std::cout << "Solver didn't converge in " << itnum << " iterations. \n";
+        int myrank;
+        MPI_Comm_rank(comm, &myrank);
+        if (myrank == 0)
+            if (converged == 1)
+                std::cout << "Solver converged in " << itnum << " iterations. \n" << std::flush;
+            else // -1
+                std::cout << "Solver didn't converge in " << itnum << " iterations. \n" << std::flush;
     }
 
 #ifdef TIMING
-        MPI_Barrier(comm);
-        chrono4.Stop();
-        time_mult += chrono3.RealTime();
+    MPI_Barrier(comm);
+    chrono4.Stop();
+    time_mult += chrono3.RealTime();
 #endif
 
 #ifdef TIMING

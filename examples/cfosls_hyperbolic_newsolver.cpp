@@ -13,7 +13,7 @@
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-#define OLD_CODE
+//#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -24,7 +24,7 @@
 #define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
 
@@ -3193,7 +3193,7 @@ int main(int argc, char *argv[])
 
     NewSolver.SetRelTol(newsolver_reltol);
     NewSolver.SetMaxIter(40);
-    NewSolver.SetPrintLevel(1);
+    NewSolver.SetPrintLevel(0);
     NewSolver.SetStopCriteriaType(0);
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
@@ -3912,7 +3912,83 @@ int main(int argc, char *argv[])
     if (verbose)
         NewSolver.PrintAllOptions();
 
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Global system for the CG was built in " << chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
     NewSolver.Mult(NewRhs, NewX);
+
+    chrono.Stop();
+
+    if (verbose)
+    {
+        std::cout << "Linear solver (new solver only) took " << chrono.RealTime() << "s. \n";
+    }
+
+
+
+#ifdef TIMING
+    double temp_sum;
+
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i && myid % 10 == 0)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "Look at my list for mult timings: \n";
+
+            for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
+                std::cout << *i << " ";
+            std::cout << "\n" << std::flush;
+        }
+        MPI_Barrier(comm);
+    }
+
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_mult = " << temp_sum << "\n";
+    delete Times_mult;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_solve->begin(); i != Times_solve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_solve = " << temp_sum << "\n";
+    delete Times_solve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_localsolve->begin(); i != Times_localsolve->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_localsolve = " << temp_sum << "\n";
+    delete Times_localsolve;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_smoother->begin(); i != Times_smoother->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_smoother = " << temp_sum << "\n";
+    delete Times_smoother;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_coarsestproblem = " << temp_sum << "\n";
+    delete Times_coarsestproblem;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_fw->begin(); i != Times_fw->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_fw = " << temp_sum << "\n";
+    delete Times_fw;
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_up->begin(); i != Times_up->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_up = " << temp_sum << "\n";
+    delete Times_up;
+#endif
 
     NewSigmahat->Distribute(&(NewX.GetBlock(0)));
 
@@ -3944,7 +4020,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    std::cout << "Solution computed via the new solver \n";
+    if (verbose)
+        std::cout << "Solution computed via the new solver \n";
 
     double max_bdr_error = 0;
     for ( int dof = 0; dof < Xinit.GetBlock(0).Size(); ++dof)
