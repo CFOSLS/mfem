@@ -21,10 +21,10 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-#define SOLVE_WITH_LOCALSOLVERS
+//#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
 
@@ -3144,7 +3144,9 @@ int main(int argc, char *argv[])
     std::list<double>* Times_mult = new std::list<double>;
     std::list<double>* Times_solve = new std::list<double>;
     std::list<double>* Times_localsolve = new std::list<double>;
+    std::list<double>* Times_localsolve_lvls = new std::list<double>[num_levels - 1];
     std::list<double>* Times_smoother = new std::list<double>;
+    std::list<double>* Times_smoother_lvls = new std::list<double>[num_levels - 1];
     std::list<double>* Times_coarsestproblem = new std::list<double>;
     std::list<double>* Times_fw = new std::list<double>;
     std::list<double>* Times_up = new std::list<double>;
@@ -3175,7 +3177,7 @@ int main(int argc, char *argv[])
                      Smoothers_lvls,
                      Xinit_truedofs,
 #ifdef TIMING
-                     Times_mult, Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
+                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_fw, Times_up,
 #endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
@@ -3541,7 +3543,7 @@ int main(int argc, char *argv[])
         BlockMattest->SetBlock(1,1, Ctest);
     }
 
-    int TestmaxIter(20);
+    int TestmaxIter(400);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
     Testsolver.SetAbsTol(sqrt(atol));
@@ -3621,12 +3623,34 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "time_localsolve = " << temp_sum << "\n";
     delete Times_localsolve;
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        temp_sum = 0.0;
+        for (list<double>::iterator i = Times_localsolve_lvls[l].begin(); i != Times_localsolve_lvls[l].end(); ++i)
+            temp_sum += *i;
+        if (verbose)
+            std::cout << "time_localsolve lvl " << l << " = " << temp_sum << "\n";
+    }
+    //delete Times_localsolve_lvls;
+
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_smoother->begin(); i != Times_smoother->end(); ++i)
         temp_sum += *i;
     if (verbose)
         std::cout << "time_smoother = " << temp_sum << "\n";
     delete Times_smoother;
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        temp_sum = 0.0;
+        for (list<double>::iterator i = Times_smoother_lvls[l].begin(); i != Times_smoother_lvls[l].end(); ++i)
+            temp_sum += *i;
+        if (verbose)
+            std::cout << "time_smoother lvl " << l << " = " << temp_sum << "\n";
+    }
+    //delete Times_smoother_lvls;
+
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
@@ -3872,6 +3896,7 @@ int main(int argc, char *argv[])
     BlockVector NewRhs(new_trueoffsets);
     NewRhs = 0.0;
 
+    /*
     double * pointer1 = NULL;
     double * pointer2 = NULL;
 
@@ -3879,6 +3904,7 @@ int main(int argc, char *argv[])
         std::cout << "NULL equals NULL \n";
     else
         std::cout << "NULL != NULL \n";
+    */
 
     if (numblocks_funct > 1)
     {
