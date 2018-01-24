@@ -2717,6 +2717,15 @@ protected:
     mutable HypreParMatrix* Curlh_global;
 #endif
 
+#ifdef TIMING
+    mutable StopWatch chrono;
+    mutable StopWatch chrono2;
+    mutable double time_beforeintmult;
+    mutable double time_intmult;
+    mutable double time_afterintmult;
+    mutable double time_globalmult;
+#endif
+
     // Projection of the system matrix M onto discrete Hcurl space
     // stores Curl_hT * M * Curlh
     //mutable SparseMatrix* CTMC;
@@ -2776,8 +2785,26 @@ public:
 
     // service routines
     int GetSweepsNumber(int block) const {return sweeps_num[block];}
+#ifdef TIMING
+    void ResetInternalTimings() const;
+
+    double GetGlobalMultTime() {return time_globalmult;}
+    double GetInternalMultTime() {return time_intmult;}
+    double GetBeforeIntMultTime() {return time_beforeintmult;}
+    double GetAfterIntMultTime() {return time_afterintmult;}
+#endif
 
 };
+
+#ifdef TIMING
+void HcurlGSSSmoother::ResetInternalTimings() const
+{
+    time_beforeintmult = 0.0;
+    time_intmult = 0.0;
+    time_afterintmult = 0.0;
+    time_globalmult = 0.0;
+}
+#endif
 
 HcurlGSSSmoother::~HcurlGSSSmoother()
 {
@@ -2868,6 +2895,11 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
 
 void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 {
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono2.Clear();
+    chrono2.Start();
+#endif
     if (print_level)
         std::cout << "Smoothing with HcurlGSS smoother \n";
 
@@ -2881,6 +2913,12 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     //xblock = new BlockVector(x.GetData(), block_offsets);
     //yblock = new BlockVector(y.GetData(), block_offsets);
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -2927,6 +2965,16 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
     //CTMC_global_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
     //Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_beforeintmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
@@ -2934,6 +2982,15 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_intmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -2966,6 +3023,16 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                           << ", index = " << (*temp)[tdofind] << "\n";
         }
     }
+#endif
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_afterintmult += chrono.RealTime();
+
+    MPI_Barrier(comm);
+    chrono2.Stop();
+    time_globalmult += chrono2.RealTime();
 #endif
 
 }
@@ -3116,6 +3183,10 @@ void HcurlGSSSmoother::Setup() const
 
     delete CTMC_d_td;
     delete d_td_Hcurl_T;
+
+#ifdef TIMING
+    ResetInternalTimings();
+#endif
 }
 
 // TODO: Add as an option using blas and lapack versions for solving local problems

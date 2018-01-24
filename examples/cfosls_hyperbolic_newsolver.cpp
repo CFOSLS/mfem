@@ -1894,6 +1894,7 @@ int main(int argc, char *argv[])
     //return 0;
     */
 
+#ifdef TIMING
     //testing the smoother performance
 
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1920,7 +1921,19 @@ int main(int argc, char *argv[])
         if (verbose)
            std::cout << "Smoother at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
 
+        if (verbose)
+        {
+           std::cout << "Internal timing of the smoother at level " << l << ": \n";
+           std::cout << "global mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetGlobalMultTime() << " \n" << std::flush;
+           std::cout << "internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetInternalMultTime() << " \n" << std::flush;
+           std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
+           std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
+        }
+
+        for (int l = 0; l < num_levels - 1; ++l)
+            ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
+#endif
 
 #ifdef COARSESOLVER_COMPARISON
 #ifndef     HCURL_COARSESOLVER
@@ -3246,6 +3259,11 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
 
+#ifdef TIMING
+    for (int l = 0; l < num_levels - 1; ++l)
+        ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
+#endif
+
 #ifndef HCURL_COARSESOLVER
     CoarsestSolver_partfinder->SetMaxIter(200);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-9); // -9
@@ -3680,6 +3698,17 @@ int main(int argc, char *argv[])
     }
     //delete Times_smoother_lvls;
 
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (verbose)
+        {
+           std::cout << "Internal timing of the smoother at level " << l << ": \n";
+           std::cout << "global mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetGlobalMultTime() << " \n" << std::flush;
+           std::cout << "internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetInternalMultTime() << " \n" << std::flush;
+           std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
+           std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
+        }
+    }
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
@@ -4044,7 +4073,20 @@ int main(int argc, char *argv[])
         if (verbose)
             std::cout << "time_smoother lvl " << l << " = " << temp_sum << "\n";
     }
+    if (verbose)
+        std::cout << "\n";
     //delete Times_smoother_lvls;
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (verbose)
+        {
+           std::cout << "Internal timing of the smoother at level " << l << ": \n";
+           std::cout << "global mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetGlobalMultTime() << " \n" << std::flush;
+           std::cout << "internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetInternalMultTime() << " \n" << std::flush;
+           std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
+           std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
+        }
+    }
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
