@@ -24,7 +24,7 @@
 //#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
 
@@ -1866,6 +1866,7 @@ int main(int argc, char *argv[])
     return 0;
     */
 
+    /*
     StopWatch chrono_debug;
 
     Vector testRhs(CoarsestSolver->Height());
@@ -1891,7 +1892,35 @@ int main(int argc, char *argv[])
     //delete CoarsestSolver;
     //MPI_Finalize();
     //return 0;
+    */
 
+    //testing the smoother performance
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        StopWatch chrono_debug;
+
+        Vector testRhs(Smoothers_lvls[l]->Height());
+        testRhs = 1.0;
+        Vector testX(Smoothers_lvls[l]->Width());
+        testX = 0.0;
+
+        MPI_Barrier(comm);
+        chrono_debug.Clear();
+        chrono_debug.Start();
+        for (int it = 0; it < 20; ++it)
+        {
+            Smoothers_lvls[l]->Mult(testRhs, testX);
+            testRhs += testX;
+        }
+
+        MPI_Barrier(comm);
+        chrono_debug.Stop();
+
+        if (verbose)
+           std::cout << "Smoother at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+
+    }
 
 #ifdef COARSESOLVER_COMPARISON
 #ifndef     HCURL_COARSESOLVER
@@ -3990,12 +4019,32 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "time_localsolve = " << temp_sum << "\n";
     delete Times_localsolve;
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        temp_sum = 0.0;
+        for (list<double>::iterator i = Times_localsolve_lvls[l].begin(); i != Times_localsolve_lvls[l].end(); ++i)
+            temp_sum += *i;
+        if (verbose)
+            std::cout << "time_localsolve lvl " << l << " = " << temp_sum << "\n";
+    }
+    //delete Times_localsolve_lvls;
+
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_smoother->begin(); i != Times_smoother->end(); ++i)
         temp_sum += *i;
     if (verbose)
         std::cout << "time_smoother = " << temp_sum << "\n";
     delete Times_smoother;
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        temp_sum = 0.0;
+        for (list<double>::iterator i = Times_smoother_lvls[l].begin(); i != Times_smoother_lvls[l].end(); ++i)
+            temp_sum += *i;
+        if (verbose)
+            std::cout << "time_smoother lvl " << l << " = " << temp_sum << "\n";
+    }
+    //delete Times_smoother_lvls;
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
