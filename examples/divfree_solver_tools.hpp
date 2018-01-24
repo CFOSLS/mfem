@@ -313,6 +313,8 @@ CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
                 delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
 
+    delete coarseSolver;
+
     delete Divfreeop_T;
 }
 
@@ -355,7 +357,7 @@ void CoarsestProblemHcurlSolver::Setup() const
 
     delete CTMC;
     delete CTMC_d_td;
-
+    delete d_td_Hcurl_T;
 
     // 1. eliminating boundary conditions at coarse level
 

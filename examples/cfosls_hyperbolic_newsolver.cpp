@@ -3608,6 +3608,7 @@ int main(int argc, char *argv[])
         temp_sum += *i;
     if (verbose)
         std::cout << "time_mult = " << temp_sum << "\n";
+    delete Times_mult;
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_solve->begin(); i != Times_solve->end(); ++i)
         temp_sum += *i;
@@ -4209,8 +4210,7 @@ int main(int argc, char *argv[])
                 for (int blk2 = 0; blk2 < Funct_mat_lvls[l]->NumColBlocks(); ++blk2)
                     delete &(Funct_mat_lvls[l]->GetBlock(blk1,blk2));
         delete Funct_mat_lvls[l];
-        if (l == 0)
-            delete Funct_mat_offsets_lvls[l];
+        delete Funct_mat_offsets_lvls[l];
 
         delete Constraint_mat_lvls[l];
 
@@ -4282,6 +4282,7 @@ int main(int argc, char *argv[])
     delete CoarsestSolver_partfinder;
 #ifdef HCURL_COARSESOLVER
     delete CoarsestSolver;
+    delete Divfreehpmat_coarse;
 #endif
 
     delete sigma_exact_finest;
