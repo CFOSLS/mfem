@@ -1866,7 +1866,6 @@ int main(int argc, char *argv[])
     return 0;
     */
 
-    /*
     StopWatch chrono_debug;
 
     Vector testRhs(CoarsestSolver->Height());
@@ -1874,10 +1873,16 @@ int main(int argc, char *argv[])
     Vector testX(CoarsestSolver->Width());
     testX = 0.0;
 
+    MPI_Barrier(comm);
     chrono_debug.Clear();
     chrono_debug.Start();
-    for (int it = 0; it < 1; ++it)
+    for (int it = 0; it < 20; ++it)
+    {
         CoarsestSolver->Mult(testRhs, testX);
+        testRhs = testX;
+    }
+
+    MPI_Barrier(comm);
     chrono_debug.Stop();
 
     if (verbose)
@@ -1886,7 +1891,6 @@ int main(int argc, char *argv[])
     //delete CoarsestSolver;
     //MPI_Finalize();
     //return 0;
-    */
 
 
 #ifdef COARSESOLVER_COMPARISON
@@ -3137,6 +3141,7 @@ int main(int argc, char *argv[])
     int stopcriteria_type = 1;
 
 #ifdef TIMING
+    std::list<double>* Times_mult = new std::list<double>;
     std::list<double>* Times_solve = new std::list<double>;
     std::list<double>* Times_localsolve = new std::list<double>;
     std::list<double>* Times_smoother = new std::list<double>;
@@ -3170,7 +3175,7 @@ int main(int argc, char *argv[])
                      Smoothers_lvls,
                      Xinit_truedofs,
 #ifdef TIMING
-                     Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
+                     Times_mult, Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
 #endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
@@ -3536,7 +3541,7 @@ int main(int argc, char *argv[])
         BlockMattest->SetBlock(1,1, Ctest);
     }
 
-    int TestmaxIter(400);
+    int TestmaxIter(20);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
     Testsolver.SetAbsTol(sqrt(atol));
@@ -3584,6 +3589,25 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     double temp_sum;
 
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i && myid % 10 == 0)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "Look at my list for mult timings: \n";
+
+            for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
+                std::cout << *i << " ";
+            std::cout << "\n" << std::flush;
+        }
+        MPI_Barrier(comm);
+    }
+
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_mult = " << temp_sum << "\n";
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_solve->begin(); i != Times_solve->end(); ++i)
         temp_sum += *i;

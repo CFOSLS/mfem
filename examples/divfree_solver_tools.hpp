@@ -17,9 +17,9 @@ using std::unique_ptr;
 //#define CHECK_LOCALSOLVE
 
 // activates constraint residual check after each iteration of the minimization solver
-#define CHECK_CONSTR
+//#define CHECK_CONSTR
 
-#define CHECK_BNDCND
+//#define CHECK_BNDCND
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
@@ -486,7 +486,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(1);
+    coarseSolver->SetPrintLevel(0);
 
     finalized = true;
 }
@@ -3216,12 +3216,15 @@ private:
     mutable StopWatch chrono;
     mutable StopWatch chrono2;
     mutable StopWatch chrono3;
+    mutable StopWatch chrono4;
     mutable double time_solve;
+    mutable double time_mult;
     mutable double time_localsolve;
     mutable double time_smoother;
     mutable double time_coarsestproblem;
     mutable double time_fw;
     mutable double time_up;
+    mutable std::list<double>* times_mult;
     mutable std::list<double>* times_solve;
     mutable std::list<double>* times_localsolve;
     mutable std::list<double>* times_smoother;
@@ -3307,6 +3310,7 @@ public:
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
 #ifdef TIMING
+                            std::list<double>* Times_mult,
                             std::list<double>* Times_solve,
                             std::list<double>* Times_localsolve,
                             std::list<double>* Times_smoother,
@@ -3487,6 +3491,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
 #ifdef TIMING
+                        std::list<double>* Times_mult,
                         std::list<double>* Times_solve,
                         std::list<double>* Times_localsolve,
                         std::list<double>* Times_smoother,
@@ -3512,6 +3517,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
        Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs),
 #ifdef TIMING
+       times_mult(Times_mult),
        times_solve(Times_solve),
        times_localsolve(Times_localsolve),
        times_smoother(Times_smoother),
@@ -3604,6 +3610,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
             LocalSolvers_lvls[l] = NULL;
 
 #ifdef TIMING
+    time_mult = 0.0;
     time_solve = 0.0;
     time_localsolve = 0.0;
     time_smoother = 0.0;
@@ -3647,12 +3654,19 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
 
 #ifdef TIMING
+    time_mult = 0.0;
     time_solve = 0.0;
     time_localsolve = 0.0;
     time_smoother = 0.0;
     time_coarsestproblem = 0.0;
     time_fw = 0.0;
     time_up = 0.0;
+#endif
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono4.Clear();
+    chrono4.Start();
 #endif
 
 
@@ -3711,6 +3725,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #endif
 
 #ifdef TIMING
+        MPI_Barrier(comm);
         chrono3.Clear();
         chrono3.Start();
 #endif
@@ -3718,6 +3733,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
 
 #ifdef TIMING
+        MPI_Barrier(comm);
         chrono3.Stop();
         time_solve  += chrono3.RealTime();
 #endif
@@ -3797,6 +3813,13 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     }
 
 #ifdef TIMING
+        MPI_Barrier(comm);
+        chrono4.Stop();
+        time_mult += chrono3.RealTime();
+#endif
+
+#ifdef TIMING
+    times_mult->push_back(time_mult);
     times_solve->push_back(time_solve);
     times_localsolve->push_back(time_localsolve);
     times_smoother->push_back(time_smoother);
@@ -3858,6 +3881,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono2.Clear();
     chrono2.Start();
 #endif
@@ -3868,6 +3892,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
 
 #ifdef TIMING
+        MPI_Barrier(comm);
         chrono.Clear();
         chrono.Start();
 #endif
@@ -3884,8 +3909,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
 #ifdef TIMING
+        MPI_Barrier(comm);
         chrono.Stop();
         time_localsolve += chrono.RealTime();
+        MPI_Barrier(comm);
         chrono.Clear();
         chrono.Start();
 #endif
@@ -3901,6 +3928,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
 
 #ifdef TIMING
+        MPI_Barrier(comm);
         chrono.Stop();
         time_smoother += chrono.RealTime();
 #endif
@@ -3912,11 +3940,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     } // end of loop over finer levels
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono2.Stop();
     time_fw  += chrono2.RealTime();
 #endif
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono.Clear();
     chrono.Start();
 #endif
@@ -3925,6 +3955,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono.Stop();
     //std::cout << "before: " << time_coarsestproblem << "\n";
     time_coarsestproblem += chrono.RealTime();
@@ -3932,6 +3963,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono2.Clear();
     chrono2.Start();
 #endif
@@ -3950,6 +3982,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
 
 #ifdef TIMING
+            MPI_Barrier(comm);
             chrono.Clear();
             chrono.Start();
 #endif
@@ -3961,8 +3994,10 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
             }
 #ifdef TIMING
+            MPI_Barrier(comm);
             chrono.Stop();
             time_smoother += chrono.RealTime();
+            MPI_Barrier(comm);
             chrono.Clear();
             chrono.Start();
 #endif
@@ -3974,6 +4009,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             }
 
 #ifdef TIMING
+            MPI_Barrier(comm);
             chrono.Stop();
             time_localsolve += chrono.RealTime();
 #endif
@@ -3995,6 +4031,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     }
 
 #ifdef TIMING
+    MPI_Barrier(comm);
     chrono2.Stop();
     time_up  += chrono2.RealTime();
 #endif
