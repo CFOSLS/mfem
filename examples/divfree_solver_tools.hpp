@@ -3320,14 +3320,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     BlockVector * diff = new BlockVector(block_offsets);
     BlockVector * truediff = new BlockVector(trueblock_offsets);
 
-
-    {
-        *truediff = *truex2;
-        *truediff -= *truex1;
-        double norm_diff = diff->Norml2() / sqrt (diff->Size());
-        if ( norm_diff > 1.0e-14)
-            std::cout << "truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
-    }
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
 
     MPI_Barrier(comm);
 
@@ -3336,14 +3331,76 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         *truediff -= *truerhs1;
         double norm_diff = diff->Norml2() / sqrt (diff->Size());
         if ( norm_diff > 1.0e-14)
-            std::cout << "truehs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
+        {
+            std::cout << "I am " << myid << ", truerhs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
+            for (int blk = 0; blk < numblocks; ++blk)
+            {
+                int count = 0;
+
+                const Array<int> *temp = essbdrtruedofs_Funct[blk];
+                for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                    if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                    {
+                        std::cout << "difference is at the true boundary \n";
+                        count++;
+                    }
+                std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+            }
+
+            int count2 = 0;
+            for (int blk = 0; blk < numblocks; ++blk)
+                for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                    if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
+                    {
+                        std::cout << "truerhs1-val = " << truerhs1->GetBlock(blk)[j] << ", truerhs2-val = " << truerhs2->GetBlock(blk)[j] << "\n";
+                        count2++;
+                    }
+
+            std::cout << "number of points where diff > 0 = " << count2 << "\n";
+
+        }
+        std::cout << std::flush;
     }
 
     MPI_Barrier(comm);
 
-    int num_procs, myid;
-    MPI_Comm_size(comm, &num_procs);
-    MPI_Comm_rank(comm, &myid);
+    {
+        *truediff = *truex2;
+        *truediff -= *truex1;
+        double norm_diff = diff->Norml2() / sqrt (diff->Size());
+        if ( norm_diff > 1.0e-14)
+        {
+            std::cout << "I am " << myid << ", truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
+            for (int blk = 0; blk < numblocks; ++blk)
+            {
+                int count = 0;
+
+                const Array<int> *temp = essbdrtruedofs_Funct[blk];
+                for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                    if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                    {
+                        std::cout << "difference is at the true boundary \n";
+                        count++;
+                    }
+                std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+            }
+
+            int count2 = 0;
+            for (int blk = 0; blk < numblocks; ++blk)
+                for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                    if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
+                    {
+                        std::cout << "truex1 val = " << truex1->GetBlock(blk)[j] << ", truex2 val = " << truex2->GetBlock(blk)[j] << "\n";
+                        count2++;
+                    }
+
+            std::cout << "number of points where diff > 0 = " << count2 << "\n";
+
+        }
+        std::cout << std::flush;
+    }
+
+    MPI_Barrier(comm);
 
     for (int i = 0 ;i < num_procs; ++i)
     {
@@ -3385,6 +3442,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
+
+    MPI_Barrier(comm);
 
 
     *yblock = *y2;
