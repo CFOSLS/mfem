@@ -3326,78 +3326,95 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     MPI_Barrier(comm);
 
+    for (int i = 0 ;i < num_procs; ++i)
     {
-        *truediff = *truerhs2;
-        *truediff -= *truerhs1;
-        double norm_diff = diff->Norml2() / sqrt (diff->Size());
-        if ( norm_diff > 1.0e-14)
+        if (myid == i)
         {
-            std::cout << "I am " << myid << ", truerhs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
-            for (int blk = 0; blk < numblocks; ++blk)
+            *truediff = *truerhs2;
+            *truediff -= *truerhs1;
+            double norm_diff = diff->Norml2() / sqrt (diff->Size());
+            if ( norm_diff > 1.0e-14)
             {
-                int count = 0;
+                std::cout << "I am " << myid << ", truerhs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
+                for (int blk = 0; blk < numblocks; ++blk)
+                {
+                    int count = 0;
 
-                const Array<int> *temp = essbdrtruedofs_Funct[blk];
-                for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-                    if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
-                    {
-                        std::cout << "difference is at the true boundary \n";
-                        count++;
-                    }
-                std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                    const Array<int> *temp;
+                    if (blk == 0)
+                        temp = &essbdrtruedofs_Hcurl;
+                    else
+                        temp = essbdrtruedofs_Funct[blk];
+
+                    for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                        if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                        {
+                            std::cout << "difference is at the true boundary \n";
+                            count++;
+                        }
+                    std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                }
+
+                int count2 = 0;
+                for (int blk = 0; blk < numblocks; ++blk)
+                    for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                        if (fabs (truediff->GetBlock(blk)[j]) > 1.0e-14)
+                        {
+                            std::cout << "truerhs1-val = " << truerhs1->GetBlock(blk)[j] << ", truerhs2-val = " << truerhs2->GetBlock(blk)[j] << "\n";
+                            count2++;
+                        }
+
+                std::cout << "number of points where diff > 0 = " << count2 << "\n";
+
             }
-
-            int count2 = 0;
-            for (int blk = 0; blk < numblocks; ++blk)
-                for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
-                    if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
-                    {
-                        std::cout << "truerhs1-val = " << truerhs1->GetBlock(blk)[j] << ", truerhs2-val = " << truerhs2->GetBlock(blk)[j] << "\n";
-                        count2++;
-                    }
-
-            std::cout << "number of points where diff > 0 = " << count2 << "\n";
-
+            std::cout << std::flush;
         }
-        std::cout << std::flush;
     }
 
     MPI_Barrier(comm);
 
+    for (int i = 0 ;i < num_procs; ++i)
     {
-        *truediff = *truex2;
-        *truediff -= *truex1;
-        double norm_diff = diff->Norml2() / sqrt (diff->Size());
-        if ( norm_diff > 1.0e-14)
+        if (myid == i)
         {
-            std::cout << "I am " << myid << ", truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
-            for (int blk = 0; blk < numblocks; ++blk)
+            *truediff = *truex2;
+            *truediff -= *truex1;
+            double norm_diff = diff->Norml2() / sqrt (diff->Size());
+            if ( norm_diff > 1.0e-14)
             {
-                int count = 0;
+                std::cout << "I am " << myid << ", truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
+                for (int blk = 0; blk < numblocks; ++blk)
+                {
+                    int count = 0;
 
-                const Array<int> *temp = essbdrtruedofs_Funct[blk];
-                for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-                    if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
-                    {
-                        std::cout << "difference is at the true boundary \n";
-                        count++;
-                    }
-                std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                    if (blk == 0)
+                        temp = &essbdrtruedofs_Hcurl;
+                    else
+                        temp = essbdrtruedofs_Funct[blk];
+
+                    for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                        if ( fabs(truediff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                        {
+                            std::cout << "difference is at the true boundary \n";
+                            count++;
+                        }
+                    std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                }
+
+                int count2 = 0;
+                for (int blk = 0; blk < numblocks; ++blk)
+                    for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                        if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
+                        {
+                            std::cout << "truex1 val = " << truex1->GetBlock(blk)[j] << ", truex2 val = " << truex2->GetBlock(blk)[j] << "\n";
+                            count2++;
+                        }
+
+                std::cout << "number of points where diff > 0 = " << count2 << "\n";
+
             }
-
-            int count2 = 0;
-            for (int blk = 0; blk < numblocks; ++blk)
-                for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
-                    if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
-                    {
-                        std::cout << "truex1 val = " << truex1->GetBlock(blk)[j] << ", truex2 val = " << truex2->GetBlock(blk)[j] << "\n";
-                        count2++;
-                    }
-
-            std::cout << "number of points where diff > 0 = " << count2 << "\n";
-
+            std::cout << std::flush;
         }
-        std::cout << std::flush;
     }
 
     MPI_Barrier(comm);
