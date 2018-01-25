@@ -4284,7 +4284,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef TIMING
             MPI_Barrier(comm);
             chrono.Stop();
-            time_localsolve_lvls[l] += chrono.RealTime();
+            time_localsolve_lvls[l - 1] += chrono.RealTime();
             time_localsolve += chrono.RealTime();
 #endif
         }

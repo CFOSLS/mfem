@@ -3391,7 +3391,6 @@ int main(int argc, char *argv[])
                      CoarsestSolver,
                      construct_coarseops, stopcriteria_type);
 
-
     double newsolver_reltol = 1.0e-6;
 
     if (verbose)
@@ -3460,7 +3459,6 @@ int main(int argc, char *argv[])
         std::cout << "Particular solution was found in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
-
 
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks_funct; ++blk)
