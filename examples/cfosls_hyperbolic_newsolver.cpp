@@ -2066,6 +2066,31 @@ int main(int argc, char *argv[])
     //return 0;
     */
 
+    // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
+    SparseMatrix d_td_Hdiv_diag;
+    Dof_TrueDof_Func_lvls[0][0]->GetDiag(d_td_Hdiv_diag);
+
+    SparseMatrix * d_td_Hdiv_diag_T = Transpose(d_td_Hdiv_diag);
+
+
+    SparseMatrix * tempRA = mfem::Mult(*d_td_Hdiv_diag_T, *Divfree_mat_lvls[0]);
+    HypreParMatrix * tempRAP = Dof_TrueDof_Hcurl_lvls[0]->LeftDiagMult(*tempRA, R_space_lvls[0]->GetTrueDofOffsets() );
+
+    Vector testvec1(tempRAP->Width());
+    testvec1 = 1.0;
+    Vector testvec2(tempRAP->Height());
+    tempRAP->Mult(testvec1, testvec2);
+
+    testvec1 = 1.0;
+    Vector testvec3(tempRAP->Height());
+    Divfree_hpmat_lvls[0]->Mult(testvec1, testvec3);
+
+    Vector diffvec(tempRAP->Height());
+    double diffnorm = diffvec.Norml2() / sqrt (diffvec.Size());
+    std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
+    MPI_Barrier(comm);
+
+
 #ifdef TIMING
     //testing the smoother performance
 
@@ -2081,7 +2106,7 @@ int main(int argc, char *argv[])
         MPI_Barrier(comm);
         chrono_debug.Clear();
         chrono_debug.Start();
-        for (int it = 0; it < 20; ++it)
+        for (int it = 0; it < 1; ++it)
         {
             Smoothers_lvls[l]->Mult(testRhs, testX);
             testRhs += testX;
