@@ -1801,6 +1801,10 @@ int main(int argc, char *argv[])
             Divfree_hpmat_lvls[l]->CopyRowStarts();
         }
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (verbose)
+            std::cout << "Got here 0 \n" << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
         // checking the orthogonality of discrete curl and discrete divergence operators
         if (l == 0)
         {
@@ -1816,11 +1820,17 @@ int main(int argc, char *argv[])
             SparseMatrix diagg;
             checkprod->GetDiag(diagg);
 
-            std::cout << "Constraint[" << l << "] * Curl[" << l << "] norm = " << diagg.MaxNorm() << "\n";
+            if (verbose)
+                std::cout << "Constraint[" << l << "] * Curl[" << l << "] norm = " << diagg.MaxNorm() << "\n";
         }
 
     }
 #endif
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Got here 1 \n" << std::flush;
+    MPI_Barrier(MPI_COMM_WORLD);
 
     for (int l = num_levels - 1; l >=0; --l)
     {
@@ -1859,6 +1869,12 @@ int main(int argc, char *argv[])
             Smoothers_lvls[l] = NULL;
 #endif
         }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (verbose)
+            std::cout << "Got here 2 \n" << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
+
 
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
@@ -1899,6 +1915,11 @@ int main(int argc, char *argv[])
     for (int blk = 0; blk < numblocks_funct; ++blk)
         size += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
     size += Dof_TrueDof_L2_lvls[num_levels - 1]->GetNumCols();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Got here 3 \n" << std::flush;
+    MPI_Barrier(MPI_COMM_WORLD);
 
     CoarsestSolver_partfinder = new CoarsestProblemSolver(size, *Funct_mat_lvls[num_levels - 1],
                                                      *Constraint_mat_lvls[num_levels - 1],
