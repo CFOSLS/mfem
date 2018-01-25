@@ -3332,7 +3332,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         {
             *truediff = *truerhs2;
             *truediff -= *truerhs1;
-            double norm_diff = diff->Norml2() / sqrt (diff->Size());
+            double norm_diff = truediff->Norml2() / sqrt (truediff->Size());
             if ( norm_diff > 1.0e-14)
             {
                 std::cout << "I am " << myid << ", truerhs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
@@ -3347,28 +3347,29 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                         temp = essbdrtruedofs_Funct[blk];
 
                     for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-                        if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                        if ( fabs(truediff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
                         {
                             std::cout << "difference is at the true boundary \n";
                             count++;
                         }
-                    std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                    std::cout << "number of boundary points where truediff > 0 in block = " << count << "\n";
                 }
 
                 int count2 = 0;
                 for (int blk = 0; blk < numblocks; ++blk)
-                    for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                    for (int j = 0; j < truediff->GetBlock(blk).Size(); ++j)
                         if (fabs (truediff->GetBlock(blk)[j]) > 1.0e-14)
                         {
                             std::cout << "truerhs1-val = " << truerhs1->GetBlock(blk)[j] << ", truerhs2-val = " << truerhs2->GetBlock(blk)[j] << "\n";
                             count2++;
                         }
 
-                std::cout << "number of points where diff > 0 = " << count2 << "\n";
+                std::cout << "number of points where truediff > 0 = " << count2 << "\n";
 
             }
             std::cout << std::flush;
         }
+        MPI_Barrier(comm);
     }
 
     MPI_Barrier(comm);
@@ -3379,7 +3380,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         {
             *truediff = *truex2;
             *truediff -= *truex1;
-            double norm_diff = diff->Norml2() / sqrt (diff->Size());
+            double norm_diff = truediff->Norml2() / sqrt (truediff->Size());
             if ( norm_diff > 1.0e-14)
             {
                 std::cout << "I am " << myid << ", truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
@@ -3399,23 +3400,24 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                             std::cout << "difference is at the true boundary \n";
                             count++;
                         }
-                    std::cout << "number of boundary points where diff > 0 in block = " << count << "\n";
+                    std::cout << "number of boundary points where truediff > 0 in block = " << count << "\n";
                 }
 
                 int count2 = 0;
                 for (int blk = 0; blk < numblocks; ++blk)
-                    for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
-                        if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
+                    for (int j = 0; j < truediff->GetBlock(blk).Size(); ++j)
+                        if (fabs (truediff->GetBlock(blk)[j]) > 1.0e-14)
                         {
                             std::cout << "truex1 val = " << truex1->GetBlock(blk)[j] << ", truex2 val = " << truex2->GetBlock(blk)[j] << "\n";
                             count2++;
                         }
 
-                std::cout << "number of points where diff > 0 = " << count2 << "\n";
+                std::cout << "number of points where true diff > 0 = " << count2 << "\n";
 
             }
             std::cout << std::flush;
         }
+        MPI_Barrier(comm);
     }
 
     MPI_Barrier(comm);
