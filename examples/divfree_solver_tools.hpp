@@ -17,9 +17,9 @@ using std::unique_ptr;
 //#define CHECK_LOCALSOLVE
 
 // activates constraint residual check after each iteration of the minimization solver
-//#define CHECK_CONSTR
+#define CHECK_CONSTR
 
-//#define CHECK_BNDCND
+#define CHECK_BNDCND
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
@@ -2704,7 +2704,12 @@ private:
 protected:
     const MPI_Comm comm;
 
-    const BlockMatrix& Funct_mat;
+#ifdef NEW_SMOOTHERSETUP
+    mutable Array2D<HypreParMatrix*> * Funct_hpmat;
+    mutable HypreParMatrix* Divfree_hpmat;
+    mutable HypreParMatrix* Divfree_hpmat_T;
+#endif
+    const BlockMatrix* Funct_mat;
 
     // discrete curl operator;
     const SparseMatrix* Curlh;
@@ -2714,7 +2719,8 @@ protected:
     mutable Vector* temp_Hcurl_dofs;
 #else
     // global discrete curl operator
-    mutable HypreParMatrix* Curlh_global;
+    mutable HypreParMatrix* Divfree_hpmat;
+    mutable HypreParMatrix* Divfree_hpmat_T;
 #endif
 
 #ifdef TIMING
@@ -2743,17 +2749,17 @@ protected:
     mutable BlockVector* truex;    // sol for H(curl) x other blocks problems on true dofs
 
     // Dof_TrueDof table for Hcurl
-    const HypreParMatrix & d_td_Hcurl;
+    const HypreParMatrix * d_td_Hcurl;
 
     // Dof_TrueDof table for the functional blocks
-    const std::vector<HypreParMatrix*> & d_td_Funct_blocks;
+    const std::vector<HypreParMatrix*> d_td_Funct_blocks;
 
     // Lists of essential boundary dofs and true dofs for Hcurl
-    const Array<int> & essbdrdofs_Hcurl;
+    const Array<int> * essbdrdofs_Hcurl;
     const Array<int> & essbdrtruedofs_Hcurl;
 
     // Lists of essential boundary dofs and true dofs for functional variables
-    const std::vector<Array<int>*> & essbdrdofs_Funct;
+    const std::vector<Array<int>*> essbdrdofs_Funct;
     const std::vector<Array<int>*> & essbdrtruedofs_Funct;
 
     // block structure (on true dofs)
@@ -2763,6 +2769,14 @@ protected:
 
 public:
     ~HcurlGSSSmoother();
+#ifdef NEW_SMOOTHERSETUP
+    HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
+                                        HypreParMatrix& Divfree_HpMat,
+                                        const Array<int>& EssBdrtruedofs_Hcurl,
+                                        const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                        const Array<int> * SweepsNum,
+                                        const Array<int>& Block_Offsets);
+#endif
     // constructor
     HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                      const SparseMatrix& Discrete_Curl,
@@ -2816,14 +2830,13 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     //delete CTMC;
     delete CTMC_global;
 
+#ifdef NEW_SMOOTHERSETUP
+    delete Divfree_hpmat_T;
+#else
     for (int rowblk = 0; rowblk < Funct_restblocks_global.NumRows(); ++rowblk)
         for (int colblk = 0; colblk < Funct_restblocks_global.NumCols(); ++colblk)
             if (Funct_restblocks_global(rowblk,colblk))
                 delete Funct_restblocks_global(rowblk,colblk);
-
-    for (int i = 0; i < Smoothers.Size(); ++i)
-        delete Smoothers[i];
-
 #ifdef MEMORY_OPTIMIZED
     delete temp_Hdiv_dofs;
     delete temp_Hcurl_dofs;
@@ -2831,6 +2844,10 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     delete Curlh_global;
 #endif
 
+#endif
+
+    for (int i = 0; i < Smoothers.Size(); ++i)
+        delete Smoothers[i];
 }
 
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
@@ -2847,10 +2864,10 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
       numblocks(Funct_Mat.NumRowBlocks()),
       print_level(0),
       comm(Dof_TrueDof_Hcurl.GetComm()),
-      Funct_mat(Funct_Mat),
-      d_td_Hcurl(Dof_TrueDof_Hcurl),
+      Funct_mat(&Funct_Mat),
+      d_td_Hcurl(&Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
-      essbdrdofs_Hcurl(EssBdrdofs_Hcurl),
+      essbdrdofs_Hcurl(&EssBdrdofs_Hcurl),
       essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
       essbdrdofs_Funct(EssBdrDofs_Funct),
       essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
@@ -2893,6 +2910,55 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
     Setup();
 }
 
+#ifdef NEW_SMOOTHERSETUP
+
+HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
+                                    HypreParMatrix& Divfree_HpMat,
+                                    const Array<int>& EssBdrtruedofs_Hcurl,
+                                    const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                    const Array<int> * SweepsNum,
+                                    const Array<int>& Block_Offsets)
+    : BlockOperator(Block_Offsets),
+      numblocks(Funct_HpMat.NumRows()),
+      print_level(0),
+      comm(Divfree_HpMat.GetComm()),
+      Funct_hpmat (&Funct_HpMat),
+      Divfree_hpmat (&Divfree_HpMat),
+      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
+      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
+{
+
+    block_offsets.SetSize(numblocks + 1);
+    for ( int i = 0; i < numblocks + 1; ++i)
+        block_offsets[i] = Block_Offsets[i];
+
+    xblock = new BlockVector(block_offsets);
+    yblock = new BlockVector(block_offsets);
+
+    trueblock_offsets.SetSize(numblocks + 1);
+    trueblock_offsets[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            trueblock_offsets[1] = Divfree_hpmat->Width();
+        else
+            trueblock_offsets[blk + 1] = (*Funct_hpmat)(blk,blk)->Height();
+    }
+    trueblock_offsets.PartialSum();
+
+    Smoothers.SetSize(numblocks);
+
+    sweeps_num.SetSize(numblocks);
+    if (SweepsNum)
+        for ( int blk = 0; blk < numblocks; ++blk)
+            sweeps_num[blk] = (*SweepsNum)[blk];
+    else
+        sweeps_num = 1;
+
+    Setup();
+}
+#endif
+
 void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 {
 #ifdef TIMING
@@ -2900,6 +2966,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono2.Clear();
     chrono2.Start();
 #endif
+
     if (print_level)
         std::cout << "Smoothing with HcurlGSS smoother \n";
 
@@ -2920,6 +2987,80 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+#ifdef NEW_SMOOTHERSETUP
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfree_hpmat->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+        else
+            truerhs->GetBlock(blk) = xblock->GetBlock(blk);
+
+        // imposing boundary conditions on the righthand side
+        if (blk == 0) // in Hcurl
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+            {
+                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                truerhs->GetBlock(0)[tdof] = 0.0;
+            }
+        else
+            for ( int blk = 1; blk < numblocks; ++blk)
+                for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+                {
+                    int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                    truerhs->GetBlock(blk)[tdof] = 0.0;
+                }
+
+    }
+
+    *truex = 0.0;
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_beforeintmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+        Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+    // computing the solution update in the H(div) x other blocks space
+    // in two steps:
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_intmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
+            Divfree_hpmat->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+        else
+            yblock->GetBlock(blk) = truex->GetBlock(blk);
+    }
+
+#ifdef CHECK_BNDCND
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
+                          << yblock->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
+
+#else // for NEW_SMOOTHERSETUP
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
@@ -2932,7 +3073,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             // rhs_l = CT_l * res_lvl
             Curlh->MultTranspose(*temp_Hdiv_dofs, *temp_Hcurl_dofs);
 
-            d_td_Hcurl.MultTranspose(*temp_Hcurl_dofs, truerhs->GetBlock(0));
+            d_td_Hcurl->MultTranspose(*temp_Hcurl_dofs, truerhs->GetBlock(0));
 #else
             std::cout << "xblock(0) size = " << xblock->GetBlock(0).Size() << "\n";
             Curlh_global->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
@@ -2997,7 +3138,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         if (blk == 0) // first component should be transferred from Hcurl to Hdiv
         {
 #ifdef MEMORY_OPTIMIZED
-            d_td_Hcurl.Mult(truex->GetBlock(0), *temp_Hcurl_dofs);
+            d_td_Hcurl->Mult(truex->GetBlock(0), *temp_Hcurl_dofs);
             Curlh->Mult(*temp_Hcurl_dofs, *temp_Hdiv_dofs);
 
             SparseMatrix d_td_Hdiv_diag;
@@ -3025,6 +3166,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     }
 #endif
 
+#endif // for NEW_SMOOTHERSETUP
+
+
 #ifdef TIMING
     MPI_Barrier(comm);
     chrono.Stop();
@@ -3043,11 +3187,29 @@ void HcurlGSSSmoother::Setup() const
     MFEM_ASSERT(numblocks <= 2, "HcurlGSSSmoother::Setup was implemented for the "
                                 "cases numblocks = 1 or 2 only \n");
 
+#ifdef NEW_SMOOTHERSETUP
+    Divfree_hpmat_T = Divfree_hpmat->Transpose();
+    CTMC_global = RAP(Divfree_hpmat, (*Funct_hpmat)(0,0), Divfree_hpmat);
+    CTMC_global->CopyRowStarts();
+    CTMC_global->CopyColStarts();
+
+    Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
+    if (numblocks > 1) // i.e. if S exists in the functional
+    {
+        //Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
+        //((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
+        //((HypreBoomerAMG*)(Smoothers[1]))->iterative_mode = false;
+        Smoothers[1] = new HypreSmoother( *(*Funct_hpmat)(1,1), HypreSmoother::Type::l1GS, sweeps_num[1]);
+    }
+
+    truex = new BlockVector(trueblock_offsets);
+    truerhs = new BlockVector(trueblock_offsets);
+#else // for NEW_SMOOTHERSETUP
     // shortcuts
     SparseMatrix *CurlhT = Transpose(*Curlh);
-    const SparseMatrix * M = &(Funct_mat.GetBlock(0,0));
+    const SparseMatrix * M = &(Funct_mat->GetBlock(0,0));
 
-    HypreParMatrix * d_td_Hcurl_T = d_td_Hcurl.Transpose();
+    HypreParMatrix * d_td_Hcurl_T = d_td_Hcurl->Transpose();
 
     // form CT*M*C as a SparseMatrix
     SparseMatrix *M_Curlh = mfem::Mult(*M, *Curlh);
@@ -3057,9 +3219,9 @@ void HcurlGSSSmoother::Setup() const
     delete CurlhT;
 
     // imposing essential boundary conditions
-    for ( int dof = 0; dof < essbdrdofs_Hcurl.Size(); ++dof)
+    for ( int dof = 0; dof < essbdrdofs_Hcurl->Size(); ++dof)
     {
-        if ( essbdrdofs_Hcurl[dof] != 0)
+        if ( (*essbdrdofs_Hcurl)[dof] != 0)
         {
             CTMC->EliminateRowCol(dof);
         }
@@ -3067,7 +3229,7 @@ void HcurlGSSSmoother::Setup() const
 
     // form CT*M*C as HypreParMatrices
     HypreParMatrix* CTMC_d_td;
-    CTMC_d_td = d_td_Hcurl.LeftDiagMult( *CTMC );
+    CTMC_d_td = d_td_Hcurl->LeftDiagMult( *CTMC );
 
     CTMC_global = ParMult(d_td_Hcurl_T, CTMC_d_td);
     CTMC_global->CopyRowStarts();
@@ -3143,7 +3305,7 @@ void HcurlGSSSmoother::Setup() const
     {
         int blk = 1;
         // FIXME: Unnecessary memory allocation, if one can provide the functional with bnd dofs eliminated in the input
-        SparseMatrix * Funct_blk = new SparseMatrix(Funct_mat.GetBlock(blk,blk));
+        SparseMatrix * Funct_blk = new SparseMatrix(Funct_mat->GetBlock(blk,blk));
 
         for ( int dof = 0; dof < essbdrdofs_Funct[blk]->Size(); ++dof)
         {
@@ -3183,6 +3345,7 @@ void HcurlGSSSmoother::Setup() const
 
     delete CTMC_d_td;
     delete d_td_Hcurl_T;
+#endif // for #else to #ifdef NEW_SMOOTHERSETUP
 
 #ifdef TIMING
     ResetInternalTimings();
@@ -4105,7 +4268,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef TIMING
             MPI_Barrier(comm);
             chrono.Stop();
-            time_smoother_lvls[l] += chrono.RealTime();
+            time_smoother_lvls[l - 1] += chrono.RealTime();
             time_smoother += chrono.RealTime();
             MPI_Barrier(comm);
             chrono.Clear();
