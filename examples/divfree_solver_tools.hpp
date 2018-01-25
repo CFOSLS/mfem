@@ -3387,6 +3387,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                 {
                     int count = 0;
 
+                    const Array<int> *temp;
                     if (blk == 0)
                         temp = &essbdrtruedofs_Hcurl;
                     else
