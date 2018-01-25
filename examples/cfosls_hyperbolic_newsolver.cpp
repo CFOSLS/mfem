@@ -802,7 +802,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1796,7 +1796,7 @@ int main(int argc, char *argv[])
                 (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
             }
 
-            Divfree_hpmat_lvls[l] = RAP(TrueP_C[l-1], Divfree_hpmat_lvls[l-1], TrueP_C[l-1]);
+            Divfree_hpmat_lvls[l] = RAP(TrueP_R[l - 1], Divfree_hpmat_lvls[l-1], TrueP_C[num_levels - 1 - l]);
             Divfree_hpmat_lvls[l]->CopyColStarts();
             Divfree_hpmat_lvls[l]->CopyRowStarts();
         }
