@@ -19,7 +19,9 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-#define NEW_SMOOTHERSETUP
+//#define NEW_SMOOTHERSETUP
+
+#define UNITED_SMOOTHERSETUP
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
@@ -802,7 +804,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1248,7 +1250,7 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
-#ifdef NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     Array<HypreParMatrix*> Divfree_hpmat_lvls(num_levels);
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
 #endif
@@ -1282,7 +1284,7 @@ int main(int argc, char *argv[])
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
-#ifdef NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
        Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numblocks_funct, numblocks_funct);
 #endif
    }
@@ -1501,7 +1503,7 @@ int main(int argc, char *argv[])
             Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
             Bblock->Assemble();
             //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
-            Bblock->EliminateTestDofs(ess_bdrSigma);
+            //Bblock->EliminateTestDofs(ess_bdrSigma);
             Bblock->Finalize();
             Constraint_mat_lvls[l] = Bblock->LoseMat();
 
@@ -1708,7 +1710,7 @@ int main(int argc, char *argv[])
         delete temp_sp;
     }
 
-#ifdef NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
         if (l == 0)
@@ -1797,7 +1799,7 @@ int main(int argc, char *argv[])
         Vector temprhs(Divfree_op.Height());
         temprhs = 0.0;
         Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        Divfree_op.EliminateTestDofs(ess_bdrSigma);
+        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
 
@@ -1872,6 +1874,14 @@ int main(int argc, char *argv[])
                     SweepsNum.Print();
                 }
             }
+#ifdef UNITED_SMOOTHERSETUP
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l],
+                                                     *Funct_mat_lvls[l], *Divfree_mat_lvls[l],
+                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
+                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
+                                                     EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
+                                                     &SweepsNum, offsets_global);
+#else
 #ifdef NEW_SMOOTHERSETUP
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l],
                                                      *EssBdrTrueDofs_Hcurl[l],
@@ -1884,7 +1894,7 @@ int main(int argc, char *argv[])
                                                      EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
 #endif
-
+#endif // for UNITED_SMOOTHERSETUP
 #else
             Smoothers_lvls[l] = NULL;
 #endif
@@ -3162,7 +3172,7 @@ int main(int argc, char *argv[])
 
     //ParLinearForm *fform = new ParLinearForm(R_space);
 
-    ParLinearForm * constrfform = new ParLinearForm(W_space);
+    ParLinearForm * constrfform = new ParLinearForm(W_space_lvls[0]);
     constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
     constrfform->Assemble();
 
@@ -3492,7 +3502,7 @@ int main(int argc, char *argv[])
     Constraint_mat_lvls[0]->Mult(temp_dofs.GetBlock(0), temp_constr);
     temp_constr -= Floc;
 
-    // 3.1 if not, computing the particular solution
+    // 3.1 if not, abort
     if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-13 )
     {
         std::cout << "Initial vector does not satisfies divergence constraint. \n";
@@ -3524,20 +3534,22 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
-    /*
     if (verbose)
         std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
 
     ParGridFunction * PartSolDofs = new ParGridFunction(R_space_lvls[0]);
     PartSolDofs->Distribute(ParticSol);
 
-    MFEM_ASSERT(CheckConstrRes(PartSolDofs, Constraint_mat_lvls[0], ConstrRhs, "in the main code for poarticular solution"), "Failure");
-
-    if (verbose)
-        std::cout << "Success \n";
+    //MFEM_ASSERT(CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"), "Failure");
+    if (!CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"))
+    {
+        std::cout << "Failure! \n";
+    }
+    else
+        if (verbose)
+            std::cout << "Success \n";
     MPI_Finalize();
     return 0;
-    */
 
     /*
     Vector tempp(sigma_exact_finest->Size());
@@ -4551,7 +4563,7 @@ int main(int argc, char *argv[])
                 delete Smoothers_lvls[l];
 #endif
 
-#ifdef NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
         if (l < num_levels - 1)
             delete Divfree_hpmat_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
