@@ -1595,7 +1595,7 @@ int main(int argc, char *argv[])
 
             // computing projectors assembled on true dofs
 
-            // TODO: Rewrite these ugly computations
+            // TODO: Rewrite these computations
             auto d_td_coarse_R = R_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             SparseMatrix * RP_R_local = Mult(*R_space_lvls[l]->GetRestrictionMatrix(), *P_R[l]);
             TrueP_R[l] = d_td_coarse_R->LeftDiagMult(
@@ -1757,25 +1757,10 @@ int main(int argc, char *argv[])
                 HypreParMatrix * BT = BTblock->ParallelAssemble();
                 (*Funct_hpmat_lvls[l])(1,0) = BT;
                 (*Funct_hpmat_lvls[l])(0,1) = BT->Transpose();
+
+                delete Cblock;
+                delete BTblock;
             }
-
-            delete Cblock;
-            delete BTblock;
-
-            ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-            if (dim == 3)
-                Divfree_op.AddDomainInterpolator(new CurlInterpolator);
-            else // dim == 4
-                Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
-            Divfree_op.Assemble();
-            Divfree_op.EliminateTestDofs(ess_bdrSigma);
-            Vector tempsol(Divfree_op.Width());
-            tempsol = 0.0;
-            Vector temprhs(Divfree_op.Height());
-            temprhs = 0.0;
-            Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-            Divfree_op.Finalize();
-            Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
 
         }
         else
@@ -1796,25 +1781,46 @@ int main(int argc, char *argv[])
                 (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
             }
 
-            Divfree_hpmat_lvls[l] = RAP(TrueP_R[l - 1], Divfree_hpmat_lvls[l-1], TrueP_C[num_levels - 1 - l]);
-            Divfree_hpmat_lvls[l]->CopyColStarts();
-            Divfree_hpmat_lvls[l]->CopyRowStarts();
+            //Divfree_hpmat_lvls[l] = RAP(TrueP_R[l - 1], Divfree_hpmat_lvls[l-1], TrueP_C[num_levels - 1 - l]);
+            //Divfree_hpmat_lvls[l]->CopyColStarts();
+            //Divfree_hpmat_lvls[l]->CopyRowStarts();
         }
+
+        ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        if (dim == 3)
+            Divfree_op.AddDomainInterpolator(new CurlInterpolator);
+        else // dim == 4
+            Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
+        Divfree_op.Assemble();
+        Vector tempsol(Divfree_op.Width());
+        tempsol = 0.0;
+        Vector temprhs(Divfree_op.Height());
+        temprhs = 0.0;
+        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        Divfree_op.EliminateTestDofs(ess_bdrSigma);
+        Divfree_op.Finalize();
+        Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
 
         MPI_Barrier(MPI_COMM_WORLD);
         if (verbose)
             std::cout << "Got here 0 \n" << std::flush;
         MPI_Barrier(MPI_COMM_WORLD);
         // checking the orthogonality of discrete curl and discrete divergence operators
+
+        HypreParMatrix * Constraint_global;
         if (l == 0)
         {
             ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
             Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
             Bblock->Assemble();
-            Bblock->EliminateTestDofs(ess_bdrSigma);
+            //Bblock->EliminateTestDofs(ess_bdrSigma);
             Bblock->Finalize();
-            HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
+            Constraint_global = Bblock->ParallelAssemble();
 
+            delete Bblock;
+        }
+        if (l == 0)
+        {
             HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat_lvls[l]);
 
             SparseMatrix diagg;
@@ -1822,9 +1828,32 @@ int main(int argc, char *argv[])
 
             if (verbose)
                 std::cout << "Constraint[" << l << "] * Curl[" << l << "] norm = " << diagg.MaxNorm() << "\n";
-        }
 
+            delete checkprod;
+        }
+        else
+        {
+            if (l == 1)
+            {
+                HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfree_hpmat_lvls[1]);
+                HypreParMatrix * checkprod = ParMult(Constraint_global, temprod);
+
+                SparseMatrix diagg;
+                checkprod->GetDiag(diagg);
+
+                if (verbose)
+                    std::cout << "Constraint[0] * P[0] * Curl[1] norm = " << diagg.MaxNorm() << "\n";
+
+                delete checkprod;
+                delete temprod;
+            }
+        }
+        if (l == num_levels - 1)
+            delete Constraint_global;
     }
+
+    //MPI_Finalize();
+    //return 0;
 #endif
 
     MPI_Barrier(MPI_COMM_WORLD);
