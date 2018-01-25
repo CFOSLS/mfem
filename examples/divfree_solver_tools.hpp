@@ -3341,12 +3341,25 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     MPI_Barrier(comm);
 
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
+
+    for (int i = 0 ;i < num_procs; ++i)
     {
-        *diff = *y2;
-        *diff -= *y1;
-        double norm_diff = diff->Norml2() / sqrt (diff->Size());
-        if ( norm_diff > 1.0e-14)
-            std::cout << "y1 != y2, diff norm = " << norm_diff << "\n" << std::flush;
+        if (myid == i)
+        {
+            *diff = *y2;
+            *diff -= *y1;
+            double norm_diff = diff->Norml2() / sqrt (diff->Size());
+            if ( norm_diff > 1.0e-14)
+            {
+                std::cout << "I am " << myid << ", y1 != y2, diff norm = " << norm_diff << "\n" << std::flush;
+                diff->Print();
+            }
+            std::cout << std::flush;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 
 
