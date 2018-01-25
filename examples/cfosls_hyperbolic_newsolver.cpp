@@ -13,7 +13,7 @@
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-#define OLD_CODE
+//#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -35,7 +35,7 @@
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-//#define TIMING
+#define TIMING
 
 // changes the multigrid code to compare Multigrid with GeneralMinSolver
 //#define COMPARE_MULTIGRID
@@ -802,7 +802,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 3;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1801,10 +1801,6 @@ int main(int argc, char *argv[])
         Divfree_op.Finalize();
         Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        if (verbose)
-            std::cout << "Got here 0 \n" << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
         // checking the orthogonality of discrete curl and discrete divergence operators
 
         HypreParMatrix * Constraint_global;
@@ -1856,11 +1852,6 @@ int main(int argc, char *argv[])
     //return 0;
 #endif
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (verbose)
-        std::cout << "Got here 1 \n" << std::flush;
-    MPI_Barrier(MPI_COMM_WORLD);
-
     for (int l = num_levels - 1; l >=0; --l)
     {
         if (l < num_levels - 1)
@@ -1898,12 +1889,6 @@ int main(int argc, char *argv[])
             Smoothers_lvls[l] = NULL;
 #endif
         }
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        if (verbose)
-            std::cout << "Got here 2 \n" << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
-
 
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
@@ -1944,11 +1929,6 @@ int main(int argc, char *argv[])
     for (int blk = 0; blk < numblocks_funct; ++blk)
         size += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
     size += Dof_TrueDof_L2_lvls[num_levels - 1]->GetNumCols();
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (verbose)
-        std::cout << "Got here 3 \n" << std::flush;
-    MPI_Barrier(MPI_COMM_WORLD);
 
     CoarsestSolver_partfinder = new CoarsestProblemSolver(size, *Funct_mat_lvls[num_levels - 1],
                                                      *Constraint_mat_lvls[num_levels - 1],
@@ -4578,8 +4558,9 @@ int main(int argc, char *argv[])
             delete Divfree_hpmat_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
-                delete (*Funct_hpmat_lvls[l])(blk1,blk2);
-        delete Funct_hpmat_lvls[l];
+                if ((*Funct_hpmat_lvls[l])(blk1,blk2))
+                    delete (*Funct_hpmat_lvls[l])(blk1,blk2);
+        //delete Funct_hpmat_lvls[l];
 #endif
 
         if (l < num_levels - 1)
