@@ -3355,7 +3355,27 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             if ( norm_diff > 1.0e-14)
             {
                 std::cout << "I am " << myid << ", y1 != y2, diff norm = " << norm_diff << "\n" << std::flush;
-                diff->Print();
+                int count = 0;
+                for (int blk = 0; blk < numblocks; ++blk)
+                {
+                    const Array<int> *temp = essbdrtruedofs_Funct[blk];
+                    for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                        if ( fabs(diff->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                        {
+                            std::cout << "difference is at the true boundary \n";
+                            count++;
+                        }
+                }
+                std::cout << "number of boundary points where diff > 0 = " << count << "\n";
+
+                int count2 = 0;
+                for (int blk = 0; blk < numblocks; ++blk)
+                    for (int j = 0; j < diff->GetBlock(blk).Size(); ++j)
+                        if (fabs (diff->GetBlock(blk)[j]) > 1.0e-14)
+                            count2++;
+
+                std::cout << "number of points where diff > 0 = " << count2 << "\n";
+
             }
             std::cout << std::flush;
         }
