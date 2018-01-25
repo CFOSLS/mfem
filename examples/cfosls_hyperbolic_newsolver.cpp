@@ -2076,12 +2076,15 @@ int main(int argc, char *argv[])
     SparseMatrix * tempRA = mfem::Mult(*d_td_Hdiv_diag_T, *Divfree_mat_lvls[0]);
     HypreParMatrix * tempRAP = Dof_TrueDof_Hcurl_lvls[0]->LeftDiagMult(*tempRA, R_space_lvls[0]->GetTrueDofOffsets() );
 
+    ParGridFunction * temppgrfunc = new ParGridFunction(C_space_lvls[0]);
+    temppgrfunc->ProjectCoefficient(*Mytest.divfreepart);
+
     Vector testvec1(tempRAP->Width());
-    testvec1 = 1.0;
+    temppgrfunc->ParallelAssemble(testvec1);
     Vector testvec2(tempRAP->Height());
     tempRAP->Mult(testvec1, testvec2);
 
-    testvec1 = 1.0;
+    temppgrfunc->ParallelAssemble(testvec1);
     Vector testvec3(tempRAP->Height());
     Divfree_hpmat_lvls[0]->Mult(testvec1, testvec3);
 
@@ -2131,6 +2134,9 @@ int main(int argc, char *argv[])
             ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
 #endif
+
+    MPI_Finalize();
+    return 0;
 
 #ifdef COARSESOLVER_COMPARISON
 #ifndef     HCURL_COARSESOLVER
