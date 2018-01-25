@@ -3113,39 +3113,46 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+    BlockVector * truex1 = new BlockVector(trueblock_offsets);
+    BlockVector * truex2 = new BlockVector(trueblock_offsets);
+    BlockVector * truerhs1 = new BlockVector(trueblock_offsets);
+    BlockVector * truerhs2 = new BlockVector(trueblock_offsets);
     BlockVector * x1 = new BlockVector(block_offsets);
     *x1 = *xblock;
     BlockVector * x2 = new BlockVector(block_offsets);
     *x2 = *xblock;
     BlockVector * y1 = new BlockVector(block_offsets);
     BlockVector * y2 = new BlockVector(block_offsets);
+
     // using the new setup
+    *truerhs1 = 0.0;
+    *truex1 = 0.0;
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
-            Divfree_hpmat->MultTranspose(x1->GetBlock(0), truerhs->GetBlock(0));
+            Divfree_hpmat->MultTranspose(x1->GetBlock(0), truerhs1->GetBlock(0));
         else
-            truerhs->GetBlock(blk) = x1->GetBlock(blk);
+            truerhs1->GetBlock(blk) = x1->GetBlock(blk);
 
         // imposing boundary conditions on the righthand side
         if (blk == 0) // in Hcurl
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
-                truerhs->GetBlock(0)[tdof] = 0.0;
+                truerhs1->GetBlock(0)[tdof] = 0.0;
             }
         else
             for ( int blk = 1; blk < numblocks; ++blk)
                 for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
                 {
                     int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-                    truerhs->GetBlock(blk)[tdof] = 0.0;
+                    truerhs1->GetBlock(blk)[tdof] = 0.0;
                 }
 
     }
 
-    *truex = 0.0;
+    *truex1 = 0.0;
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3157,7 +3164,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
 
     for ( int blk = 0; blk < numblocks; ++blk)
-        Smoothers_new[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+        Smoothers_new[blk]->Mult(truerhs1->GetBlock(blk), truex1->GetBlock(blk));
 
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
@@ -3174,9 +3181,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // first component should be transferred from Hcurl to Hdiv
-            Divfree_hpmat->Mult(truex->GetBlock(0), y1->GetBlock(0));
+            Divfree_hpmat->Mult(truex1->GetBlock(0), y1->GetBlock(0));
         else
-            y1->GetBlock(blk) = truex->GetBlock(blk);
+            y1->GetBlock(blk) = truex1->GetBlock(blk);
     }
 
 #ifdef CHECK_BNDCND
@@ -3194,8 +3201,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
 
     // using the old setup
-    *truerhs = 0.0;
-    *truex = 0.0;
+    *truerhs2 = 0.0;
+    *truex2 = 0.0;
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -3209,15 +3216,15 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             // rhs_l = CT_l * res_lvl
             Curlh->MultTranspose(*temp_Hdiv_dofs, *temp_Hcurl_dofs);
 
-            d_td_Hcurl->MultTranspose(*temp_Hcurl_dofs, truerhs->GetBlock(0));
+            d_td_Hcurl->MultTranspose(*temp_Hcurl_dofs, truerhs2->GetBlock(0));
 #else
             std::cout << "x2(0) size = " << x2->GetBlock(0).Size() << "\n";
-            Curlh_global->MultTranspose(x2->GetBlock(0), truerhs->GetBlock(0));
+            Curlh_global->MultTranspose(x2->GetBlock(0), truerhs2->GetBlock(0));
 #endif
         }
         else
         {
-            truerhs->GetBlock(blk) = x2->GetBlock(blk);
+            truerhs2->GetBlock(blk) = x2->GetBlock(blk);
         }
 
     }
@@ -3226,7 +3233,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
     {
         int tdof = essbdrtruedofs_Hcurl[tdofind];
-        truerhs->GetBlock(0)[tdof] = 0.0;
+        truerhs2->GetBlock(0)[tdof] = 0.0;
     }
 
     // imposing boundary conditions for the rest of the blocks in the righthand side
@@ -3234,10 +3241,10 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
         {
             int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-            truerhs->GetBlock(blk)[tdof] = 0.0;
+            truerhs2->GetBlock(blk)[tdof] = 0.0;
         }
 
-    *truex = 0.0;
+    *truex2 = 0.0;
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3250,7 +3257,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+        Smoothers[blk]->Mult(truerhs2->GetBlock(blk), truex2->GetBlock(blk));
     }
 
     // computing the solution update in the H(div) x other blocks space
@@ -3270,18 +3277,18 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         if (blk == 0) // first component should be transferred from Hcurl to Hdiv
         {
 #ifdef MEMORY_OPTIMIZED
-            d_td_Hcurl->Mult(truex->GetBlock(0), *temp_Hcurl_dofs);
+            d_td_Hcurl->Mult(truex2->GetBlock(0), *temp_Hcurl_dofs);
             Curlh->Mult(*temp_Hcurl_dofs, *temp_Hdiv_dofs);
 
             SparseMatrix d_td_Hdiv_diag;
             d_td_Funct_blocks[0]->GetDiag(d_td_Hdiv_diag);
             d_td_Hdiv_diag.MultTranspose(*temp_Hdiv_dofs, y2->GetBlock(0));
 #else
-            Curlh_global->Mult(truex->GetBlock(0), y2->GetBlock(0));
+            Curlh_global->Mult(truex2->GetBlock(0), y2->GetBlock(0));
 #endif
         }
         else
-            y2->GetBlock(blk) = truex->GetBlock(blk);
+            y2->GetBlock(blk) = truex2->GetBlock(blk);
     }
 
 #ifdef CHECK_BNDCND
@@ -3311,13 +3318,48 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     // comparing the old and the new setups;
     BlockVector * diff = new BlockVector(block_offsets);
-    *diff = *y2;
-    *diff -= *y1;
+    BlockVector * truediff = new BlockVector(trueblock_offsets);
 
-    double norm_diff = diff->Norml2() / sqrt (diff->Size());
-    if ( norm_diff > 1.0e-14)
-        std::cout << "y1 != y2, diff norm = " << norm_diff << "\n" << std::flush;
 
+    {
+        *truediff = *truex2;
+        *truediff -= *truex1;
+        double norm_diff = diff->Norml2() / sqrt (diff->Size());
+        if ( norm_diff > 1.0e-14)
+            std::cout << "truex1 != truex2, diff norm = " << norm_diff << "\n" << std::flush;
+    }
+
+    MPI_Barrier(comm);
+
+    {
+        *truediff = *truerhs2;
+        *truediff -= *truerhs1;
+        double norm_diff = diff->Norml2() / sqrt (diff->Size());
+        if ( norm_diff > 1.0e-14)
+            std::cout << "truehs1 != truerhs2, diff norm = " << norm_diff << "\n" << std::flush;
+    }
+
+    MPI_Barrier(comm);
+
+    {
+        *diff = *y2;
+        *diff -= *y1;
+        double norm_diff = diff->Norml2() / sqrt (diff->Size());
+        if ( norm_diff > 1.0e-14)
+            std::cout << "y1 != y2, diff norm = " << norm_diff << "\n" << std::flush;
+    }
+
+
+    *yblock = *y2;
+
+    delete x1;
+    delete x2;
+    delete y1;
+    delete y2;
+    delete truerhs1;
+    delete truerhs2;
+    delete truex1;
+    delete truex2;
 }
 #else
 
