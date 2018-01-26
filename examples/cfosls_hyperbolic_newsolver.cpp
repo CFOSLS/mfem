@@ -19,9 +19,9 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-//#define NEW_SMOOTHERSETUP
+#define NEW_SMOOTHERSETUP
 
-#define UNITED_SMOOTHERSETUP
+//#define UNITED_SMOOTHERSETUP
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
@@ -1893,7 +1893,7 @@ int main(int argc, char *argv[])
                                                      &SweepsNum, offsets_global);
 #else
 #ifdef NEW_SMOOTHERSETUP
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l],
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
                                                      *EssBdrTrueDofs_Hcurl[l],
                                                      EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
@@ -2100,6 +2100,7 @@ int main(int argc, char *argv[])
 
     Vector diffvec(tempRAP->Height());
     double diffnorm = diffvec.Norml2() / sqrt (diffvec.Size());
+    MPI_Barrier(comm);
     std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
     MPI_Barrier(comm);
 

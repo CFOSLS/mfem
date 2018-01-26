@@ -2828,7 +2828,7 @@ public:
 #endif
 #ifdef NEW_SMOOTHERSETUP
     HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
-                                        HypreParMatrix& Divfree_HpMat,
+                                        HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                                         const Array<int>& EssBdrtruedofs_Hcurl,
                                         const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                         const Array<int> * SweepsNum,
@@ -3039,7 +3039,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
 
 #ifdef NEW_SMOOTHERSETUP
 
-HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
+HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                                     HypreParMatrix& Divfree_HpMat,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
                                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
@@ -3051,6 +3051,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
       comm(Divfree_HpMat.GetComm()),
       Funct_hpmat (&Funct_HpMat),
       Divfree_hpmat (&Divfree_HpMat),
+      Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
       essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
       essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
 {
@@ -3285,7 +3286,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         Smoothers_new[blk]->Mult(truerhs1->GetBlock(blk), truex1->GetBlock(blk));
 
     // FIXME: Only while debugging
-    *truex1 = *truex2;
+    //*truex1 = *truex2;
 
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
@@ -3901,13 +3902,15 @@ void HcurlGSSSmoother::Setup() const
 
 #ifdef NEW_SMOOTHERSETUP
     Divfree_hpmat_T = Divfree_hpmat->Transpose();
-    CTMC_global = RAP(Divfree_hpmat, (*Funct_hpmat)(0,0), Divfree_hpmat);
+    CTMC_global = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
 
+    /*
     SparseMatrix diagg;
     CTMC_global->GetDiag(diagg);
     diagg.EliminateZeroRows();
+    */
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1) // i.e. if S exists in the functional
