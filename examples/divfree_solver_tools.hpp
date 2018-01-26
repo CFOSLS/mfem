@@ -3124,82 +3124,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     BlockVector * y1 = new BlockVector(block_offsets);
     BlockVector * y2 = new BlockVector(block_offsets);
 
-    // using the new setup
-    *truerhs1 = 0.0;
-    *truex1 = 0.0;
-
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        if (blk == 0)
-            Divfree_hpmat->MultTranspose(x1->GetBlock(0), truerhs1->GetBlock(0));
-        else
-            truerhs1->GetBlock(blk) = x1->GetBlock(blk);
-
-        // imposing boundary conditions on the righthand side
-        if (blk == 0) // in Hcurl
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
-            {
-                int tdof = essbdrtruedofs_Hcurl[tdofind];
-                truerhs1->GetBlock(0)[tdof] = 0.0;
-            }
-        else
-            for ( int blk = 1; blk < numblocks; ++blk)
-                for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
-                {
-                    int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-                    truerhs1->GetBlock(blk)[tdof] = 0.0;
-                }
-
-    }
-
-    *truex1 = 0.0;
-
-#ifdef TIMING
-    MPI_Barrier(comm);
-    chrono.Stop();
-    time_beforeintmult += chrono.RealTime();
-    MPI_Barrier(comm);
-    chrono.Clear();
-    chrono.Start();
-#endif
-
-    for ( int blk = 0; blk < numblocks; ++blk)
-        Smoothers_new[blk]->Mult(truerhs1->GetBlock(blk), truex1->GetBlock(blk));
-
-    // computing the solution update in the H(div) x other blocks space
-    // in two steps:
-
-#ifdef TIMING
-    MPI_Barrier(comm);
-    chrono.Stop();
-    time_intmult += chrono.RealTime();
-    MPI_Barrier(comm);
-    chrono.Clear();
-    chrono.Start();
-#endif
-
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
-            Divfree_hpmat->Mult(truex1->GetBlock(0), y1->GetBlock(0));
-        else
-            y1->GetBlock(blk) = truex1->GetBlock(blk);
-    }
-
-#ifdef CHECK_BNDCND
-    for ( int blk = 0; blk < numblocks; ++blk)
-    {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
-        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-        {
-            if ( fabs(y1->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
-                std::cout << "bnd cnd is violated for y1! blk = " << blk << ", value = "
-                          << y1->GetBlock(blk)[(*temp)[tdofind]]
-                          << ", index = " << (*temp)[tdofind] << "\n";
-        }
-    }
-#endif
-
     // using the old setup
     *truerhs2 = 0.0;
     *truex2 = 0.0;
@@ -3314,6 +3238,85 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     MPI_Barrier(comm);
     chrono2.Stop();
     time_globalmult += chrono2.RealTime();
+#endif
+
+    // using the new setup
+    *truerhs1 = 0.0;
+    *truex1 = 0.0;
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfree_hpmat->MultTranspose(x1->GetBlock(0), truerhs1->GetBlock(0));
+        else
+            truerhs1->GetBlock(blk) = x1->GetBlock(blk);
+
+        // imposing boundary conditions on the righthand side
+        if (blk == 0) // in Hcurl
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+            {
+                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                truerhs1->GetBlock(0)[tdof] = 0.0;
+            }
+        else
+            for ( int blk = 1; blk < numblocks; ++blk)
+                for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+                {
+                    int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                    truerhs1->GetBlock(blk)[tdof] = 0.0;
+                }
+
+    }
+
+    *truex1 = 0.0;
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_beforeintmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+        Smoothers_new[blk]->Mult(truerhs1->GetBlock(blk), truex1->GetBlock(blk));
+
+    // FIXME: Only while debugging
+    *truex1 = *truex2;
+
+    // computing the solution update in the H(div) x other blocks space
+    // in two steps:
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_intmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
+            Divfree_hpmat->Mult(truex1->GetBlock(0), y1->GetBlock(0));
+        else
+            y1->GetBlock(blk) = truex1->GetBlock(blk);
+    }
+
+#ifdef CHECK_BNDCND
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(y1->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for y1! blk = " << blk << ", value = "
+                          << y1->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
 #endif
 
     // comparing the old and the new setups;
@@ -3822,6 +3825,29 @@ void HcurlGSSSmoother::Setup() const
     diagg.EliminateZeroRows();
     //diagg.SetDiagIdentity();
 
+    /*
+    std::cout << "Special stuff \n";
+    {
+        int blk = 0;
+        // FIXME: Unnecessary memory allocation, if one can provide the functional with bnd dofs eliminated in the input
+        SparseMatrix * Funct_blk = new SparseMatrix(Funct_mat->GetBlock(blk,blk));
+
+        for ( int dof = 0; dof < essbdrdofs_Funct[blk]->Size(); ++dof)
+        {
+            if ( (*essbdrdofs_Funct[blk])[dof] != 0)
+            {
+                Funct_blk->EliminateRowCol(dof);
+            }
+        }
+
+        // alternative way
+        HYPRE_Int glob_size = d_td_Funct_blocks[blk]->M();
+        HYPRE_Int * row_starts = d_td_Funct_blocks[blk]->GetRowStarts();
+        HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_size, row_starts, Funct_blk);
+        Funct_restblocks_global(blk,blk) = RAP(temphpmat, d_td_Funct_blocks[blk]);
+    }
+    */
+
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1)
     {
@@ -3841,7 +3867,7 @@ void HcurlGSSSmoother::Setup() const
         HYPRE_Int glob_size = d_td_Funct_blocks[blk]->M();
         HYPRE_Int * row_starts = d_td_Funct_blocks[blk]->GetRowStarts();
         HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_size, row_starts, Funct_blk);
-        Funct_restblocks_global(1,1) = RAP(temphpmat, d_td_Funct_blocks[blk]);
+        Funct_restblocks_global(blk,blk) = RAP(temphpmat, d_td_Funct_blocks[blk]);
 
         // old way
         //HypreParMatrix* Functblk_d_td_blk = d_td_Funct_blocks[blk]->LeftDiagMult(*Funct_blk, d_td_Funct_blocks[blk]->GetRowStarts() );
