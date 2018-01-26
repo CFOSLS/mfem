@@ -2748,6 +2748,7 @@ protected:
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     mutable Array2D<HypreParMatrix*> * Funct_hpmat;
     mutable HypreParMatrix* Divfree_hpmat;
+    mutable HypreParMatrix* Divfree_hpmat_nobnd;
     mutable HypreParMatrix* Divfree_hpmat_T;
 #endif
 
@@ -2816,7 +2817,7 @@ protected:
 public:
     ~HcurlGSSSmoother();
 #ifdef UNITED_SMOOTHERSETUP
-    HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat, HypreParMatrix& Divfree_HpMat,
+    HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat, HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                       const BlockMatrix& Funct_Mat, const SparseMatrix& Discrete_Curl,
                       const HypreParMatrix& Dof_TrueDof_Hcurl,
                       const std::vector<HypreParMatrix*> & Dof_TrueDof_Funct,
@@ -2971,7 +2972,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
 
 #ifdef UNITED_SMOOTHERSETUP
 HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
-                                    HypreParMatrix& Divfree_HpMat,
+                                    HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                                     const BlockMatrix& Funct_Mat,
                                     const SparseMatrix& Discrete_Curl,
                                     const HypreParMatrix& Dof_TrueDof_Hcurl,
@@ -2987,6 +2988,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
       comm(Divfree_HpMat.GetComm()),
       Funct_hpmat (&Funct_HpMat),
       Divfree_hpmat (&Divfree_HpMat),
+      Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
       Funct_mat(&Funct_Mat),
       d_td_Hcurl(&Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
@@ -3713,15 +3715,17 @@ void HcurlGSSSmoother::Setup() const
 
 #ifdef UNITED_SMOOTHERSETUP
     Divfree_hpmat_T = Divfree_hpmat->Transpose();
-    CTMC_global_new = RAP(Divfree_hpmat, (*Funct_hpmat)(0,0), Divfree_hpmat);
+    CTMC_global_new = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
     CTMC_global_new->CopyRowStarts();
     CTMC_global_new->CopyColStarts();
 
+    /*
     {
         SparseMatrix diagg;
         CTMC_global_new->GetDiag(diagg);
         diagg.EliminateZeroRows();
     }
+    */
 
     Smoothers_new[0] = new HypreSmoother(*CTMC_global_new, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1) // i.e. if S exists in the functional

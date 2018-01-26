@@ -1252,6 +1252,7 @@ int main(int argc, char *argv[])
 
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     Array<HypreParMatrix*> Divfree_hpmat_lvls(num_levels);
+    Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
 #endif
 
@@ -1803,6 +1804,15 @@ int main(int argc, char *argv[])
         Divfree_op.Finalize();
         Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
 
+        ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        if (dim == 3)
+            Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
+        else // dim == 4
+            Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
+        Divfree_op2.Assemble();
+        Divfree_op2.Finalize();
+        Divfree_hpmat_nobnd_lvls[l] = Divfree_op2.ParallelAssemble();
+
         // checking the orthogonality of discrete curl and discrete divergence operators
 
         HypreParMatrix * Constraint_global;
@@ -1875,7 +1885,7 @@ int main(int argc, char *argv[])
                 }
             }
 #ifdef UNITED_SMOOTHERSETUP
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l],
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
                                                      *Funct_mat_lvls[l], *Divfree_mat_lvls[l],
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
