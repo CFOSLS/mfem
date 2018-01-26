@@ -19,9 +19,9 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-#define NEW_SMOOTHERSETUP
+//#define NEW_SMOOTHERSETUP
 
-//#define UNITED_SMOOTHERSETUP
+#define UNITED_SMOOTHERSETUP
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
@@ -2146,8 +2146,8 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 
 #ifdef COARSESOLVER_COMPARISON
 #ifndef     HCURL_COARSESOLVER
