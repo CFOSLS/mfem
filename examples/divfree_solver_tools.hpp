@@ -16,16 +16,15 @@ using std::unique_ptr;
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 //#define CHECK_LOCALSOLVE
 
-// activates constraint residual check after each iteration of the minimization solver
-#define CHECK_CONSTR
+//#ifdef TIMING
+//#undef CHECK_LOCALSOLVE
+//#undef CHECK_CONSTR
+//#undef CHECK_BNDCND
+//#endif
 
-#define CHECK_BNDCND
+//#define NEW_SMOOTHERSETUP
 
-#ifdef TIMING
-#undef CHECK_LOCALSOLVE
-#undef CHECK_CONSTR
-#undef CHECK_BNDCND
-#endif
+//#define UNITED_SMOOTHERSETUP
 
 
 // activates some additional checks
@@ -108,30 +107,6 @@ double CheckFunctValue(MPI_Comm comm, const BlockOperator& Funct, const BlockVec
     if (print)
         std::cout << "Functional norm " << string << global_func_norm << " ... \n";
     return global_func_norm;
-}
-
-
-// Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h
-bool CheckConstrRes(Vector& sigma, const SparseMatrix& Constr, const Vector* ConstrRhs,
-                                                char const* string)
-{
-    bool passed = true;
-    Vector res_constr(Constr.Height());
-    Constr.Mult(sigma, res_constr);
-    //ofstream ofs("newsolver_out.txt");
-    //res_constr.Print(ofs,1);
-    if (ConstrRhs)
-        res_constr -= *ConstrRhs;
-    double constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
-    if (fabs(constr_norm) > 1.0e-13)
-    {
-        //res_constr.Print();
-        std::cout << "Constraint residual norm " << string << ": "
-                  << constr_norm << " ... \n";
-        passed = false;
-    }
-
-    return passed;
 }
 
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
@@ -378,6 +353,10 @@ void CoarsestProblemHcurlSolver::Setup() const
     CTMC_global = ParMult(d_td_Hcurl_T, CTMC_d_td);
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
+
+    SparseMatrix diagg;
+    CTMC_global->GetDiag(diagg);
+    diagg.EliminateZeroRows();
 
     delete CTMC;
     delete CTMC_d_td;
@@ -2252,6 +2231,12 @@ protected:
     mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
     mutable CoarsestProblemSolver* CoarseSolver;
 
+#ifdef CHECK_CONSTR
+    mutable HypreParMatrix * Constr_global;
+    mutable Vector * Constr_rhs_global;
+#endif
+
+
     // Allocates current level-related data and computes coarser matrices for the functional
     // and the constraint.
     // Called only during the SetUpSolver()
@@ -2284,6 +2269,10 @@ public:
                            const Vector& ConstrRhsVec,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
+#ifdef CHECK_CONSTR
+                           HypreParMatrix & Constr_Global,
+                           Vector & Constr_Rhs_global,
+#endif
                            Array<LocalProblemSolver*>* LocalSolvers,
                            CoarsestProblemSolver* CoarsestSolver,
                            bool Construct_CoarseOps = true);
@@ -2354,6 +2343,10 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
                        const Vector& ConstrRhsVec,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
+#ifdef CHECK_CONSTR
+                       HypreParMatrix & Constr_Global,
+                       Vector & Constr_Rhs_global,
+#endif
                        Array<LocalProblemSolver*>* LocalSolvers,
                        CoarsestProblemSolver* CoarsestSolver,
                        bool Construct_CoarseOps)
@@ -2371,6 +2364,10 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
        ConstrRhs(ConstrRhsVec),
        Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs)
+#ifdef CHECK_CONSTR
+       , Constr_global(&Constr_Global),
+       Constr_rhs_global(&Constr_Rhs_global)
+#endif
 {
 
     MFEM_ASSERT(FunctOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
@@ -2518,13 +2515,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
 #ifdef CHECK_CONSTR
             if (l == 0)
-            {
-                for ( int blk = 0; blk < numblocks; ++blk)
-                    dof_trueDof_Func_lvls[0][blk]->Mult(truetempvec2_lvls[0]->GetBlock(blk), temp_dofs.GetBlock(blk));
-
-                CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
-                            NULL, "for the smoother level 0 update");
-            }
+                CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), *Constr_global, NULL, "for the smoother level 0 update");
 #endif
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
@@ -2561,17 +2552,9 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     particular_solution = truestart_guess;
     particular_solution += *truesolupdate_lvls[0];
 
-    for ( int blk = 0; blk < numblocks; ++blk)
-        dof_trueDof_Func_lvls[0][blk]->Mult(particular_solution.GetBlock(blk), temp_dofs.GetBlock(blk));
-
-    MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
-                &constr_rhs, "for the particular solution"),"");
 #ifdef CHECK_CONSTR
-    CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
-                    &constr_rhs, "for the particular solution inside in the end");
-#else
-    MFEM_ASSERT(CheckConstrRes(temp_dofs.GetBlock(0), *Constr_lvls[0],
-                &constr_rhs, "for the particular solution inside in the end"),"");
+    CheckConstrRes(particular_solution.GetBlock(0), *Constr_global,
+                    Constr_rhs_global, "for the particular solution inside in the end");
 #endif
 
 }
@@ -2770,6 +2753,10 @@ protected:
     mutable HypreParMatrix* Divfree_hpmat_T;
 #endif
 
+#ifdef DEBUG_SMOOTHER
+    mutable HypreParMatrix * Constr_global;
+#endif
+
 #ifdef TIMING
     mutable StopWatch chrono;
     mutable StopWatch chrono2;
@@ -2819,6 +2806,9 @@ public:
 #ifdef UNITED_SMOOTHERSETUP
     HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat, HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                       const BlockMatrix& Funct_Mat, const SparseMatrix& Discrete_Curl,
+#ifdef DEBUG_SMOOTHER
+                      HypreParMatrix & Const_Global,
+#endif
                       const HypreParMatrix& Dof_TrueDof_Hcurl,
                       const std::vector<HypreParMatrix*> & Dof_TrueDof_Funct,
                       const Array<int>& EssBdrdofs_Hcurl, const Array<int> &EssBdrtruedofs_Hcurl,
@@ -2975,6 +2965,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
                                     HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                                     const BlockMatrix& Funct_Mat,
                                     const SparseMatrix& Discrete_Curl,
+#ifdef DEBUG_SMOOTHER
+                                    HypreParMatrix & Const_Global,
+#endif
                                     const HypreParMatrix& Dof_TrueDof_Hcurl,
                                     const std::vector<HypreParMatrix *> &Dof_TrueDof_Funct,
                                     const Array<int>& EssBdrdofs_Hcurl,
@@ -2990,6 +2983,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
       Divfree_hpmat (&Divfree_HpMat),
       Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
       Funct_mat(&Funct_Mat),
+#ifdef DEBUG_SMOOTHER
+      Constr_global(&Const_Global),
+#endif
       d_td_Hcurl(&Dof_TrueDof_Hcurl),
       d_td_Funct_blocks(Dof_TrueDof_Funct),
       essbdrdofs_Hcurl(&EssBdrdofs_Hcurl),
@@ -3039,8 +3035,8 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
 
 #ifdef NEW_SMOOTHERSETUP
 
-HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
-                                    HypreParMatrix& Divfree_HpMat,
+HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
+                                    HypreParMatrix& Divfree_HpMat, HypreParMatrix& Divfree_HpMat_nobnd,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
                                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                     const Array<int> * SweepsNum,
@@ -3095,6 +3091,10 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono2.Clear();
     chrono2.Start();
 #endif
+
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
 
     if (print_level)
         std::cout << "Smoothing with HcurlGSS smoother \n";
@@ -3218,6 +3218,27 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             y2->GetBlock(blk) = truex2->GetBlock(blk);
     }
 
+#ifdef DEBUG_SMOOTHER
+    Vector temp2(Constr_global->Height());
+    Constr_global->Mult(y2->GetBlock(0), temp2);
+    double norm_temp2 = temp2.Norml2() / sqrt (temp2.Size());
+    MPI_Barrier(comm);
+
+    for (int i = 0 ;i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            if (norm_temp2 > 1.0e-14)
+            {
+                std::cout << "I am " << myid << "\n" << std::flush;
+                std::cout << "Div * y2[0] != 0, temp2 norm = " << norm_temp2 << "\n";
+            }
+        }
+        MPI_Barrier(comm);
+    }
+
+#endif
+
 #ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -3308,6 +3329,48 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             y1->GetBlock(blk) = truex1->GetBlock(blk);
     }
 
+#ifdef DEBUG_SMOOTHER
+    HypreParMatrix * checkprod = ParMult(Constr_global, Divfree_hpmat);
+    SparseMatrix diagg;
+    checkprod->GetDiag(diagg);
+
+    SparseMatrix offdiagg;
+    HYPRE_Int * cmap_offd;
+    checkprod->GetOffd(offdiagg, cmap_offd);
+
+    for (int i = 0 ;i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n" << std::flush;
+            std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
+            std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
+        }
+        MPI_Barrier(comm);
+    }
+
+    delete checkprod;
+
+    Vector temp1(Constr_global->Height());
+    Constr_global->Mult(y1->GetBlock(0), temp1);
+    double norm_temp1 = temp1.Norml2() / sqrt (temp1.Size());
+    MPI_Barrier(comm);
+
+    for (int i = 0 ;i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            if (norm_temp1 > 1.0e-14)
+            {
+                std::cout << "I am " << myid << "\n" << std::flush;
+                std::cout << "Div * y1[0] != 0, temp1 norm = " << norm_temp1 << "\n";
+            }
+        }
+        MPI_Barrier(comm);
+    }
+
+#endif
+
 #ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -3325,10 +3388,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     // comparing the old and the new setups;
     BlockVector * diff = new BlockVector(block_offsets);
     BlockVector * truediff = new BlockVector(trueblock_offsets);
-
-    int num_procs, myid;
-    MPI_Comm_size(comm, &num_procs);
-    MPI_Comm_rank(comm, &myid);
 
     MPI_Barrier(comm);
 
@@ -3529,13 +3588,11 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                 truerhs->GetBlock(0)[tdof] = 0.0;
             }
         else
-            for ( int blk = 1; blk < numblocks; ++blk)
-                for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
-                {
-                    int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-                    truerhs->GetBlock(blk)[tdof] = 0.0;
-                }
-
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+            {
+                int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                truerhs->GetBlock(blk)[tdof] = 0.0;
+            }
     }
 
     *truex = 0.0;
@@ -3551,6 +3608,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+    //truex->Print();
+    //std::cout << "debug print \n";
 
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
@@ -4014,9 +4074,9 @@ void HcurlGSSSmoother::Setup() const
     //delete temphp;
 #endif
 
-    SparseMatrix diagg;
-    CTMC_global->GetDiag(diagg);
-    diagg.EliminateZeroRows();
+    //SparseMatrix diagg;
+    //CTMC_global->GetDiag(diagg);
+    //diagg.EliminateZeroRows();
     //diagg.SetDiagIdentity();
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
@@ -4156,16 +4216,17 @@ protected:
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
 
-    // Righthand side of  the divergence contraint on dofs
-    // (remains unchanged throughout the solving process)
-    const Vector& ConstrRhs; // can be removed since it used only for debugging
-
     const Array<Operator*>& Smoothers_lvls;
 
     // a given blockvector which satisfies essential bdr conditions
     // imposed for the initial problem
     // on true dofs
     const BlockVector& bdrdata_truedofs;
+
+#ifdef CHECK_CONSTR
+    mutable HypreParMatrix * Constr_global;
+    mutable Vector * Constr_rhs_global;
+#endif
 
 #ifdef TIMING
 private:
@@ -4197,7 +4258,6 @@ protected:
     // stores Functional matrix on all levels except the finest
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
     mutable Array<BlockMatrix*> Funct_lvls; // created during SetUpLvl and used only in MultTrueLevel and for constraint residual check
-    mutable Array<SparseMatrix*> Constr_lvls; // can be removed since it's used only for debugging
 
     const BlockOperator& Funct_global;
     const BlockVector& Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
@@ -4262,13 +4322,16 @@ public:
                            const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const Array<BlockMatrix *> &FunctOp_lvls,
-                           const Array<SparseMatrix *> &ConstrOp_lvls,
-                           const Vector& ConstrRhsVec,
                            const BlockOperator& Funct_Global,
                            const BlockVector& Functrhs_Global,
                            const Array<int>& Offsets_Global,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
+#ifdef CHECK_CONSTR
+                           HypreParMatrix & Constr_Global,
+                           Vector & Constr_Rhs_global,
+#endif
+
 #ifdef TIMING
                             std::list<double>* Times_mult,
                             std::list<double>* Times_solve,
@@ -4349,9 +4412,6 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
     for ( int l = 0; l < num_levels; ++l)
         if (l > 0 && Funct_lvls[l]) // only for l > 0 new memory is allocated for these pointers
             delete Funct_lvls[l];
-    for ( int l = 0; l < num_levels; ++l)
-        if (l > 0 && Constr_lvls[l])
-            delete Constr_lvls[l];
 
 #ifdef TIMING
     delete time_localsolve_lvls;
@@ -4450,13 +4510,15 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
                        const Array< SparseMatrix*> &Proj_L2,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const Array<BlockMatrix*> & FunctOp_lvls,
-                       const Array<SparseMatrix*> &ConstrOp_lvls,
-                       const Vector& ConstrRhsVec,
                        const BlockOperator& Funct_Global,
                        const BlockVector& Functrhs_Global,
                        const Array<int>& Offsets_Global,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
+#ifdef CHECK_CONSTR
+                       HypreParMatrix & Constr_Global,
+                       Vector & Constr_Rhs_global,
+#endif
 #ifdef TIMING
                         std::list<double>* Times_mult,
                         std::list<double>* Times_solve,
@@ -4482,9 +4544,12 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
        P_Func(Proj_Func), TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
        essbdrtruedofs_Func(EssBdrTrueDofs_Func),
        numblocks(FunctOp_lvls[0]->NumColBlocks()),
-       ConstrRhs(ConstrRhsVec),
        Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs),
+#ifdef CHECK_CONSTR
+       Constr_global(&Constr_Global),
+       Constr_rhs_global(&Constr_Rhs_global),
+#endif
 #ifdef TIMING
        times_mult(Times_mult),
        times_solve(Times_solve),
@@ -4503,8 +4568,6 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
 
     MFEM_ASSERT(FunctOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
                                                 " Funct operator at the finest level must be given anyway!");
-    MFEM_ASSERT(ConstrOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
-                                                " Constraint operator at the finest level must be given anyway!");
 
     if (!construct_coarseops)
         for ( int l = 0; l < num_levels; ++l)
@@ -4512,18 +4575,11 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int NumLevels,
             MFEM_ASSERT(FunctOp_lvls[l] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
                                                         " functional operators at all levels must be provided "
                                                         " when construct_curls == false!");
-            MFEM_ASSERT(ConstrOp_lvls[l] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
-                                                        " constraint operators at all levels must be provided "
-                                                        " when construct_curls == false!");
         }
 
     Funct_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Funct_lvls[l] = FunctOp_lvls[l];
-
-    Constr_lvls.SetSize(num_levels);
-    for (int l = 0; l < num_levels; ++l)
-        Constr_lvls[l] = ConstrOp_lvls[l];
 
     xblock_truedofs = new BlockVector(offsets_global);
     yblock_truedofs = new BlockVector(offsets_global);
@@ -4650,13 +4706,6 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     chrono4.Start();
 #endif
 
-
-#ifdef CHECK_CONSTR
-    BlockVector * temp_dofs;
-    if (!preconditioner_mode)
-        temp_dofs = new BlockVector(Funct_lvls[0]->RowOffsets());
-#endif
-
     // start iteration
     current_iteration = 0;
     converged = 0;
@@ -4678,6 +4727,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
+        std::cout << "i = " << i << " (iter) \n";
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
 #ifdef CHECK_BNDCND
@@ -4686,23 +4736,12 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #endif
 
 #ifdef CHECK_CONSTR
-        // unnecessary checking block
         if (!preconditioner_mode)
         {
-            for ( int blk = 0; blk < numblocks; ++blk)
-                dof_trueDof_Func_lvls[0][blk]->Mult(tempblock_truedofs->GetBlock(blk), temp_dofs->GetBlock(blk));
-
-            if (!preconditioner_mode)
-            {
-                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
-                                           "before the iteration"),"");
-                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], &ConstrRhs,
-                                           "before the iteration"),"");
-            }
-            else
-                MFEM_ASSERT(CheckConstrRes(temp_dofs->GetBlock(0), *Constr_lvls[0], NULL, "before the iteration"),"");
-
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "before the iteration"),"");
         }
+        else
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL, "before the iteration"),"");
 #endif
 
 #ifdef TIMING
@@ -4894,6 +4933,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+
+            next_sol += *truesolupdate_lvls[0];
+            funct_currnorm = CheckFunctValue(comm, Funct_global, &Functrhs_global, offsets_global, next_sol,
+                                     "after the localsolve update: ", 1);
+            next_sol -= *truesolupdate_lvls[0];
         }
 
 #ifdef TIMING
@@ -4911,11 +4955,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // smooth
         if (Smoothers_lvls[l])
         {
+            next_sol += *truesolupdate_lvls[0];
+            funct_currnorm = CheckFunctValue(comm, Funct_global, &Functrhs_global, offsets_global, next_sol,
+                                     "before the smoother update: ", 1);
+            next_sol -= *truesolupdate_lvls[0];
+
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+            next_sol += *truesolupdate_lvls[0];
+            funct_currnorm = CheckFunctValue(comm, Funct_global, &Functrhs_global, offsets_global, next_sol,
+                                     "after the smoother update: ", 1);
+            next_sol -= *truesolupdate_lvls[0];
         }
 
 #ifdef TIMING
@@ -4960,6 +5014,15 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono2.Start();
 #endif
 
+    TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
+    *truesolupdate_lvls[0] += *truetempvec_lvls[0];
+    next_sol += *truesolupdate_lvls[0];
+    funct_currnorm = CheckFunctValue(comm, Funct_global, &Functrhs_global, offsets_global, next_sol,
+                             "after the coarsest level update: ", 1);
+    next_sol -= *truesolupdate_lvls[0];
+    *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
+
+
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
     {
@@ -4984,6 +5047,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
                 *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
                 UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
+
             }
 #ifdef TIMING
             MPI_Barrier(comm);
@@ -5096,16 +5160,8 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
 
         Funct_lvls[lvl + 1] = mfem::Mult(*P_FuncT, *Funct_PFunc);
 
-        SparseMatrix *P_L2T = Transpose(*P_L2[lvl]);
-        SparseMatrix *Constr_PR;
-        Constr_PR = mfem::Mult(*Constr_lvls[lvl], P_Func[lvl]->GetBlock(0,0));
-
-        Constr_lvls[lvl + 1] = mfem::Mult(*P_L2T, *Constr_PR);
-
         delete Funct_PFunc;
-        delete Constr_PR;
         delete P_FuncT;
-        delete P_L2T;
     }
 
     trueoffsets_lvls[lvl + 1] = new Array<int>(numblocks + 1);

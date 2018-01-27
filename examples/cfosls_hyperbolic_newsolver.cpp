@@ -21,23 +21,34 @@
 
 //#define NEW_SMOOTHERSETUP
 
-#define UNITED_SMOOTHERSETUP
+//#define UNITED_SMOOTHERSETUP
+
+// activates a check for the symmetry of the new smoother setup
+#define CHECK_SPDSMOOTHER
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define SOLVE_WITH_LOCALSOLVERS
+#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-#define USE_AS_A_PREC
+//#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
+
+//#define DEBUG_SMOOTHER
 
 //#define COARSESOLVER_COMPARISON
 
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
-#define TIMING
+// activates constraint residual check after each iteration of the minimization solver
+#define CHECK_CONSTR
+
+#define CHECK_BNDCND
+
+
+//#define TIMING
 
 // changes the multigrid code to compare Multigrid with GeneralMinSolver
 //#define COMPARE_MULTIGRID
@@ -1118,6 +1129,11 @@ int main(int argc, char *argv[])
         //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
     }
 
+    // FIXME:
+    if (verbose)
+        std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
+    ess_bdrSigma = 1;
+
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
     ess_bdrS = 0;
     if (strcmp(space_for_S,"H1") == 0) // S is from H1
@@ -1135,6 +1151,77 @@ int main(int argc, char *argv[])
     int ref_levels = par_ref_levels;
 
     int num_levels = ref_levels + 1;
+
+    /*
+    pmesh->PrintInfo(std::cout);
+    if (myid == 0)
+        std::cout << "\n";
+
+
+    {
+        FiniteElementCollection *hdiv_coll_test = new RT_FECollection(feorder, dim);
+        FiniteElementCollection *l2_coll_test = new L2_FECollection(feorder, dim);
+        FiniteElementCollection *hdivfree_coll_test = new ND_FECollection(feorder + 1, dim);
+
+        ParFiniteElementSpace *R_space_test = new ParFiniteElementSpace(pmesh.get(), hdiv_coll_test);
+        ParFiniteElementSpace *W_space_test = new ParFiniteElementSpace(pmesh.get(), l2_coll_test);
+        ParFiniteElementSpace *C_space_test = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll_test);
+
+        if (myid == 0)
+         ess_bdrSigma.Print();
+
+        ParDiscreteLinearOperator Divfree_op(C_space_test, R_space_test); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        Divfree_op.AddDomainInterpolator(new CurlInterpolator);
+        Divfree_op.Assemble();
+        Vector tempsol(Divfree_op.Width());
+        tempsol = 0.0;
+        Vector temprhs(Divfree_op.Height());
+        temprhs = 0.0;
+        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
+        Divfree_op.Finalize();
+        HypreParMatrix * Divfree_hpmat = Divfree_op.ParallelAssemble();
+
+        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_test, W_space_test);
+        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Bblock->Assemble();
+        //Vector tempsol(Bblock->Width());
+        //tempsol = 0.0;
+        //Vector temprhs(Bblock->Height());
+        //temprhs = 0.0;
+        //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        //Bblock->EliminateTestDofs(ess_bdrSigma);
+        Bblock->Finalize();
+        HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
+
+        delete Bblock;
+
+        HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat);
+
+        SparseMatrix diagg;
+        checkprod->GetDiag(diagg);
+
+        SparseMatrix offdiagg;
+        HYPRE_Int * cmap_offd;
+        checkprod->GetOffd(offdiagg, cmap_offd);
+
+        for (int i = 0 ;i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::cout << "I am " << myid << "\n" << std::flush;
+                std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
+                std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
+            }
+            MPI_Barrier(comm);
+        }
+
+        delete checkprod;
+
+        MPI_Finalize();
+        return 0;
+    }
+    */
 
     chrono.Clear();
     chrono.Start();
@@ -1425,6 +1512,13 @@ int main(int argc, char *argv[])
         else // dim == 4
             Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
         Divfree_op.Assemble();
+        // FIXME: Only for debugging
+        //Vector tempsol(Divfree_op.Width());
+        //tempsol = 0.0;
+        //Vector temprhs(Divfree_op.Height());
+        //temprhs = 0.0;
+        //Divfree_op.EliminateTrialDofs(all_bdrSigma, tempsol, temprhs);
+
         //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
@@ -1711,6 +1805,8 @@ int main(int argc, char *argv[])
         delete temp_sp;
     }
 
+    HypreParMatrix * Constraint_global;
+
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
@@ -1800,6 +1896,27 @@ int main(int argc, char *argv[])
         Vector temprhs(Divfree_op.Height());
         temprhs = 0.0;
         Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        /*
+        Array<int> marked_dofs (C_space_lvls[l]->GetVSize());
+        Array<int> tr_vdofs;
+        for (int i = 0; i < C_space_lvls[l]->GetNBE(); ++i)
+        {
+            if (ess_bdrSigma[C_space_lvls[l]->GetBdrAttribute(i)-1])
+            {
+                C_space_lvls[l]->GetBdrElementVDofs (i, tr_vdofs);
+                for (int j = 0; j < tr_vdofs.Size(); j++)
+                {
+                    int k;
+                    if ( (k = tr_vdofs[j]) < 0 )
+                    {
+                       k = -1-k;
+                    }
+                    marked_dofs[k] = 1;
+                }
+            }
+        }
+        Divfree_op.EliminateEssentialBCFromTrialDofs(marked_dofs, tempsol, temprhs);
+        */
         //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
@@ -1815,12 +1932,16 @@ int main(int argc, char *argv[])
 
         // checking the orthogonality of discrete curl and discrete divergence operators
 
-        HypreParMatrix * Constraint_global;
         if (l == 0)
         {
             ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
             Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
             Bblock->Assemble();
+            Vector tempsol(Bblock->Width());
+            tempsol = 0.0;
+            Vector temprhs(Bblock->Height());
+            temprhs = 0.0;
+            //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
             //Bblock->EliminateTestDofs(ess_bdrSigma);
             Bblock->Finalize();
             Constraint_global = Bblock->ParallelAssemble();
@@ -1834,8 +1955,20 @@ int main(int argc, char *argv[])
             SparseMatrix diagg;
             checkprod->GetDiag(diagg);
 
-            if (verbose)
-                std::cout << "Constraint[" << l << "] * Curl[" << l << "] norm = " << diagg.MaxNorm() << "\n";
+            SparseMatrix offdiagg;
+            HYPRE_Int * cmap_offd;
+            checkprod->GetOffd(offdiagg, cmap_offd);
+
+            for (int i = 0 ;i < num_procs; ++i)
+            {
+                if (myid == i)
+                {
+                    std::cout << "I am " << myid << "\n" << std::flush;
+                    std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
+                    std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
+                }
+                MPI_Barrier(comm);
+            }
 
             delete checkprod;
         }
@@ -1856,12 +1989,20 @@ int main(int argc, char *argv[])
                 delete temprod;
             }
         }
-        if (l == num_levels - 1)
-            delete Constraint_global;
+        //if (l == num_levels - 1)
+            //delete Constraint_global;
     }
 
     //MPI_Finalize();
     //return 0;
+
+#else
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]);
+    Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+    Bblock->Assemble();
+    Bblock->Finalize();
+    Constraint_global = Bblock->ParallelAssemble();
+    delete Bblock;
 #endif
 
     for (int l = num_levels - 1; l >=0; --l)
@@ -1887,6 +2028,9 @@ int main(int argc, char *argv[])
 #ifdef UNITED_SMOOTHERSETUP
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
                                                      *Funct_mat_lvls[l], *Divfree_mat_lvls[l],
+#ifdef DEBUG_SMOOTHER
+                                                     *Constraint_global,
+#endif
                                                      *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
                                                      *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
                                                      EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
@@ -1907,6 +2051,82 @@ int main(int argc, char *argv[])
 #endif // for UNITED_SMOOTHERSETUP
 #else
             Smoothers_lvls[l] = NULL;
+#endif
+
+#ifdef CHECK_SPDSMOOTHER
+            {
+                if (num_procs == 1)
+                {
+                    Vector Vec1(Smoothers_lvls[l]->Height());
+                    Vec1.Randomize(2000);
+                    Vector Vec2(Smoothers_lvls[l]->Height());
+                    Vec2.Randomize(-39);
+
+                    Vector Tempy(Smoothers_lvls[l]->Height());
+
+                    /*
+                    for ( int i = 0; i < Vec1.Size(); ++i )
+                    {
+                        if ((*EssBdrDofs_R[0][0])[i] != 0 )
+                        {
+                            Vec1[i] = 0.0;
+                            Vec2[i] = 0.0;
+                        }
+                    }
+                    */
+
+                    Vector VecDiff(Vec1.Size());
+                    VecDiff = Vec1;
+
+                    std::cout << "Norm of Vec1 = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
+
+                    VecDiff -= Vec2;
+
+                    MFEM_ASSERT(VecDiff.Norml2() / sqrt(VecDiff.Size()) > 1.0e-10, "Vec1 equals Vec2 but they must be different");
+                    //VecDiff.Print();
+                    std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
+
+                    Smoothers_lvls[l]->Mult(Vec1, Tempy);
+                    double scal1 = Tempy * Vec2;
+                    double scal3 = Tempy * Vec1;
+                    //std::cout << "A Vec1 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
+
+                    Smoothers_lvls[l]->Mult(Vec2, Tempy);
+                    double scal2 = Tempy * Vec1;
+                    double scal4 = Tempy * Vec2;
+                    //std::cout << "A Vec2 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
+
+                    std::cout << "scal1 = " << scal1 << "\n";
+                    std::cout << "scal2 = " << scal2 << "\n";
+
+                    if ( fabs(scal1 - scal2) / fabs(scal1) > 1.0e-12)
+                    {
+                        std::cout << "Smoother is not symmetric on two random vectors: \n";
+                        std::cout << "vec2 * (A * vec1) = " << scal1 << " != " << scal2 << " = vec1 * (A * vec2)" << "\n";
+                        std::cout << "difference = " << scal1 - scal2 << "\n";
+                    }
+                    else
+                    {
+                        std::cout << "Smoother was symmetric on the given vectors: dot product = " << scal1 << "\n";
+                    }
+
+                    std::cout << "scal3 = " << scal3 << "\n";
+                    std::cout << "scal4 = " << scal4 << "\n";
+
+                    if (scal3 < 0 || scal4 < 0)
+                    {
+                        std::cout << "The operator (new smoother) is not s.p.d. \n";
+                    }
+                    else
+                    {
+                        std::cout << "The smoother is s.p.d. on the two random vectors: (Av,v) > 0 \n";
+                    }
+                }
+                else
+                    if (verbose)
+                        std::cout << "Symmetry check for the smoother works correctly only in the serial case \n";
+
+            }
 #endif
         }
 
@@ -1943,6 +2163,9 @@ int main(int argc, char *argv[])
 
         }
     }
+
+    //MPI_Finalize();
+    //return 0;
 
     // Creating the coarsest problem solver
     int size = 0;
@@ -2076,6 +2299,7 @@ int main(int argc, char *argv[])
     //return 0;
     */
 
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
     SparseMatrix d_td_Hdiv_diag;
     Dof_TrueDof_Func_lvls[0][0]->GetDiag(d_td_Hdiv_diag);
@@ -2103,7 +2327,7 @@ int main(int argc, char *argv[])
     MPI_Barrier(comm);
     std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
     MPI_Barrier(comm);
-
+#endif
 
 #ifdef TIMING
     //testing the smoother performance
@@ -3415,6 +3639,9 @@ int main(int argc, char *argv[])
                                       Funct_mat_lvls, Constraint_mat_lvls, Floc,
                                       Smoothers_lvls,
                                       Xinit_truedofs,
+#ifdef CHECK_CONSTR
+                                      *Constraint_global, Floc,
+#endif
                                       LocalSolver_partfinder_lvls,
                                       CoarsestSolver_partfinder,
                                       construct_coarseops);
@@ -3427,11 +3654,14 @@ int main(int argc, char *argv[])
                      Dof_TrueDof_Func_lvls,
                      P_Func, TrueP_Func, P_W,
                      EssBdrTrueDofs_Funct_lvls,
-                     Funct_mat_lvls, Constraint_mat_lvls,
-                     Floc,
+                     Funct_mat_lvls,
                      *Funct_global, *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
+#ifdef CHECK_CONSTR
+                     *Constraint_global, Floc,
+#endif
+
 #ifdef TIMING
                      Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_fw, Times_up,
 #endif
@@ -3583,15 +3813,16 @@ int main(int argc, char *argv[])
     PartSolDofs->Distribute(ParticSol);
 
     //MFEM_ASSERT(CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"), "Failure");
-    if (!CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"))
+    //if (!CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"))
+    if (!CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &Floc, "in the main code for the particular solution"))
     {
         std::cout << "Failure! \n";
     }
     else
         if (verbose)
             std::cout << "Success \n";
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 
     /*
     Vector tempp(sigma_exact_finest->Size());
@@ -3811,7 +4042,7 @@ int main(int argc, char *argv[])
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
     Testsolver.SetOperator(*BlockMattest);
-    Testsolver.SetPrintLevel(0);
+    Testsolver.SetPrintLevel(1);
 
     NewSolver.SetAsPreconditioner(true);
     NewSolver.SetPrintLevel(0);
