@@ -15,6 +15,8 @@ using std::unique_ptr;
 // TODO: Look into the main example class, probably Funct_global is to be removed, maybe even d_td is not needed?
 // TODO: Maybe, the coarsest solver ccan also avoid it, so that only global things are involved inside it?
 
+#define NEW_COARSESTSETUP
+
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
@@ -176,9 +178,6 @@ bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const 
     return passed;
 }
 
-// TODO: Implement an abstract base for the coarsest problem solver. Maybe unnecessary now
-// TODO: Implement an abstract base for the local problems solver. Maybe unnecessary now
-
 class CoarsestProblemHcurlSolver : public Operator
 {
 private:
@@ -190,18 +189,25 @@ private:
 
     mutable bool finalized;
 
+#ifndef NEW_COARSESTSETUP
     // coarsest level local-to-process matrices
     mutable BlockMatrix* Op_blkspmat;
 
     const SparseMatrix& Divfreeop_sp;
+#endif
     mutable HypreParMatrix * CTMC_global;
+#ifdef NEW_COARSESTSETUP
+    const Array2D<HypreParMatrix*> & Funct_global;
+#endif
     const HypreParMatrix& Divfreeop;
     mutable HypreParMatrix * Divfreeop_T;
 
+#ifndef NEW_COARSESTSETUP
     // Dof_TrueDof relation tables for each level for functional-related
     // variables and the L2 variable (constraint space).
     const std::vector<HypreParMatrix*> & dof_trueDof_blocks;
     const HypreParMatrix & dof_trueDof_Hcurl;
+#endif
 
     const std::vector<Array<int>* > & essbdrdofs_blocks;
     const std::vector<Array<int>* > & essbdrtruedofs_blocks;
@@ -230,8 +236,18 @@ protected:
 
 public:
     ~CoarsestProblemHcurlSolver();
-    CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat, const SparseMatrix &DivfreeOpSpMat, const HypreParMatrix& DivfreeOp,
+    CoarsestProblemHcurlSolver(int Size,
+#ifndef NEW_COARSESTSETUP
+                               BlockMatrix& Op_Blksmat, const SparseMatrix &DivfreeOpSpMat,
+#endif
+#ifdef NEW_COARSESTSETUP
+                               const Array2D<HypreParMatrix*> & Funct_Global,
+#endif
+
+                               const HypreParMatrix& DivfreeOp,
+#ifndef NEW_COARSESTSETUP
                                const std::vector<HypreParMatrix*>& D_tD_blks, const HypreParMatrix &D_tD_Hcurl,
+#endif
                                const std::vector<Array<int>* >& EssBdrDofs_blks,
                                const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
                                const Array<int>& EssBdrTrueDofs_Hcurl);
@@ -257,23 +273,42 @@ public:
     }
 };
 
-CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op_Blksmat,
+CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
+#ifndef NEW_COARSESTSETUP
+                                                       BlockMatrix& Op_Blksmat,
                                                        const SparseMatrix& DivfreeOpSpMat,
+#endif
+#ifdef NEW_COARSESTSETUP
+                                                       const Array2D<HypreParMatrix*> & Funct_Global,
+#endif
                                                        const HypreParMatrix& DivfreeOp,
+#ifndef NEW_COARSESTSETUP
                                                        const std::vector<HypreParMatrix*>& D_tD_blks,
                                                        const HypreParMatrix& D_tD_Hcurl,
+#endif
                                                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                                                        const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
                                                        const Array<int>& EssBdrDofs_Hcurl,
                                                        const Array<int>& EssBdrTrueDofs_Hcurl)
     : Operator(Size),
+#ifdef NEW_COARSESTSETUP
+      numblocks(Funct_Global.NumRows()),
+#else
       numblocks(Op_Blksmat.NumRowBlocks()),
+#endif
       comm(DivfreeOp.GetComm()),
+#ifndef NEW_COARSESTSETUP
       Op_blkspmat(&Op_Blksmat),
       Divfreeop_sp(DivfreeOpSpMat),
+#endif
+#ifdef NEW_COARSESTSETUP
+      Funct_global(Funct_Global),
+#endif
       Divfreeop(DivfreeOp),
+#ifndef NEW_COARSESTSETUP
       dof_trueDof_blocks(D_tD_blks),
       dof_trueDof_Hcurl(D_tD_Hcurl),
+#endif
       essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
       essbdrdofs_Hcurl(EssBdrDofs_Hcurl),
@@ -284,7 +319,11 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size, BlockMatrix& Op
     block_offsets.SetSize(numblocks + 1);
     block_offsets[0] = 0;
     for (int blk = 0; blk < numblocks; ++blk)
+#ifdef NEW_COARSESTSETUP
+        block_offsets[blk + 1] = Funct_Global(blk,blk)->Height();
+#else
         block_offsets[blk + 1] = dof_trueDof_blocks[blk]->Width();
+#endif
     block_offsets.PartialSum();
 
     coarse_offsets.SetSize(numblocks + 1);
@@ -326,7 +365,58 @@ void CoarsestProblemHcurlSolver::Setup() const
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
 
+#ifdef NEW_COARSESTSETUP
+    Divfreeop_T = Divfreeop.Transpose();
 
+    Array2D<HypreParMatrix*> HcurlFunct_global(numblocks, numblocks);
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+    {
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+        {
+            HypreParMatrix * Funct_blk = Funct_global(blk1,blk2);
+
+            //SparseMatrix diag_debug;
+            //Funct_blk->GetDiag(diag_debug);
+            //diag_debug.Print();
+
+            if (blk1 == 0)
+            {
+                HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
+                temp1->CopyRowStarts();
+                temp1->CopyColStarts();
+
+                if (blk2 == 0)
+                {
+                    HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+
+                    // FIXME: Why is it needed?
+                    SparseMatrix diagg;
+                    HcurlFunct_global(blk1, blk2)->GetDiag(diagg);
+                    diagg.EliminateZeroRows();
+
+                    HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                    HcurlFunct_global(blk1, blk2)->CopyColStarts();
+
+                    delete temp1;
+                }
+                else
+                    HcurlFunct_global(blk1, blk2) = temp1;
+
+            }
+            else if (blk2 == 0)
+            {
+                HcurlFunct_global(blk1, blk2) = ParMult(Funct_blk,
+                                                              &Divfreeop);
+                HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                HcurlFunct_global(blk1, blk2)->CopyColStarts();
+            }
+            else
+            {
+                HcurlFunct_global(blk1, blk2)  = Funct_blk;
+            }
+        }
+    }
+#else
     // shortcuts
     const SparseMatrix* Curlh = &(Divfreeop_sp);
     SparseMatrix *CurlhT = Transpose(*Curlh);
@@ -456,6 +546,9 @@ void CoarsestProblemHcurlSolver::Setup() const
             }
         }
     }
+#endif
+
+
 
     coarse_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
