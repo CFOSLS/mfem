@@ -19,8 +19,6 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-#define NEW_DIVSOLVER
-
 //#define NEW_SMOOTHERSETUP
 
 //#define UNITED_SMOOTHERSETUP
@@ -819,7 +817,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1882,13 +1880,16 @@ int main(int argc, char *argv[])
             (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
-                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[l-1], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[l-1]);
+                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[num_levels - 1 - l],
+                        (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[num_levels - 1 - l]);
                 (*Funct_hpmat_lvls[l])(1,1)->CopyColStarts();
                 (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(1,0) = RAP(TrueP_H[l-1], (*Funct_hpmat_lvls[l-1])(1,0), TrueP_R[l-1]);
+                (*Funct_hpmat_lvls[l])(1,0) = RAP(TrueP_H[num_levels - 1 - l],
+                        (*Funct_hpmat_lvls[l-1])(1,0), TrueP_R[l-1]);
                 (*Funct_hpmat_lvls[l])(1,0)->CopyColStarts();
                 (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(0,1) = RAP(TrueP_R[l-1], (*Funct_hpmat_lvls[l-1])(0,1), TrueP_H[l-1]);
+                (*Funct_hpmat_lvls[l])(0,1) = RAP(TrueP_R[l-1],
+                        (*Funct_hpmat_lvls[l-1])(0,1), TrueP_H[num_levels - 1 - l]);
                 (*Funct_hpmat_lvls[l])(0,1)->CopyColStarts();
                 (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
             }
@@ -3631,7 +3632,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Calling constructor of the new solver \n";
 
-    const bool construct_coarseops = true;
     int stopcriteria_type = 1;
 
 #ifdef TIMING
@@ -3646,7 +3646,6 @@ int main(int argc, char *argv[])
     std::list<double>* Times_up = new std::list<double>;
 #endif
 
-#ifdef NEW_DIVSOLVER
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
@@ -3659,23 +3658,7 @@ int main(int argc, char *argv[])
                                       Floc,
 #endif
                                       LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder,
-                                      construct_coarseops);
-#else
-    DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
-                                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                                      P_Func, TrueP_Func, P_W,
-                                      EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
-                                      Smoothers_lvls,
-                                      Xinit_truedofs,
-#ifdef CHECK_CONSTR
-                                      *Constraint_global, Floc,
-#endif
-                                      LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder,
-                                      construct_coarseops);
-#endif
+                                      CoarsestSolver_partfinder);
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
