@@ -12,8 +12,10 @@
 
 #include "cfosls_testsuite.hpp"
 
+#define NEW_SOLVERSETUP
+
 // (de)activates solving of the discrete global problem
-//#define OLD_CODE
+#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -24,14 +26,14 @@
 //#define UNITED_SMOOTHERSETUP
 
 // activates a check for the symmetry of the new smoother setup
-#define CHECK_SPDSMOOTHER
+//#define CHECK_SPDSMOOTHER
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
 #define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
-//#define USE_AS_A_PREC
+#define USE_AS_A_PREC
 
 #define HCURL_COARSESOLVER
 
@@ -1130,9 +1132,9 @@ int main(int argc, char *argv[])
     }
 
     // FIXME:
-    if (verbose)
-        std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
-    ess_bdrSigma = 1;
+    //if (verbose)
+        //std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
+    //ess_bdrSigma = 1;
 
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
     ess_bdrS = 0;
@@ -1344,6 +1346,9 @@ int main(int argc, char *argv[])
 #endif
 
     BlockOperator* Funct_global;
+#ifdef NEW_SOLVERSETUP
+    std::vector<Operator*> Funct_global_lvls(num_levels);
+#endif
     BlockVector* Functrhs_global;
     Array<int> offsets_global(numblocks_funct + 1);
 
@@ -1806,6 +1811,31 @@ int main(int argc, char *argv[])
     }
 
     HypreParMatrix * Constraint_global;
+
+#ifdef NEW_SOLVERSETUP
+    for (int l = 0; l < num_levels; ++l)
+    {
+        if (l == 0)
+            Funct_global_lvls[l] = Funct_global;
+        else
+        {
+            Funct_global_lvls[l] = new RAPOperator(*TrueP_Func[l - 1], *Funct_global_lvls[l - 1], *TrueP_Func[l - 1]);
+            /*
+            Funct_global_lvls[l] = new BlockOperator(offsets_global_lvls[l]);
+            for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
+            {
+                for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
+                {
+                    Funct_global_lvls[l]->SetBlock(blk1,blk2) = RAP(TrueP_R);
+                    Funct_global_lvls[l]->CopyRowStarts();
+                    Funct_global_lvls[l]->CopyColStarts();
+                }
+            }
+            */
+
+        }
+    }
+#endif
 
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
@@ -3650,14 +3680,28 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder->ResetSolverParams();
 
-    GeneralMinConstrSolver NewSolver(num_levels,
+    GeneralMinConstrSolver NewSolver(
+                     comm,
+                     num_levels,
+#ifndef NEW_SOLVERSETUP
                      Dof_TrueDof_Func_lvls,
-                     P_Func, TrueP_Func, P_W,
+                     P_Func,
+#endif
+                     TrueP_Func,
+#ifndef NEW_SOLVERSETUP
+                     P_W,
+#endif
                      EssBdrTrueDofs_Funct_lvls,
+#ifndef NEW_SOLVERSETUP
                      Funct_mat_lvls,
-                     *Funct_global, *Functrhs_global, offsets_global,
+                     *Funct_global,
+#endif
+                     *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
+#ifdef NEW_SOLVERSETUP
+                     Funct_global_lvls,
+#endif
 #ifdef CHECK_CONSTR
                      *Constraint_global, Floc,
 #endif
