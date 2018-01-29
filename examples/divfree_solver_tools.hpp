@@ -14,6 +14,8 @@ using std::unique_ptr;
 // TODO: Do the same thing with DivConstraint? Or we need something like d_td there? I guess, no.
 // TODO: Look into the main example class, probably Funct_global is to be removed, maybe even d_td is not needed?
 
+#define NEW_DIVSOLVER
+
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
@@ -2085,17 +2087,21 @@ protected:
     // Relation tables which represent agglomerated elements-to-elements relation at each level
     const Array< SparseMatrix*>& AE_e;
 
+#ifndef NEW_DIVSOLVER
     // Dof_TrueDof relation tables for each level for functional-related
     // variables and the L2 variable (constraint space).
     // Used for assembling the coarsest level problem
     // and for the smoother setup in the general case
     const std::vector<std::vector<HypreParMatrix*> >& dof_trueDof_Func_lvls;
     const std::vector<HypreParMatrix*> & dof_trueDof_L2_lvls;
+#endif
 
     const MPI_Comm comm;
 
     // Projectors for the variables related to the functional and constraint
+#ifndef NEW_DIVSOLVER
     const Array< BlockMatrix*>& P_Func; // used only for constructing coarsened operators now
+#endif
     const Array< BlockOperator*>& TrueP_Func;
     const Array< SparseMatrix*>& P_L2; // used for operators coarsening and in ComputeLocalRhsConstr (via ProjectFinerL2ToCoarser)
 
@@ -2107,7 +2113,9 @@ protected:
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
     //const Array<int>& block_offsets;
+#ifndef NEW_DIVSOLVER
     mutable Array<int> block_trueoffsets;
+#endif
 
     // Righthand side of  the divergence contraint on dofs
     // (remains unchanged throughout the solving process)
@@ -2119,30 +2127,42 @@ protected:
     // essential bdr conditions imposed for the initial problem
     const BlockVector& bdrdata_truedofs;
 
+#ifdef NEW_DIVSOLVER
+    const std::vector<Operator*> & Func_global_lvls;
+    const HypreParMatrix & Constr_global;
+#endif
+
     // stores Functional matrix on all levels except the finest
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
+#ifndef NEW_DIVSOLVER
     mutable Array<BlockMatrix*> Funct_lvls;
     mutable Array<SparseMatrix*> Constr_lvls;
+#endif
 
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
     mutable BlockVector* yblock_truedofs;
     mutable BlockVector* tempblock_truedofs;
 
+#ifndef NEW_DIVSOLVER
     mutable Array<Array<int>* > trueoffsets_lvls;
+#endif
     mutable Array<BlockVector*> truetempvec_lvls;
     mutable Array<BlockVector*> truetempvec2_lvls;
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
-
+#ifndef NEW_DIVSOLVER
     mutable Array<BlockVector*> tempvec1_lvls; // on dofs, used in MultTrueFunc()
     mutable Array<BlockVector*> tempvec2_lvls;
+#endif
 
     mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
     mutable CoarsestProblemSolver* CoarseSolver;
 
 #ifdef CHECK_CONSTR
+#ifndef NEW_DIVSOLVER
     mutable HypreParMatrix * Constr_global;
+#endif
     mutable Vector * Constr_rhs_global;
 #endif
 
@@ -2166,21 +2186,31 @@ protected:
 
 public:
     ~DivConstraintSolver();
-    DivConstraintSolver(int NumLevels,
+    DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                            const Array< SparseMatrix*> &AE_to_e,
+#ifndef NEW_DIVSOLVER
                            const std::vector<std::vector<HypreParMatrix*> >& Dof_TrueDof_Func_lvls,
                            const std::vector<HypreParMatrix*>& Dof_TrueDof_L2_lvls,
                            const Array< BlockMatrix*> &Proj_Func,
+#endif
                            const Array< BlockOperator*>& TrueProj_Func,
                            const Array< SparseMatrix*> &Proj_L2,
                            const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
+#ifdef NEW_DIVSOLVER
+                           const std::vector<Operator*> & Func_Global_lvls,
+                           const HypreParMatrix & Constr_Global,
+#endif
+#ifndef NEW_DIVSOLVER
                            const Array<BlockMatrix*> & FunctOp_lvls,
                            const Array<SparseMatrix*> &ConstrOp_lvls,
+#endif
                            const Vector& ConstrRhsVec,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
 #ifdef CHECK_CONSTR
+#ifndef NEW_DIVSOLVER
                            HypreParMatrix & Constr_Global,
+#endif
                            Vector & Constr_Rhs_global,
 #endif
                            Array<LocalProblemSolver*>* LocalSolvers,
@@ -2190,11 +2220,16 @@ public:
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const
     {
+#ifdef NEW_DIVSOLVER
+        // x and y will be accessed through its viewers
+        xblock_truedofs->Update(x.GetData(), TrueP_Func[0]->RowOffsets());
+        yblock_truedofs->Update(y.GetData(), TrueP_Func[0]->RowOffsets());
+#else
         // x will be accessed through xblock as its view
         xblock_truedofs->Update(x.GetData(), block_trueoffsets);
         // y will be accessed through yblock as its view
         yblock_truedofs->Update(y.GetData(), block_trueoffsets);
-
+#endif
         FindParticularSolution(*xblock_truedofs, *yblock_truedofs, ConstrRhs, print_level);
     }
 
@@ -2214,9 +2249,11 @@ DivConstraintSolver::~DivConstraintSolver()
     delete yblock_truedofs;
     delete tempblock_truedofs;
 
+#ifndef NEW_DIVSOLVER
     for (int i = 0; i < trueoffsets_lvls.Size(); ++i)
         if (i > 0) // for i = 0 it is an input parameter
             delete trueoffsets_lvls[i];
+#endif
     for (int i = 0; i < truetempvec_lvls.Size(); ++i)
         delete truetempvec_lvls[i];
     for (int i = 0; i < truetempvec2_lvls.Size(); ++i)
@@ -2226,60 +2263,86 @@ DivConstraintSolver::~DivConstraintSolver()
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
 
+#ifndef NEW_DIVSOLVER
     for (int i = 0; i < tempvec1_lvls.Size(); ++i)
         delete tempvec1_lvls[i];
     for (int i = 0; i < tempvec2_lvls.Size(); ++i)
         delete tempvec2_lvls[i];
-
     for (int l = 0; l < Funct_lvls.Size(); ++l)
         if (l > 0)
             delete Funct_lvls[l];
     for (int l = 0; l < Constr_lvls.Size(); ++l)
         if (l > 0)
             delete Constr_lvls[l];
+#endif
 
 }
 
-DivConstraintSolver::DivConstraintSolver(int NumLevels,
+DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                        const Array< SparseMatrix*> &AE_to_e,
+#ifndef NEW_DIVSOLVER
                        const std::vector<std::vector<HypreParMatrix*> >& Dof_TrueDof_Func_lvls,
                        const std::vector<HypreParMatrix*>& Dof_TrueDof_L2_lvls,
                        const Array< BlockMatrix*> &Proj_Func,
+#endif
                        const Array< BlockOperator*>& TrueProj_Func,
                        const Array< SparseMatrix*> &Proj_L2,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
+#ifdef NEW_DIVSOLVER
+                       const std::vector<Operator*> & Func_Global_lvls,
+                       const HypreParMatrix & Constr_Global,
+#endif
+#ifndef NEW_DIVSOLVER
                        const Array<BlockMatrix*> & FunctOp_lvls,
                        const Array<SparseMatrix*> &ConstrOp_lvls,
+#endif
                        const Vector& ConstrRhsVec,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
 #ifdef CHECK_CONSTR
+#ifndef NEW_DIVSOLVER
                        HypreParMatrix & Constr_Global,
+#endif
                        Vector & Constr_Rhs_global,
 #endif
                        Array<LocalProblemSolver*>* LocalSolvers,
                        CoarsestProblemSolver* CoarsestSolver,
                        bool Construct_CoarseOps)
+#ifdef NEW_DIVSOLVER
+     : Solver(Func_Global_lvls[0]->Height(), Func_Global_lvls[0]->Width()),
+#else
      : Solver(FunctOp_lvls[0]->Height(), FunctOp_lvls[0]->Width()),
+#endif
        construct_coarseops(Construct_CoarseOps),
        setup_finished(false),
        num_levels(NumLevels),
        AE_e(AE_to_e),
+#ifndef NEW_DIVSOLVER
        dof_trueDof_Func_lvls(Dof_TrueDof_Func_lvls),
        dof_trueDof_L2_lvls(Dof_TrueDof_L2_lvls),
-       comm(Dof_TrueDof_L2_lvls[0]->GetComm()),
-       P_Func(Proj_Func), TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
+#endif
+       comm(Comm),
+#ifndef NEW_DIVSOLVER
+       P_Func(Proj_Func),
+#endif
+       TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
        essbdrtruedofs_Func(EssBdrTrueDofs_Func),
-       numblocks(FunctOp_lvls[0]->NumColBlocks()),
+       numblocks(TrueProj_Func[0]->NumRowBlocks()),
        ConstrRhs(ConstrRhsVec),
        Smoothers_lvls(Smoothers_Lvls),
        bdrdata_truedofs(Bdrdata_TrueDofs)
+#ifdef NEW_DIVSOLVER
+       , Func_global_lvls(Func_Global_lvls),
+       Constr_global(Constr_Global)
+#endif
 #ifdef CHECK_CONSTR
-       , Constr_global(&Constr_Global),
-       Constr_rhs_global(&Constr_Rhs_global)
+#ifndef NEW_DIVSOLVER
+       , Constr_global(&Constr_Global)
+#endif
+       ,Constr_rhs_global(&Constr_Rhs_global)
 #endif
 {
-
+#ifndef NEW_DIVSOLVER
     MFEM_ASSERT(FunctOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
                                                 " Funct operator at the finest level must be given anyway!");
     MFEM_ASSERT(ConstrOp_lvls[0] != NULL, "GeneralMinConstrSolver::GeneralMinConstrSolver()"
@@ -2302,7 +2365,25 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     Constr_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Constr_lvls[l] = ConstrOp_lvls[l];
+#endif
 
+#ifdef NEW_DIVSOLVER
+
+    xblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
+    yblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
+    tempblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
+
+    truesolupdate_lvls.SetSize(num_levels);
+    truesolupdate_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+
+    truetempvec_lvls.SetSize(num_levels);
+    truetempvec_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+    truetempvec2_lvls.SetSize(num_levels);
+    truetempvec2_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+    trueresfunc_lvls.SetSize(num_levels);
+    trueresfunc_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+
+#else
     block_trueoffsets.SetSize(numblocks + 1);
     block_trueoffsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk )
@@ -2316,20 +2397,26 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
     truesolupdate_lvls.SetSize(num_levels);
     truesolupdate_lvls[0] = new BlockVector(block_trueoffsets);
 
-    trueoffsets_lvls.SetSize(num_levels);
-    trueoffsets_lvls[0] = &block_trueoffsets;
     truetempvec_lvls.SetSize(num_levels);
     truetempvec_lvls[0] = new BlockVector(block_trueoffsets);
     truetempvec2_lvls.SetSize(num_levels);
     truetempvec2_lvls[0] = new BlockVector(block_trueoffsets);
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(block_trueoffsets);
+#endif
 
+#ifndef NEW_DIVSOLVER
+    trueoffsets_lvls.SetSize(num_levels);
+    trueoffsets_lvls[0] = &block_trueoffsets;
+#endif
+
+#ifndef NEW_DIVSOLVER
     tempvec1_lvls.SetSize(num_levels);
     tempvec1_lvls[0] = new BlockVector(Funct_lvls[0]->ColOffsets());
 
     tempvec2_lvls.SetSize(num_levels);
     tempvec2_lvls[0] = new BlockVector(Funct_lvls[0]->RowOffsets());
+#endif
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -2354,7 +2441,14 @@ DivConstraintSolver::DivConstraintSolver(int NumLevels,
 void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_guess,
                                                          BlockVector& particular_solution, const Vector &constr_rhs, bool verbose) const
 {
-    // 3. checking if the given initial vector satisfies the divergence constraint
+    // checking if the given initial vector satisfies the divergence constraint
+#ifdef NEW_DIVSOLVER
+    Vector rhs_constr(Constr_global.Height());
+    Constr_global.Mult(truestart_guess.GetBlock(0), rhs_constr);
+    rhs_constr -= constr_rhs;
+    rhs_constr *= -1.0;
+    if ( ComputeMPIVecNorm(comm, rhs_constr,"", verbose) > 1.0e-14 )
+#else
     BlockVector temp_dofs(Funct_lvls[0]->RowOffsets());
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -2364,9 +2458,10 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     Vector temp_constr(Constr_lvls[0]->Height());
     Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), temp_constr);
     temp_constr -= constr_rhs;
-
-    // 3.1 if not, computing the particular solution
     if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-14 )
+#endif
+    // 3.1 if not, computing the particular solution
+    //if ( ComputeMPIVecNorm(comm, temp_constr,"", verbose) > 1.0e-14 )
     {
         if (verbose)
             std::cout << "Initial vector does not satisfy the divergence constraint. \n";
@@ -2385,10 +2480,13 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
 #endif
 
     // variable-size vectors (initialized with the finest level sizes) on dofs
+#ifdef NEW_DIVSOLVER
+#else
     Vector rhs_constr((Constr_lvls[0]->Height()));     // righthand side (from the divergence constraint) at level l
     Constr_lvls[0]->Mult(temp_dofs.GetBlock(0), rhs_constr);
     rhs_constr *= -1.0;
     rhs_constr += constr_rhs;
+#endif
 
     Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
     Vector workfvec(rhs_constr.Size());       // used only in ComputeLocalRhsConstr()
@@ -2425,7 +2523,11 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
 #ifdef CHECK_CONSTR
             if (l == 0)
+#ifdef NEW_DIVSOLVER
+                CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), Constr_global, NULL, "for the smoother level 0 update");
+#else
                 CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), *Constr_global, NULL, "for the smoother level 0 update");
+#endif
 #endif
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
@@ -2463,8 +2565,13 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     particular_solution += *truesolupdate_lvls[0];
 
 #ifdef CHECK_CONSTR
+#ifdef NEW_DIVSOLVER
+    CheckConstrRes(particular_solution.GetBlock(0), Constr_global,
+                    Constr_rhs_global, "for the particular solution inside in the end");
+#else
     CheckConstrRes(particular_solution.GetBlock(0), *Constr_global,
                     Constr_rhs_global, "for the particular solution inside in the end");
+#endif
 #endif
 
 }
@@ -2475,10 +2582,13 @@ void DivConstraintSolver::Setup(bool verbose) const
         std::cout << "Starting solver setup \n";
 
     // 1. copying the given initial vector to the internal variable
-
+#ifdef NEW_DIVSOLVER
+    CheckFunctValue(comm, *Func_global_lvls[0], NULL, bdrdata_truedofs,
+            "for initial vector at the beginning of solver setup: ", print_level);
+#else
     CheckFunctValue(comm, *Funct_lvls[0], dof_trueDof_Func_lvls[0], bdrdata_truedofs,
             "for initial vector at the beginning of solver setup: ", print_level);
-
+#endif
     // 2. setting up the required internal data at all levels
 
     // 2.1 all levels except the coarsest
@@ -2499,6 +2609,10 @@ void DivConstraintSolver::Setup(bool verbose) const
 
 void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {
+#ifdef NEW_DIVSOLVER
+    Func_global_lvls[l]->Mult(x_l, rhs_l);
+    rhs_l *= coeff;
+#else
     for (int blk = 0; blk < numblocks; ++blk)
         dof_trueDof_Func_lvls[l][blk]->Mult(x_l.GetBlock(blk), tempvec1_lvls[l]->GetBlock(blk));
 
@@ -2508,6 +2622,7 @@ void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x
 
     for (int blk = 0; blk < numblocks; ++blk)
         dof_trueDof_Func_lvls[l][blk]->MultTranspose(tempvec2_lvls[l]->GetBlock(blk), rhs_l.GetBlock(blk));
+#endif
 }
 
 // Computes prerequisites required for solving local problems at level l
@@ -2515,6 +2630,7 @@ void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x
 // and maybe smth else ... ?
 void DivConstraintSolver::SetUpFinerLvl(int lvl) const
 {
+#ifndef NEW_DIVSOLVER
     // Funct_lvls[lvl] stores the Functional matrix on level lvl
     if (construct_coarseops)
     {
@@ -2535,7 +2651,14 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
         delete Constr_PR;
         delete P_L2T;
     }
+#endif
 
+#ifdef NEW_DIVSOLVER
+    truetempvec_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+    truetempvec2_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+    truesolupdate_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+    trueresfunc_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+#else
     trueoffsets_lvls[lvl + 1] = new Array<int>(numblocks + 1);
     (*trueoffsets_lvls[lvl + 1])[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -2548,9 +2671,12 @@ void DivConstraintSolver::SetUpFinerLvl(int lvl) const
     truetempvec2_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     truesolupdate_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
     trueresfunc_lvls[lvl + 1] = new BlockVector(*trueoffsets_lvls[lvl + 1]);
+#endif
 
+#ifndef NEW_DIVSOLVER
     tempvec1_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->ColOffsets());
     tempvec2_lvls[lvl + 1] = new BlockVector(Funct_lvls[lvl + 1]->RowOffsets());
+#endif
 }
 
 

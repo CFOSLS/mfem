@@ -19,6 +19,8 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
+#define NEW_DIVSOLVER
+
 //#define NEW_SMOOTHERSETUP
 
 //#define UNITED_SMOOTHERSETUP
@@ -3644,7 +3646,23 @@ int main(int argc, char *argv[])
     std::list<double>* Times_up = new std::list<double>;
 #endif
 
-    DivConstraintSolver PartsolFinder(num_levels, P_WT,
+#ifdef NEW_DIVSOLVER
+    DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
+                                      TrueP_Func, P_W,
+                                      EssBdrTrueDofs_Funct_lvls,
+                                      Funct_global_lvls,
+                                      *Constraint_global,
+                                      Floc,
+                                      Smoothers_lvls,
+                                      Xinit_truedofs,
+#ifdef CHECK_CONSTR
+                                      Floc,
+#endif
+                                      LocalSolver_partfinder_lvls,
+                                      CoarsestSolver_partfinder,
+                                      construct_coarseops);
+#else
+    DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
                                       P_Func, TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
@@ -3657,6 +3675,7 @@ int main(int argc, char *argv[])
                                       LocalSolver_partfinder_lvls,
                                       CoarsestSolver_partfinder,
                                       construct_coarseops);
+#endif
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
