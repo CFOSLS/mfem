@@ -12,8 +12,6 @@
 
 #include "cfosls_testsuite.hpp"
 
-#define NEW_SOLVERSETUP
-
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
@@ -817,9 +815,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1346,9 +1344,7 @@ int main(int argc, char *argv[])
 #endif
 
     BlockOperator* Funct_global;
-#ifdef NEW_SOLVERSETUP
     std::vector<Operator*> Funct_global_lvls(num_levels);
-#endif
     BlockVector* Functrhs_global;
     Array<int> offsets_global(numblocks_funct + 1);
 
@@ -1812,30 +1808,13 @@ int main(int argc, char *argv[])
 
     HypreParMatrix * Constraint_global;
 
-#ifdef NEW_SOLVERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
         if (l == 0)
             Funct_global_lvls[l] = Funct_global;
         else
-        {
             Funct_global_lvls[l] = new RAPOperator(*TrueP_Func[l - 1], *Funct_global_lvls[l - 1], *TrueP_Func[l - 1]);
-            /*
-            Funct_global_lvls[l] = new BlockOperator(offsets_global_lvls[l]);
-            for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
-            {
-                for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
-                {
-                    Funct_global_lvls[l]->SetBlock(blk1,blk2) = RAP(TrueP_R);
-                    Funct_global_lvls[l]->CopyRowStarts();
-                    Funct_global_lvls[l]->CopyColStarts();
-                }
-            }
-            */
-
-        }
     }
-#endif
 
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
@@ -3683,25 +3662,12 @@ int main(int argc, char *argv[])
     GeneralMinConstrSolver NewSolver(
                      comm,
                      num_levels,
-#ifndef NEW_SOLVERSETUP
-                     Dof_TrueDof_Func_lvls,
-                     P_Func,
-#endif
                      TrueP_Func,
-#ifndef NEW_SOLVERSETUP
-                     P_W,
-#endif
                      EssBdrTrueDofs_Funct_lvls,
-#ifndef NEW_SOLVERSETUP
-                     Funct_mat_lvls,
-                     *Funct_global,
-#endif
                      *Functrhs_global, offsets_global,
                      Smoothers_lvls,
                      Xinit_truedofs,
-#ifdef NEW_SOLVERSETUP
                      Funct_global_lvls,
-#endif
 #ifdef CHECK_CONSTR
                      *Constraint_global, Floc,
 #endif
@@ -3715,7 +3681,7 @@ int main(int argc, char *argv[])
                      NULL,
 #endif
                      CoarsestSolver,
-                     construct_coarseops, stopcriteria_type);
+                     stopcriteria_type);
 
     double newsolver_reltol = 1.0e-6;
 
@@ -3852,9 +3818,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
-
-    ParGridFunction * PartSolDofs = new ParGridFunction(R_space_lvls[0]);
-    PartSolDofs->Distribute(ParticSol);
 
     //MFEM_ASSERT(CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"), "Failure");
     //if (!CheckConstrRes(*PartSolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the particular solution"))
