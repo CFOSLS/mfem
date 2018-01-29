@@ -19,8 +19,6 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-#define NEW_COARSESTSETUP
-
 //#define NEW_SMOOTHERSETUP
 
 //#define UNITED_SMOOTHERSETUP
@@ -1343,7 +1341,7 @@ int main(int argc, char *argv[])
     Array<HypreParMatrix*> Divfree_hpmat_lvls(num_levels);
     Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
 #endif
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined NEW_COARSESTSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
 #endif
 
@@ -1377,7 +1375,7 @@ int main(int argc, char *argv[])
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined NEW_COARSESTSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
        Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numblocks_funct, numblocks_funct);
 #endif
    }
@@ -1820,7 +1818,7 @@ int main(int argc, char *argv[])
             Funct_global_lvls[l] = new RAPOperator(*TrueP_Func[l - 1], *Funct_global_lvls[l - 1], *TrueP_Func[l - 1]);
     }
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined NEW_COARSESTSETUP
+#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
         if (l == 0)
@@ -2235,7 +2233,6 @@ int main(int argc, char *argv[])
     MPI_Finalize();
     return 0;
     */
-#ifdef NEW_COARSESTSETUP
     CoarsestSolver = new CoarsestProblemHcurlSolver(size,
                                                      *Funct_hpmat_lvls[num_levels - 1],
                                                      *Divfreehpmat_coarse,
@@ -2243,18 +2240,6 @@ int main(int argc, char *argv[])
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1],
                                                      *EssBdrDofs_Hcurl[num_levels - 1],
                                                      *EssBdrTrueDofs_Hcurl[num_levels - 1]);
-#else
-    CoarsestSolver = new CoarsestProblemHcurlSolver(size, *Funct_mat_lvls[num_levels - 1],
-                                                     *Divfree_mat_lvls[num_levels - 1],
-                                                     *Divfreehpmat_coarse,
-                                                     Dof_TrueDof_Func_lvls[num_levels - 1],
-                                                     *Dof_TrueDof_Hcurl_lvls[num_levels - 1],
-                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
-                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1],
-                                                     *EssBdrDofs_Hcurl[num_levels - 1],
-                                                     *EssBdrTrueDofs_Hcurl[num_levels - 1]);
-#endif
-
 
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
