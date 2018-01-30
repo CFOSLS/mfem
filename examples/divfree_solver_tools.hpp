@@ -866,6 +866,11 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         coarsetrueRhs->GetBlock(numblocks) = *rhs_constr;
     }
 
+    //std::cout << "Block 0 \n";
+    //coarsetrueRhs->GetBlock(0).Print();
+    //std::cout << "Block 1 \n";
+    //coarsetrueRhs->GetBlock(1).Print();
+
     // 2. solve the linear system with preconditioned MINRES.
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
@@ -2293,8 +2298,11 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     }
 
 #ifdef CHECK_BNDCND
-    MFEM_ASSERT(CheckBdrError(truestart_guess, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(CheckBdrError(truestart_guess.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
                               "for the initial guess");
+    }
 #endif
 
     // variable-size vectors (initialized with the finest level sizes) on dofs
@@ -2330,6 +2338,9 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             MPI_Barrier(comm);
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+
+            //truetempvec2_lvls[l]->Print();
+
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
 #ifdef CHECK_CONSTR
             if (l == 0)
@@ -2350,6 +2361,8 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
 
     // imposes boundary conditions and assembles coarsest level's
     // righthand side (from rhsfunc) on true dofs
+
+    //trueresfunc_lvls[num_levels - 1]->Print();
 
     // 2.5 solve coarse problem
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
@@ -2509,7 +2522,6 @@ protected:
     mutable Array2D<HypreParMatrix*> * Funct_hpmat;
     mutable HypreParMatrix* Divfree_hpmat;
     mutable HypreParMatrix* Divfree_hpmat_nobnd;
-    mutable HypreParMatrix* Divfree_hpmat_T;
 #endif
 
 #ifdef UNITED_SMOOTHERSETUP
@@ -2527,7 +2539,6 @@ protected:
 #else
     // global discrete curl operator
     mutable HypreParMatrix* Divfree_hpmat;
-    mutable HypreParMatrix* Divfree_hpmat_T;
 #endif
 
 #ifdef DEBUG_SMOOTHER
@@ -2653,7 +2664,6 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     delete CTMC_global;
 
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
-    delete Divfree_hpmat_T;
 #else
     for (int rowblk = 0; rowblk < Funct_restblocks_global.NumRows(); ++rowblk)
         for (int colblk = 0; colblk < Funct_restblocks_global.NumCols(); ++colblk)
@@ -3349,6 +3359,21 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+#ifdef CHECK_BNDCND
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for xblock! blk = " << blk << ", value = "
+                          << xblock->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
+
+
 #ifdef NEW_SMOOTHERSETUP
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -3362,13 +3387,26 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
-                truerhs->GetBlock(0)[tdof] = 0.0;
+                //truerhs->GetBlock(0)[tdof] = 0.0;
+#ifdef CHECK_BNDCND
+                if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
+                    std::cout << "bnd cnd is violated for truerhs! blk = " << blk << ", value = "
+                              << truerhs->GetBlock(blk)[tdof]
+                              << ", index = " << tdof << "\n";
+#endif
+                //truerhs->GetBlock(0)[tdof] = 0.0;
             }
         else
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
             {
                 int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-                truerhs->GetBlock(blk)[tdof] = 0.0;
+#ifdef CHECK_BNDCND
+                if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
+                    std::cout << "bnd cnd is violated for truerhs! blk = " << blk << ", value = "
+                              << truerhs->GetBlock(blk)[tdof]
+                              << ", index = " << tdof << "\n";
+#endif
+                //truerhs->GetBlock(blk)[tdof] = 0.0;
             }
     }
 
@@ -3383,9 +3421,34 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+    //truerhs->GetBlock(0).Print();
+
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
 
+#ifdef CHECK_BNDCND
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // in Hcurl
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+            {
+                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
+                    std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
+                              << truex->GetBlock(blk)[tdof]
+                              << ", index = " << tdof << "\n";
+            }
+        else
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+            {
+                int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
+                    std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
+                              << truex->GetBlock(blk)[tdof]
+                              << ", index = " << tdof << "\n";
+            }
+    }
+#endif
     //truex->Print();
     //std::cout << "debug print \n";
 
@@ -3404,7 +3467,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // first component should be transferred from Hcurl to Hdiv
-            Divfree_hpmat->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+            Divfree_hpmat_nobnd->Mult(truex->GetBlock(0), yblock->GetBlock(0));
         else
             yblock->GetBlock(blk) = truex->GetBlock(blk);
     }
@@ -3422,6 +3485,9 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         }
     }
 #endif
+
+    //yblock->GetBlock(0).Print();
+
 
 #else // for NEW_SMOOTHERSETUP
     for (int blk = 0; blk < numblocks; ++blk)
@@ -3552,7 +3618,6 @@ void HcurlGSSSmoother::Setup() const
                                 "cases numblocks = 1 or 2 only \n");
 
 #ifdef UNITED_SMOOTHERSETUP
-    Divfree_hpmat_T = Divfree_hpmat->Transpose();
     CTMC_global_new = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
     CTMC_global_new->CopyRowStarts();
     CTMC_global_new->CopyColStarts();
@@ -3738,16 +3803,13 @@ void HcurlGSSSmoother::Setup() const
 #else
 
 #ifdef NEW_SMOOTHERSETUP
-    Divfree_hpmat_T = Divfree_hpmat->Transpose();
-    CTMC_global = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
+    CTMC_global = RAP(Divfree_hpmat, (*Funct_hpmat)(0,0), Divfree_hpmat);
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
 
-    /*
     SparseMatrix diagg;
     CTMC_global->GetDiag(diagg);
     diagg.EliminateZeroRows();
-    */
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1) // i.e. if S exists in the functional
@@ -4443,8 +4505,11 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
 #ifdef CHECK_BNDCND
-        MFEM_ASSERT(CheckBdrError(*tempblock_truedofs, bdrdata_truedofs,
-                                  *essbdrtruedofs_Func[0][0], true), "before the iteration");
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            MFEM_ASSERT(CheckBdrError(tempblock_truedofs->GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
+                                  "before the iteration");
+        }
 #endif
 
 #ifdef CHECK_CONSTR
@@ -4602,8 +4667,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
 #ifdef CHECK_BNDCND
-    MFEM_ASSERT(CheckBdrError(previous_sol, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
-            "at the start of Solve()");
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
+                              "at the start of Solve()");
+    }
 #endif
 
     next_sol = previous_sol;
@@ -4818,8 +4886,11 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef CHECK_BNDCND
     if (print_level && !preconditioner_mode)
     {
-        MFEM_ASSERT(CheckBdrError(next_sol, bdrdata_truedofs, *essbdrtruedofs_Func[0][0], true),
-                "after all levels update");
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
+                                  "after all levels update");
+        }
     }
 #endif
 

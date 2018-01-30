@@ -814,7 +814,7 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
@@ -1998,6 +1998,7 @@ int main(int argc, char *argv[])
         Vector temprhs(Divfree_op.Height());
         temprhs = 0.0;
         Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         /*
         Array<int> marked_dofs (C_space_lvls[l]->GetVSize());
         Array<int> tr_vdofs;
@@ -3837,7 +3838,7 @@ int main(int argc, char *argv[])
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks_funct; ++blk)
     {
-        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), Xinit_truedofs.GetBlock(blk), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
     }
 
@@ -3877,8 +3878,12 @@ int main(int argc, char *argv[])
         MFEM_ABORT("");
     }
 
-    MFEM_ASSERT(CheckBdrError(ParticSol, Xinit_truedofs, *EssBdrTrueDofs_Funct_lvls[0][0], true),
-                              "for the particular solution");
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+                                  "for the particular solution");
+    }
+
 
     Vector error3(ParticSol.Size());
     error3 = ParticSol;
