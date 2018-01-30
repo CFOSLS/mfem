@@ -2848,6 +2848,15 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
 
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_intmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // in Hcurl
@@ -2879,15 +2888,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
-
-#ifdef TIMING
-    MPI_Barrier(comm);
-    chrono.Stop();
-    time_intmult += chrono.RealTime();
-    MPI_Barrier(comm);
-    chrono.Clear();
-    chrono.Start();
-#endif
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -2976,9 +2976,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
     }
 
-    // computing the solution update in the H(div) x other blocks space
-    // in two steps:
-
 #ifdef TIMING
     MPI_Barrier(comm);
     chrono.Stop();
@@ -2987,6 +2984,10 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Clear();
     chrono.Start();
 #endif
+
+    // computing the solution update in the H(div) x other blocks space
+    // in two steps:
+
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {

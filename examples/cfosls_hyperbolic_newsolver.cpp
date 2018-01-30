@@ -2264,6 +2264,134 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     //testing the smoother performance
 
+    HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
+    HypreSmoother * testsmoother = new HypreSmoother(*testmat, HypreSmoother::Type::l1GS, 1);
+
+    {
+        double time_globalmult = 0.0;
+        double time_beforeintmult = 0.0;
+        double time_afterintmult = 0.0;
+        double time_intmult = 0.0;
+
+        Array<int> test_offsets(2);
+        test_offsets[0] = 0;
+        test_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Height();
+
+        BlockVector * xblock = new BlockVector(test_offsets);
+        BlockVector * yblock = new BlockVector(test_offsets);
+
+        Vector testvec1(Divfree_hpmat_nobnd_lvls[0]->Height());
+        testvec1 = 1.0;
+        Vector testvec2(Divfree_hpmat_nobnd_lvls[0]->Height());
+        testvec2 = 0.0;
+
+        Array<int> testcurl_offsets(2);
+        testcurl_offsets[0] = 0;
+        testcurl_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Width();
+
+        BlockVector * truerhs = new BlockVector(testcurl_offsets);
+        BlockVector * truex = new BlockVector(testcurl_offsets);
+
+        StopWatch chrono_debug;
+        StopWatch chrono_int;
+        StopWatch chrono_int2;
+
+        MPI_Barrier(comm);
+        chrono_debug.Clear();
+        chrono_debug.Start();
+
+
+        for (int it = 0; it < 20; ++it)
+        {
+            MPI_Barrier(comm);
+            chrono_int2.Clear();
+            chrono_int2.Start();
+
+            xblock->Update(testvec1.GetData(), test_offsets);
+            yblock->Update(testvec2.GetData(), test_offsets);
+
+            MPI_Barrier(comm);
+            chrono_int.Clear();
+            chrono_int.Start();
+
+            int blk = 0;
+
+            const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+
+            Divfree_hpmat_nobnd_lvls[0]->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+
+            for ( int tdofind = 0; tdofind < EssBdrTrueDofs_Hcurl[0]->Size(); ++tdofind)
+            {
+                int tdof = (*EssBdrTrueDofs_Hcurl[0])[tdofind];
+                truerhs->GetBlock(blk)[tdof] = 0.0;
+            }
+
+            *truex = 0.0;
+
+            MPI_Barrier(comm);
+            chrono_int.Stop();
+            time_beforeintmult += chrono_int.RealTime();
+            MPI_Barrier(comm);
+            chrono_int.Clear();
+            chrono_int.Start();
+
+            testsmoother->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+            MPI_Barrier(comm);
+            chrono_int.Stop();
+            time_intmult += chrono_int.RealTime();
+            MPI_Barrier(comm);
+            chrono_int.Clear();
+            chrono_int.Start();
+
+            for ( int tdofind = 0; tdofind < EssBdrTrueDofs_Hcurl[0]->Size(); ++tdofind)
+            {
+                int tdof =  (*EssBdrTrueDofs_Hcurl[0])[tdofind];
+                truex->GetBlock(blk)[tdof] = 0.0;
+            }
+
+            // computing the solution update in the H(div) x other blocks space
+            // in two steps:
+
+            Divfree_hpmat_nobnd_lvls[0]->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+
+            {
+                const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+                for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                {
+                    yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+                }
+            }
+
+            MPI_Barrier(comm);
+            chrono_int.Stop();
+            time_afterintmult += chrono_int.RealTime();
+
+            MPI_Barrier(comm);
+            chrono_int2.Stop();
+            time_globalmult += chrono_int2.RealTime();
+
+            testvec1 += testvec2;
+        }
+
+        MPI_Barrier(comm);
+        chrono_debug.Stop();
+
+        if (verbose)
+           std::cout << "Extraordinary external check for smoother at level 0  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+        if (verbose)
+        {
+            std::cout << "Extraordinary global mult time = " << time_globalmult << "\n";
+            std::cout << "Extraordinary int mult time = " << time_intmult << "\n";
+            std::cout << "Extraordinary int beforemult time = " << time_beforeintmult << "\n";
+            std::cout << "Extraordinary int aftermult time = " << time_afterintmult << "\n";
+            std::cout << std::flush;
+        }
+    }
+
+
     for (int l = 0; l < num_levels - 1; ++l)
     {
         StopWatch chrono_debug;
@@ -2276,7 +2404,7 @@ int main(int argc, char *argv[])
         MPI_Barrier(comm);
         chrono_debug.Clear();
         chrono_debug.Start();
-        for (int it = 0; it < 1; ++it)
+        for (int it = 0; it < 20; ++it)
         {
             Smoothers_lvls[l]->Mult(testRhs, testX);
             testRhs += testX;
