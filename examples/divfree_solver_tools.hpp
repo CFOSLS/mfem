@@ -193,8 +193,6 @@ private:
 
     mutable bool finalized;
 
-    mutable HypreParMatrix * CTMC_global;
-
     const Array2D<HypreParMatrix*> & Funct_global;
 
     const HypreParMatrix& Divfreeop;
@@ -208,7 +206,6 @@ private:
     mutable Array<int> coarse_offsets;
     mutable BlockOperator* coarse_matrix;
     mutable BlockDiagonalPreconditioner * coarse_prec;
-    //mutable BlockVector * coarse_rhsfunc;
     mutable BlockVector * coarsetrueX;
     mutable BlockVector * coarsetrueRhs;
     mutable IterativeSolver * coarseSolver;
@@ -2102,8 +2099,7 @@ protected:
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
 
-    // Righthand side of  the divergence contraint on dofs
-    // (remains unchanged throughout the solving process)
+    // righthand side of  the divergence contraint on dofs (= on true dofs for L2)
     const Vector& ConstrRhs;
 
     const Array<Operator*>& Smoothers_lvls;
@@ -4028,9 +4024,6 @@ private:
 protected:
     const BlockVector& Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
-    // a required input since MFEM cannot give out offsets out of the const BlockOperator which is ugly imo
-    const Array<int>& offsets_global;
-
     // The same as xblock and yblock but on true dofs
     mutable BlockVector* xblock_truedofs;
     mutable BlockVector* yblock_truedofs;
@@ -4083,7 +4076,6 @@ public:
                            const Array< BlockOperator*>& TrueProj_Func,
                            const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
                            const BlockVector& Functrhs_Global,
-                           const Array<int>& Offsets_Global,
                            const Array<Operator*>& Smoothers_Lvls,
                            const BlockVector& Bdrdata_TrueDofs,
                            const std::vector<Operator*> & Func_Global_lvls,
@@ -4185,7 +4177,7 @@ void GeneralMinConstrSolver::PrintAllOptions() const
 // The input must be defined on true dofs
 void GeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
 {
-    init_guess->Update(InitGuess.GetData(), offsets_global);
+    init_guess->Update(InitGuess.GetData(), TrueP_Func[0]->RowOffsets());
 }
 
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
@@ -4256,7 +4248,6 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
                        const Array< BlockOperator*>& TrueProj_Func,
                        const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        const BlockVector& Functrhs_Global,
-                       const Array<int>& Offsets_Global,
                        const Array<Operator*>& Smoothers_Lvls,
                        const BlockVector& Bdrdata_TrueDofs,
                        const std::vector<Operator*> & Func_Global_lvls,
@@ -4278,7 +4269,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
                        Array<Operator*>* LocalSolvers,
                        Operator *CoarsestSolver,
                        int StopCriteria_Type)
-     : Solver(Offsets_Global[Offsets_Global.Size()-1]),
+     : Solver(TrueProj_Func[0]->Height()),
        stopcriteria_type(StopCriteria_Type),
        setup_finished(false),
        num_levels(NumLevels),
@@ -4306,22 +4297,24 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        times_fw(Times_fw),
        times_up(Times_up),
 #endif
-       Functrhs_global(Functrhs_Global),
-       offsets_global(Offsets_Global)
+       Functrhs_global(Functrhs_Global)
 {
-    xblock_truedofs = new BlockVector(offsets_global);
-    yblock_truedofs = new BlockVector(offsets_global);
-    tempblock_truedofs = new BlockVector(offsets_global);
+
+    TrueProj_Func[0]->RowOffsets();
+
+    xblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
+    yblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
+    tempblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     truesolupdate_lvls.SetSize(num_levels);
-    truesolupdate_lvls[0] = new BlockVector(offsets_global);
+    truesolupdate_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     truetempvec_lvls.SetSize(num_levels);
-    truetempvec_lvls[0] = new BlockVector(offsets_global);
+    truetempvec_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
     truetempvec2_lvls.SetSize(num_levels);
-    truetempvec2_lvls[0] = new BlockVector(offsets_global);
+    truetempvec2_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
     trueresfunc_lvls.SetSize(num_levels);
-    trueresfunc_lvls[0] = new BlockVector(offsets_global);
+    trueresfunc_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -4347,7 +4340,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
 
-    init_guess = new BlockVector(offsets_global);
+    init_guess = new BlockVector(TrueProj_Func[0]->RowOffsets());
     *init_guess = 0.0;
 
     LocalSolvers_lvls.SetSize(num_levels - 1);
@@ -4431,9 +4424,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     converged = 0;
 
     // x will be accessed through xblock_truedofs as its view
-    xblock_truedofs->Update(x.GetData(), offsets_global);
+    xblock_truedofs->Update(x.GetData(), TrueP_Func[0]->RowOffsets());
     // y will be accessed through yblock_truedofs as its view
-    yblock_truedofs->Update(y.GetData(), offsets_global);
+    yblock_truedofs->Update(y.GetData(), TrueP_Func[0]->RowOffsets());
 
     if (preconditioner_mode)
         *init_guess = 0.0;

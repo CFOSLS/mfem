@@ -3748,19 +3748,13 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder->ResetSolverParams();
 
-    GeneralMinConstrSolver NewSolver(
-                     comm,
-                     num_levels,
-                     TrueP_Func,
-                     EssBdrTrueDofs_Funct_lvls,
-                     *Functrhs_global, offsets_global,
-                     Smoothers_lvls,
-                     Xinit_truedofs,
-                     Funct_global_lvls,
+    GeneralMinConstrSolver NewSolver( comm, num_levels,
+                     TrueP_Func, EssBdrTrueDofs_Funct_lvls,
+                     *Functrhs_global, Smoothers_lvls,
+                     Xinit_truedofs, Funct_global_lvls,
 #ifdef CHECK_CONSTR
                      *Constraint_global, Floc,
 #endif
-
 #ifdef TIMING
                      Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_fw, Times_up,
 #endif
@@ -3769,8 +3763,7 @@ int main(int argc, char *argv[])
 #else
                      NULL,
 #endif
-                     CoarsestSolver,
-                     stopcriteria_type);
+                     CoarsestSolver, stopcriteria_type);
 
     double newsolver_reltol = 1.0e-6;
 
