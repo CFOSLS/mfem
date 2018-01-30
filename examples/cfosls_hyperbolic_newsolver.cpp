@@ -1358,7 +1358,7 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
-#if defined NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
 #endif
 #if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
@@ -1917,7 +1917,7 @@ int main(int argc, char *argv[])
         }
     }
 #endif
-#if defined NEW_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
         ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
@@ -2295,15 +2295,18 @@ int main(int argc, char *argv[])
            std::cout << "internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetInternalMultTime() << " \n" << std::flush;
            std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
+           std::cout << "\n";
         }
+
+        MPI_Barrier(comm);
 
         for (int l = 0; l < num_levels - 1; ++l)
             ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
 #endif
 
-    //MPI_Finalize();
-    //return 0;
+    MPI_Finalize();
+    return 0;
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
@@ -3674,7 +3677,7 @@ int main(int argc, char *argv[])
         MFEM_ABORT("");
     }
 
-    for (int blk = 0; blk < numblocks; ++blk)
+    for (int blk = 0; blk < numblocks_funct; ++blk)
     {
         MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
@@ -4726,9 +4729,11 @@ int main(int argc, char *argv[])
                 delete Smoothers_lvls[l];
 #endif
 
-#if defined NEW_SMOOTHERSETUP
+#ifdef HCURL_COARSESOLVER
         if (l < num_levels - 1)
             delete Divfree_hpmat_nobnd_lvls[l];
+#endif
+#if defined NEW_SMOOTHERSETUP
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))
