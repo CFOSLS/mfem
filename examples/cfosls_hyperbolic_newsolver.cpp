@@ -19,7 +19,7 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-//#define NEW_SMOOTHERSETUP
+#define NEW_SMOOTHERSETUP
 
 //#define UNITED_SMOOTHERSETUP
 

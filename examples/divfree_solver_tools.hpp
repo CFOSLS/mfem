@@ -24,7 +24,7 @@ using std::unique_ptr;
 //#undef CHECK_BNDCND
 //#endif
 
-//#define NEW_SMOOTHERSETUP
+#define NEW_SMOOTHERSETUP
 
 //#define UNITED_SMOOTHERSETUP
 
@@ -337,6 +337,12 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                 if (blk2 == 0)
                 {
+                    /*
+                    HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
+                    HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                    HcurlFunct_global(blk1, blk2)->CopyColStarts();
+                    */
+
                     HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
 
                     // FIXME: Why is it needed?
@@ -501,6 +507,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
+            yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
             if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
                 std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
                           << yblock->GetBlock(blk)[(*temp)[tdofind]]
@@ -3378,7 +3385,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0)
-            Divfree_hpmat->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+            Divfree_hpmat_nobnd->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
         else
             truerhs->GetBlock(blk) = xblock->GetBlock(blk);
 
@@ -3387,7 +3394,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
-                //truerhs->GetBlock(0)[tdof] = 0.0;
+                truerhs->GetBlock(0)[tdof] = 0.0;
 #ifdef CHECK_BNDCND
                 if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truerhs! blk = " << blk << ", value = "
@@ -3433,6 +3440,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
+                truex->GetBlock(blk)[tdof] = 0.0;
                 if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
                               << truex->GetBlock(blk)[tdof]
@@ -3478,6 +3486,7 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         const Array<int> *temp = essbdrtruedofs_Funct[blk];
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
+            yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
             if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
                 std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
                           << yblock->GetBlock(blk)[(*temp)[tdofind]]
@@ -3803,13 +3812,15 @@ void HcurlGSSSmoother::Setup() const
 #else
 
 #ifdef NEW_SMOOTHERSETUP
-    CTMC_global = RAP(Divfree_hpmat, (*Funct_hpmat)(0,0), Divfree_hpmat);
+    CTMC_global = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
 
+    /*
     SparseMatrix diagg;
     CTMC_global->GetDiag(diagg);
     diagg.EliminateZeroRows();
+    */
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1) // i.e. if S exists in the functional
