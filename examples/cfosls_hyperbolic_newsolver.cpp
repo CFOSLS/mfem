@@ -817,7 +817,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1633,15 +1633,31 @@ int main(int argc, char *argv[])
             }
 
             Ablock->Assemble();
+            Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
             Ablock->Finalize();
             Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
 
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
                 Cblock->Assemble();
+                {
+                    Vector temp1(Cblock->Width());
+                    temp1 = 0.0;
+                    Vector temp2(Cblock->Height());
+                    temp2 = 0.0;
+                    Cblock->EliminateEssentialBC(ess_bdrS, temp1, temp2);
+                }
                 Cblock->Finalize();
                 Funct_global->SetBlock(1,1, Cblock->ParallelAssemble());
                 BTblock->Assemble();
+                {
+                    Vector temp1(BTblock->Width());
+                    temp1 = 0.0;
+                    Vector temp2(BTblock->Height());
+                    temp2 = 0.0;
+                    BTblock->EliminateTrialDofs(ess_bdrSigma, temp1, temp2);
+                    BTblock->EliminateTestDofs(ess_bdrS);
+                }
                 BTblock->Finalize();
                 HypreParMatrix * BT = BTblock->ParallelAssemble();
                 Funct_global->SetBlock(1,0, BT);
@@ -1821,6 +1837,65 @@ int main(int argc, char *argv[])
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
+        ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
+        //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        else
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Ablock->Assemble();
+        Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+        Ablock->Finalize();
+
+        (*Funct_hpmat_lvls[l])(0,0) = Ablock->ParallelAssemble();
+
+        delete Ablock;
+
+        ParBilinearForm *Cblock;
+        ParMixedBilinearForm *BTblock;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Case when S is from L2 but is not"
+                                                       " eliminated is not supported currently! \n");
+
+            // diagonal block for H^1
+            Cblock = new ParBilinearForm(H_space_lvls[l]);
+            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+            Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+            Cblock->Assemble();
+            {
+                Vector temp1(Cblock->Width());
+                temp1 = 0.0;
+                Vector temp2(Cblock->Height());
+                temp2 = 0.0;
+                Cblock->EliminateEssentialBC(ess_bdrS, temp1, temp2);
+            }
+            Cblock->Finalize();
+
+            // off-diagonal block for (H(div), Space_for_S) block
+            // you need to create a new integrator here to swap the spaces
+            BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
+            BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+            BTblock->Assemble();
+            {
+                Vector temp1(BTblock->Width());
+                temp1 = 0.0;
+                Vector temp2(BTblock->Height());
+                temp2 = 0.0;
+                BTblock->EliminateTrialDofs(ess_bdrSigma, temp1, temp2);
+                BTblock->EliminateTestDofs(ess_bdrS);
+            }
+            BTblock->Finalize();
+
+            (*Funct_hpmat_lvls[l])(1,1) = Cblock->ParallelAssemble();
+            HypreParMatrix * BT = BTblock->ParallelAssemble();
+            (*Funct_hpmat_lvls[l])(1,0) = BT;
+            (*Funct_hpmat_lvls[l])(0,1) = BT->Transpose();
+
+            delete Cblock;
+            delete BTblock;
+        }
+#if 0
         if (l == 0)
         {
             ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
@@ -1850,7 +1925,13 @@ int main(int argc, char *argv[])
                 Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
                 Cblock->Assemble();
                 // FIXME: What about boundary conditons here?
-                //Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
+                {
+                    Vector temp1(Cblock->Width());
+                    temp1 = 0.0;
+                    Vector temp2(Cblock->Height());
+                    temp2 = 0.0;
+                    Cblock->EliminateEssentialBC(ess_bdrS, temp1, temp2);
+                }
                 Cblock->Finalize();
 
                 // off-diagonal block for (H(div), Space_for_S) block
@@ -1859,8 +1940,14 @@ int main(int argc, char *argv[])
                 BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
                 BTblock->Assemble();
                 // FIXME: What about boundary conditons here?
-                //BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
-                //BTblock->EliminateTestDofs(ess_bdrS);
+                {
+                    Vector temp1(BTblock->Width());
+                    temp1 = 0.0;
+                    Vector temp2(BTblock->Height());
+                    temp2 = 0.0;
+                    BTblock->EliminateTrialDofs(ess_bdrSigma, temp1, temp2);
+                    BTblock->EliminateTestDofs(ess_bdrS);
+                }
                 BTblock->Finalize();
 
                 (*Funct_hpmat_lvls[l])(1,1) = Cblock->ParallelAssemble();
@@ -1893,11 +1980,8 @@ int main(int argc, char *argv[])
                 (*Funct_hpmat_lvls[l])(0,1)->CopyColStarts();
                 (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
             }
-
-            //Divfree_hpmat_lvls[l] = RAP(TrueP_R[l - 1], Divfree_hpmat_lvls[l-1], TrueP_C[num_levels - 1 - l]);
-            //Divfree_hpmat_lvls[l]->CopyColStarts();
-            //Divfree_hpmat_lvls[l]->CopyRowStarts();
         }
+#endif
     }
 #endif
 #if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP

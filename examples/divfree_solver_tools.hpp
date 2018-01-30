@@ -10,8 +10,7 @@ using std::unique_ptr;
 // PLAN:
 // 1) ...
 
-// TODO: Look again at GeneralMinSolver class, maybe somehing local is to be eliminated
-// TODO: Do the same thing with DivConstraint? Or we need something like d_td there? I guess, no.
+// TODO: Look again at GeneralMinSolver class, maybe something local is to be eliminated
 // TODO: Look into the main example class, probably Funct_global is to be removed, maybe even d_td is not needed?
 
 #define MEMORY_OPTIMIZED
@@ -136,7 +135,7 @@ bool CheckConstrRes(Vector& sigma, const HypreParMatrix& Constr, const Vector* C
 }
 
 // true for truedofs, false for dofs
-bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const Array<int>& ess_bdr, bool dof_or_truedof)
+bool CheckBdrError (const Vector& Candidate, const Vector* Given_bdrdata, const Array<int>& ess_bdr, bool dof_or_truedof)
 {
     bool passed = true;
     double max_bdr_error = 0;
@@ -145,18 +144,26 @@ bool CheckBdrError (const Vector& Candidate, const Vector& Given_bdrdata, const 
         for ( int i = 0; i < ess_bdr.Size(); ++i)
         {
             int tdof = ess_bdr[i];
-            double bdr_error_dof = fabs(Given_bdrdata[tdof] - Candidate[tdof]);
+            double bdr_error_dof;
+            if (Given_bdrdata)
+                bdr_error_dof = fabs((*Given_bdrdata)[tdof] - Candidate[tdof]);
+            else
+                bdr_error_dof = fabs(Candidate[tdof]);
             if ( bdr_error_dof > max_bdr_error )
                 max_bdr_error = bdr_error_dof;
         }
     }
     else // for dofs
     {
-        for ( int dof = 0; dof < Given_bdrdata.Size(); ++dof)
+        for ( int dof = 0; dof < Candidate.Size(); ++dof)
         {
             if (ess_bdr[dof] != 0.0)
             {
-                double bdr_error_dof = fabs(Given_bdrdata[dof] - Candidate[dof]);
+                double bdr_error_dof;
+                if (Given_bdrdata)
+                    bdr_error_dof = fabs((*Given_bdrdata)[dof] - Candidate[dof]);
+                else
+                    bdr_error_dof = fabs(Candidate[dof]);
                 if ( bdr_error_dof > max_bdr_error )
                     max_bdr_error = bdr_error_dof;
             }
@@ -4687,6 +4694,19 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
+
+        // manually setting the boundary conditions (requried for S from H1 at least) at the coarser level
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            const Array<int> * temp;
+            temp = essbdrtruedofs_Func[l + 1][blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                trueresfunc_lvls[l + 1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+
 
     } // end of loop over finer levels
 
