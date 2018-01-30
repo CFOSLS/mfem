@@ -10,21 +10,10 @@ using std::unique_ptr;
 // PLAN:
 // 1) ...
 
-// TODO: Look again at GeneralMinSolver class, maybe something local is to be eliminated
-// TODO: Look into the main example class, probably Funct_global is to be removed, maybe even d_td is not needed?
-
 #define MEMORY_OPTIMIZED
 
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 //#define CHECK_LOCALSOLVE
-
-//#ifdef TIMING
-//#undef CHECK_LOCALSOLVE
-//#undef CHECK_CONSTR
-//#undef CHECK_BNDCND
-//#endif
-
-#define NEW_SMOOTHERSETUP
 
 // activates some additional checks
 //#define DEBUG_INFO
@@ -299,7 +288,7 @@ CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
     delete coarse_prec;
     for ( int blk1 = 0; blk1 < coarse_matrix->NumRowBlocks(); ++blk1)
         for ( int blk2 = 0; blk2 < coarse_matrix->NumColBlocks(); ++blk2)
-            if (coarse_matrix->IsZeroBlock(blk1, blk2) == false)
+            if ( !(blk1 == 1 && blk2 == 1) && coarse_matrix->IsZeroBlock(blk1, blk2) == false)
                 delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
 
@@ -322,10 +311,6 @@ void CoarsestProblemHcurlSolver::Setup() const
         {
             HypreParMatrix * Funct_blk = Funct_global(blk1,blk2);
 
-            //SparseMatrix diag_debug;
-            //Funct_blk->GetDiag(diag_debug);
-            //diag_debug.Print();
-
             if (blk1 == 0)
             {
                 HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
@@ -337,13 +322,6 @@ void CoarsestProblemHcurlSolver::Setup() const
                     HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
 
                     //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
-
-                    /*
-                    // FIXME: Why is it needed?
-                    SparseMatrix diagg;
-                    HcurlFunct_global(blk1, blk2)->GetDiag(diagg);
-                    diagg.EliminateZeroRows();
-                    */
 
                     HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                     HcurlFunct_global(blk1, blk2)->CopyColStarts();
@@ -1381,10 +1359,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
                                         const std::vector<Array<int>* > &dof_is_essbdr,
                                         const std::vector<Array<int>* > &dof_is_bdr) const
 {
-#ifdef DEBUG_INFO
-    Vector dofs_check;
-#endif
-
     MPI_Comm comm = d_td_blocks[0]->GetComm();
     int num_procs;
     MPI_Comm_size(comm, &num_procs);
@@ -1426,13 +1400,6 @@ BlockMatrix* LocalProblemSolver::Get_AE_eintdofs(const BlockMatrix &el_to_dofs,
         delete tempprod;
 
         int ndofs = dofs_AE->Height();
-#ifdef DEBUG_INFO
-        if (blk == 0)
-        {
-            dofs_check.SetSize(ndofs);
-            dofs_check = -1.0;
-        }
-#endif
 
         int * innerdofs_AE_i = new int [ndofs + 1];
 
@@ -3774,7 +3741,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
+#ifdef DEBUG_INFO
         std::cout << "i = " << i << " (iter) \n";
+#endif
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
 #ifdef CHECK_BNDCND
@@ -3980,10 +3949,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
 
+#ifdef DEBUG_INFO
             next_sol += *truesolupdate_lvls[0];
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
+            if (!preconditioner_mode)
+                funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
                                      "after the localsolve update: ", 1);
             next_sol -= *truesolupdate_lvls[0];
+#endif
         }
 
 #ifdef TIMING
@@ -4001,21 +3973,24 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // smooth
         if (Smoothers_lvls[l])
         {
+#ifdef DEBUG_INFO
             next_sol += *truesolupdate_lvls[0];
             funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
                                      "before the smoother update: ", 1);
             next_sol -= *truesolupdate_lvls[0];
-
+#endif
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
+#ifdef DEBUG_INFO
             next_sol += *truesolupdate_lvls[0];
             funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
                                      "after the smoother update: ", 1);
             next_sol -= *truesolupdate_lvls[0];
+#endif
         }
 
 #ifdef TIMING
@@ -4073,6 +4048,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono2.Start();
 #endif
 
+#ifdef DEBUG_INFO
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
@@ -4080,7 +4056,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                              "after the coarsest level update: ", 1);
     next_sol -= *truesolupdate_lvls[0];
     *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
-
+#endif
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up

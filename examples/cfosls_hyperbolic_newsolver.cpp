@@ -35,8 +35,6 @@
 
 //#define DEBUG_SMOOTHER
 
-//#define COARSESOLVER_COMPARISON
-
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -45,8 +43,13 @@
 
 #define CHECK_BNDCND
 
+#define TIMING
 
-//#define TIMING
+#ifdef TIMING
+#undef CHECK_LOCALSOLVE
+#undef CHECK_CONSTR
+#undef CHECK_BNDCND
+#endif
 
 // changes the multigrid code to compare Multigrid with GeneralMinSolver
 //#define COMPARE_MULTIGRID
@@ -815,7 +818,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -937,10 +940,30 @@ int main(int argc, char *argv[])
 #ifdef OLD_CODE
     if (verbose)
         std::cout << "OLD_CODE active \n";
+#else
+    if (verbose)
+        std::cout << "OLD_CODE passive \n";
 #endif
 #ifdef TIMING
     if (verbose)
         std::cout << "TIMING active \n";
+#else
+    if (verbose)
+        std::cout << "TIMING passive \n";
+#endif
+#ifdef CHECK_BNDCND
+    if (verbose)
+        std::cout << "CHECK_BNDCND active \n";
+#else
+    if (verbose)
+        std::cout << "CHECK_BNDCND passive \n";
+#endif
+#ifdef CHECK_CONSTR
+    if (verbose)
+        std::cout << "CHECK_CONSTR active \n";
+#else
+    if (verbose)
+        std::cout << "CHECK_CONSTR passive \n";
 #endif
 
     std::cout << std::flush;
@@ -2269,42 +2292,6 @@ int main(int argc, char *argv[])
 
     //MPI_Finalize();
     //return 0;
-
-#ifdef COARSESOLVER_COMPARISON
-#ifndef     HCURL_COARSESOLVER
-    MFEM_ABORT("HCURL_COARSESOLVER must be active \n");
-#endif
-
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(1.0e-7);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(1.0e-7);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
-
-    CoarsestSolver_partfinder->SetMaxIter(100);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-7);
-    CoarsestSolver_partfinder->SetRelTol(1.0e-7);
-    CoarsestSolver_partfinder->ResetSolverParams();
-
-    Vector testRhs(CoarsestSolver->Height());
-    Vector testX1(CoarsestSolver->Width());
-    testX1 = 0.0;
-    Vector testX2(CoarsestSolver->Width());
-    testX2 = 0.0;
-
-    testRhs = 1.0;
-    CoarsestSolver->Mult(testRhs, testX1);
-    testRhs = 1.0;
-    CoarsestSolver_partfinder->Mult(testRhs, testX2);
-
-    Vector diff(CoarsestSolver->Width());
-    diff = testX1;
-    diff -= testX2;
-    if (verbose)
-        std::cout << "diff norm l2 = " << diff.Norml2() / sqrt (diff.Size()) << "\n";
-
-    MPI_Finalize();
-    return 0;
-#endif
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
