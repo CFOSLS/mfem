@@ -337,18 +337,16 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                 if (blk2 == 0)
                 {
-                    /*
                     HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
-                    HcurlFunct_global(blk1, blk2)->CopyRowStarts();
-                    HcurlFunct_global(blk1, blk2)->CopyColStarts();
-                    */
 
-                    HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+                    //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
 
+                    /*
                     // FIXME: Why is it needed?
                     SparseMatrix diagg;
                     HcurlFunct_global(blk1, blk2)->GetDiag(diagg);
                     diagg.EliminateZeroRows();
+                    */
 
                     HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                     HcurlFunct_global(blk1, blk2)->CopyColStarts();
@@ -461,6 +459,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
         }
 
+        /*
         const Array<int> * temp;
         if (blk == 0)
             temp = &essbdrtruedofs_Hcurl;
@@ -471,6 +470,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         {
             coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
+        */
     }
 
     // 2. solve the linear system with preconditioned CG.
@@ -498,8 +498,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
     }
 
-#ifdef CHECK_BNDCND
-    // checking bnd conditions for the resulting output vector
+    // inposing bnd conditions on the resulting output vector
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> * temp;
@@ -508,13 +507,15 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+#ifdef CHECK_BNDCND
+            // checking bnd conditions for the resulting output vector
             if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
                 std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
                           << yblock->GetBlock(blk)[(*temp)[tdofind]]
                           << ", index = " << (*temp)[tdofind] << "\n";
+#endif
         }
     }
-#endif
 
     return;
 }
@@ -3366,6 +3367,13 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+    }
+
 #ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -3403,18 +3411,18 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
                 //truerhs->GetBlock(0)[tdof] = 0.0;
             }
+#ifdef CHECK_BNDCND
         else
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
             {
                 int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
-#ifdef CHECK_BNDCND
                 if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truerhs! blk = " << blk << ", value = "
                               << truerhs->GetBlock(blk)[tdof]
                               << ", index = " << tdof << "\n";
-#endif
                 //truerhs->GetBlock(blk)[tdof] = 0.0;
             }
+#endif
     }
 
     *truex = 0.0;
@@ -3433,19 +3441,21 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
 
-#ifdef CHECK_BNDCND
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // in Hcurl
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
+#ifdef CHECK_BNDCND
                 truex->GetBlock(blk)[tdof] = 0.0;
                 if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
                               << truex->GetBlock(blk)[tdof]
                               << ", index = " << tdof << "\n";
+#endif
             }
+#ifdef CHECK_BNDCND
         else
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
             {
@@ -3455,8 +3465,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                               << truex->GetBlock(blk)[tdof]
                               << ", index = " << tdof << "\n";
             }
-    }
 #endif
+    }
     //truex->Print();
     //std::cout << "debug print \n";
 
@@ -3480,20 +3490,20 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             yblock->GetBlock(blk) = truex->GetBlock(blk);
     }
 
-#ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> *temp = essbdrtruedofs_Funct[blk];
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+#ifdef CHECK_BNDCND
             if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
                 std::cout << "bnd cnd is violated for yblock! blk = " << blk << ", value = "
                           << yblock->GetBlock(blk)[(*temp)[tdofind]]
                           << ", index = " << (*temp)[tdofind] << "\n";
+#endif
         }
     }
-#endif
 
     //yblock->GetBlock(0).Print();
 

@@ -2293,11 +2293,13 @@ int main(int argc, char *argv[])
         Divfreeop_coarse.AddDomainInterpolator(new DivSkewInterpolator);
     Divfreeop_coarse.Assemble();
     //Divfreeop_coarse.EliminateTestDofs(ess_bdrSigma);
+    /*
     Vector tempsol(Divfreeop_coarse.Width());
     tempsol = 0.0;
     Vector temprhs(Divfreeop_coarse.Height());
     temprhs = 0.0;
     Divfreeop_coarse.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+    */
     Divfreeop_coarse.Finalize();
     HypreParMatrix * Divfreehpmat_coarse = Divfreeop_coarse.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
 
