@@ -21,8 +21,6 @@
 
 #define NEW_SMOOTHERSETUP
 
-//#define UNITED_SMOOTHERSETUP
-
 // activates a check for the symmetry of the new smoother setup
 //#define CHECK_SPDSMOOTHER
 
@@ -1337,11 +1335,10 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
-    Array<HypreParMatrix*> Divfree_hpmat_lvls(num_levels);
+#if defined NEW_SMOOTHERSETUP
     Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
 #endif
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
+#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
 #endif
 
@@ -1375,7 +1372,7 @@ int main(int argc, char *argv[])
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
+#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
        Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numblocks_funct, numblocks_funct);
 #endif
    }
@@ -1834,7 +1831,7 @@ int main(int argc, char *argv[])
             Funct_global_lvls[l] = new RAPOperator(*TrueP_Func[l - 1], *Funct_global_lvls[l - 1], *TrueP_Func[l - 1]);
     }
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP || defined HCURL_COARSESOLVER
+#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
         ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
@@ -1895,135 +1892,11 @@ int main(int argc, char *argv[])
             delete Cblock;
             delete BTblock;
         }
-#if 0
-        if (l == 0)
-        {
-            ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
-            //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
-            else
-                Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
-            Ablock->Assemble();
-            Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
-            Ablock->Finalize();
-
-            (*Funct_hpmat_lvls[l])(0,0) = Ablock->ParallelAssemble();
-
-            delete Ablock;
-
-            ParBilinearForm *Cblock;
-            ParMixedBilinearForm *BTblock;
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Case when S is from L2 but is not"
-                                                           " eliminated is not supported currently! \n");
-
-                // diagonal block for H^1
-                Cblock = new ParBilinearForm(H_space_lvls[l]);
-                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
-                Cblock->Assemble();
-                // FIXME: What about boundary conditons here?
-                {
-                    Vector temp1(Cblock->Width());
-                    temp1 = 0.0;
-                    Vector temp2(Cblock->Height());
-                    temp2 = 0.0;
-                    Cblock->EliminateEssentialBC(ess_bdrS, temp1, temp2);
-                }
-                Cblock->Finalize();
-
-                // off-diagonal block for (H(div), Space_for_S) block
-                // you need to create a new integrator here to swap the spaces
-                BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
-                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
-                BTblock->Assemble();
-                // FIXME: What about boundary conditons here?
-                {
-                    Vector temp1(BTblock->Width());
-                    temp1 = 0.0;
-                    Vector temp2(BTblock->Height());
-                    temp2 = 0.0;
-                    BTblock->EliminateTrialDofs(ess_bdrSigma, temp1, temp2);
-                    BTblock->EliminateTestDofs(ess_bdrS);
-                }
-                BTblock->Finalize();
-
-                (*Funct_hpmat_lvls[l])(1,1) = Cblock->ParallelAssemble();
-                HypreParMatrix * BT = BTblock->ParallelAssemble();
-                (*Funct_hpmat_lvls[l])(1,0) = BT;
-                (*Funct_hpmat_lvls[l])(0,1) = BT->Transpose();
-
-                delete Cblock;
-                delete BTblock;
-            }
-
-        }
-        else
-        {
-            (*Funct_hpmat_lvls[l])(0,0) = RAP(TrueP_R[l-1], (*Funct_hpmat_lvls[l-1])(0,0), TrueP_R[l-1]);
-            (*Funct_hpmat_lvls[l])(0,0)->CopyColStarts();
-            (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[num_levels - 1 - l],
-                        (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[num_levels - 1 - l]);
-                (*Funct_hpmat_lvls[l])(1,1)->CopyColStarts();
-                (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(1,0) = RAP(TrueP_H[num_levels - 1 - l],
-                        (*Funct_hpmat_lvls[l-1])(1,0), TrueP_R[l-1]);
-                (*Funct_hpmat_lvls[l])(1,0)->CopyColStarts();
-                (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(0,1) = RAP(TrueP_R[l-1],
-                        (*Funct_hpmat_lvls[l-1])(0,1), TrueP_H[num_levels - 1 - l]);
-                (*Funct_hpmat_lvls[l])(0,1)->CopyColStarts();
-                (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
-            }
-        }
-#endif
     }
 #endif
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
-        ParDiscreteLinearOperator Divfree_op(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-        if (dim == 3)
-            Divfree_op.AddDomainInterpolator(new CurlInterpolator);
-        else // dim == 4
-            Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
-        Divfree_op.Assemble();
-        Vector tempsol(Divfree_op.Width());
-        tempsol = 0.0;
-        Vector temprhs(Divfree_op.Height());
-        temprhs = 0.0;
-        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
-        /*
-        Array<int> marked_dofs (C_space_lvls[l]->GetVSize());
-        Array<int> tr_vdofs;
-        for (int i = 0; i < C_space_lvls[l]->GetNBE(); ++i)
-        {
-            if (ess_bdrSigma[C_space_lvls[l]->GetBdrAttribute(i)-1])
-            {
-                C_space_lvls[l]->GetBdrElementVDofs (i, tr_vdofs);
-                for (int j = 0; j < tr_vdofs.Size(); j++)
-                {
-                    int k;
-                    if ( (k = tr_vdofs[j]) < 0 )
-                    {
-                       k = -1-k;
-                    }
-                    marked_dofs[k] = 1;
-                }
-            }
-        }
-        Divfree_op.EliminateEssentialBCFromTrialDofs(marked_dofs, tempsol, temprhs);
-        */
-        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
-        Divfree_op.Finalize();
-        Divfree_hpmat_lvls[l] = Divfree_op.ParallelAssemble();
-
         ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
         if (dim == 3)
             Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
@@ -2053,7 +1926,7 @@ int main(int argc, char *argv[])
         }
         if (l == 0)
         {
-            HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat_lvls[l]);
+            HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat_nobnd_lvls[l]);
 
             SparseMatrix diagg;
             checkprod->GetDiag(diagg);
@@ -2079,7 +1952,7 @@ int main(int argc, char *argv[])
         {
             if (l == 1)
             {
-                HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfree_hpmat_lvls[1]);
+                HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfree_hpmat_nobnd_lvls[1]);
                 HypreParMatrix * checkprod = ParMult(Constraint_global, temprod);
 
                 SparseMatrix diagg;
@@ -2128,19 +2001,8 @@ int main(int argc, char *argv[])
                     SweepsNum.Print();
                 }
             }
-#ifdef UNITED_SMOOTHERSETUP
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
-                                                     *Funct_mat_lvls[l], *Divfree_mat_lvls[l],
-#ifdef DEBUG_SMOOTHER
-                                                     *Constraint_global,
-#endif
-                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
-                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
-                                                     EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
-                                                     &SweepsNum, offsets_global);
-#else
 #ifdef NEW_SMOOTHERSETUP
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_nobnd_lvls[l],
                                                      *EssBdrTrueDofs_Hcurl[l],
                                                      EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
@@ -2151,8 +2013,8 @@ int main(int argc, char *argv[])
                                                      EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
 #endif
-#endif // for UNITED_SMOOTHERSETUP
-#else
+
+#else // for #ifdef WITH_SMOOTHERS
             Smoothers_lvls[l] = NULL;
 #endif
 
@@ -2286,46 +2148,9 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Creating the new coarsest solver which works in the div-free subspace \n" << std::flush;
 
-    ParDiscreteLinearOperator Divfreeop_coarse(C_space_lvls[num_levels - 1], R_space_lvls[num_levels - 1]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-    if (dim == 3)
-        Divfreeop_coarse.AddDomainInterpolator(new CurlInterpolator);
-    else // dim == 4
-        Divfreeop_coarse.AddDomainInterpolator(new DivSkewInterpolator);
-    Divfreeop_coarse.Assemble();
-    //Divfreeop_coarse.EliminateTestDofs(ess_bdrSigma);
-    /*
-    Vector tempsol(Divfreeop_coarse.Width());
-    tempsol = 0.0;
-    Vector temprhs(Divfreeop_coarse.Height());
-    temprhs = 0.0;
-    Divfreeop_coarse.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-    */
-    Divfreeop_coarse.Finalize();
-    HypreParMatrix * Divfreehpmat_coarse = Divfreeop_coarse.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-
-    // checking that Divfreeop_coarse, interpolated back to the finer level, is orthogonal to the divergence
-
-    /*
-    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]);
-    Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-    Bblock->Assemble();
-    Bblock->EliminateTestDofs(ess_bdrSigma);
-    Bblock->Finalize();
-    HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
-
-    HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfreehpmat_coarse);
-    HypreParMatrix * checkprod = ParMult(Constraint_global, temprod);
-
-    SparseMatrix diagg;
-    checkprod->GetDiag(diagg);
-
-    std::cout << "Constraint[0] * TrueP * Curl[1] norm = " << diagg.MaxNorm() << "\n";
-    MPI_Finalize();
-    return 0;
-    */
     CoarsestSolver = new CoarsestProblemHcurlSolver(size,
                                                      *Funct_hpmat_lvls[num_levels - 1],
-                                                     *Divfreehpmat_coarse,
+                                                     *Divfree_hpmat_nobnd_lvls[num_levels - 1],
                                                      EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1],
                                                      *EssBdrDofs_Hcurl[num_levels - 1],
@@ -2342,36 +2167,6 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
-
-    // must be the other way around
-    /*
-    // checking if truepfunct holds the boundary condition
-    Vector vec1(TrueP_R[0]->Height());
-    vec1 = 1.0;
-
-    for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][0]->Size(); ++i)
-    {
-        int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][0])[i];
-        vec1[tdofind] = 0.0;
-    }
-
-    Vector vec2(TrueP_R[0]->Width());
-
-    TrueP_R[0]->MultTranspose(vec1, vec2);
-
-    for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[1][0]->Size(); ++i)
-    {
-        int tdofind = (*EssBdrTrueDofs_Funct_lvls[1][0])[i];
-        if ( fabs(vec2[tdofind]) > 1.0e-14 )
-        {
-            std::cout << "bnd cnd is violated for vec2! \n";
-            std::cout << "tdofind = " << tdofind << ", value = " << vec2[tdofind] << "\n";
-        }
-    }
-
-    MPI_Finalize();
-    return 0;
-    */
 
     /*
     StopWatch chrono_debug;
@@ -2401,7 +2196,7 @@ int main(int argc, char *argv[])
     //return 0;
     */
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP
     // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
     SparseMatrix d_td_Hdiv_diag;
     Dof_TrueDof_Func_lvls[0][0]->GetDiag(d_td_Hdiv_diag);
@@ -2422,7 +2217,7 @@ int main(int argc, char *argv[])
 
     temppgrfunc->ParallelAssemble(testvec1);
     Vector testvec3(tempRAP->Height());
-    Divfree_hpmat_lvls[0]->Mult(testvec1, testvec3);
+    Divfree_hpmat_nobnd_lvls[0]->Mult(testvec1, testvec3);
 
     Vector diffvec(tempRAP->Height());
     double diffnorm = diffvec.Norml2() / sqrt (diffvec.Size());
@@ -4932,9 +4727,9 @@ int main(int argc, char *argv[])
                 delete Smoothers_lvls[l];
 #endif
 
-#if defined NEW_SMOOTHERSETUP || defined UNITED_SMOOTHERSETUP
+#if defined NEW_SMOOTHERSETUP
         if (l < num_levels - 1)
-            delete Divfree_hpmat_lvls[l];
+            delete Divfree_hpmat_nobnd_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))
@@ -5028,7 +4823,6 @@ int main(int argc, char *argv[])
     delete CoarsestSolver_partfinder;
 #ifdef HCURL_COARSESOLVER
     delete CoarsestSolver;
-    delete Divfreehpmat_coarse;
 #endif
 
     delete sigma_exact_finest;
