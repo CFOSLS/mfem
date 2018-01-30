@@ -1929,6 +1929,17 @@ int main(int argc, char *argv[])
         Divfree_op2.Finalize();
         Divfree_hpmat_nobnd_lvls[l] = Divfree_op2.ParallelAssemble();
 
+        if (l == 0)
+        {
+            ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
+            Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Bblock->Assemble();
+            Bblock->Finalize();
+            Constraint_global = Bblock->ParallelAssemble();
+
+            delete Bblock;
+        }
+
         // checking the orthogonality of discrete curl and discrete divergence operators
         /*
         if (l == 0)
