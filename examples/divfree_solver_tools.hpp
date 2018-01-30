@@ -2854,8 +2854,8 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
             for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
             {
                 int tdof = essbdrtruedofs_Hcurl[tdofind];
-#ifdef CHECK_BNDCND
                 truex->GetBlock(blk)[tdof] = 0.0;
+#ifdef CHECK_BNDCND
                 if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
                               << truex->GetBlock(blk)[tdof]
