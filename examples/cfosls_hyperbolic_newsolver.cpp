@@ -43,6 +43,8 @@
 
 #define CHECK_BNDCND
 
+#define SERIALMESH
+
 #define TIMING
 
 #ifdef TIMING
@@ -1104,6 +1106,11 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+#ifdef SERIALMESH
+    Mesh * serialmesh;
+    ParMesh * serialpmesh;
+#endif
+
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
     {
         if (aniso_refine)
@@ -1129,6 +1136,16 @@ int main(int argc, char *argv[])
             for (int l = 0; l < ser_ref_levels; l++)
                 mesh->UniformRefinement();
         }
+
+#ifdef SERIALMESH
+        serialmesh = new Mesh(*mesh);
+        for (int l = 0; l < par_ref_levels; l++)
+            serialmesh->UniformRefinement();
+        serialpmesh = new ParMesh(comm, *serialmesh);
+        if (verbose)
+            std::cout << "serialpmesh info \n" << std::flush;
+        serialpmesh->PrintInfo(std::cout);
+#endif
 
         if (verbose)
             cout << "Creating parmesh(" << nDimensions <<
@@ -1499,11 +1516,30 @@ int main(int argc, char *argv[])
         }
 
         // creating pfespaces for level l
+#ifdef SERIALMESH
+        if (l == 0)
+        {
+            R_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, hdiv_coll);
+            W_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, l2_coll);
+            C_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, hdivfree_coll);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                H_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, h1_coll);
+        }
+        else
+        {
+            R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
+            W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
+            C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
+        }
+#else
         R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
         W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
         C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
+#endif
 
         // getting boundary and essential boundary dofs
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
@@ -2266,6 +2302,83 @@ int main(int argc, char *argv[])
 
     HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
     HypreSmoother * testsmoother = new HypreSmoother(*testmat, HypreSmoother::Type::l1GS, 1);
+
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "Hcurl at finest level size = " << Divfree_hpmat_nobnd_lvls[0]->Width() << "\n";
+            std::cout << "Hdiv at finest level size = " << Divfree_hpmat_nobnd_lvls[0]->Height() << "\n";
+        }
+        MPI_Barrier(comm);
+    }
+
+    {
+        Array<int> testcurl_offsets(2);
+        testcurl_offsets[0] = 0;
+        testcurl_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Width();
+
+        BlockVector * testvec1 = new BlockVector(testcurl_offsets);
+        BlockVector * testvec2 = new BlockVector(testcurl_offsets);
+
+        *testvec1 = 1.0;
+        *testvec2 = 0.0;
+
+        double time_intblkmult_vec = 0.0;
+
+        StopWatch chrono_intblkvec;
+
+        MPI_Barrier(comm);
+        chrono_intblkvec.Clear();
+        chrono_intblkvec.Start();
+
+        for (int it = 0; it < 20; ++it)
+        {
+            //testsmoother->Mult(*testvec1, *testvec2);
+            testsmoother->Mult(testvec1->GetBlock(0), testvec2->GetBlock(0));
+            *testvec1 += *testvec2;
+        }
+
+        MPI_Barrier(comm);
+        chrono_intblkvec.Stop();
+        time_intblkmult_vec += chrono_intblkvec.RealTime();
+        MPI_Barrier(comm);
+
+        if (verbose)
+           std::cout << "Extraordinary external check for smoother on block vecs has finished in " << chrono_intblkvec.RealTime() << " \n\n" << std::flush;
+    }
+
+    {
+        Vector testvec1(Divfree_hpmat_nobnd_lvls[0]->Width());
+        testvec1 = 1.0;
+        Vector testvec2(Divfree_hpmat_nobnd_lvls[0]->Width());
+        testvec2 = 0.0;
+
+        double time_intmult_vec = 0.0;
+
+        StopWatch chrono_intvec;
+
+        MPI_Barrier(comm);
+        chrono_intvec.Clear();
+        chrono_intvec.Start();
+
+        for (int it = 0; it < 20; ++it)
+        {
+            testsmoother->Mult(testvec1, testvec2);
+            testvec1 += testvec2;
+        }
+
+        MPI_Barrier(comm);
+        chrono_intvec.Stop();
+        time_intmult_vec += chrono_intvec.RealTime();
+        MPI_Barrier(comm);
+
+        if (verbose)
+           std::cout << "Extraordinary external check for smoother on vecs has finished in " << chrono_intvec.RealTime() << " \n\n" << std::flush;
+    }
 
     {
         double time_globalmult = 0.0;
