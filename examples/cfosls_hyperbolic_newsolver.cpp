@@ -13,7 +13,7 @@
 #include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
-#define OLD_CODE
+//#define OLD_CODE
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -43,7 +43,7 @@
 
 #define CHECK_BNDCND
 
-#define SERIALMESH
+//#define SERIALMESH
 
 #define TIMING
 
@@ -1145,6 +1145,7 @@ int main(int argc, char *argv[])
         if (verbose)
             std::cout << "serialpmesh info \n" << std::flush;
         serialpmesh->PrintInfo(std::cout);
+        delete serialmesh;
 #endif
 
         if (verbose)
@@ -1467,6 +1468,9 @@ int main(int argc, char *argv[])
     if (!withDiv && verbose)
         std::cout << "Multilevel code cannot be used without withDiv flag \n";
 
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+
     for (int l = num_levels - 1; l >= 0; --l)
     {
         // creating pmesh for level l
@@ -1512,34 +1516,26 @@ int main(int argc, char *argv[])
                 pmesh->UniformRefinement();
             }
 
+#ifdef SERIALMESH
+            if (l == 0)
+                pmesh_lvls[l] = new ParMesh(*serialpmesh);
+            else
+                pmesh_lvls[l] = new ParMesh(*pmesh);
+#else
             pmesh_lvls[l] = new ParMesh(*pmesh);
+#endif
         }
 
+        MPI_Barrier(comm);
+        std::cout << "l = " << l << " \n" << std::flush;
+        MPI_Barrier(comm);
+
         // creating pfespaces for level l
-#ifdef SERIALMESH
-        if (l == 0)
-        {
-            R_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, hdiv_coll);
-            W_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, l2_coll);
-            C_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, hdivfree_coll);
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                H_space_lvls[l] = new ParFiniteElementSpace(serialpmesh, h1_coll);
-        }
-        else
-        {
-            R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
-            W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
-            C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
-        }
-#else
         R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
         W_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
         C_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivfree_coll);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
-#endif
 
         // getting boundary and essential boundary dofs
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
@@ -1729,6 +1725,7 @@ int main(int argc, char *argv[])
             delete Bblock;
         }
 
+#ifndef SERIALMESH
         // for all but one levels we create projection matrices between levels
         // and projectors assembled on true dofs if MG preconditioner is used
         if (l < num_levels - 1)
@@ -1863,10 +1860,12 @@ int main(int argc, char *argv[])
 
             P_WT[l] = Transpose(*P_W[l]);
         }
+#endif
 
         delete Ablock;
     } // end of loop over all levels
 
+#ifndef SERIALMESH
     for ( int l = 0; l < num_levels - 1; ++l)
     {
         BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
@@ -1879,6 +1878,7 @@ int main(int argc, char *argv[])
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
         delete temp_sp;
     }
+#endif
 
     HypreParMatrix * Constraint_global;
 
@@ -2164,6 +2164,7 @@ int main(int argc, char *argv[])
 #endif
         }
 
+#ifndef SERIALMESH
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -2196,11 +2197,13 @@ int main(int argc, char *argv[])
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
+#endif
     }
 
     //MPI_Finalize();
     //return 0;
 
+#ifndef SERIALMESH
     // Creating the coarsest problem solver
     int size = 0;
     for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -2236,7 +2239,7 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
-
+#endif
     /*
     StopWatch chrono_debug;
 
