@@ -811,6 +811,10 @@ int main(int argc, char *argv[])
     MPI_Comm_size(comm, &num_procs);
     MPI_Comm_rank(comm, &myid);
 
+    //MPI_Barrier(comm);
+    //sleep(40);
+    //MPI_Barrier(comm);
+
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
@@ -1059,7 +1063,7 @@ int main(int argc, char *argv[])
 
     Mesh *mesh = NULL;
 
-    shared_ptr<ParMesh> pmesh;
+    ParMesh* pmesh;
 
     if (nDimensions == 3 || nDimensions == 4)
     {
@@ -1107,7 +1111,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-
+  
 #ifdef SERIALMESH
     Mesh * serialmesh = NULL;
     ParMesh * serialpmesh;
@@ -1135,7 +1139,14 @@ int main(int argc, char *argv[])
         delete serialmesh;
 
 #endif
+
+    //MPI_Barrier(comm);
+    //if (verbose)
+       //std::cout << "Created serialpmesh \n" << std::flush;
+    //MPI_Barrier(comm);
+
     
+//#if 0
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
     {
         /*
@@ -1163,15 +1174,16 @@ int main(int argc, char *argv[])
             for (int l = 0; l < ser_ref_levels; l++)
                 mesh->UniformRefinement();
         }
+        
        
        //if (verbose)
             //cout << "Creating parmesh(" << nDimensions <<
                     //"d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
-        pmesh = make_shared<ParMesh>(comm, *mesh);
+        pmesh = new ParMesh(comm, *mesh);
         delete mesh;
     }
     //MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
-
+//#endif
 
     /*
     int dim = nDimensions;
@@ -1185,6 +1197,15 @@ int main(int argc, char *argv[])
         //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
     }
     */
+ 
+
+    MPI_Barrier(comm);
+    if (verbose)
+       std::cout << "Got here \n" << std::flush;
+    MPI_Barrier(comm);
+
+     MPI_Finalize();
+     return 0;
 
 #ifdef SERIALMESH                  
     {
