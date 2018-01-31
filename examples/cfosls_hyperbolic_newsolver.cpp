@@ -1138,7 +1138,20 @@ int main(int argc, char *argv[])
         }
 
 #ifdef SERIALMESH
-        serialmesh = new Mesh(*mesh);
+        ifstream imesh(mesh_file);
+        if (!imesh)
+        {
+            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+            MPI_Finalize();
+            return -2;
+        }
+        else
+        {
+            serialmesh = new Mesh(imesh, 1, 1);
+            imesh.close();
+        }
+        for (int l = 0; l < ser_ref_levels; l++)
+            serialmesh->UniformRefinement();
         for (int l = 0; l < par_ref_levels; l++)
             serialmesh->UniformRefinement();
         serialpmesh = new ParMesh(comm, *serialmesh);
@@ -1316,6 +1329,236 @@ int main(int argc, char *argv[])
             MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
     }
     H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
+
+#ifdef SERIALMESH
+    {
+        HypreParMatrix * testdivfree;
+        HypreParMatrix * testfunct;
+        FiniteElementCollection *hdiv_coll_sp;
+
+        if (dim == 4)
+            hdiv_coll_sp = new RT0_4DFECollection;
+        else
+            hdiv_coll_sp = new RT_FECollection(feorder, dim);
+
+        FiniteElementCollection *hdivfree_coll_sp;
+        if (dim == 3)
+            hdivfree_coll_sp = new ND_FECollection(feorder + 1, nDimensions);
+        else // dim == 4
+            hdivfree_coll_sp = new DivSkew1_4DFECollection;
+
+        ParFiniteElementSpace * R_space_sp = new ParFiniteElementSpace(serialpmesh, hdiv_coll_sp);
+        ParFiniteElementSpace * C_space_sp = new ParFiniteElementSpace(serialpmesh, hdivfree_coll_sp);
+
+        ParBilinearForm *Ablock(new ParBilinearForm(R_space_sp));
+        //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+        else
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Ablock->Assemble();
+        Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+        Ablock->Finalize();
+
+        testfunct = Ablock->ParallelAssemble();
+
+        delete Ablock;
+
+        ParDiscreteLinearOperator Divfree_op2(C_space_sp, R_space_sp); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        if (dim == 3)
+            Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
+        else // dim == 4
+            Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
+        Divfree_op2.Assemble();
+        Divfree_op2.Finalize();
+        testdivfree = Divfree_op2.ParallelAssemble();
+
+        HypreParMatrix * testmat = mfem::RAP(testdivfree, testfunct, testdivfree);
+        HypreSmoother * testsmoother = new HypreSmoother(*testmat, HypreSmoother::Type::l1GS, 1);
+
+        std::cout << std::flush;
+        MPI_Barrier(comm);
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i && (myid < 5 || myid > num_procs - 6))
+            {
+                std::cout << "I am " << myid << "\n";
+                std::cout << "Hcurl at finest level size = " << testdivfree->Width() << "\n";
+                std::cout << "Hdiv at finest level size = " << testdivfree->Height() << "\n";
+            }
+            MPI_Barrier(comm);
+        }
+
+        {
+            Array<int> testcurl_offsets(2);
+            testcurl_offsets[0] = 0;
+            testcurl_offsets[1] = testdivfree->Width();
+
+            BlockVector * testvec1 = new BlockVector(testcurl_offsets);
+            BlockVector * testvec2 = new BlockVector(testcurl_offsets);
+
+            *testvec1 = 1.0;
+            *testvec2 = 0.0;
+
+            double time_intblkmult_vec = 0.0;
+
+            StopWatch chrono_intblkvec;
+
+            MPI_Barrier(comm);
+            chrono_intblkvec.Clear();
+            chrono_intblkvec.Start();
+
+            for (int it = 0; it < 20; ++it)
+            {
+                //testsmoother->Mult(*testvec1, *testvec2);
+                testsmoother->Mult(testvec1->GetBlock(0), testvec2->GetBlock(0));
+                *testvec1 += *testvec2;
+            }
+
+            MPI_Barrier(comm);
+            chrono_intblkvec.Stop();
+            time_intblkmult_vec += chrono_intblkvec.RealTime();
+            MPI_Barrier(comm);
+
+            if (verbose)
+               std::cout << "Extraordinary external check for smoother on block vecs has finished in " << chrono_intblkvec.RealTime() << " \n\n" << std::flush;
+        }
+
+        {
+            Vector testvec1(testdivfree->Width());
+            testvec1 = 1.0;
+            Vector testvec2(testdivfree->Width());
+            testvec2 = 0.0;
+
+            double time_intmult_vec = 0.0;
+
+            StopWatch chrono_intvec;
+
+            MPI_Barrier(comm);
+            chrono_intvec.Clear();
+            chrono_intvec.Start();
+
+            for (int it = 0; it < 20; ++it)
+            {
+                testsmoother->Mult(testvec1, testvec2);
+                testvec1 += testvec2;
+            }
+
+            MPI_Barrier(comm);
+            chrono_intvec.Stop();
+            time_intmult_vec += chrono_intvec.RealTime();
+            MPI_Barrier(comm);
+
+            if (verbose)
+               std::cout << "Extraordinary external check for smoother on vecs has finished in " << chrono_intvec.RealTime() << " \n\n" << std::flush;
+        }
+
+        {
+            double time_globalmult = 0.0;
+            double time_beforeintmult = 0.0;
+            double time_afterintmult = 0.0;
+            double time_intmult = 0.0;
+
+            Array<int> test_offsets(2);
+            test_offsets[0] = 0;
+            test_offsets[1] = testdivfree->Height();
+
+            BlockVector * xblock = new BlockVector(test_offsets);
+            BlockVector * yblock = new BlockVector(test_offsets);
+
+            Vector testvec1(testdivfree->Height());
+            testvec1 = 1.0;
+            Vector testvec2(testdivfree->Height());
+            testvec2 = 0.0;
+
+            Array<int> testcurl_offsets(2);
+            testcurl_offsets[0] = 0;
+            testcurl_offsets[1] = testdivfree->Width();
+
+            BlockVector * truerhs = new BlockVector(testcurl_offsets);
+            BlockVector * truex = new BlockVector(testcurl_offsets);
+
+            StopWatch chrono_debug;
+            StopWatch chrono_int;
+            StopWatch chrono_int2;
+
+            MPI_Barrier(comm);
+            chrono_debug.Clear();
+            chrono_debug.Start();
+
+
+            for (int it = 0; it < 20; ++it)
+            {
+                MPI_Barrier(comm);
+                chrono_int2.Clear();
+                chrono_int2.Start();
+
+                xblock->Update(testvec1.GetData(), test_offsets);
+                yblock->Update(testvec2.GetData(), test_offsets);
+
+                MPI_Barrier(comm);
+                chrono_int.Clear();
+                chrono_int.Start();
+
+                int blk = 0;
+
+                testdivfree->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+
+                *truex = 0.0;
+
+                MPI_Barrier(comm);
+                chrono_int.Stop();
+                time_beforeintmult += chrono_int.RealTime();
+                MPI_Barrier(comm);
+                chrono_int.Clear();
+                chrono_int.Start();
+
+                testsmoother->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+                MPI_Barrier(comm);
+                chrono_int.Stop();
+                time_intmult += chrono_int.RealTime();
+                MPI_Barrier(comm);
+                chrono_int.Clear();
+                chrono_int.Start();
+
+
+                // computing the solution update in the H(div) x other blocks space
+                // in two steps:
+
+                testdivfree->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+
+                MPI_Barrier(comm);
+                chrono_int.Stop();
+                time_afterintmult += chrono_int.RealTime();
+
+                MPI_Barrier(comm);
+                chrono_int2.Stop();
+                time_globalmult += chrono_int2.RealTime();
+
+                testvec1 += testvec2;
+            }
+
+            MPI_Barrier(comm);
+            chrono_debug.Stop();
+
+            if (verbose)
+               std::cout << "Extraordinary external check for smoother at level 0  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+            if (verbose)
+            {
+                std::cout << "Extraordinary global mult time = " << time_globalmult << "\n";
+                std::cout << "Extraordinary int mult time = " << time_intmult << "\n";
+                std::cout << "Extraordinary int beforemult time = " << time_beforeintmult << "\n";
+                std::cout << "Extraordinary int aftermult time = " << time_afterintmult << "\n";
+                std::cout << std::flush;
+            }
+        }
+
+        MPI_Finalize();
+        return 0;
+    }
+#endif
+
 
 #ifdef OLD_CODE
     ParFiniteElementSpace * S_space;
@@ -2287,7 +2530,6 @@ int main(int argc, char *argv[])
     HypreParMatrix * testdivfree;
     HypreParMatrix * testfunct;
 #ifdef SERIALMESH
-    /*
     FiniteElementCollection *hdiv_coll_sp;
 
     if (dim == 4)
@@ -2300,10 +2542,12 @@ int main(int argc, char *argv[])
         hdivfree_coll_sp = new ND_FECollection(feorder + 1, nDimensions);
     else // dim == 4
         hdivfree_coll_sp = new DivSkew1_4DFECollection;
-    */
 
-    ParFiniteElementSpace * R_space_sp = new ParFiniteElementSpace(serialpmesh, hdiv_coll);
-    ParFiniteElementSpace * C_space_sp = new ParFiniteElementSpace(serialpmesh, hdivfree_coll);
+    ParFiniteElementSpace * R_space_sp = new ParFiniteElementSpace(serialpmesh, hdiv_coll_sp);
+    ParFiniteElementSpace * C_space_sp = new ParFiniteElementSpace(serialpmesh, hdivfree_coll_sp);
+
+    MPI_Finalize();
+    return 0;
 
     ParBilinearForm *Ablock(new ParBilinearForm(R_space_sp));
     //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
@@ -2536,6 +2780,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    MPI_Finalize();
+    return 0;
+
 
     for (int l = 0; l < num_levels - 1; ++l)
     {
@@ -2577,9 +2824,6 @@ int main(int argc, char *argv[])
             ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
 #endif
-
-    MPI_Finalize();
-    return 0;
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
