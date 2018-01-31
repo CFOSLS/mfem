@@ -2284,7 +2284,24 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     //testing the smoother performance
 
+    HypreParMatrix * testdivfree;
+    HypreParMatrix * testfunct;
 #ifdef SERIALMESH
+    /*
+    FiniteElementCollection *hdiv_coll_sp;
+
+    if (dim == 4)
+        hdiv_coll_sp = new RT0_4DFECollection;
+    else
+        hdiv_coll_sp = new RT_FECollection(feorder, dim);
+
+    FiniteElementCollection *hdivfree_coll_sp;
+    if (dim == 3)
+        hdivfree_coll_sp = new ND_FECollection(feorder + 1, nDimensions);
+    else // dim == 4
+        hdivfree_coll_sp = new DivSkew1_4DFECollection;
+    */
+
     ParFiniteElementSpace * R_space_sp = new ParFiniteElementSpace(serialpmesh, hdiv_coll);
     ParFiniteElementSpace * C_space_sp = new ParFiniteElementSpace(serialpmesh, hdivfree_coll);
 
@@ -2298,7 +2315,7 @@ int main(int argc, char *argv[])
     Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
     Ablock->Finalize();
 
-    (*Funct_hpmat_lvls[0])(0,0) = Ablock->ParallelAssemble();
+    testfunct = Ablock->ParallelAssemble();
 
     delete Ablock;
 
@@ -2309,12 +2326,13 @@ int main(int argc, char *argv[])
         Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
     Divfree_op2.Assemble();
     Divfree_op2.Finalize();
-    Divfree_hpmat_nobnd_lvls[0] = Divfree_op2.ParallelAssemble();
+    testdivfree = Divfree_op2.ParallelAssemble();
 
-    HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
 #else
-    HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
+    testdivfree = Divfree_hpmat_nobnd_lvls[0];
+    testfunct = (*Funct_hpmat_lvls[0])(0,0);
 #endif
+    HypreParMatrix * testmat = mfem::RAP(testdivfree, testfunct, testdivfree);
     HypreSmoother * testsmoother = new HypreSmoother(*testmat, HypreSmoother::Type::l1GS, 1);
 
     std::cout << std::flush;
@@ -2324,8 +2342,8 @@ int main(int argc, char *argv[])
         if (myid == i && (myid < 5 || myid > num_procs - 6))
         {
             std::cout << "I am " << myid << "\n";
-            std::cout << "Hcurl at finest level size = " << Divfree_hpmat_nobnd_lvls[0]->Width() << "\n";
-            std::cout << "Hdiv at finest level size = " << Divfree_hpmat_nobnd_lvls[0]->Height() << "\n";
+            std::cout << "Hcurl at finest level size = " << testdivfree->Width() << "\n";
+            std::cout << "Hdiv at finest level size = " << testdivfree->Height() << "\n";
         }
         MPI_Barrier(comm);
     }
@@ -2333,7 +2351,7 @@ int main(int argc, char *argv[])
     {
         Array<int> testcurl_offsets(2);
         testcurl_offsets[0] = 0;
-        testcurl_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Width();
+        testcurl_offsets[1] = testdivfree->Width();
 
         BlockVector * testvec1 = new BlockVector(testcurl_offsets);
         BlockVector * testvec2 = new BlockVector(testcurl_offsets);
@@ -2366,9 +2384,9 @@ int main(int argc, char *argv[])
     }
 
     {
-        Vector testvec1(Divfree_hpmat_nobnd_lvls[0]->Width());
+        Vector testvec1(testdivfree->Width());
         testvec1 = 1.0;
-        Vector testvec2(Divfree_hpmat_nobnd_lvls[0]->Width());
+        Vector testvec2(testdivfree->Width());
         testvec2 = 0.0;
 
         double time_intmult_vec = 0.0;
@@ -2402,19 +2420,19 @@ int main(int argc, char *argv[])
 
         Array<int> test_offsets(2);
         test_offsets[0] = 0;
-        test_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Height();
+        test_offsets[1] = testdivfree->Height();
 
         BlockVector * xblock = new BlockVector(test_offsets);
         BlockVector * yblock = new BlockVector(test_offsets);
 
-        Vector testvec1(Divfree_hpmat_nobnd_lvls[0]->Height());
+        Vector testvec1(testdivfree->Height());
         testvec1 = 1.0;
-        Vector testvec2(Divfree_hpmat_nobnd_lvls[0]->Height());
+        Vector testvec2(testdivfree->Height());
         testvec2 = 0.0;
 
         Array<int> testcurl_offsets(2);
         testcurl_offsets[0] = 0;
-        testcurl_offsets[1] = Divfree_hpmat_nobnd_lvls[0]->Width();
+        testcurl_offsets[1] = testdivfree->Width();
 
         BlockVector * truerhs = new BlockVector(testcurl_offsets);
         BlockVector * truex = new BlockVector(testcurl_offsets);
@@ -2447,7 +2465,7 @@ int main(int argc, char *argv[])
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
                 xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
 
-            Divfree_hpmat_nobnd_lvls[0]->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+            testdivfree->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
 
             for ( int tdofind = 0; tdofind < EssBdrTrueDofs_Hcurl[0]->Size(); ++tdofind)
             {
@@ -2482,7 +2500,7 @@ int main(int argc, char *argv[])
             // computing the solution update in the H(div) x other blocks space
             // in two steps:
 
-            Divfree_hpmat_nobnd_lvls[0]->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+            testdivfree->Mult(truex->GetBlock(0), yblock->GetBlock(0));
 
             {
                 const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][blk];
