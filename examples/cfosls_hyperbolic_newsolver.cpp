@@ -1056,6 +1056,7 @@ int main(int argc, char *argv[])
     double rtol = 1e-12;//1e-7;//1e-9;
     double atol = 1e-14;//1e-9;//1e-12;
 
+
     Mesh *mesh = NULL;
 
     shared_ptr<ParMesh> pmesh;
@@ -1106,13 +1107,38 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-#ifdef SERIALMESH
-    Mesh * serialmesh;
-    ParMesh * serialpmesh;
-#endif
 
+#ifdef SERIALMESH
+    Mesh * serialmesh = NULL;
+    ParMesh * serialpmesh;
+
+        ifstream imesh2(mesh_file);
+        if (!imesh2)
+        {
+            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+            MPI_Finalize();
+            return -2;
+        }
+        else
+        {
+            serialmesh = new Mesh(imesh2, 1, 1);
+            imesh2.close();
+        }
+        for (int l = 0; l < ser_ref_levels; l++)
+            serialmesh->UniformRefinement();
+        for (int l = 0; l < par_ref_levels; l++)
+            serialmesh->UniformRefinement();
+        serialpmesh = new ParMesh(comm, *serialmesh);
+        if (verbose)
+            std::cout << "serialpmesh info \n" << std::flush;
+        //serialpmesh->PrintInfo(std::cout);
+        delete serialmesh;
+
+#endif
+    
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
     {
+        /*
         if (aniso_refine)
         {
             // for anisotropic refinement, the serial mesh needs at least one
@@ -1132,44 +1158,22 @@ int main(int argc, char *argv[])
             par_ref_levels *= 2;
         }
         else
+        */
         {
             for (int l = 0; l < ser_ref_levels; l++)
                 mesh->UniformRefinement();
         }
-
-#ifdef SERIALMESH
-        ifstream imesh(mesh_file);
-        if (!imesh)
-        {
-            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
-            MPI_Finalize();
-            return -2;
-        }
-        else
-        {
-            serialmesh = new Mesh(imesh, 1, 1);
-            imesh.close();
-        }
-        for (int l = 0; l < ser_ref_levels; l++)
-            serialmesh->UniformRefinement();
-        for (int l = 0; l < par_ref_levels; l++)
-            serialmesh->UniformRefinement();
-        serialpmesh = new ParMesh(comm, *serialmesh);
-        if (verbose)
-            std::cout << "serialpmesh info \n" << std::flush;
-        serialpmesh->PrintInfo(std::cout);
-        delete serialmesh;
-#endif
-
-        if (verbose)
-            cout << "Creating parmesh(" << nDimensions <<
-                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
+       
+       //if (verbose)
+            //cout << "Creating parmesh(" << nDimensions <<
+                    //"d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
         pmesh = make_shared<ParMesh>(comm, *mesh);
         delete mesh;
     }
+    //MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
 
-    MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
 
+    /*
     int dim = nDimensions;
 
     Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
@@ -1180,162 +1184,25 @@ int main(int argc, char *argv[])
         //ess_bdrSigma = 1;
         //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
     }
-
-    // FIXME:
-    //if (verbose)
-        //std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
-    //ess_bdrSigma = 1;
-
-    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
-    ess_bdrS = 0;
-    if (strcmp(space_for_S,"H1") == 0) // S is from H1
-    {
-        ess_bdrS[0] = 1; // t = 0
-        //ess_bdrS = 1;
-    }
-
-    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
-    all_bdrSigma = 1;
-
-    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
-    all_bdrS = 1;
-
-    int ref_levels = par_ref_levels;
-
-    int num_levels = ref_levels + 1;
-
-    /*
-    pmesh->PrintInfo(std::cout);
-    if (myid == 0)
-        std::cout << "\n";
-
-
-    {
-        FiniteElementCollection *hdiv_coll_test = new RT_FECollection(feorder, dim);
-        FiniteElementCollection *l2_coll_test = new L2_FECollection(feorder, dim);
-        FiniteElementCollection *hdivfree_coll_test = new ND_FECollection(feorder + 1, dim);
-
-        ParFiniteElementSpace *R_space_test = new ParFiniteElementSpace(pmesh.get(), hdiv_coll_test);
-        ParFiniteElementSpace *W_space_test = new ParFiniteElementSpace(pmesh.get(), l2_coll_test);
-        ParFiniteElementSpace *C_space_test = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll_test);
-
-        if (myid == 0)
-         ess_bdrSigma.Print();
-
-        ParDiscreteLinearOperator Divfree_op(C_space_test, R_space_test); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-        Divfree_op.AddDomainInterpolator(new CurlInterpolator);
-        Divfree_op.Assemble();
-        Vector tempsol(Divfree_op.Width());
-        tempsol = 0.0;
-        Vector temprhs(Divfree_op.Height());
-        temprhs = 0.0;
-        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
-        Divfree_op.Finalize();
-        HypreParMatrix * Divfree_hpmat = Divfree_op.ParallelAssemble();
-
-        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_test, W_space_test);
-        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-        Bblock->Assemble();
-        //Vector tempsol(Bblock->Width());
-        //tempsol = 0.0;
-        //Vector temprhs(Bblock->Height());
-        //temprhs = 0.0;
-        //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        //Bblock->EliminateTestDofs(ess_bdrSigma);
-        Bblock->Finalize();
-        HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
-
-        delete Bblock;
-
-        HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat);
-
-        SparseMatrix diagg;
-        checkprod->GetDiag(diagg);
-
-        SparseMatrix offdiagg;
-        HYPRE_Int * cmap_offd;
-        checkprod->GetOffd(offdiagg, cmap_offd);
-
-        for (int i = 0 ;i < num_procs; ++i)
-        {
-            if (myid == i)
-            {
-                std::cout << "I am " << myid << "\n" << std::flush;
-                std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
-                std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
-            }
-            MPI_Barrier(comm);
-        }
-
-        delete checkprod;
-
-        MPI_Finalize();
-        return 0;
-    }
     */
 
-    chrono.Clear();
-    chrono.Start();
-
-    //sleep(10);
-
-    Array<ParMesh*> pmesh_lvls(num_levels);
-    Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
-    Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
-    Array<ParFiniteElementSpace*> C_space_lvls(num_levels);
-    Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
-
-    FiniteElementCollection *hdiv_coll;
-    ParFiniteElementSpace *R_space;
-    FiniteElementCollection *l2_coll;
-    ParFiniteElementSpace *W_space;
-
-    if (dim == 4)
-        hdiv_coll = new RT0_4DFECollection;
-    else
-        hdiv_coll = new RT_FECollection(feorder, dim);
-
-    R_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
-
-    l2_coll = new L2_FECollection(feorder, nDimensions);
-    W_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
-
-    FiniteElementCollection *hdivfree_coll;
-    ParFiniteElementSpace *C_space;
-
-    if (dim == 3)
-        hdivfree_coll = new ND_FECollection(feorder + 1, nDimensions);
-    else // dim == 4
-        hdivfree_coll = new DivSkew1_4DFECollection;
-
-    C_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
-
-    FiniteElementCollection *h1_coll;
-    ParFiniteElementSpace *H_space;
-    if (dim == 3)
-        h1_coll = new H1_FECollection(feorder+1, nDimensions);
-    else
+#ifdef SERIALMESH                  
     {
-        if (feorder + 1 == 1)
-            h1_coll = new LinearFECollection;
-        else if (feorder + 1 == 2)
-        {
-            if (verbose)
-                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
-            h1_coll = new QuadraticFECollection;
+         int dim = nDimensions;
+
+    	Array<int> ess_bdrSigma(serialpmesh->bdr_attributes.Max());
+    	ess_bdrSigma = 0;
+    	if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr condition for sigma at t = 0
+    	{
+        	ess_bdrSigma[0] = 1;
+	        //ess_bdrSigma = 1;
+        	//ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
         }
-        else
-            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
-    }
-    H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
-
-#ifdef SERIALMESH
-    {
+        
         HypreParMatrix * testdivfree;
         HypreParMatrix * testfunct;
-        FiniteElementCollection *hdiv_coll_sp;
 
+        FiniteElementCollection *hdiv_coll_sp;
         if (dim == 4)
             hdiv_coll_sp = new RT0_4DFECollection;
         else
@@ -1559,6 +1426,155 @@ int main(int argc, char *argv[])
     }
 #endif
 
+#if 0
+    // FIXME:
+    //if (verbose)
+        //std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
+    //ess_bdrSigma = 1;
+
+    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
+    ess_bdrS = 0;
+    if (strcmp(space_for_S,"H1") == 0) // S is from H1
+    {
+        ess_bdrS[0] = 1; // t = 0
+        //ess_bdrS = 1;
+    }
+
+    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
+    all_bdrSigma = 1;
+
+    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
+    all_bdrS = 1;
+
+    int ref_levels = par_ref_levels;
+
+    int num_levels = ref_levels + 1;
+
+    /*
+    pmesh->PrintInfo(std::cout);
+    if (myid == 0)
+        std::cout << "\n";
+
+
+    {
+        FiniteElementCollection *hdiv_coll_test = new RT_FECollection(feorder, dim);
+        FiniteElementCollection *l2_coll_test = new L2_FECollection(feorder, dim);
+        FiniteElementCollection *hdivfree_coll_test = new ND_FECollection(feorder + 1, dim);
+
+        ParFiniteElementSpace *R_space_test = new ParFiniteElementSpace(pmesh.get(), hdiv_coll_test);
+        ParFiniteElementSpace *W_space_test = new ParFiniteElementSpace(pmesh.get(), l2_coll_test);
+        ParFiniteElementSpace *C_space_test = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll_test);
+
+        if (myid == 0)
+         ess_bdrSigma.Print();
+
+        ParDiscreteLinearOperator Divfree_op(C_space_test, R_space_test); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        Divfree_op.AddDomainInterpolator(new CurlInterpolator);
+        Divfree_op.Assemble();
+        Vector tempsol(Divfree_op.Width());
+        tempsol = 0.0;
+        Vector temprhs(Divfree_op.Height());
+        temprhs = 0.0;
+        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
+        Divfree_op.Finalize();
+        HypreParMatrix * Divfree_hpmat = Divfree_op.ParallelAssemble();
+
+        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_test, W_space_test);
+        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Bblock->Assemble();
+        //Vector tempsol(Bblock->Width());
+        //tempsol = 0.0;
+        //Vector temprhs(Bblock->Height());
+        //temprhs = 0.0;
+        //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+        //Bblock->EliminateTestDofs(ess_bdrSigma);
+        Bblock->Finalize();
+        HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
+
+        delete Bblock;
+
+        HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat);
+
+        SparseMatrix diagg;
+        checkprod->GetDiag(diagg);
+
+        SparseMatrix offdiagg;
+        HYPRE_Int * cmap_offd;
+        checkprod->GetOffd(offdiagg, cmap_offd);
+
+        for (int i = 0 ;i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::cout << "I am " << myid << "\n" << std::flush;
+                std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
+                std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
+            }
+            MPI_Barrier(comm);
+        }
+
+        delete checkprod;
+
+        MPI_Finalize();
+        return 0;
+    }
+    */
+
+    chrono.Clear();
+    chrono.Start();
+
+    //sleep(10);
+
+    Array<ParMesh*> pmesh_lvls(num_levels);
+    Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
+    Array<ParFiniteElementSpace*> W_space_lvls(num_levels);
+    Array<ParFiniteElementSpace*> C_space_lvls(num_levels);
+    Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
+
+    FiniteElementCollection *hdiv_coll;
+    ParFiniteElementSpace *R_space;
+    FiniteElementCollection *l2_coll;
+    ParFiniteElementSpace *W_space;
+
+    if (dim == 4)
+        hdiv_coll = new RT0_4DFECollection;
+    else
+        hdiv_coll = new RT_FECollection(feorder, dim);
+
+    R_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
+
+    l2_coll = new L2_FECollection(feorder, nDimensions);
+    W_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
+
+    FiniteElementCollection *hdivfree_coll;
+    ParFiniteElementSpace *C_space;
+
+    if (dim == 3)
+        hdivfree_coll = new ND_FECollection(feorder + 1, nDimensions);
+    else // dim == 4
+        hdivfree_coll = new DivSkew1_4DFECollection;
+
+    C_space = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll);
+
+    FiniteElementCollection *h1_coll;
+    ParFiniteElementSpace *H_space;
+    if (dim == 3)
+        h1_coll = new H1_FECollection(feorder+1, nDimensions);
+    else
+    {
+        if (feorder + 1 == 1)
+            h1_coll = new LinearFECollection;
+        else if (feorder + 1 == 2)
+        {
+            if (verbose)
+                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
+            h1_coll = new QuadraticFECollection;
+        }
+        else
+            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
+    }
+    H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
 
 #ifdef OLD_CODE
     ParFiniteElementSpace * S_space;
@@ -5450,6 +5466,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+#endif
 }
 
 template <void (*bvecfunc)(const Vector&, Vector& )> \
