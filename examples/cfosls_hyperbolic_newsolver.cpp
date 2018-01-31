@@ -43,7 +43,7 @@
 
 #define CHECK_BNDCND
 
-//#define SERIALMESH
+#define SERIALMESH
 
 #define TIMING
 
@@ -1516,19 +1516,8 @@ int main(int argc, char *argv[])
                 pmesh->UniformRefinement();
             }
 
-#ifdef SERIALMESH
-            if (l == 0)
-                pmesh_lvls[l] = new ParMesh(*serialpmesh);
-            else
-                pmesh_lvls[l] = new ParMesh(*pmesh);
-#else
             pmesh_lvls[l] = new ParMesh(*pmesh);
-#endif
         }
-
-        MPI_Barrier(comm);
-        std::cout << "l = " << l << " \n" << std::flush;
-        MPI_Barrier(comm);
 
         // creating pfespaces for level l
         R_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
@@ -1725,7 +1714,6 @@ int main(int argc, char *argv[])
             delete Bblock;
         }
 
-#ifndef SERIALMESH
         // for all but one levels we create projection matrices between levels
         // and projectors assembled on true dofs if MG preconditioner is used
         if (l < num_levels - 1)
@@ -1860,12 +1848,10 @@ int main(int argc, char *argv[])
 
             P_WT[l] = Transpose(*P_W[l]);
         }
-#endif
 
         delete Ablock;
     } // end of loop over all levels
 
-#ifndef SERIALMESH
     for ( int l = 0; l < num_levels - 1; ++l)
     {
         BlockMatrix * temp = mfem::Mult(*Funct_mat_lvls[l],*P_Func[l]);
@@ -1878,7 +1864,6 @@ int main(int argc, char *argv[])
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
         delete temp_sp;
     }
-#endif
 
     HypreParMatrix * Constraint_global;
 
@@ -2164,7 +2149,6 @@ int main(int argc, char *argv[])
 #endif
         }
 
-#ifndef SERIALMESH
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
@@ -2197,13 +2181,11 @@ int main(int argc, char *argv[])
             (*LocalSolver_lvls)[l] = (*LocalSolver_partfinder_lvls)[l];
 
         }
-#endif
     }
 
     //MPI_Finalize();
     //return 0;
 
-#ifndef SERIALMESH
     // Creating the coarsest problem solver
     int size = 0;
     for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -2238,7 +2220,6 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetAbsTol(1.0e-12);
     CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
-#endif
 #endif
     /*
     StopWatch chrono_debug;
@@ -2303,14 +2284,44 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     //testing the smoother performance
 
+#ifdef SERIALMESH
+    ParFiniteElementSpace * R_space_sp = new ParFiniteElementSpace(serialpmesh, hdiv_coll);
+    ParFiniteElementSpace * C_space_sp = new ParFiniteElementSpace(serialpmesh, hdivfree_coll);
+
+    ParBilinearForm *Ablock(new ParBilinearForm(R_space_sp));
+    //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+    else
+        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+    Ablock->Assemble();
+    Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+    Ablock->Finalize();
+
+    (*Funct_hpmat_lvls[0])(0,0) = Ablock->ParallelAssemble();
+
+    delete Ablock;
+
+    ParDiscreteLinearOperator Divfree_op2(C_space_sp, R_space_sp); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+    if (dim == 3)
+        Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
+    else // dim == 4
+        Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
+    Divfree_op2.Assemble();
+    Divfree_op2.Finalize();
+    Divfree_hpmat_nobnd_lvls[0] = Divfree_op2.ParallelAssemble();
+
     HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
+#else
+    HypreParMatrix * testmat = mfem::RAP(Divfree_hpmat_nobnd_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_nobnd_lvls[0]);
+#endif
     HypreSmoother * testsmoother = new HypreSmoother(*testmat, HypreSmoother::Type::l1GS, 1);
 
     std::cout << std::flush;
     MPI_Barrier(comm);
     for (int i = 0; i < num_procs; ++i)
     {
-        if (myid == i)
+        if (myid == i && (myid < 5 || myid > num_procs - 6))
         {
             std::cout << "I am " << myid << "\n";
             std::cout << "Hcurl at finest level size = " << Divfree_hpmat_nobnd_lvls[0]->Width() << "\n";
