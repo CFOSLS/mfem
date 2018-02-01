@@ -268,3 +268,78 @@ double bFunCircle2Ddiv_ex(const Vector& xt)
     return 0.0;
 }
 
+double uFunTestLap_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double tpart = 16.0 * t * t * (1 - t) * (1 - t) * exp(t);
+    double res = tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    if (xt.Size() == 4)
+        res *= sin (M_PI * z);
+
+    return res;
+}
+
+double uFunTestLap_lap(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double tpart = 16.0 * t * t * (1 - t) * (1 - t) * exp(t);
+
+    // d2/dx2 + d2/dy2
+    double res1 = - tpart * (3.0 * M_PI * 3.0 * M_PI + 2.0 * M_PI * 2.0 * M_PI) * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    if (xt.Size() == 4)
+        res1 *= sin (M_PI * z);
+
+    // d2/dt2
+    double d2tpart = exp(t) * (t * t * (1 - t) * (1 - t) + 2.0 * ( 2.0 * t * (t - 1) * (2.0 * t - 1) ) + (12.0 * t * t - 12.0 * x + 2) );
+    double res2 = 16.0 * d2tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    if (xt.Size() == 4)
+        res2 *= sin (M_PI * z);
+
+    //d2/dz2
+    double res3 = 0.0;
+    if (xt.Size() == 4)
+        res3 = (-1) * M_PI * M_PI * tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y) * sin (M_PI * z);
+
+    return res1 + res2 + res3;
+}
+
+void uFunTestLap_grad(const Vector& xt, Vector& grad )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double tpart = 16.0 * t * t * (1 - t) * (1 - t) * exp(t);
+    double dttpart = 16.0 * exp(t) * (t * t * (1 - t) * (1 - t) + 2.0 * t * (t - 1) * (2.0 * t - 1) );
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = tpart * 3.0 * M_PI * cos (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    grad(1) = tpart * 2.0 * M_PI * cos (2.0 * M_PI * y) * sin (3.0 * M_PI * x);
+    grad(xt.Size() - 1) =  dttpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+
+    if (xt.Size() == 4)
+    {
+        grad(2) = tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y) * M_PI * cos (M_PI * z);
+        grad(0) *= sin (M_PI * z);
+        grad(1) *= sin (M_PI * z);
+        grad(xt.Size() - 1) *= sin (M_PI * z);
+    }
+
+    return;
+}
