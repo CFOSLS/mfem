@@ -38,6 +38,10 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <iomanip>
+#include <list>
+#include <unistd.h>
 
 #include "divfree_solver_tools.hpp"
 
@@ -71,15 +75,15 @@ int main(int argc, char *argv[])
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
-   args.AddOption(&order, "-o", "--order",
-                  "Finite element order (polynomial degree) or -1 for"
-                  " isoparametric space.");
-   args.AddOption(&static_cond, "-sc", "--static-condensation", "-no-sc",
-                  "--no-static-condensation", "Enable static condensation.");
+   args.AddOption(&ser_ref_levels, "-sref", "--sref",
+                  "Number of serial refinements 4d mesh.");
+   args.AddOption(&par_ref_levels, "-pref", "--pref",
+                  "Number of parallel refinements 4d mesh.");
+   args.AddOption(&nDimensions, "-dim", "--whichD",
+                  "Dimension of the space-time problem.");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
-   args.Parse();
    if (!args.Good())
    {
       if (myid == 0)
