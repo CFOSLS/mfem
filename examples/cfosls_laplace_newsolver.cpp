@@ -1924,7 +1924,7 @@ int main(int argc, char *argv[])
         MPI_Barrier(comm);
         chrono_debug.Clear();
         chrono_debug.Start();
-        for (int it = 0; it < 1; ++it)
+        for (int it = 0; it < 20; ++it)
         {
             Smoothers_lvls[l]->Mult(testRhs, testX);
             testRhs += testX;
@@ -1944,10 +1944,11 @@ int main(int argc, char *argv[])
            std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
         }
+        MPI_Barrier(comm);
 
-        for (int l = 0; l < num_levels - 1; ++l)
-            ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
+    for (int l = 0; l < num_levels - 1; ++l)
+        ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
 #endif
 
     //MPI_Finalize();
@@ -2018,6 +2019,7 @@ int main(int argc, char *argv[])
         {
             std::cout << "dim(S) = " << dimS << ", ";
             std::cout << "dim(C+S) = " << dimC + dimS << "\n";
+            std::cout << "dim(R+S) = " << dimR + dimS << "\n";
         }
         if (withDiv)
             std::cout << "dim(R) = " << dimR << "\n";
@@ -3800,6 +3802,7 @@ int main(int argc, char *argv[])
     }
     //delete Times_smoother_lvls;
 
+    MPI_Barrier(comm);
     for (int l = 0; l < num_levels - 1; ++l)
     {
         if (verbose)
@@ -3811,6 +3814,7 @@ int main(int argc, char *argv[])
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
         }
     }
+    MPI_Barrier(comm);
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
