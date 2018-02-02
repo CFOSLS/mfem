@@ -1910,6 +1910,38 @@ int main(int argc, char *argv[])
     */
 
 #ifdef TIMING
+    // testing Functional action as operator timing
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        StopWatch chrono_debug;
+
+        Vector testRhs(Funct_global_lvls[l]->Height());
+        testRhs = 1.0;
+        Vector testX(Funct_global_lvls[l]->Width());
+        testX = 0.0;
+
+        MPI_Barrier(comm);
+        chrono_debug.Clear();
+        chrono_debug.Start();
+        for (int it = 0; it < 40; ++it)
+        {
+            Funct_global_lvls[l]->Mult(testRhs, testX);
+            testRhs += testX;
+        }
+
+        MPI_Barrier(comm);
+        chrono_debug.Stop();
+
+        if (verbose)
+           std::cout << "Funct action at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+
+        MPI_Barrier(comm);
+
+    }
+
+
+
     //testing the smoother performance
 
     for (int l = 0; l < num_levels - 1; ++l)
