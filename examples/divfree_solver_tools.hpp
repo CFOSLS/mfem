@@ -2957,10 +2957,6 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
         }
 
     *truex = 0.0;
-    //Operator * id = new IdentityOperator(Smoothers_lvls[level]->Height());
-    //id->Mult(*truerhs_lvls[level], *truex_lvls[level]);
-    //CTMC_global_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
-    //Smoothers_lvls[level]->Mult(*truerhs_lvls[level], *truex_lvls[level]);
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3311,6 +3307,7 @@ private:
     mutable double time_smoother;
     mutable double* time_smoother_lvls;
     mutable double time_coarsestproblem;
+    mutable double time_resupdate;
     mutable double time_fw;
     mutable double time_up;
     mutable std::list<double>* times_mult;
@@ -3320,6 +3317,7 @@ private:
     mutable std::list<double>* times_smoother;
     mutable std::list<double>* times_smoother_lvls;
     mutable std::list<double>* times_coarsestproblem;
+    mutable std::list<double>* times_resupdate;
     mutable std::list<double>* times_fw;
     mutable std::list<double>* times_up;
 #endif
@@ -3395,6 +3393,7 @@ public:
                             std::list<double>* Times_smoother,
                             std::list<double>* Times_smoother_lvls,
                             std::list<double>* Times_coarsestproblem,
+                            std::list<double>* Times_resupdate,
                             std::list<double>* Times_fw,
                             std::list<double>* Times_up,
 #endif
@@ -3566,6 +3565,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
                         std::list<double>* Times_smoother,
                         std::list<double>* Times_smoother_lvls,
                         std::list<double>* Times_coarsestproblem,
+                        std::list<double>* Times_resupdate,
                         std::list<double>* Times_fw,
                         std::list<double>* Times_up,
 #endif
@@ -3597,6 +3597,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        times_smoother(Times_smoother),
        times_smoother_lvls(Times_smoother_lvls),
        times_coarsestproblem(Times_coarsestproblem),
+       times_resupdate(Times_resupdate),
        times_fw(Times_fw),
        times_up(Times_up),
 #endif
@@ -3665,6 +3666,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
     for (int l = 0; l < num_levels - 1; ++l)
         time_smoother_lvls[l] = 0.0;
     time_coarsestproblem = 0.0;
+    time_resupdate = 0.0;
     time_fw = 0.0;
     time_up = 0.0;
 #endif
@@ -3712,6 +3714,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     for (int l = 0; l < num_levels - 1; ++l)
         time_smoother_lvls[l] = 0.0;
     time_coarsestproblem = 0.0;
+    time_resupdate = 0.0;
     time_fw = 0.0;
     time_up = 0.0;
 #endif
@@ -3873,6 +3876,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     for (int l = 0; l < num_levels - 1; ++l)
         times_smoother_lvls[l].push_back(time_smoother_lvls[l]);
     times_coarsestproblem->push_back(time_coarsestproblem);
+    times_resupdate->push_back(time_resupdate);
     times_fw->push_back(time_fw);
     times_up->push_back(time_up);
 #endif
@@ -3906,6 +3910,12 @@ void GeneralMinConstrSolver::UpdateTrueResidual(int level, const BlockVector* rh
 void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                        const BlockVector& previous_sol, BlockVector& next_sol) const
 {
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono2.Clear();
+    chrono2.Start();
+#endif
+
     if (print_level)
         std::cout << "Starting iteration " << current_iteration << " ... \n";
 
@@ -3923,12 +3933,20 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
                              "at the beginning of Solve: ", print_level);
 
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
     UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
 
 #ifdef TIMING
     MPI_Barrier(comm);
-    chrono2.Clear();
-    chrono2.Start();
+    chrono.Stop();
+    time_resupdate += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
 #endif
 
     // DOWNWARD loop: from finest to coarsest
@@ -3971,6 +3989,15 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
+#ifdef TIMING
+        MPI_Barrier(comm);
+        chrono.Stop();
+        time_resupdate += chrono.RealTime();
+        MPI_Barrier(comm);
+        chrono.Clear();
+        chrono.Start();
+#endif
+
         // smooth
         if (Smoothers_lvls[l])
         {
@@ -3983,8 +4010,30 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+#ifdef TIMING
+            MPI_Barrier(comm);
+            chrono.Stop();
+            time_smoother_lvls[l] += chrono.RealTime();
+            time_smoother += chrono.RealTime();
+#endif
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
+#ifdef TIMING
+            MPI_Barrier(comm);
+            chrono.Clear();
+            chrono.Start();
+#endif
+
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+#ifdef TIMING
+            MPI_Barrier(comm);
+            chrono.Stop();
+            time_resupdate += chrono.RealTime();
+            MPI_Barrier(comm);
+            chrono.Clear();
+            chrono.Start();
+#endif
+
 
 #ifdef DEBUG_INFO
             next_sol += *truesolupdate_lvls[0];
@@ -3994,12 +4043,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
         }
 
-#ifdef TIMING
-        MPI_Barrier(comm);
-        chrono.Stop();
-        time_smoother_lvls[l] += chrono.RealTime();
-        time_smoother += chrono.RealTime();
-#endif
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
@@ -4069,7 +4112,17 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
 
+#ifdef TIMING
+            MPI_Barrier(comm);
+            chrono.Clear();
+            chrono.Start();
+#endif
             UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
+#ifdef TIMING
+            MPI_Barrier(comm);
+            chrono.Stop();
+            time_resupdate += chrono.RealTime();
+#endif
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
 
 #ifdef TIMING
@@ -4081,15 +4134,30 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             if (Smoothers_lvls[l - 1])
             {
                 Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
+#ifdef TIMING
+                MPI_Barrier(comm);
+                chrono.Stop();
+                time_smoother_lvls[l - 1] += chrono.RealTime();
+                time_smoother += chrono.RealTime();
+#endif
+
                 *truesolupdate_lvls[l - 1] += *truetempvec_lvls[l - 1];
+
+#ifdef TIMING
+                MPI_Barrier(comm);
+                chrono.Clear();
+                chrono.Start();
+#endif
                 UpdateTrueResidual(l - 1, trueresfunc_lvls[l - 1], *truetempvec_lvls[l - 1], *truetempvec2_lvls[l - 1] );
 
-            }
 #ifdef TIMING
-            MPI_Barrier(comm);
-            chrono.Stop();
-            time_smoother_lvls[l - 1] += chrono.RealTime();
-            time_smoother += chrono.RealTime();
+                MPI_Barrier(comm);
+                chrono.Stop();
+                time_resupdate += chrono.RealTime();
+#endif
+            }
+
+#ifdef TIMING
             MPI_Barrier(comm);
             chrono.Clear();
             chrono.Start();

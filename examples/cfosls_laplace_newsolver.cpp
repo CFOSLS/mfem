@@ -3299,6 +3299,7 @@ int main(int argc, char *argv[])
     std::list<double>* Times_smoother = new std::list<double>;
     std::list<double>* Times_smoother_lvls = new std::list<double>[num_levels - 1];
     std::list<double>* Times_coarsestproblem = new std::list<double>;
+    std::list<double>* Times_resupdate = new std::list<double>;
     std::list<double>* Times_fw = new std::list<double>;
     std::list<double>* Times_up = new std::list<double>;
 #endif
@@ -3329,7 +3330,7 @@ int main(int argc, char *argv[])
                      *Constraint_global, Floc,
 #endif
 #ifdef TIMING
-                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_fw, Times_up,
+                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
 #endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
@@ -3821,6 +3822,15 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "time_coarsestproblem = " << temp_sum << "\n";
     delete Times_coarsestproblem;
+
+    MPI_Barrier(comm);
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_resupdate->begin(); i != Times_resupdate->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_resupdate = " << temp_sum << "\n";
+    delete Times_resupdate;
+
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_fw->begin(); i != Times_fw->end(); ++i)
         temp_sum += *i;
@@ -4199,6 +4209,15 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "time_coarsestproblem = " << temp_sum << "\n";
     delete Times_coarsestproblem;
+
+    MPI_Barrier(comm);
+    temp_sum = 0.0;
+    for (list<double>::iterator i = Times_resupdate->begin(); i != Times_resupdate->end(); ++i)
+        temp_sum += *i;
+    if (verbose)
+        std::cout << "time_resupdate = " << temp_sum << "\n";
+    delete Times_resupdate;
+
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_fw->begin(); i != Times_fw->end(); ++i)
         temp_sum += *i;
