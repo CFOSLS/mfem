@@ -2989,7 +2989,7 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
     if (verbose)
-        std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
+        std::cout << "Errors in the div-free code were computed in "<< chrono.RealTime() <<" seconds.\n";
 #endif
 
 #ifdef VISUALIZATION
@@ -3097,9 +3097,6 @@ int main(int argc, char *argv[])
         MPI_Barrier(pmesh->GetComm());
     }
 #endif
-
-    MPI_Finalize();
-    return 0;
 
     chrono.Clear();
     chrono.Start();
@@ -3419,7 +3416,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][blk]->Size(); ++i)
         {
             int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][blk])[i];
-            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-16 )
+            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-14 )
             {
                 std::cout << "blk = " << blk << ": bnd cnd is violated for the ParticSol! \n";
                 std::cout << "tdofind = " << tdofind << ", value = " << ParticSol.GetBlock(blk)[tdofind] << "\n";
@@ -3652,11 +3649,11 @@ int main(int argc, char *argv[])
     HypreParMatrix *BTtest;
     if (strcmp(space_for_S,"H1") == 0)
     {
-        ParMixedBilinearForm *Bblocktest = new ParMixedBilinearForm(R_space_lvls[0], H_space_lvls[0]);
+        ParMixedBilinearForm *Bblocktest = new ParMixedBilinearForm(H_space_lvls[0], R_space_lvls[0]);
         Bblocktest->AddDomainIntegrator(new MixedVectorGradientIntegrator);
         Bblocktest->Assemble();
-        Bblocktest->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *qformtest);
-        Bblocktest->EliminateTestDofs(ess_bdrS);
+        Bblocktest->EliminateTrialDofs(ess_bdrS, *S_exact_finest, *fformtest);
+        Bblocktest->EliminateTestDofs(ess_bdrSigma);
         Bblocktest->Finalize();
 
         Btest = Bblocktest->ParallelAssemble();
@@ -3688,8 +3685,8 @@ int main(int argc, char *argv[])
     BlockMattest->SetBlock(0,0, Atest);
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
-        BlockMattest->SetBlock(0,1, BTtest);
-        BlockMattest->SetBlock(1,0, Btest);
+        BlockMattest->SetBlock(1,0, BTtest);
+        BlockMattest->SetBlock(0,1, Btest);
         BlockMattest->SetBlock(1,1, Ctest);
     }
 
