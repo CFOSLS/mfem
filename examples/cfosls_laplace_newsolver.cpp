@@ -502,6 +502,15 @@ Laplace_test_divfree::Laplace_test_divfree (int Dim, int NumSol, int NumCurl)
     } // end of setting test coefficients in correct case
 }
 
+void ExternalUpdateResImitation(Operator& oper, double coeff, const Vector* rhs_l, const Vector& x_l, Vector &out_l)
+{
+    oper.Mult(x_l, out_l);
+    out_l *= coeff;
+
+    if (rhs_l)
+        out_l += *rhs_l;
+}
+
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -1910,6 +1919,37 @@ int main(int argc, char *argv[])
     */
 
 #ifdef TIMING
+    // testing Functional action as operator timing with an external imitating routine
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        Vector testRhs(Funct_global_lvls[l]->Height());
+        testRhs = 1.0;
+        Vector testX(Funct_global_lvls[l]->Width());
+        testX = 0.0;
+
+        Vector testsuppl(Funct_global_lvls[l]->Height());
+
+        StopWatch chrono_debug;
+
+        MPI_Barrier(comm);
+        chrono_debug.Clear();
+        chrono_debug.Start();
+        for (int it = 0; it < 20; ++it)
+        {
+            ExternalUpdateResImitation(*Funct_global_lvls[l], -1.0, &testsuppl, testRhs, testX);
+            testRhs += testX;
+        }
+
+        MPI_Barrier(comm);
+        chrono_debug.Stop();
+
+        if (verbose)
+           std::cout << "UpdateRes imitating routine at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+
+        MPI_Barrier(comm);
+
+    }
+
     // testing Functional action as operator timing
 
     for (int l = 0; l < num_levels - 1; ++l)
@@ -1924,7 +1964,7 @@ int main(int argc, char *argv[])
         MPI_Barrier(comm);
         chrono_debug.Clear();
         chrono_debug.Start();
-        for (int it = 0; it < 40; ++it)
+        for (int it = 0; it < 20; ++it)
         {
             Funct_global_lvls[l]->Mult(testRhs, testX);
             testRhs += testX;
@@ -1939,8 +1979,6 @@ int main(int argc, char *argv[])
         MPI_Barrier(comm);
 
     }
-
-
 
     //testing the smoother performance
 
