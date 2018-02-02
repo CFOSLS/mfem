@@ -277,6 +277,8 @@ double uFunTestLap_ex(const Vector& xt)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
+    //return sin (M_PI * x) * sin (M_PI * y) * sin (M_PI * t);
+
     double tpart = 16.0 * t * t * (1 - t) * (1 - t) * exp(t);
     double res = tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
@@ -302,8 +304,8 @@ double uFunTestLap_lap(const Vector& xt)
         res1 *= sin (M_PI * z);
 
     // d2/dt2
-    double d2tpart = exp(t) * (t * t * (1 - t) * (1 - t) + 2.0 * ( 2.0 * t * (t - 1) * (2.0 * t - 1) ) + (12.0 * t * t - 12.0 * x + 2) );
-    double res2 = 16.0 * d2tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    double d2tpart = 16.0 * exp(t) * (t * t * (1 - t) * (1 - t) + 2.0 * ( 2.0 * t * (t - 1) * (2.0 * t - 1) ) + (12.0 * t * t - 12.0 * t + 2) );
+    double res2 = d2tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
         res2 *= sin (M_PI * z);
 
@@ -313,6 +315,8 @@ double uFunTestLap_lap(const Vector& xt)
         res3 = (-1) * M_PI * M_PI * tpart * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y) * sin (M_PI * z);
 
     return res1 + res2 + res3;
+
+    //return (-1) * 3.0 * M_PI * M_PI * uFunTestLap_ex(xt);
 }
 
 void uFunTestLap_grad(const Vector& xt, Vector& grad )
@@ -340,6 +344,10 @@ void uFunTestLap_grad(const Vector& xt, Vector& grad )
         grad(1) *= sin (M_PI * z);
         grad(xt.Size() - 1) *= sin (M_PI * z);
     }
+
+    //grad(0) = M_PI * cos (M_PI * x) * sin (M_PI * y) * sin (M_PI * t);
+    //grad(1) = M_PI * sin (M_PI * x) * cos (M_PI * y) * sin (M_PI * t);
+    //grad(2) = M_PI * sin (M_PI * x) * sin (M_PI * y) * cos (M_PI * t);
 
     return;
 }

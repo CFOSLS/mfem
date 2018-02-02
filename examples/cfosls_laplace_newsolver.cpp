@@ -12,6 +12,8 @@
 
 #include "cfosls_testsuite.hpp"
 
+//#define VISUALIZATION
+
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
@@ -545,6 +547,8 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char * mesh_file = "../data/orthotope3D_fine.mesh";
+
+    kappa = freq * M_PI;
 
     int feorder         = 0;
 
@@ -2396,12 +2400,15 @@ int main(int argc, char *argv[])
     //Vector sigma_hat_truedofs(M->Width());
     //Sigmahat->ParallelProject(sigma_hat_truedofs);
     //M->Mult(sigma_hat_truedofs, Msigmahat);
-    M->Mult(tempHdiv_true, Msigmahat);
+
+    //M->Mult(tempHdiv_true, Msigmahat);
+
+    Msigmahat = temp2Hdiv_true;
 
     Vector res_Hdiv2(M->Height());
     res_Hdiv2 = res_Hdiv;
-    res_Hdiv2 += Msigmahat;
-    res_Hdiv2 -= temp2Hdiv_true;
+    res_Hdiv2 -= Msigmahat;
+    res_Hdiv2 += temp2Hdiv_true;
 
     double res_Hdiv2_norm = res_Hdiv2.Norml2() / sqrt (res_Hdiv2.Size());
 
@@ -2432,10 +2439,24 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "res_H1_norm = " << res_H1_norm << "\n";
 
-    MPI_Barrier(comm);
-    MPI_Finalize();
-    return 0;
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space, W_space);
+    Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+    Bblock->Assemble();
+    Bblock->Finalize();
+    HypreParMatrix * Constr_forcheck = Bblock->ParallelAssemble();
 
+    Vector res_Constr(Constr_forcheck->Height());
+    Constr_forcheck->Mult(sigma_exact_truedofs, res_Constr);
+    res_Constr -= F_fine;
+
+    double res_Constr_norm = res_Constr.Norml2() / sqrt (res_Constr.Size());
+
+    if (verbose)
+        std::cout << "res_Constr_norm = " << res_Constr_norm << "\n";
+
+    //MPI_Barrier(comm);
+    //MPI_Finalize();
+    //return 0;
 
     delete Divfree_dop;
     delete DivfreeT_dop;
@@ -2969,6 +2990,112 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
+#endif
+
+#ifdef VISUALIZATION
+    if (visualization && nDimensions < 4)
+    {
+        char vishost[] = "localhost";
+        int  visport   = 19916;
+
+        if (!withDiv)
+        {
+            socketstream uex_sock(vishost, visport);
+            uex_sock << "parallel " << num_procs << " " << myid << "\n";
+            uex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            uex_sock << "solution\n" << *pmesh << *u_exact << "window_title 'u_exact'"
+                   << endl;
+
+            socketstream uh_sock(vishost, visport);
+            uh_sock << "parallel " << num_procs << " " << myid << "\n";
+            uh_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            uh_sock << "solution\n" << *pmesh << *u << "window_title 'u_h'"
+                   << endl;
+
+            *u -= *u_exact;
+            socketstream udiff_sock(vishost, visport);
+            udiff_sock << "parallel " << num_procs << " " << myid << "\n";
+            udiff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            udiff_sock << "solution\n" << *pmesh << *u << "window_title 'u_h - u_exact'"
+                   << endl;
+
+            socketstream opdivfreepartex_sock(vishost, visport);
+            opdivfreepartex_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepartex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepartex_sock << "solution\n" << *pmesh << *opdivfreepart_exact << "window_title 'curl u_exact'"
+                   << endl;
+
+            socketstream opdivfreepart_sock(vishost, visport);
+            opdivfreepart_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepart_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepart_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h'"
+                   << endl;
+
+            *opdivfreepart -= *opdivfreepart_exact;
+            socketstream opdivfreepartdiff_sock(vishost, visport);
+            opdivfreepartdiff_sock << "parallel " << num_procs << " " << myid << "\n";
+            opdivfreepartdiff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            opdivfreepartdiff_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h - curl u_exact'"
+                   << endl;
+        }
+
+        //if (withS)
+        {
+            socketstream S_ex_sock(vishost, visport);
+            S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_ex_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_ex_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
+                   << endl;
+
+            socketstream S_h_sock(vishost, visport);
+            S_h_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_h_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
+                   << endl;
+
+            *S -= *S_exact;
+            socketstream S_diff_sock(vishost, visport);
+            S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
+            S_diff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
+                   << endl;
+        }
+
+        socketstream sigma_sock(vishost, visport);
+        sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigma_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigma_sock << "solution\n" << *pmesh << *sigma_exact
+               << "window_title 'sigma_exact'" << endl;
+        // Make sure all ranks have sent their 'u' solution before initiating
+        // another set of GLVis connections (one from each rank):
+
+        socketstream sigmah_sock(vishost, visport);
+        sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigmah_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigmah_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
+                << endl;
+
+        *sigma_exact -= *sigma;
+        socketstream sigmadiff_sock(vishost, visport);
+        sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
+        sigmadiff_sock.precision(8);
+        MPI_Barrier(pmesh->GetComm());
+        sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact
+                 << "window_title 'sigma_ex - sigma_h'" << endl;
+
+        MPI_Barrier(pmesh->GetComm());
+    }
 #endif
 
     MPI_Finalize();
