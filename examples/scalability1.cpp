@@ -235,7 +235,7 @@ int main(int argc, char *argv[])
         std::cout << "Creating a hierarchy of meshes by successive refinements "
                      "(with multilevel and multigrid prerequisites) \n";
 
-    for (int l = num_levels - 1; l >= 0; --l)
+    for (int l = num_levels - 1; l > 0; --l)
         pmesh->UniformRefinement();
 
     pmesh->PrintInfo(std::cout);
