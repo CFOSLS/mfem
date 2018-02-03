@@ -64,12 +64,11 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
 
    int ser_ref_levels  = 1;
-   int par_ref_levels  = 1;
+   int par_ref_levels  = 2;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
    int order = 1;
-   bool static_cond = false;
    bool visualization = 0;
 
    OptionsParser args(argc, argv);
@@ -84,6 +83,7 @@ int main(int argc, char *argv[])
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
+   args.Parse();
    if (!args.Good())
    {
       if (myid == 0)
@@ -214,7 +214,7 @@ int main(int argc, char *argv[])
 
    } // end of loop over all levels
 
-   pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
+   pmesh_lvls[0]->PrintInfo(std::cout); if(verbose) cout << endl;
 
    // 7. Determine the list of true (i.e. parallel conforming) essential
    //    boundary dofs. In this example, the boundary conditions are defined
@@ -252,7 +252,6 @@ int main(int argc, char *argv[])
    //     system, applying any necessary transformations such as: parallel
    //     assembly, eliminating boundary conditions, applying conforming
    //     constraints for non-conforming AMR, static condensation, etc.
-   if (static_cond) { a->EnableStaticCondensation(); }
    a->Assemble();
 
    HypreParMatrix A;
