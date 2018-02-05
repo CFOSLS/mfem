@@ -196,7 +196,8 @@ int main(int argc, char *argv[])
     Ablock->Assemble();
     Ablock->EliminateEssentialBC(ess_bdrSigma);
     Ablock->Finalize();
-    Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
+    HypreParMatrix * A = Ablock->ParallelAssemble();
+    Funct_global->SetBlock(0,0, A);
 
     Cblock->Assemble();
     {
@@ -207,7 +208,8 @@ int main(int argc, char *argv[])
         Cblock->EliminateEssentialBC(ess_bdrS, temp1, temp2);
     }
     Cblock->Finalize();
-    Funct_global->SetBlock(1,1, Cblock->ParallelAssemble());
+    HypreParMatrix * C = Cblock->ParallelAssemble();
+    Funct_global->SetBlock(1,1, C);
     Bblock->Assemble();
     {
         Vector temp1(Bblock->Width());
@@ -219,10 +221,61 @@ int main(int argc, char *argv[])
     }
     Bblock->Finalize();
     HypreParMatrix * B = Bblock->ParallelAssemble();
+    HypreParMatrix * BT = B->Transpose();
+
     Funct_global->SetBlock(0,1, B);
     Funct_global->SetBlock(1,0, B->Transpose());
 
     Funct_global_lvls[0] = Funct_global;
+
+    // Looking at global and local nnz in the funct
+    MPI_Barrier(comm);
+    if (verbose)
+    {
+        int global_nnz = A->NNZ() + C->NNZ() + B->NNZ() + BT->NNZ();
+        std::cout << "Global nnz in Funct = " << global_nnz << "\n" << std::flush;
+    }
+    MPI_Barrier(comm);
+
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "Look at my local NNZ in Funct: \n";
+            int local_nnz = 0;
+
+            SparseMatrix diag;
+            SparseMatrix offd;
+            HYPRE_Int * cmap;
+
+            A->GetDiag(diag);
+            local_nnz += diag.NumNonZeroElems();
+            A->GetOffd(offd, cmap);
+            local_nnz += offd.NumNonZeroElems();
+
+            C->GetDiag(diag);
+            local_nnz += diag.NumNonZeroElems();
+            C->GetOffd(offd, cmap);
+            local_nnz += offd.NumNonZeroElems();
+
+            B->GetDiag(diag);
+            local_nnz += diag.NumNonZeroElems();
+            B->GetOffd(offd, cmap);
+            local_nnz += offd.NumNonZeroElems();
+
+            BT->GetDiag(diag);
+            local_nnz += diag.NumNonZeroElems();
+            BT->GetOffd(offd, cmap);
+            local_nnz += offd.NumNonZeroElems();
+
+            std::cout << "local nnz in Funct = " << local_nnz << "\n";
+            std::cout << "\n" << std::flush;
+        }
+        MPI_Barrier(comm);
+    }
+    MPI_Barrier(comm);
+
 
 #ifdef TIMING
     // testing Functional action as operator timing with an external imitating routine
