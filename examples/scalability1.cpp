@@ -308,6 +308,10 @@ int main(int argc, char *argv[])
             if (verbose)
                std::cout << "UpdateRes imitating routine at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
 
+            double norm = testX.Norml2() / sqrt(testX.Size());
+            if (!IsFinite(norm))
+                std::cout << "test vector has nans \n" << std::flush;
+
             MPI_Barrier(comm);
 
         }
@@ -341,6 +345,10 @@ int main(int argc, char *argv[])
 
             if (verbose)
                std::cout << "Funct action at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
+
+            double norm = testX.Norml2() / sqrt(testX.Size());
+            if (!IsFinite(norm))
+                std::cout << "test vector has nans \n" << std::flush;
 
             MPI_Barrier(comm);
 
