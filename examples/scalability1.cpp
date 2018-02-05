@@ -45,7 +45,6 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 4;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
@@ -70,8 +69,6 @@ int main(int argc, char *argv[])
                    "Number of serial refinements 4d mesh.");
     args.AddOption(&par_ref_levels, "-pref", "--pref",
                    "Number of parallel refinements 4d mesh.");
-    args.AddOption(&nDimensions, "-dim", "--whichD",
-                   "Dimension of the space-time problem.");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -101,21 +98,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Running tests for the paper: \n";
 
-    if (nDimensions == 3)
-    {
-        numsol = -3;
-        mesh_file = "../data/cube_3d_moderate.mesh";
-    }
-    else // 4D case
-    {
-        numsol = -4;
-        mesh_file = "../data/cube4d_96.MFEM";
-    }
-
-    if (verbose)
-        std::cout << "For the records: numsol = " << numsol
-                  << ", mesh_file = " << mesh_file << "\n";
-
     if (verbose)
         cout << "Number of mpi processes: " << num_procs << endl << flush;
 
@@ -125,29 +107,19 @@ int main(int argc, char *argv[])
 
     ParMesh * pmesh;
 
-    if (nDimensions == 3 || nDimensions == 4)
+    if (verbose)
+        cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
+    ifstream imesh(mesh_file);
+    if (!imesh)
     {
-        if (verbose)
-            cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
-        ifstream imesh(mesh_file);
-        if (!imesh)
-        {
-            std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
-            MPI_Finalize();
-            return -2;
-        }
-        else
-        {
-            mesh = new Mesh(imesh, 1, 1);
-            imesh.close();
-        }
-    }
-    else //if nDimensions is not 3 or 4
-    {
-        if (verbose)
-            cerr << "Case nDimensions = " << nDimensions << " is not supported \n" << std::flush;
+        std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
         MPI_Finalize();
-        return -1;
+        return -2;
+    }
+    else
+    {
+        mesh = new Mesh(imesh, 1, 1);
+        imesh.close();
     }
 
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
@@ -170,66 +142,16 @@ int main(int argc, char *argv[])
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
     ess_bdrS = 1;
 
-    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
-    all_bdrSigma = 1;
-
-    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
-    all_bdrS = 1;
-
-    int ref_levels = par_ref_levels;
-
-    int num_levels = ref_levels + 1;
+    int num_levels = par_ref_levels + 1;
 
     chrono.Clear();
     chrono.Start();
 
-    Array<ParFiniteElementSpace*> R_space_lvls(num_levels);
-    Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
-
-    FiniteElementCollection *hdiv_coll;
-    ParFiniteElementSpace *R_space;
-
-    if (dim == 4)
-        hdiv_coll = new RT0_4DFECollection;
-    else
-        hdiv_coll = new RT_FECollection(feorder, dim);
-
-    R_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
-
-    FiniteElementCollection *h1_coll;
-    ParFiniteElementSpace *H_space;
-    if (dim == 3)
-        h1_coll = new H1_FECollection(feorder+1, nDimensions);
-    else
-    {
-        if (feorder + 1 == 1)
-            h1_coll = new LinearFECollection;
-        else if (feorder + 1 == 2)
-        {
-            if (verbose)
-                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
-            h1_coll = new QuadraticFECollection;
-        }
-        else
-            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
-    }
-    H_space = new ParFiniteElementSpace(pmesh, h1_coll);
-
-    int numblocks_funct = 1;
-    numblocks_funct++;
-
-    //std::cout << "num_levels - 1 = " << num_levels << "\n";
-
-    std::vector<std::vector<HypreParMatrix*> > Dof_TrueDof_Func_lvls(num_levels);
+    FiniteElementCollection *hdiv_coll = new RT_FECollection(feorder, dim);
+    FiniteElementCollection *h1_coll = new H1_FECollection(feorder+1, nDimensions);
 
     BlockOperator* Funct_global;
     std::vector<Operator*> Funct_global_lvls(num_levels);
-    Array<int> offsets_global(numblocks_funct + 1);
-
-   for (int l = 0; l < num_levels; ++l)
-   {
-       Dof_TrueDof_Func_lvls[l].resize(numblocks_funct);
-   }
 
     if (verbose)
         std::cout << "Creating a hierarchy of meshes by successive refinements "
@@ -243,37 +165,36 @@ int main(int argc, char *argv[])
         std::cout << "\n";
 
     int l = 0;
-    // creating pfespaces for level l
-    R_space_lvls[l] = new ParFiniteElementSpace(pmesh, hdiv_coll);
-    H_space_lvls[l] = new ParFiniteElementSpace(pmesh, h1_coll);
 
-    ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
+    ParFiniteElementSpace * R_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
+    ParFiniteElementSpace * H_space = new ParFiniteElementSpace(pmesh, h1_coll);
+
+    ParBilinearForm *Ablock(new ParBilinearForm(R_space));
     Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
     Ablock->Assemble();
-    Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+    Ablock->EliminateEssentialBC(ess_bdrSigma);
     Ablock->Finalize();
-
-    // getting pointers to dof_truedof matrices
-
-    Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
-    Dof_TrueDof_Func_lvls[l][1] = H_space_lvls[l]->Dof_TrueDof_Matrix();
 
     ParBilinearForm *Cblock;
     ParMixedBilinearForm *Bblock;
-    Cblock = new ParBilinearForm(H_space_lvls[l]);
-    Bblock = new ParMixedBilinearForm(H_space_lvls[l], R_space_lvls[l]);
+    Cblock = new ParBilinearForm(H_space);
+    Bblock = new ParMixedBilinearForm(H_space, R_space);
 
 
     // Creating global functional matrix
+    Array<int> offsets_global(3);
     offsets_global[0] = 0;
-    for ( int blk = 0; blk < numblocks_funct; ++blk)
-        offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
+    offsets_global[1] = R_space->GetTrueVSize();
+    offsets_global[2] = H_space->GetTrueVSize();
     offsets_global.PartialSum();
+
+    if (verbose)
+        offsets_global.Print();
 
     Funct_global = new BlockOperator(offsets_global);
 
     Ablock->Assemble();
-    Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+    Ablock->EliminateEssentialBC(ess_bdrSigma);
     Ablock->Finalize();
     Funct_global->SetBlock(0,0, Ablock->ParallelAssemble());
 
