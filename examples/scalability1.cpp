@@ -289,13 +289,14 @@ int main(int argc, char *argv[])
             testX = 0.0;
 
             Vector testsuppl(Funct_global_lvls[l]->Height());
+            testsuppl.Randomize(2000);
 
             StopWatch chrono_debug;
 
             MPI_Barrier(comm);
             chrono_debug.Clear();
             chrono_debug.Start();
-            for (int it = 0; it < 20; ++it)
+            for (int it = 0; it < 100; ++it)
             {
                 ExternalUpdateResImitation(*Funct_global_lvls[l], -1.0, &testsuppl, testRhs, testX);
                 testRhs += testX;
@@ -329,7 +330,7 @@ int main(int argc, char *argv[])
             MPI_Barrier(comm);
             chrono_debug.Clear();
             chrono_debug.Start();
-            for (int it = 0; it < 20; ++it)
+            for (int it = 0; it < 100; ++it)
             {
                 Funct_global_lvls[l]->Mult(testRhs, testX);
                 testRhs += testX;
