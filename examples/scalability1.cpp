@@ -237,13 +237,13 @@ int main(int argc, char *argv[])
     }
     MPI_Barrier(comm);
 
+    int local_nnz = 0;
     for (int i = 0; i < num_procs; ++i)
     {
         if (myid == i)
         {
             std::cout << "I am " << myid << "\n";
             std::cout << "Look at my local NNZ in Funct: \n";
-            int local_nnz = 0;
 
             SparseMatrix diag;
             SparseMatrix offd;
@@ -273,6 +273,32 @@ int main(int argc, char *argv[])
             std::cout << "\n" << std::flush;
         }
         MPI_Barrier(comm);
+    }
+    MPI_Barrier(comm);
+
+    int nnz_array[num_procs];
+    MPI_Gather( &local_nnz, 1, MPI_INT, nnz_array, 1, MPI_INT, 0, comm);
+
+    if (verbose)
+    {
+        double median = 0, mad = 0, maxad = 0;
+        for (int i = 0; i < num_procs; ++i)
+            median += nnz_array[i];
+        median /= num_procs;
+
+        for (int i = 0; i < num_procs; ++i)
+        {
+            int ad = ( nnz_array[i] > median ? nnz_array[i] - median : median - nnz_array[i]);
+            mad += ad;
+            if (ad > maxad)
+                maxad = ad;
+        }
+        mad /= num_procs;
+
+        std::cout << "median of nnz = " << median << "\n";
+        std::cout << "median absolute deviation of nnz = " << mad << "\n";
+        std::cout << "maximal absolute deviation of nnz = " << maxad << "\n";
+        std::cout << std::flush;
     }
     MPI_Barrier(comm);
 
