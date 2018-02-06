@@ -19,7 +19,7 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-#define NEW_SMOOTHERSETUP
+//#define NEW_SMOOTHERSETUP
 
 // activates a check for the symmetry of the new smoother setup
 //#define CHECK_SPDSMOOTHER
@@ -818,7 +818,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1358,10 +1358,8 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
-#if defined NEW_SMOOTHERSETUP
-    Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
-#endif
 #if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
+    Array<HypreParMatrix*> Divfree_hpmat_nobnd_lvls(num_levels);
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
 #endif
 
@@ -1857,6 +1855,15 @@ int main(int argc, char *argv[])
 #if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
+        ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+        if (dim == 3)
+            Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
+        else // dim == 4
+            Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
+        Divfree_op2.Assemble();
+        Divfree_op2.Finalize();
+        Divfree_hpmat_nobnd_lvls[l] = Divfree_op2.ParallelAssemble();
+
         ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
         //Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1920,15 +1927,6 @@ int main(int argc, char *argv[])
 #if defined NEW_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
-        ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-        if (dim == 3)
-            Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
-        else // dim == 4
-            Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
-        Divfree_op2.Assemble();
-        Divfree_op2.Finalize();
-        Divfree_hpmat_nobnd_lvls[l] = Divfree_op2.ParallelAssemble();
-
         if (l == 0)
         {
             ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
@@ -2190,6 +2188,23 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-12);
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
+
+    if (verbose)
+    {
+#ifdef HCURL_COARSESOLVER
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            std::cout << "CoarseSolver size = " << Divfree_hpmat_nobnd_lvls[num_levels - 1]->M()
+                    + (*Funct_hpmat_lvls[num_levels - 1])(1,1)->M() << "\n";
+        else
+            std::cout << "CoarseSolver size = " << Divfree_hpmat_nobnd_lvls[num_levels - 1]->M() << "\n";
+#else
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            std::cout << "CoarseSolver size = " << Dof_TrueDof_Func_lvls[num_levels - 1][0]->N()
+                    + Dof_TrueDof_Func_lvls[num_levels - 1][1]->N() + Dof_TrueDof_L2_lvls[num_levels - 1]->N() << "\n";
+        else
+            std::cout << "CoarseSolver size = " << Dof_TrueDof_Func_lvls[num_levels - 1][0]->N() + Dof_TrueDof_L2_lvls[num_levels - 1]->N() << "\n";
+#endif
+    }
 
     /*
     StopWatch chrono_debug;
@@ -3595,16 +3610,16 @@ int main(int argc, char *argv[])
 #else
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(400);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-22));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-22));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
     }
     else // L2 case requires more iterations
     {
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(50);
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(400);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-22));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-22));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
     }
 #endif
@@ -3750,18 +3765,16 @@ int main(int argc, char *argv[])
     // provide the negative answer
     //NewSolver.SetUnSymmetric();
 
-    Vector Vec1(Funct_mat_lvls[0]->Height());
+    Vector Vec1(NewSolver.Height());
     Vec1.Randomize(2000);
-    Vector Vec2(Funct_mat_lvls[0]->Height());
+    Vector Vec2(NewSolver.Height());
     Vec2.Randomize(-39);
 
-    for ( int i = 0; i < Vec1.Size(); ++i )
+    for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][0]->Size(); ++i )
     {
-        if ((*EssBdrDofs_R[0][0])[i] != 0 )
-        {
-            Vec1[i] = 0.0;
-            Vec2[i] = 0.0;
-        }
+        int tdof = (*EssBdrTrueDofs_Funct_lvls[0][0])[i];
+        Vec1[tdof] = 0.0;
+        Vec2[tdof] = 0.0;
     }
 
     Vector VecDiff(Vec1.Size());
@@ -3776,7 +3789,7 @@ int main(int argc, char *argv[])
     std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
 
     NewSolver.SetAsPreconditioner(true);
-    NewSolver.SetMaxIter(5);
+    NewSolver.SetMaxIter(1);
 
     NewSolver.Mult(Vec1, Tempy);
     double scal1 = Tempy * Vec2;
@@ -3796,6 +3809,7 @@ int main(int argc, char *argv[])
         std::cout << "Solver is not symmetric on two random vectors: \n";
         std::cout << "vec2 * (A * vec1) = " << scal1 << " != " << scal2 << " = vec1 * (A * vec2)" << "\n";
         std::cout << "difference = " << scal1 - scal2 << "\n";
+        std::cout << "relative difference = " << fabs(scal1 - scal2) / fabs(scal1) << "\n";
     }
     else
     {
@@ -3957,6 +3971,10 @@ int main(int argc, char *argv[])
             std::cout << "Linear solver did not converge in " << Testsolver.GetNumIterations()
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver (CG + new solver) took " << chrono.RealTime() << "s. \n";
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            std::cout << "System size: " << Atest->M() + Ctest->M() << "\n" << std::flush;
+        else
+            std::cout << "System size: " << Atest->M() << "\n" << std::flush;
     }
 
     chrono.Clear();

@@ -384,7 +384,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(0);
+    coarseSolver->SetPrintLevel(1);
 
     finalized = true;
 }
@@ -4077,6 +4077,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     // BOTTOM: solve the global problem at the coarsest level
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
+    //*truesolupdate_lvls[num_levels - 1] = 0.0;
 
 #ifdef TIMING
     MPI_Barrier(comm);
