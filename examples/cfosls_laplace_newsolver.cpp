@@ -528,8 +528,8 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int ser_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1612,51 +1612,6 @@ int main(int argc, char *argv[])
 
             delete Bblock;
         }
-
-        // checking the orthogonality of discrete curl and discrete divergence operators
-        /*
-        if (l == 0)
-        {
-            HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat_nobnd_lvls[l]);
-
-            SparseMatrix diagg;
-            checkprod->GetDiag(diagg);
-
-            SparseMatrix offdiagg;
-            HYPRE_Int * cmap_offd;
-            checkprod->GetOffd(offdiagg, cmap_offd);
-
-            for (int i = 0 ;i < num_procs; ++i)
-            {
-                if (myid == i)
-                {
-                    std::cout << "I am " << myid << "\n" << std::flush;
-                    std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
-                    std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
-                }
-                MPI_Barrier(comm);
-            }
-
-            delete checkprod;
-        }
-        else
-        {
-            if (l == 1)
-            {
-                HypreParMatrix * temprod = ParMult(TrueP_R[0],Divfree_hpmat_nobnd_lvls[1]);
-                HypreParMatrix * checkprod = ParMult(Constraint_global, temprod);
-
-                SparseMatrix diagg;
-                checkprod->GetDiag(diagg);
-
-                if (verbose)
-                    std::cout << "Constraint[0] * P[0] * Curl[1] norm = " << diagg.MaxNorm() << "\n";
-
-                delete checkprod;
-                delete temprod;
-            }
-        }
-        */
     }
 
     //MPI_Finalize();
@@ -3806,6 +3761,7 @@ int main(int argc, char *argv[])
             std::cout << "Linear solver did not converge in " << Testsolver.GetNumIterations()
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver (CG + new solver) took " << chrono.RealTime() << "s. \n";
+        std::cout << "System size: " << Atest->M() + Ctest->M() << "\n" << std::flush;
     }
 
     chrono.Clear();

@@ -1,6 +1,3 @@
-//
-//                        MFEM CFOSLS Poisson equation with multigrid (debugging & testing of a new multilevel solver)
-//
 
 #include "mfem.hpp"
 #include <fstream>
@@ -14,13 +11,8 @@
 
 #define TIMING
 
-#define MYZEROTOL (1.0e-13)
-
 using namespace std;
 using namespace mfem;
-using std::unique_ptr;
-using std::shared_ptr;
-using std::make_shared;
 
 void ExternalUpdateResImitation(Operator& oper, double coeff, const Vector* rhs_l, const Vector& x_l, Vector &out_l)
 {
@@ -164,8 +156,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "\n";
 
-    int l = 0;
-
     ParFiniteElementSpace * R_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
     ParFiniteElementSpace * H_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
@@ -242,8 +232,8 @@ int main(int argc, char *argv[])
     {
         if (myid == i)
         {
-            std::cout << "I am " << myid << "\n";
-            std::cout << "Look at my local NNZ in Funct: \n";
+            //std::cout << "I am " << myid << "\n";
+            //std::cout << "Look at my local NNZ in Funct: \n";
 
             SparseMatrix diag;
             SparseMatrix offd;
@@ -269,8 +259,8 @@ int main(int argc, char *argv[])
             BT->GetOffd(offd, cmap);
             local_nnz += offd.NumNonZeroElems();
 
-            std::cout << "local nnz in Funct = " << local_nnz << "\n";
-            std::cout << "\n" << std::flush;
+            //std::cout << "local nnz in Funct = " << local_nnz << "\n";
+            //std::cout << "\n" << std::flush;
         }
         MPI_Barrier(comm);
     }
