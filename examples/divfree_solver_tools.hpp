@@ -311,38 +311,42 @@ void CoarsestProblemHcurlSolver::Setup() const
         {
             HypreParMatrix * Funct_blk = Funct_global(blk1,blk2);
 
-            if (blk1 == 0)
+            if (Funct_blk)
             {
-                HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
-                temp1->CopyRowStarts();
-                temp1->CopyColStarts();
-
-                if (blk2 == 0)
+                if (blk1 == 0)
                 {
-                    HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
+                    HypreParMatrix * temp1 = ParMult(Divfreeop_T, Funct_blk);
+                    temp1->CopyRowStarts();
+                    temp1->CopyColStarts();
 
-                    //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+                    if (blk2 == 0)
+                    {
+                        HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
 
+                        //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+
+                        HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                        HcurlFunct_global(blk1, blk2)->CopyColStarts();
+
+                        delete temp1;
+                    }
+                    else
+                        HcurlFunct_global(blk1, blk2) = temp1;
+
+                }
+                else if (blk2 == 0)
+                {
+                    HcurlFunct_global(blk1, blk2) = ParMult(Funct_blk,
+                                                                  &Divfreeop);
                     HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                     HcurlFunct_global(blk1, blk2)->CopyColStarts();
-
-                    delete temp1;
                 }
                 else
-                    HcurlFunct_global(blk1, blk2) = temp1;
+                {
+                    HcurlFunct_global(blk1, blk2)  = Funct_blk;
+                }
+            } // else of if Funct_blk != NULL
 
-            }
-            else if (blk2 == 0)
-            {
-                HcurlFunct_global(blk1, blk2) = ParMult(Funct_blk,
-                                                              &Divfreeop);
-                HcurlFunct_global(blk1, blk2)->CopyRowStarts();
-                HcurlFunct_global(blk1, blk2)->CopyColStarts();
-            }
-            else
-            {
-                HcurlFunct_global(blk1, blk2)  = Funct_blk;
-            }
         }
     }
 
@@ -368,7 +372,12 @@ void CoarsestProblemHcurlSolver::Setup() const
     {
         MFEM_ASSERT(numblocks <= 2, "Current implementation of coarsest level solver "
                                    "knows preconditioners only for sigma or (sigma,S) setups \n");
-        Prec_blocks[blk] = new HypreSmoother(*HcurlFunct_global(blk,blk),
+        //if (blk == 0)
+        //{
+            //Prec_blocks[0] = new HypreDiagScale(*HcurlFunct_global(blk,blk));
+        //}
+        //else
+            Prec_blocks[blk] = new HypreSmoother(*HcurlFunct_global(blk,blk),
                                            HypreSmoother::Type::l1GS, sweeps_num);
     }
 
@@ -384,7 +393,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(1);
+    coarseSolver->SetPrintLevel(0);
 
     finalized = true;
 }
@@ -400,6 +409,15 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     // 1. set up solution and righthand side vectors
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
+
+
+    //Divfreeop.MultTranspose(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
+    //Divfreeop_T->Mult(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
+    //Divfreeop.Mult(coarsetrueRhs->GetBlock(0), yblock->GetBlock(0));
+
+    //yblock->GetBlock(1) = xblock->GetBlock(1);
+
+    //return;
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -436,18 +454,6 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
         }
 
-        /*
-        const Array<int> * temp;
-        if (blk == 0)
-            temp = &essbdrtruedofs_Hcurl;
-        else
-            temp = essbdrtruedofs_blocks[blk];
-
-        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-        {
-            coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-        }
-        */
     }
 
     // 2. solve the linear system with preconditioned CG.
@@ -461,8 +467,25 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
         coarseSolver->SetAbsTol(1.0e-15);
     }
     */
-    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
+    // imposing bnd conditions on the internal solver input vector
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> * temp;
+        if (blk == 0)
+            temp = &essbdrtruedofs_Hcurl;
+        else
+            temp = essbdrtruedofs_blocks[blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            coarsetrueRhs->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+        }
+    }
+    //*coarsetrueX = *coarsetrueRhs;
+    //coarse_prec->Mult(*coarsetrueRhs, *coarsetrueX);
+    //coarse_matrix->Mult(*coarsetrueRhs, *coarsetrueX);
+    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
     // imposing bnd conditions on the internal solver output vector
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -477,6 +500,10 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             coarsetrueX->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
     }
+
+    //*coarsetrueX = *coarsetrueRhs;
+
+
 
     //if (coarseSolver->GetConverged())
         //std::cout << "coarseSolver converged in " << coarseSolver->GetNumIterations()
