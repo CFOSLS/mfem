@@ -1929,8 +1929,6 @@ int main(int argc, char *argv[])
         Divfree_op2.Finalize();
         Divfree_hpmat_nobnd_lvls[l] = Divfree_op2.ParallelAssemble();
 
-        // checking the orthogonality of discrete curl and discrete divergence operators
-
         if (l == 0)
         {
             ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
@@ -1947,6 +1945,9 @@ int main(int argc, char *argv[])
 
             delete Bblock;
         }
+
+        /*
+        // checking the orthogonality of discrete curl and discrete divergence operators
         if (l == 0)
         {
             HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat_nobnd_lvls[l]);
@@ -1988,8 +1989,7 @@ int main(int argc, char *argv[])
                 delete temprod;
             }
         }
-        //if (l == num_levels - 1)
-            //delete Constraint_global;
+        */
     }
 
     //MPI_Finalize();
@@ -2220,6 +2220,7 @@ int main(int argc, char *argv[])
     */
 
 #if defined NEW_SMOOTHERSETUP
+    /*
     // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
     SparseMatrix d_td_Hdiv_diag;
     Dof_TrueDof_Func_lvls[0][0]->GetDiag(d_td_Hdiv_diag);
@@ -2247,6 +2248,7 @@ int main(int argc, char *argv[])
     MPI_Barrier(comm);
     std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
     MPI_Barrier(comm);
+    */
 #endif
 
 #ifdef TIMING
