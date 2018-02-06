@@ -98,7 +98,7 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
 }
 
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
-bool CheckConstrRes(Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
+bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
                                                 char const* string)
 {
     bool passed = true;
@@ -408,10 +408,12 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             const Array<int> * temp;
             temp = essbdrtruedofs_blocks[blk];
 
+            /*
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
                 xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
             }
+            */
 
 #ifdef CHECK_BNDCND
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
@@ -461,6 +463,21 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     */
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
 
+    // imposing bnd conditions on the internal solver output vector
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> * temp;
+        if (blk == 0)
+            temp = &essbdrtruedofs_Hcurl;
+        else
+            temp = essbdrtruedofs_blocks[blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            coarsetrueX->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+        }
+    }
+
     //if (coarseSolver->GetConverged())
         //std::cout << "coarseSolver converged in " << coarseSolver->GetNumIterations()
                   //<< " iterations with a residual norm of " << coarseSolver->GetFinalNorm() << ".\n";
@@ -473,7 +490,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
     }
 
-    // inposing bnd conditions on the resulting output vector
+    // imposing/checking bnd conditions on the resulting output vector
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> * temp;
@@ -481,7 +498,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
-            yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            //yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
 #ifdef CHECK_BNDCND
             // checking bnd conditions for the resulting output vector
             if ( fabs(yblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
@@ -2981,6 +2998,21 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+    // imposing boundary conditions in Hcurl on the internal solver solution (block 0)
+    for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+    {
+        int tdof = essbdrtruedofs_Hcurl[tdofind];
+        truex->GetBlock(0)[tdof] = 0.0;
+    }
+
+    // imposing boundary conditions for the rest of the blocks in the righthand side
+    for ( int blk = 1; blk < numblocks; ++blk)
+        for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+        {
+            int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+            truex->GetBlock(blk)[tdof] = 0.0;
+        }
+
     // computing the solution update in the H(div) x other blocks space
     // in two steps:
 
@@ -3737,10 +3769,23 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     if (preconditioner_mode)
         *init_guess = 0.0;
     else
+    {
         funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, *init_guess,
                                  "for the initial guess: ", print_level);
+    }
     // tempblock is the initial guess (on true dofs)
     *tempblock_truedofs = *init_guess;
+#ifdef CHECK_CONSTR
+     if (!preconditioner_mode)
+     {
+        MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "for the initial guess"),"");
+     }
+     else
+     {
+         MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL, "for the initial guess"),"");
+     }
+#endif
+
 
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
@@ -3781,6 +3826,16 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         time_solve  += chrono3.RealTime();
 #endif
 
+#ifdef CHECK_CONSTR
+        if (!preconditioner_mode)
+        {
+           MFEM_ASSERT(CheckConstrRes(yblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "for the initial guess"),"");
+        }
+        else
+        {
+            MFEM_ASSERT(CheckConstrRes(yblock_truedofs->GetBlock(0), *Constr_global, NULL, "for the initial guess"),"");
+        }
+#endif
         // monitoring convergence
         bool monotone_check = (i != 0);
         if (!preconditioner_mode)
@@ -3924,6 +3979,17 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
         MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
                               "at the start of Solve()");
+    }
+#endif
+
+#ifdef CHECK_CONSTR
+    if (!preconditioner_mode)
+    {
+        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, Constr_rhs_global, "for previous_sol"),"");
+    }
+    else
+    {
+        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, NULL, "for previous_sol"),"");
     }
 #endif
 
@@ -4093,8 +4159,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono2.Start();
 #endif
 
+#ifdef CHECK_CONSTR
+    TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
+    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL, "for interpolated coarsest level update"),"");
+
+    *truesolupdate_lvls[0] += *truetempvec_lvls[0];
+    next_sol += *truesolupdate_lvls[0];
+    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL, "after fw and bottom updates"),"");
+    next_sol -= *truesolupdate_lvls[0];
+    *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
+#endif
+
 #ifdef DEBUG_INFO
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
+
+
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
     funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
@@ -4199,8 +4278,23 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     time_up  += chrono2.RealTime();
 #endif
 
+#ifdef CHECK_CONSTR
+    MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global, NULL, "for update after full V-cycle"),"");
+#endif
+
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
+
+#ifdef CHECK_CONSTR
+    if (!preconditioner_mode)
+    {
+        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_global, Constr_rhs_global, "for next_sol"),"");
+    }
+    else
+    {
+        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_global, NULL, "for next_sol"),"");
+    }
+#endif
 
 #ifdef CHECK_BNDCND
     if (print_level && !preconditioner_mode)

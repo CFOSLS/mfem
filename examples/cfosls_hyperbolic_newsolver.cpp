@@ -19,7 +19,7 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-//#define NEW_SMOOTHERSETUP
+#define NEW_SMOOTHERSETUP
 
 // activates a check for the symmetry of the new smoother setup
 //#define CHECK_SPDSMOOTHER
@@ -43,7 +43,7 @@
 
 #define CHECK_BNDCND
 
-#define TIMING
+//#define TIMING
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
@@ -816,9 +816,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -3603,10 +3603,20 @@ int main(int argc, char *argv[])
 #endif
 
 #ifndef HCURL_COARSESOLVER
-    CoarsestSolver_partfinder->SetMaxIter(200);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-9); // -9
-    CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
-    CoarsestSolver_partfinder->ResetSolverParams();
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+    {
+        CoarsestSolver_partfinder->SetMaxIter(200);
+        CoarsestSolver_partfinder->SetAbsTol(1.0e-9); // -9
+        CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
+        CoarsestSolver_partfinder->ResetSolverParams();
+    }
+    else
+    {
+        CoarsestSolver_partfinder->SetMaxIter(400);
+        CoarsestSolver_partfinder->SetAbsTol(1.0e-15); // -9
+        CoarsestSolver_partfinder->SetRelTol(1.0e-15); // -9 for USE_AS_A_PREC
+        CoarsestSolver_partfinder->ResetSolverParams();
+    }
 #else
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
@@ -3617,9 +3627,9 @@ int main(int argc, char *argv[])
     }
     else // L2 case requires more iterations
     {
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(400);
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-22));
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-22));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(1000);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-32));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-32));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
     }
 #endif
@@ -4343,6 +4353,8 @@ int main(int argc, char *argv[])
     BlockVector NewX(new_trueoffsets);
     NewX = 0.0;
 
+    MFEM_ASSERT(CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &Floc, "in the main code for the ParticSol"), "blablabla");
+
     NewSolver.SetInitialGuess(ParticSol);
     //NewSolver.SetUnSymmetric(); // FIXME: temporarily, for debugging purposes!
 
@@ -4351,7 +4363,7 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
     if (verbose)
-        std::cout << "Global system for the CG was built in " << chrono.RealTime() <<" seconds.\n";
+        std::cout << "NewSolver was prepared for solving in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
 
