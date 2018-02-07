@@ -528,8 +528,8 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 2;
-    int par_ref_levels  = 1;
+    int ser_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -544,7 +544,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -850,77 +850,6 @@ int main(int argc, char *argv[])
     int ref_levels = par_ref_levels;
 
     int num_levels = ref_levels + 1;
-
-    /*
-    pmesh->PrintInfo(std::cout);
-    if (myid == 0)
-        std::cout << "\n";
-
-
-    {
-        FiniteElementCollection *hdiv_coll_test = new RT_FECollection(feorder, dim);
-        FiniteElementCollection *l2_coll_test = new L2_FECollection(feorder, dim);
-        FiniteElementCollection *hdivfree_coll_test = new ND_FECollection(feorder + 1, dim);
-
-        ParFiniteElementSpace *R_space_test = new ParFiniteElementSpace(pmesh.get(), hdiv_coll_test);
-        ParFiniteElementSpace *W_space_test = new ParFiniteElementSpace(pmesh.get(), l2_coll_test);
-        ParFiniteElementSpace *C_space_test = new ParFiniteElementSpace(pmesh.get(), hdivfree_coll_test);
-
-        if (myid == 0)
-         ess_bdrSigma.Print();
-
-        ParDiscreteLinearOperator Divfree_op(C_space_test, R_space_test); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
-        Divfree_op.AddDomainInterpolator(new CurlInterpolator);
-        Divfree_op.Assemble();
-        Vector tempsol(Divfree_op.Width());
-        tempsol = 0.0;
-        Vector temprhs(Divfree_op.Height());
-        temprhs = 0.0;
-        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
-        Divfree_op.Finalize();
-        HypreParMatrix * Divfree_hpmat = Divfree_op.ParallelAssemble();
-
-        ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_test, W_space_test);
-        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-        Bblock->Assemble();
-        //Vector tempsol(Bblock->Width());
-        //tempsol = 0.0;
-        //Vector temprhs(Bblock->Height());
-        //temprhs = 0.0;
-        //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
-        //Bblock->EliminateTestDofs(ess_bdrSigma);
-        Bblock->Finalize();
-        HypreParMatrix * Constraint_global = Bblock->ParallelAssemble();
-
-        delete Bblock;
-
-        HypreParMatrix * checkprod = ParMult(Constraint_global, Divfree_hpmat);
-
-        SparseMatrix diagg;
-        checkprod->GetDiag(diagg);
-
-        SparseMatrix offdiagg;
-        HYPRE_Int * cmap_offd;
-        checkprod->GetOffd(offdiagg, cmap_offd);
-
-        for (int i = 0 ;i < num_procs; ++i)
-        {
-            if (myid == i)
-            {
-                std::cout << "I am " << myid << "\n" << std::flush;
-                std::cout << "Constraint[0] * Curl[0] diag norm = " << diagg.MaxNorm() << "\n";
-                std::cout << "Constraint[0] * Curl[0] offdiag norm = " << offdiagg.MaxNorm() << "\n";
-            }
-            MPI_Barrier(comm);
-        }
-
-        delete checkprod;
-
-        MPI_Finalize();
-        return 0;
-    }
-    */
 
     chrono.Clear();
     chrono.Start();
@@ -2814,8 +2743,8 @@ int main(int argc, char *argv[])
 
     Solver *prec;
     Array<BlockOperator*> P;
-    Array<int> * offsets_f;
-    Array<int> * offsets_c;
+    std::vector<Array<int> *> offsets_f;
+    std::vector<Array<int> *> offsets_c;
     if (with_prec)
     {
         if(dim<=4)
@@ -2828,29 +2757,37 @@ int main(int argc, char *argv[])
                     {
                         P.SetSize(TrueP_C.Size());
 
-                        offsets_f = new Array<int>(3);
-                        offsets_c = new Array<int>(3);
+                        offsets_f.resize(num_levels);
+                        offsets_c.resize(num_levels);
 
                         for (int l = 0; l < P.Size(); l++)
                         {
-                            (*offsets_f)[0] = (*offsets_c)[0] = 0;
-                            (*offsets_f)[1] = TrueP_C[l]->Height();
-                            (*offsets_c)[1] = TrueP_C[l]->Width();
-                            (*offsets_f)[2] = (*offsets_f)[1] + TrueP_H[l]->Height();
-                            (*offsets_c)[2] = (*offsets_c)[1] + TrueP_H[l]->Width();
+                            offsets_f[l] = new Array<int>(3);
+                            offsets_c[l] = new Array<int>(3);
 
-                            P[l] = new BlockOperator(*offsets_f, *offsets_c);
+                            (*offsets_f[l])[0] = (*offsets_c[l])[0] = 0;
+                            (*offsets_f[l])[1] = TrueP_C[l]->Height();
+                            (*offsets_c[l])[1] = TrueP_C[l]->Width();
+                            (*offsets_f[l])[2] = (*offsets_f[l])[1] + TrueP_H[l]->Height();
+                            (*offsets_c[l])[2] = (*offsets_c[l])[1] + TrueP_H[l]->Width();
+
+                            P[l] = new BlockOperator(*offsets_f[l], *offsets_c[l]);
                             P[l]->SetBlock(0, 0, TrueP_C[l]);
                             P[l]->SetBlock(1, 1, TrueP_H[l]);
                         }
-                        prec = new MonolithicMultigrid(*MainOp, P);
+
+                        prec = new MonolithicMultigrid(*MainOp, P, NULL);
                     }
                     else
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, TrueP_C);
-
-                        Operator * precS = new Multigrid(*C, TrueP_H);
+#ifdef GEOMMG_COARSESOLVE
+                        Operator * precU = new Multigrid(*A, TrueP_C, CoarseSolverHdiv);
+                        Operator * precS = new Multigrid(*C, TrueP_H, NULL);
+#else
+                        Operator * precU = new Multigrid(*A, TrueP_C, NULL);
+                        Operator * precS = new Multigrid(*C, TrueP_H, NULL);
+#endif
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
                     }
@@ -2863,7 +2800,7 @@ int main(int argc, char *argv[])
                     if (prec_is_MG)
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, TrueP_C);
+                        Operator * precU = new Multigrid(*A, TrueP_C, NULL);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                     }
 
@@ -5031,8 +4968,11 @@ int main(int argc, char *argv[])
             {
                 if (monolithicMG)
                 {
-                    delete offsets_f;
-                    delete offsets_c;
+                    for (int l = 0; l < num_levels; ++l)
+                    {
+                        delete offsets_f[l];
+                        delete offsets_c[l];
+                    }
                 }
                 else
                 {

@@ -3070,8 +3070,8 @@ int main(int argc, char *argv[])
 
     Solver *prec;
     Array<BlockOperator*> P;
-    Array<int> * offsets_f;
-    Array<int> * offsets_c;
+    std::vector<Array<int> *> offsets_f;
+    std::vector<Array<int> *> offsets_c;
     if (with_prec)
     {
         if(dim<=4)
@@ -3084,21 +3084,25 @@ int main(int argc, char *argv[])
                     {
                         P.SetSize(TrueP_C.Size());
 
-                        offsets_f = new Array<int>(3);
-                        offsets_c = new Array<int>(3);
+                        offsets_f.resize(num_levels);
+                        offsets_c.resize(num_levels);
 
                         for (int l = 0; l < P.Size(); l++)
                         {
-                            (*offsets_f)[0] = (*offsets_c)[0] = 0;
-                            (*offsets_f)[1] = TrueP_C[l]->Height();
-                            (*offsets_c)[1] = TrueP_C[l]->Width();
-                            (*offsets_f)[2] = (*offsets_f)[1] + TrueP_H[l]->Height();
-                            (*offsets_c)[2] = (*offsets_c)[1] + TrueP_H[l]->Width();
+                            offsets_f[l] = new Array<int>(3);
+                            offsets_c[l] = new Array<int>(3);
 
-                            P[l] = new BlockOperator(*offsets_f, *offsets_c);
+                            (*offsets_f[l])[0] = (*offsets_c[l])[0] = 0;
+                            (*offsets_f[l])[1] = TrueP_C[l]->Height();
+                            (*offsets_c[l])[1] = TrueP_C[l]->Width();
+                            (*offsets_f[l])[2] = (*offsets_f[l])[1] + TrueP_H[l]->Height();
+                            (*offsets_c[l])[2] = (*offsets_c[l])[1] + TrueP_H[l]->Width();
+
+                            P[l] = new BlockOperator(*offsets_f[l], *offsets_c[l]);
                             P[l]->SetBlock(0, 0, TrueP_C[l]);
                             P[l]->SetBlock(1, 1, TrueP_H[l]);
                         }
+
                         prec = new MonolithicMultigrid(*MainOp, P);
                     }
                     else
@@ -5234,8 +5238,11 @@ int main(int argc, char *argv[])
             {
                 if (monolithicMG)
                 {
-                    delete offsets_f;
-                    delete offsets_c;
+                    for (int l = 0; l < num_levels; ++l)
+                    {
+                        delete offsets_f[l];
+                        delete offsets_c[l];
+                    }
                 }
                 else
                 {
