@@ -524,7 +524,7 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
 
-    int nDimensions     = 3;
+    int nDimensions     = 4;
     int numsol          = 4;
     int numcurl         = 0;
 
@@ -2771,8 +2771,8 @@ int main(int argc, char *argv[])
                             (*offsets_f[l])[2] = (*offsets_f[l])[1] + TrueP_H[l]->Height();
                             (*offsets_c[l])[2] = (*offsets_c[l])[1] + TrueP_H[l]->Width();
 
-                            offsets_f[l]->Print();
-                            offsets_c[l]->Print();
+                            //offsets_f[l]->Print();
+                            //offsets_c[l]->Print();
                             P[l] = new BlockOperator(*offsets_f[l], *offsets_c[l]);
                             P[l]->SetBlock(0, 0, TrueP_C[l]);
                             P[l]->SetBlock(1, 1, TrueP_H[l]);
@@ -3273,7 +3273,10 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Errors in the div-free code were computed in "<< chrono.RealTime() <<" seconds.\n";
-#endif
+
+    MPI_Finalize();
+    return 0;
+#endif // for the OLD_CODE
 
 #ifdef VISUALIZATION
     if (visualization && nDimensions < 4)

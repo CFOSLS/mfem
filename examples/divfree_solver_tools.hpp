@@ -5099,8 +5099,9 @@ public:
         }
 
         CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
-        CoarseSolver->SetRelTol(1e-8);
-        CoarseSolver->SetMaxIter(50);
+        CoarseSolver->SetAbsTol(sqrt(1e-16));
+        CoarseSolver->SetRelTol(sqrt(1e-16));
+        CoarseSolver->SetMaxIter(200);
         CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
 
@@ -5261,8 +5262,8 @@ public:
 
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-16));
-        CoarseSolver->SetRelTol(sqrt(1e-6));
-        CoarseSolver->SetMaxIter(50);
+        CoarseSolver->SetRelTol(sqrt(1e-16));
+        CoarseSolver->SetMaxIter(200);
         CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
 
