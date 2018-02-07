@@ -43,6 +43,8 @@
 
 //#define CHECK_BNDCND
 
+#define HCURL_MG_TEST
+
 #define TIMING
 
 #ifdef TIMING
@@ -524,7 +526,7 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
 
-    int nDimensions     = 4;
+    int nDimensions     = 3;
     int numsol          = 4;
     int numcurl         = 0;
 
@@ -2731,9 +2733,12 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
+#ifndef HCURL_MG_TEST
     delete Divfree_dop;
     delete DivfreeT_dop;
     delete rhside_Hdiv;
+#endif
+
 
     chrono.Stop();
     if (verbose)
@@ -2898,6 +2903,46 @@ int main(int argc, char *argv[])
     //solver = new MINRESSolver(comm);
     //if (verbose)
         //cout << "Linear solver: MINRES \n";
+#ifdef HCURL_MG_TEST
+    Solver *testprec;
+    testprec = new Multigrid(*A, TrueP_C, NULL);
+
+    solver.SetAbsTol(sqrt(atol));
+    solver.SetRelTol(sqrt(rtol));
+    solver.SetMaxIter(max_num_iter);
+    solver.SetOperator(*A);
+
+    Vector testVec(DivfreeT_dop->Width());
+    testVec = 1.0;
+    Vector testRhs(A->Height());
+    DivfreeT_dop->Mult(testVec, testRhs);
+    Vector testX(A->Width());
+
+    solver.SetPrintLevel(0);
+    solver.SetPreconditioner(*testprec);
+
+    chrono.Clear();
+    chrono.Start();
+    solver.Mult(testRhs, testX);
+    chrono.Stop();
+
+    delete Divfree_dop;
+    delete DivfreeT_dop;
+    delete rhside_Hdiv;
+#endif
+
+    if (verbose)
+    {
+        if (solver.GetConverged())
+            std::cout << "Linear solver converged in " << solver.GetNumIterations()
+                      << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
+        else
+            std::cout << "Linear solver did not converge in " << solver.GetNumIterations()
+                      << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
+        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+    }
+    MPI_Finalize();
+    return 0;
 
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
