@@ -2603,10 +2603,11 @@ int main(int argc, char *argv[])
            std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
         }
+        MPI_Barrier(comm);
 
-        for (int l = 0; l < num_levels - 1; ++l)
-            ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
+    for (int l = 0; l < num_levels - 1; ++l)
+        ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
 #endif
 #endif
 
@@ -4296,7 +4297,7 @@ int main(int argc, char *argv[])
 
 #ifdef TIMING
     double temp_sum;
-
+    /*
     for (int i = 0; i < num_procs; ++i)
     {
         if (myid == i && myid % 10 == 0)
@@ -4310,6 +4311,7 @@ int main(int argc, char *argv[])
         }
         MPI_Barrier(comm);
     }
+    */
 
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
@@ -4686,7 +4688,7 @@ int main(int argc, char *argv[])
 
 #ifdef TIMING
     double temp_sum;
-
+    /*
     for (int i = 0; i < num_procs; ++i)
     {
         if (myid == i && myid % 10 == 0)
@@ -4700,7 +4702,7 @@ int main(int argc, char *argv[])
         }
         MPI_Barrier(comm);
     }
-
+    */
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
         temp_sum += *i;
