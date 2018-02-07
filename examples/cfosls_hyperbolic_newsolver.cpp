@@ -45,7 +45,7 @@
 
 #define CHECK_BNDCND
 
-#define TIMING
+//#define TIMING
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
@@ -818,7 +818,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2006,6 +2006,142 @@ int main(int argc, char *argv[])
 
     for (int l = num_levels - 1; l >=0; --l)
     {
+        // modifying the divfree operator so that the block which connects internal dofs to boundary dofs is zero
+        int ntdofs_Hcurl = Dof_TrueDof_Hcurl_lvls[l]->Height();
+        Array<int> btd_flags(ntdofs_Hcurl);
+        btd_flags = 0;
+        //if (verbose)
+            //std::cout << "EssBdrTrueDofsHcurl \n";
+        //EssBdrTrueDofs_Hcurl[l]->Print();
+
+        for ( int i = 0; i < EssBdrTrueDofs_Hcurl[l]->Size(); ++i )
+        {
+            int tdof = (*EssBdrTrueDofs_Hcurl[l])[i];
+            btd_flags[tdof] = 1;
+        }
+
+        int * td_btd_i = new int[ ntdofs_Hcurl + 1];
+        td_btd_i[0] = 0;
+        for (int i = 0; i < ntdofs_Hcurl; ++i)
+            td_btd_i[i + 1] = td_btd_i[i] + 1;
+
+        int * td_btd_j = new int [td_btd_i[ntdofs_Hcurl]];
+        double * td_btd_data = new double [td_btd_i[ntdofs_Hcurl]];
+        for (int i = 0; i < ntdofs_Hcurl; ++i)
+        {
+            td_btd_j[i] = i;
+            if (btd_flags[i] != 0)
+                td_btd_data[i] = 1.0;
+            else
+                td_btd_data[i] = 0.0;
+        }
+
+        SparseMatrix * td_btd_diag = new SparseMatrix(td_btd_i, td_btd_j, td_btd_data, ntdofs_Hcurl, ntdofs_Hcurl);
+
+        HYPRE_Int * row_starts = Dof_TrueDof_Hcurl_lvls[l]->GetColStarts();
+
+        HypreParMatrix * td_btd_hpmat = new HypreParMatrix(comm, Dof_TrueDof_Hcurl_lvls[l]->N(),
+                row_starts, td_btd_diag);
+        td_btd_hpmat->CopyColStarts();
+        td_btd_hpmat->CopyRowStarts();
+
+        HypreParMatrix * C_td_btd = ParMult(Divfree_hpmat_nobnd_lvls[l], td_btd_hpmat);
+
+        // processing local-to-process block of the Divfree matrix
+        SparseMatrix C_td_btd_diag;
+        C_td_btd->GetDiag(C_td_btd_diag);
+
+        //C_td_btd_diag.Print();
+
+        SparseMatrix C_diag;
+        Divfree_hpmat_nobnd_lvls[l]->GetDiag(C_diag);
+
+        //C_diag.Print();
+
+        int ntdofs_Hdiv = Dof_TrueDof_Func_lvls[l][0]->Height();
+        Array<int> btd_flags_Hdiv(ntdofs_Hdiv);
+        btd_flags_Hdiv = 0;
+        for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[l][0]->Size(); ++i )
+        {
+            int tdof = (*EssBdrTrueDofs_Funct_lvls[l][0])[i];
+            btd_flags_Hdiv[tdof] = 1;
+        }
+
+        //if (verbose)
+            //std::cout << "EssBdrTrueDofsFunct \n";
+        //EssBdrTrueDofs_Funct_lvls[l][0]->Print();
+
+        for (int row = 0; row < C_td_btd_diag.Height(); ++row)
+        {
+            if (btd_flags_Hdiv[row] == 0)
+            {
+                for (int colind = 0; colind < C_td_btd_diag.RowSize(row); ++colind)
+                {
+                    int nnz_ind = C_td_btd_diag.GetI()[row] + colind;
+                    int col = C_td_btd_diag.GetJ()[nnz_ind];
+                    double fabs_entry = fabs(C_td_btd_diag.GetData()[nnz_ind]);
+
+                    if (fabs_entry > 1.0e-10)
+                    {
+                        for (int j = 0; j < C_diag.RowSize(row); ++j)
+                        {
+                            int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
+                            if (colorig == col && colorig != row)
+                            {
+                                //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                                C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
+
+                            }
+                        }
+                    } // else of if fabs_entry is large enough
+
+                }
+            } // end of if row corresponds to the non-boundary Hdiv dof
+        }
+
+        //C_diag.Print();
+
+        // processing the off-diagonal block of the Divfree matrix
+        SparseMatrix C_td_btd_offd;
+        HYPRE_Int * C_td_btd_cmap;
+        C_td_btd->GetOffd(C_td_btd_offd, C_td_btd_cmap);
+
+        SparseMatrix C_offd;
+        HYPRE_Int * C_cmap;
+        Divfree_hpmat_nobnd_lvls[l]->GetOffd(C_offd, C_cmap);
+
+        for (int row = 0; row < C_td_btd_offd.Height(); ++row)
+        {
+            if (btd_flags_Hdiv[row] == 0)
+            {
+                for (int colind = 0; colind < C_td_btd_offd.RowSize(row); ++colind)
+                {
+                    int nnz_ind = C_td_btd_offd.GetI()[row] + colind;
+                    int truecol = C_td_btd_cmap[C_td_btd_offd.GetJ()[nnz_ind]];
+                    double fabs_entry = fabs(C_td_btd_offd.GetData()[nnz_ind]);
+
+                    if (fabs_entry > 1.0e-10)
+                    {
+                        for (int j = 0; j < C_offd.RowSize(row); ++j)
+                        {
+                            int truecolorig = C_cmap[C_offd.GetJ()[C_offd.GetI()[row] + j]];
+                            if (truecolorig == truecol && truecolorig != row)
+                            {
+                                //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                                C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
+
+                            }
+                        }
+                    } // else of if fabs_entry is large enough
+
+                }
+            } // end of if row corresponds to the non-boundary Hdiv dof
+
+        }
+
+        //MPI_Finalize();
+        //return 0;
+
         if (l < num_levels - 1)
         {
 #ifdef WITH_SMOOTHERS
@@ -2170,143 +2306,6 @@ int main(int argc, char *argv[])
 #ifdef HCURL_COARSESOLVER
     if (verbose)
         std::cout << "Creating the new coarsest solver which works in the div-free subspace \n" << std::flush;
-
-    // modifying the divfree operator so that the block which connects internal dofs to boundary dofs is zero
-
-    int ntdofs_Hcurl = Dof_TrueDof_Hcurl_lvls[num_levels - 1]->Height();
-    Array<int> btd_flags(ntdofs_Hcurl);
-    btd_flags = 0;
-    //if (verbose)
-        //std::cout << "EssBdrTrueDofsHcurl \n";
-    //EssBdrTrueDofs_Hcurl[num_levels - 1]->Print();
-
-    for ( int i = 0; i < EssBdrTrueDofs_Hcurl[num_levels - 1]->Size(); ++i )
-    {
-        int tdof = (*EssBdrTrueDofs_Hcurl[num_levels - 1])[i];
-        btd_flags[tdof] = 1;
-    }
-
-    int * td_btd_i = new int[ ntdofs_Hcurl + 1];
-    td_btd_i[0] = 0;
-    for (int i = 0; i < ntdofs_Hcurl; ++i)
-        td_btd_i[i + 1] = td_btd_i[i] + 1;
-
-    int * td_btd_j = new int [td_btd_i[ntdofs_Hcurl]];
-    double * td_btd_data = new double [td_btd_i[ntdofs_Hcurl]];
-    for (int i = 0; i < ntdofs_Hcurl; ++i)
-    {
-        td_btd_j[i] = i;
-        if (btd_flags[i] != 0)
-            td_btd_data[i] = 1.0;
-        else
-            td_btd_data[i] = 0.0;
-    }
-
-    SparseMatrix * td_btd_diag = new SparseMatrix(td_btd_i, td_btd_j, td_btd_data, ntdofs_Hcurl, ntdofs_Hcurl);
-
-    HYPRE_Int * row_starts = Dof_TrueDof_Hcurl_lvls[num_levels - 1]->GetColStarts();
-
-    HypreParMatrix * td_btd_hpmat = new HypreParMatrix(comm, Dof_TrueDof_Hcurl_lvls[num_levels - 1]->N(),
-            row_starts, td_btd_diag);
-    td_btd_hpmat->CopyColStarts();
-    td_btd_hpmat->CopyRowStarts();
-
-    HypreParMatrix * C_td_btd = ParMult(Divfree_hpmat_nobnd_lvls[num_levels - 1], td_btd_hpmat);
-
-    // processing local-to-process block of the Divfree matrix
-    SparseMatrix C_td_btd_diag;
-    C_td_btd->GetDiag(C_td_btd_diag);
-
-    //C_td_btd_diag.Print();
-
-    SparseMatrix C_diag;
-    Divfree_hpmat_nobnd_lvls[num_levels - 1]->GetDiag(C_diag);
-
-    //C_diag.Print();
-
-    int ntdofs_Hdiv = Dof_TrueDof_Func_lvls[num_levels - 1][0]->Height();
-    Array<int> btd_flags_Hdiv(ntdofs_Hdiv);
-    btd_flags_Hdiv = 0;
-    for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[num_levels - 1][0]->Size(); ++i )
-    {
-        int tdof = (*EssBdrTrueDofs_Funct_lvls[num_levels - 1][0])[i];
-        btd_flags_Hdiv[tdof] = 1;
-    }
-
-    //if (verbose)
-        //std::cout << "EssBdrTrueDofsFunct \n";
-    //EssBdrTrueDofs_Funct_lvls[num_levels - 1][0]->Print();
-
-    for (int row = 0; row < C_td_btd_diag.Height(); ++row)
-    {
-        if (btd_flags_Hdiv[row] == 0)
-        {
-            for (int colind = 0; colind < C_td_btd_diag.RowSize(row); ++colind)
-            {
-                int nnz_ind = C_td_btd_diag.GetI()[row] + colind;
-                int col = C_td_btd_diag.GetJ()[nnz_ind];
-                double fabs_entry = fabs(C_td_btd_diag.GetData()[nnz_ind]);
-
-                if (fabs_entry > 1.0e-10)
-                {
-                    for (int j = 0; j < C_diag.RowSize(row); ++j)
-                    {
-                        int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
-                        if (colorig == col && colorig != row)
-                        {
-                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
-                            C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
-
-                        }
-                    }
-                } // else of if fabs_entry is large enough
-
-            }
-        } // end of if row corresponds to the non-boundary Hdiv dof
-    }
-
-    //C_diag.Print();
-
-    // processing the off-diagonal block of the Divfree matrix
-    SparseMatrix C_td_btd_offd;
-    HYPRE_Int * C_td_btd_cmap;
-    C_td_btd->GetOffd(C_td_btd_offd, C_td_btd_cmap);
-
-    SparseMatrix C_offd;
-    HYPRE_Int * C_cmap;
-    Divfree_hpmat_nobnd_lvls[num_levels - 1]->GetOffd(C_offd, C_cmap);
-
-    for (int row = 0; row < C_td_btd_offd.Height(); ++row)
-    {
-        if (btd_flags_Hdiv[row] == 0)
-        {
-            for (int colind = 0; colind < C_td_btd_offd.RowSize(row); ++colind)
-            {
-                int nnz_ind = C_td_btd_offd.GetI()[row] + colind;
-                int truecol = C_td_btd_cmap[C_td_btd_offd.GetJ()[nnz_ind]];
-                double fabs_entry = fabs(C_td_btd_offd.GetData()[nnz_ind]);
-
-                if (fabs_entry > 1.0e-10)
-                {
-                    for (int j = 0; j < C_offd.RowSize(row); ++j)
-                    {
-                        int truecolorig = C_cmap[C_offd.GetJ()[C_offd.GetI()[row] + j]];
-                        if (truecolorig == truecol && truecolorig != row)
-                        {
-                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
-                            C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
-
-                        }
-                    }
-                } // else of if fabs_entry is large enough
-
-            }
-        } // end of if row corresponds to the non-boundary Hdiv dof
-
-    }
-
-    //MPI_Finalize();
-    //return 0;
 
     int size_sp = 0;
     for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -2571,6 +2570,7 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     //testing the smoother performance
 
+#ifdef WITH_SMOOTHERS
     for (int l = 0; l < num_levels - 1; ++l)
     {
         StopWatch chrono_debug;
@@ -2607,6 +2607,7 @@ int main(int argc, char *argv[])
         for (int l = 0; l < num_levels - 1; ++l)
             ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
     }
+#endif
 #endif
 
     //MPI_Finalize();
@@ -3900,8 +3901,10 @@ int main(int argc, char *argv[])
     chrono.Stop();
 
 #ifdef TIMING
+#ifdef WITH_SMOOTHERS
     for (int l = 0; l < num_levels - 1; ++l)
         ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
+#endif
 #endif
 
 #ifndef HCURL_COARSESOLVER
@@ -4353,7 +4356,7 @@ int main(int argc, char *argv[])
             std::cout << "time_smoother lvl " << l << " = " << temp_sum << "\n";
     }
     //delete Times_smoother_lvls;
-
+#ifdef WITH_SMOOTHERS
     for (int l = 0; l < num_levels - 1; ++l)
     {
         if (verbose)
@@ -4365,6 +4368,7 @@ int main(int argc, char *argv[])
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
         }
     }
+#endif
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
@@ -4743,6 +4747,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "\n";
     //delete Times_smoother_lvls;
+#ifdef WITH_SMOOTHERS
     for (int l = 0; l < num_levels - 1; ++l)
     {
         if (verbose)
@@ -4754,6 +4759,7 @@ int main(int argc, char *argv[])
            std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
         }
     }
+#endif
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_coarsestproblem->begin(); i != Times_coarsestproblem->end(); ++i)
         temp_sum += *i;
