@@ -53,9 +53,6 @@
 #undef CHECK_BNDCND
 #endif
 
-// changes the multigrid code to compare Multigrid with GeneralMinSolver
-//#define COMPARE_MULTIGRID
-
 #include "divfree_solver_tools.hpp"
 
 // must be always active
@@ -899,13 +896,6 @@ int main(int argc, char *argv[])
     {
         args.PrintOptions(cout);
     }
-
-#ifdef COMPARE_MULTIGRID
-    prec_option = 3;
-    if (verbose)
-        std::cout << "COMPARE_MULTIGRID falg is active: a modified monolithic MG is used \n" << std::flush;
-    MPI_Barrier(comm);
-#endif
 
 #ifdef WITH_SMOOTHERS
     if (verbose)

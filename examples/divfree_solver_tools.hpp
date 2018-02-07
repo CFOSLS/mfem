@@ -5032,21 +5032,21 @@ private:
     };
 
 public:
-    MonolithicMultigrid(BlockOperator &Operator,
+    MonolithicMultigrid(BlockOperator &Op,
                         const Array<BlockOperator*> &P,
-                        Solver *CoarsePrec=NULL)
+                        Solver* Coarse_Prec = NULL)
         :
-          Solver(Operator.RowOffsets().Last()),
+          Solver(Op.RowOffsets().Last()),
           P_(P),
           Operators_(P.Size()+1),
           Smoothers_(Operators_.Size()),
           current_level(Operators_.Size()-1),
           correction(Operators_.Size()),
           residual(Operators_.Size()),
-          CoarseSolver(NULL),
-          CoarsePrec_(CoarsePrec)
+          CoarsePrec_(Coarse_Prec),
+          built_prec(false)
     {
-        Operators_.Last() = &Operator;
+        Operators_.Last() = &Op;
 
         for (int l = Operators_.Size()-1; l >= 0; l--)
         {
@@ -5098,17 +5098,29 @@ public:
             }
         }
 
-        //if (CoarsePrec)
+        CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
+        CoarseSolver->SetRelTol(1e-8);
+        CoarseSolver->SetMaxIter(50);
+        CoarseSolver->SetPrintLevel(0);
+        CoarseSolver->SetOperator(*Operators_[0]);
+
+        if (!CoarsePrec_)
         {
-            CoarseSolver = new CGSolver(
-                        ((HypreParMatrix&)Operator.GetBlock(0,0)).GetComm() );
-            CoarseSolver->SetRelTol(1e-8);
-            CoarseSolver->SetMaxIter(50);
-            CoarseSolver->SetPrintLevel(0);
-            CoarseSolver->SetOperator(*Operators_[0]);
-            if (CoarsePrec)
-                CoarseSolver->SetPreconditioner(*CoarsePrec);
+            built_prec = true;
+
+            CoarsePrec_ = new BlockDiagonalPreconditioner(Operators_[0]->ColOffsets());
+
+            HypreParMatrix &A00 = (HypreParMatrix&)Operators_[0]->GetBlock(0,0);
+            HypreParMatrix &A11 = (HypreParMatrix&)Operators_[0]->GetBlock(1,1);
+
+            HypreSmoother * precU = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
+            HypreSmoother * precS = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
+
+            ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(0, precU);
+            ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(1, precS);
         }
+
+        CoarseSolver->SetPreconditioner(*CoarsePrec_);
     }
 
     virtual void Mult(const Vector & x, Vector & y) const;
@@ -5126,6 +5138,9 @@ public:
             if (l < Operators_.Size() - 1)
                 delete Operators_[l];
         }
+        delete CoarseSolver;
+        if (built_prec)
+            delete CoarsePrec_;
     }
 
 private:
@@ -5147,6 +5162,8 @@ private:
 
     CGSolver *CoarseSolver;
     Solver *CoarsePrec_;
+
+    mutable bool built_prec;
 };
 
 void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
@@ -5158,55 +5175,6 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
 
 void MonolithicMultigrid::MG_Cycle() const
 {
-#ifdef COMPARE_MULTIGRID
-    // then no pre- or post-smoothing at the coarsest level
-    const BlockOperator& Operator_l = *Operators_[current_level];
-    const BlockSmoother& Smoother_l = *Smoothers_[current_level];
-
-    Vector& residual_l = *residual[current_level];
-    Vector& correction_l = *correction[current_level];
-    Vector help(residual_l.Size());
-    help = 0.0;
-
-    if (current_level > 0)
-    {
-        // PreSmoothing
-        Smoother_l.Mult(residual_l, correction_l);
-
-        Operator_l.Mult(correction_l, help);
-        residual_l -= help;
-
-        // Coarse grid correction
-        const BlockOperator& P_l = *P_[current_level-1];
-
-        P_l.MultTranspose(residual_l, *residual[current_level-1]);
-
-        current_level--;
-        MG_Cycle();
-        current_level++;
-
-        cor_cor.SetSize(residual_l.Size());
-        P_l.Mult(*correction[current_level-1], cor_cor);
-        correction_l += cor_cor;
-        Operator_l.Mult(cor_cor, help);
-        residual_l -= help;
-
-        // PostSmoothing
-        Smoother_l.MultTranspose(residual_l, cor_cor);
-        correction_l += cor_cor;
-    }
-    else
-    {
-        cor_cor.SetSize(residual_l.Size());
-        if (CoarseSolver)
-        {
-            CoarseSolver->Mult(residual_l, cor_cor);
-            correction_l += cor_cor;
-            Operator_l.Mult(cor_cor, help);
-            residual_l -= help;
-        }
-    }
-#else
     // PreSmoothing
     const BlockOperator& Operator_l = *Operators_[current_level];
     const BlockSmoother& Smoother_l = *Smoothers_[current_level];
@@ -5241,7 +5209,7 @@ void MonolithicMultigrid::MG_Cycle() const
     else
     {
         cor_cor.SetSize(residual_l.Size());
-        //if (CoarseSolver)
+        if (CoarseSolver)
         {
             CoarseSolver->Mult(residual_l, cor_cor);
             correction_l += cor_cor;
@@ -5253,7 +5221,6 @@ void MonolithicMultigrid::MG_Cycle() const
     // PostSmoothing
     Smoother_l.MultTranspose(residual_l, cor_cor);
     correction_l += cor_cor;
-#endif
 }
 
 class Multigrid : public Solver
@@ -5261,7 +5228,7 @@ class Multigrid : public Solver
 public:
     Multigrid(HypreParMatrix &Operator,
               const Array<HypreParMatrix*> &P,
-              Solver *CoarsePrec=NULL)
+              Solver *Coarse_Solver=NULL)
         :
           Solver(Operator.GetNumRows()),
           P_(P),
@@ -5270,8 +5237,7 @@ public:
           current_level(Operators_.Size()-1),
           correction(Operators_.Size()),
           residual(Operators_.Size()),
-          CoarseSolver(NULL),
-          CoarsePrec_(CoarsePrec)
+          CoarseSolver(Coarse_Solver)
     {
         Operators_.Last() = &Operator;
         for (int l = Operators_.Size()-1; l > 0; l--)
@@ -5294,20 +5260,14 @@ public:
                 correction[l] = new Vector();
         }
 
-        if (CoarsePrec)
-        {
-            CoarseSolver = new CGSolver(Operators_[0]->GetComm());
-            CoarseSolver->SetRelTol(1e-8);
-            CoarseSolver->SetMaxIter(50);
-            CoarseSolver->SetPrintLevel(0);
-            CoarseSolver->SetOperator(*Operators_[0]);
-            CoarseSolver->SetPreconditioner(*CoarsePrec);
-        }
     }
 
     virtual void Mult(const Vector & x, Vector & y) const;
 
     virtual void SetOperator(const Operator &op) { }
+
+    virtual void SetCoarseSolver(Solver* Coarse_Solver) const {CoarseSolver = Coarse_Solver;}
+
 
     ~Multigrid()
     {
@@ -5318,8 +5278,6 @@ public:
             delete residual[l];
             if (l < Operators_.Size() - 1)
                 delete Operators_[l];
-            if (CoarseSolver)
-                delete CoarseSolver;
         }
     }
 
@@ -5340,8 +5298,7 @@ private:
     mutable Vector cor_cor;
     mutable Vector cor_aux;
 
-    CGSolver *CoarseSolver;
-    Solver *CoarsePrec_;
+    mutable Solver *CoarseSolver;
 };
 
 void Multigrid::Mult(const Vector & x, Vector & y) const

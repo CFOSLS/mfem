@@ -1883,10 +1883,10 @@ int main(int argc, char *argv[])
     {
 #ifdef HCURL_COARSESOLVER
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            std::cout << "CoarseSolver size = " << Divfree_hpmat_nobnd_lvls[num_levels - 1]->M()
+            std::cout << "CoarseSolver size = " << Dof_TrueDof_Func_lvls[num_levels - 1][0]->N()
                     + (*Funct_hpmat_lvls[num_levels - 1])(1,1)->M() << "\n";
         else
-            std::cout << "CoarseSolver size = " << Divfree_hpmat_nobnd_lvls[num_levels - 1]->M() << "\n";
+            std::cout << "CoarseSolver size = " << Dof_TrueDof_Func_lvls[num_levels - 1][0]->N() << "\n";
 #else
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             std::cout << "CoarseSolver size = " << Dof_TrueDof_Func_lvls[num_levels - 1][0]->N()
@@ -2771,23 +2771,25 @@ int main(int argc, char *argv[])
                             (*offsets_f[l])[2] = (*offsets_f[l])[1] + TrueP_H[l]->Height();
                             (*offsets_c[l])[2] = (*offsets_c[l])[1] + TrueP_H[l]->Width();
 
+                            offsets_f[l]->Print();
+                            offsets_c[l]->Print();
                             P[l] = new BlockOperator(*offsets_f[l], *offsets_c[l]);
                             P[l]->SetBlock(0, 0, TrueP_C[l]);
                             P[l]->SetBlock(1, 1, TrueP_H[l]);
                         }
 
                         prec = new MonolithicMultigrid(*MainOp, P, NULL);
+
+                        // creating a preconditioner for the coarsest level solver in Hcurl x H1
+                        //prec = new MonolithicMultigrid(*MainOp, P, CoarsestPrec);
                     }
                     else
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-#ifdef GEOMMG_COARSESOLVE
-                        Operator * precU = new Multigrid(*A, TrueP_C, CoarseSolverHdiv);
-                        Operator * precS = new Multigrid(*C, TrueP_H, NULL);
-#else
+
                         Operator * precU = new Multigrid(*A, TrueP_C, NULL);
                         Operator * precS = new Multigrid(*C, TrueP_H, NULL);
-#endif
+
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
                     }
