@@ -37,8 +37,7 @@ int main(int argc, char *argv[])
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
-   int order = 1;
-   int feorder = order;
+   int feorder = 0;
    bool visualization = 0;
 
    OptionsParser args(argc, argv);
@@ -117,9 +116,6 @@ int main(int argc, char *argv[])
        pmesh = new ParMesh(comm, *mesh);
        delete mesh;
    }
-#ifdef WITH_HCURL
-   pmesh->ReorientTetMesh();
-#endif
 
    int dim = nDimensions;
 
@@ -169,12 +165,12 @@ int main(int argc, char *argv[])
    FiniteElementCollection *h1_coll;
    ParFiniteElementSpace *H1_space;
    if (dim == 3)
-       h1_coll = new H1_FECollection(order, nDimensions);
+       h1_coll = new H1_FECollection(feorder + 1, nDimensions);
    else
    {
-       if (order == 1)
+       if (feorder + 1 == 1)
            h1_coll = new LinearFECollection;
-       else if (order == 2)
+       else if (feorder + 1 == 2)
        {
            if (verbose)
                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
@@ -214,7 +210,6 @@ int main(int argc, char *argv[])
        else
        {
            pmesh->UniformRefinement();
-           //pmesh->ReorientTetMesh();
            pmesh_lvls[l] = new ParMesh(*pmesh);
        }
 
@@ -266,6 +261,7 @@ int main(int argc, char *argv[])
                Hdivskew_space->Update();
                P_Hdivskew_local = (SparseMatrix *)Hdivskew_space->GetUpdateOperator();
                P_Hdivskew_lvls[l] = RemoveZeroEntries(*P_Hdivskew_local);
+               //P_Hdivskew_lvls[l] = (SparseMatrix *)Hdivskew_space->GetUpdateOperator();
 
                auto d_td_coarse_Hdivskew = Hdivskew_space_lvls[l + 1]->Dof_TrueDof_Matrix();
                SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[l]->GetRestrictionMatrix(), *P_Hdivskew_lvls[l]);
