@@ -8,7 +8,7 @@
 #include <list>
 #include <unistd.h>
 
-#define WITH_HCURL
+//#define WITH_HCURL
 
 #define WITH_HDIVSKEW
 

@@ -6344,7 +6344,7 @@ void Nedelec1PentFiniteElement::GetLocalInterpolation (
 #endif
 
 #ifdef MFEM_DEBUG
-   cout << "not implemented in NED_FE_PENT" << endl;
+   //cout << "not implemented in NED_FE_PENT" << endl;
 #endif
 
    IntegrationPoint ip;
@@ -7381,7 +7381,7 @@ void DivSkew1PentFiniteElement::GetLocalInterpolation (
    int k, j;
 #ifdef MFEM_THREAD_SAFE
    DenseMatrix vshape(Dof, Dim);
-   DenseMatrix Jinv(Dim);
+   DenseMatrix J(Dim);
 #endif
 
    DenseMatrix mat(Dim,Dim); mat = 0.0;
@@ -7430,9 +7430,7 @@ void DivSkew1PentFiniteElement::GetLocalInterpolation (
    IntegrationPoint ip;
    ip.x = ip.y = ip.z = ip.t = 0.0;
    Trans.SetIntPoint (&ip);
-   // Trans must be linear
-   // set Jinv = |J| J^{-t} = adj(J)^t
-   CalcAdjugateTranspose (Trans.Jacobian(), Jinv);
+   J = Trans.Jacobian();
    Vector vk1(4), vk2(4);
    Vector xk(4);
 
@@ -7442,15 +7440,15 @@ void DivSkew1PentFiniteElement::GetLocalInterpolation (
       ip.x = xk[0]; ip.y = xk[1]; ip.z = xk[2]; ip.t = xk[3];
       CalcVShape (ip, vshape);
 
-      //  vk1 = |J| J^{-t} tk1, vk2 = |J| J^{-t} tk2
+      //  vk1 = J tk1, vk2 =  J tk2
       for ( int dim = 0; dim < 4; ++dim)
       {
           t1i[dim] = tk1[k][dim];
           t2i[dim] = tk2[k][dim];
       }
 
-      Jinv.Mult(t1i, vk1);
-      Jinv.Mult(t2i, vk2);
+      J.Mult(t1i, vk1);
+      J.Mult(t2i, vk2);
 
       for (j = 0; j < 10; j++)
       {
