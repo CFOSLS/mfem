@@ -580,6 +580,9 @@ int main(int argc, char *argv[])
 
                }
 
+               // checking on a specific vector
+               //Vector testort(offd1.Width());
+
                std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);

@@ -521,7 +521,7 @@ int main(int argc, char *argv[])
     int numsol          = 3;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 3;
 
     const char *formulation = "cfosls";     // or "fosls"
     bool with_divdiv = false;                // should be true for fosls and can be false for cfosls
@@ -784,7 +784,19 @@ int main(int argc, char *argv[])
     ess_bdrS = 1;
     ess_bdrS[pmesh->bdr_attributes.Max()-1] = 0;
 
+    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());   // applied to Hdiv variable
+    ess_bdrSigma = 0;
+
      //-----------------------
+
+    if (verbose)
+    {
+        std::cout << "Boundary conditions: \n";
+        std::cout << "ess bdr Sigma (not used in the parabolic example): \n";
+        ess_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
+        std::cout << "ess bdr S: \n";
+        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
+    }
 
 
     // 9. Define the parallel grid function and parallel linear forms, solution

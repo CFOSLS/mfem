@@ -473,6 +473,12 @@ bool Wave_test::CheckTestConfig()
             return true;
         return false;
     }
+    else if (dim == 2)
+    {
+        if (numsol == -34)
+            return true;
+        return false;
+    }
     else
         return false;
 
@@ -523,6 +529,7 @@ int main(int argc, char *argv[])
 {
     StopWatch chrono;
 
+
     // 1. Initialize MPI.
     int num_procs, myid;
     MPI_Init(&argc, &argv);
@@ -533,11 +540,11 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
     bool visualization = 0;
 
-    int nDimensions     = 3;
+    int nDimensions     = 2;
     int numsol          = 3;
 
-    int ser_ref_levels  = 1;//0;
-    int par_ref_levels  = 1;//2;
+    int ser_ref_levels  = 1;
+    int par_ref_levels  = 3;
 
     const char *formulation = "cfosls";      // "cfosls" or "fosls"
     bool with_divdiv = false;                // should be true for fosls and can be false for cfosls
@@ -622,10 +629,15 @@ int main(int argc, char *argv[])
         numsol = -34;
         mesh_file = "../data/cube_3d_moderate.mesh";
     }
-    else // 4D case
+    else if (nDimensions == 4)// 4D case
     {
         numsol = -34;
         mesh_file = "../data/cube4d_96.MFEM";
+    }
+    else
+    {
+        numsol = -34;
+        mesh_file = "../data/square_2d_moderate.mesh";
     }
 
     if (verbose)
@@ -653,32 +665,20 @@ int main(int argc, char *argv[])
 
     shared_ptr<ParMesh> pmesh;
 
-    if (nDimensions == 3 || nDimensions == 4)
+    // not generating from a lower dimensional mesh
+    if (verbose)
+        cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
+    ifstream imesh(mesh_file);
+    if (!imesh)
     {
-        // not generating from a lower dimensional mesh
-        if (verbose)
-            cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
-        ifstream imesh(mesh_file);
-        if (!imesh)
-        {
-             std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
-             MPI_Finalize();
-             return -2;
-        }
-        else
-        {
-            mesh = new Mesh(imesh, 1, 1);
-            imesh.close();
-        }
+         std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+         MPI_Finalize();
+         return -2;
     }
-    else //if nDimensions is no 3 or 4
+    else
     {
-        if (verbose)
-            cerr << "Case nDimensions = " << nDimensions << " is not supported \n"
-                 << flush;
-        MPI_Finalize();
-        return -1;
-
+        mesh = new Mesh(imesh, 1, 1);
+        imesh.close();
     }
 
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
@@ -808,8 +808,16 @@ int main(int argc, char *argv[])
     ess_bdrS[pmesh->bdr_attributes.Max()-1] = 0;
     Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());   // applied to Hdiv variable
     ess_bdrSigma = 0;
-    ess_bdrSigma[0] = 1; // t = 0 = essential boundary for sigma from Hdiv
+    ess_bdrSigma[0] = 1; // t = 0 = essential boundary for sigma from Hdiv = for dS/dt|t=0
 
+    if (verbose)
+    {
+        std::cout << "Boundary conditions: \n";
+        std::cout << "ess bdr Sigma: \n";
+        ess_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
+        std::cout << "ess bdr S: \n";
+        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
+    }
 
     // 8.5 some additional parelag stuff which is used for coarse lagrange
     // multiplier implementation at the matrix level
@@ -1189,16 +1197,17 @@ int main(int argc, char *argv[])
 
     ParFiniteElementSpace * GradSpace;
     FiniteElementCollection *hcurl_coll;
-    if (dim == 3)
-    {
-        hcurl_coll = new ND_FECollection(feorder+1, dim);
-        GradSpace = new ParFiniteElementSpace(pmesh.get(), hcurl_coll);
-    }
-    else // dim == 4
+    if (dim == 4)
     {
         hcurl_coll = new ND1_4DFECollection;
         GradSpace = new ParFiniteElementSpace(pmesh.get(), hcurl_coll);
     }
+    else
+    {
+        hcurl_coll = new ND_FECollection(feorder+1, dim);
+        GradSpace = new ParFiniteElementSpace(pmesh.get(), hcurl_coll);
+    }
+
     DiscreteLinearOperator Grad(H_space, GradSpace);
     Grad.AddDomainInterpolator(new GradientInterpolator());
     ParGridFunction GradS(GradSpace);
