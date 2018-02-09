@@ -795,7 +795,7 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
 
-    int nDimensions     = 3;
+    int nDimensions     = 4;
     int numsol          = -34;
     int numcurl         = 0;
 
@@ -1191,6 +1191,8 @@ int main(int argc, char *argv[])
    Array<int> * row_offsets_TrueP_Func = new Array<int>[num_levels - 1];
    Array<int> * col_offsets_TrueP_Func = new Array<int>[num_levels - 1];
 
+   std::vector<Operator*> Funct_global_lvls(num_levels);
+
    Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
 
     chrono.Clear();
@@ -1563,6 +1565,36 @@ int main(int argc, char *argv[])
         Constraint_mat_lvls[l + 1] = mfem::Mult(*P_WT[l], *temp_sp);
     }
 
+    HypreParMatrix * Constraint_global;
+    for (int l = 0; l < num_levels; ++l)
+    {
+        if (l == 0)
+        {
+            ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
+            Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Bblock->Assemble();
+            Vector tempsol(Bblock->Width());
+            tempsol = 0.0;
+            Vector temprhs(Bblock->Height());
+            temprhs = 0.0;
+            //Bblock->EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);
+            //Bblock->EliminateTestDofs(ess_bdrSigma);
+            Bblock->Finalize();
+            Constraint_global = Bblock->ParallelAssemble();
+
+            delete Bblock;
+        }
+    }
+
+    for (int l = 0; l < num_levels; ++l)
+    {
+        if (l == 0)
+            Funct_global_lvls[l] = Funct_global;
+        else
+            Funct_global_lvls[l] = new RAPOperator(*TrueP_Func[l - 1], *Funct_global_lvls[l - 1], *TrueP_Func[l - 1]);
+    }
+
+
     for (int l = num_levels - 1; l >=0; --l)
     {
         if (l < num_levels - 1)
@@ -1613,7 +1645,12 @@ int main(int argc, char *argv[])
     }
 
     // Creating the coarsest problem solver
-    CoarsestSolver_partfinder = new CoarsestProblemSolver(*Funct_mat_lvls[num_levels - 1],
+    int size = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        size += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
+    size += Dof_TrueDof_L2_lvls[num_levels - 1]->GetNumCols();
+
+    CoarsestSolver_partfinder = new CoarsestProblemSolver(size, *Funct_mat_lvls[num_levels - 1],
                                                      *Constraint_mat_lvls[num_levels - 1],
                                                      Dof_TrueDof_Func_lvls[num_levels - 1],
                                                      *Dof_TrueDof_L2_lvls[num_levels - 1],
@@ -2611,55 +2648,56 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    const bool construct_coarseops = true;
     int stopcriteria_type = 1;
 
 #ifdef TIMING
+    std::list<double>* Times_mult = new std::list<double>;
     std::list<double>* Times_solve = new std::list<double>;
     std::list<double>* Times_localsolve = new std::list<double>;
+    std::list<double>* Times_localsolve_lvls = new std::list<double>[num_levels - 1];
     std::list<double>* Times_smoother = new std::list<double>;
+    std::list<double>* Times_smoother_lvls = new std::list<double>[num_levels - 1];
     std::list<double>* Times_coarsestproblem = new std::list<double>;
+    std::list<double>* Times_resupdate = new std::list<double>;
     std::list<double>* Times_fw = new std::list<double>;
     std::list<double>* Times_up = new std::list<double>;
 #endif
 
-
-    DivConstraintSolver PartsolFinder(num_levels, P_WT,
-                                      Dof_TrueDof_Func_lvls, Dof_TrueDof_L2_lvls,
-                                      P_Func, TrueP_Func, P_W,
+    DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
+                                      TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
-                                      Funct_mat_lvls, Constraint_mat_lvls, Floc,
+                                      Funct_global_lvls,
+                                      *Constraint_global,
+                                      Floc,
                                       Smoothers_lvls,
                                       Xinit_truedofs,
+#ifdef CHECK_CONSTR
+                                      Floc,
+#endif
                                       LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder,
-                                      construct_coarseops);
+                                      CoarsestSolver_partfinder);
 
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder->ResetSolverParams();
 
-    GeneralMinConstrSolver NewSolver(num_levels,
-                     Dof_TrueDof_Func_lvls,
-                     P_Func, TrueP_Func, P_W,
-                     EssBdrTrueDofs_Funct_lvls,
-                     Funct_mat_lvls, Constraint_mat_lvls,
-                     Floc,
-                     *Funct_global, *Functrhs_global, offsets_global,
-                     Smoothers_lvls,
-                     Xinit_truedofs,
-#ifdef TIMING
-                     Times_solve, Times_localsolve, Times_smoother, Times_coarsestproblem, Times_fw, Times_up,
+    GeneralMinConstrSolver NewSolver( comm, num_levels,
+                     TrueP_Func, EssBdrTrueDofs_Funct_lvls,
+                     *Functrhs_global, Smoothers_lvls,
+                     Xinit_truedofs, Funct_global_lvls,
+#ifdef CHECK_CONSTR
+                     *Constraint_global, Floc,
 #endif
-
+#ifdef TIMING
+                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
+#endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
                      LocalSolver_lvls,
 #else
                      NULL,
 #endif
-                     CoarsestSolver,
-                     construct_coarseops, stopcriteria_type);
+                     CoarsestSolver, stopcriteria_type);
 
 
     double newsolver_reltol = 1.0e-6;
@@ -2699,7 +2737,7 @@ int main(int argc, char *argv[])
     // checking that the computed particular solution satisfies essential boundary conditions
     for ( int blk = 0; blk < numblocks_funct; ++blk)
     {
-        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), Xinit_truedofs.GetBlock(blk), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
     }
 
@@ -2739,8 +2777,11 @@ int main(int argc, char *argv[])
         MFEM_ABORT("");
     }
 
-    MFEM_ASSERT(CheckBdrError(ParticSol, Xinit_truedofs, *EssBdrTrueDofs_Funct_lvls[0][0], true),
-                              "for the particular solution");
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+                                  "for the particular solution");
+    }
 
     Vector error3(ParticSol.Size());
     error3 = ParticSol;
