@@ -5527,3 +5527,145 @@ HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 }
 
 } // end of namespace mfem
+
+
+// Eliminates all entries in the Operator acting in a pair of spaces,
+// assembled as a HypreParMatrix, which connect internal dofs to boundary dofs
+// Used to modife the Curl and Divskew operator for the new multigrid solver
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range )
+{
+    MPI_Comm comm = Op_hpmat.GetComm();
+
+    int ntdofs_dom = Op_hpmat.Width();
+    Array<int> btd_flags(ntdofs_dom);
+    btd_flags = 0;
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs_dom \n";
+    //EssBdrTrueDofs_dom.Print();
+
+    for ( int i = 0; i < EssBdrTrueDofs_dom.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs_dom[i];
+        btd_flags[tdof] = 1;
+    }
+
+    int * td_btd_i = new int[ ntdofs_dom + 1];
+    td_btd_i[0] = 0;
+    for (int i = 0; i < ntdofs_dom; ++i)
+        td_btd_i[i + 1] = td_btd_i[i] + 1;
+
+    int * td_btd_j = new int [td_btd_i[ntdofs_dom]];
+    double * td_btd_data = new double [td_btd_i[ntdofs_dom]];
+    for (int i = 0; i < ntdofs_dom; ++i)
+    {
+        td_btd_j[i] = i;
+        if (btd_flags[i] != 0)
+            td_btd_data[i] = 1.0;
+        else
+            td_btd_data[i] = 0.0;
+    }
+
+    SparseMatrix * td_btd_diag = new SparseMatrix(td_btd_i, td_btd_j, td_btd_data, ntdofs_dom, ntdofs_dom);
+
+    HYPRE_Int * row_starts = Op_hpmat.GetColStarts();
+
+    HypreParMatrix * td_btd_hpmat = new HypreParMatrix(comm, Op_hpmat.N(),
+            row_starts, td_btd_diag);
+    td_btd_hpmat->CopyColStarts();
+    td_btd_hpmat->CopyRowStarts();
+
+    HypreParMatrix * C_td_btd = ParMult(&Op_hpmat, td_btd_hpmat);
+
+    // processing local-to-process block of the Divfree matrix
+    SparseMatrix C_td_btd_diag;
+    C_td_btd->GetDiag(C_td_btd_diag);
+
+    //C_td_btd_diag.Print();
+
+    SparseMatrix C_diag;
+    Op_hpmat.GetDiag(C_diag);
+
+    //C_diag.Print();
+
+    int ntdofs_range = Op_hpmat.Height();
+
+    Array<int> btd_flags_range(ntdofs_range);
+    btd_flags_range = 0;
+    for ( int i = 0; i < EssBdrTrueDofs_range.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs_range[i];
+        btd_flags_range[tdof] = 1;
+    }
+
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs_range \n";
+    //EssBdrTrueDofs_range.Print();
+
+    for (int row = 0; row < C_td_btd_diag.Height(); ++row)
+    {
+        if (btd_flags_range[row] == 0)
+        {
+            for (int colind = 0; colind < C_td_btd_diag.RowSize(row); ++colind)
+            {
+                int nnz_ind = C_td_btd_diag.GetI()[row] + colind;
+                int col = C_td_btd_diag.GetJ()[nnz_ind];
+                double fabs_entry = fabs(C_td_btd_diag.GetData()[nnz_ind]);
+
+                if (fabs_entry > 1.0e-10)
+                {
+                    for (int j = 0; j < C_diag.RowSize(row); ++j)
+                    {
+                        int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
+                        if (colorig == col && colorig != row)
+                        {
+                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                            C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
+
+                        }
+                    }
+                } // else of if fabs_entry is large enough
+
+            }
+        } // end of if row corresponds to the non-boundary Hdiv dof
+    }
+
+    //C_diag.Print();
+
+    // processing the off-diagonal block of the Divfree matrix
+    SparseMatrix C_td_btd_offd;
+    HYPRE_Int * C_td_btd_cmap;
+    C_td_btd->GetOffd(C_td_btd_offd, C_td_btd_cmap);
+
+    SparseMatrix C_offd;
+    HYPRE_Int * C_cmap;
+    Op_hpmat.GetOffd(C_offd, C_cmap);
+
+    for (int row = 0; row < C_td_btd_offd.Height(); ++row)
+    {
+        if (btd_flags_range[row] == 0)
+        {
+            for (int colind = 0; colind < C_td_btd_offd.RowSize(row); ++colind)
+            {
+                int nnz_ind = C_td_btd_offd.GetI()[row] + colind;
+                int truecol = C_td_btd_cmap[C_td_btd_offd.GetJ()[nnz_ind]];
+                double fabs_entry = fabs(C_td_btd_offd.GetData()[nnz_ind]);
+
+                if (fabs_entry > 1.0e-10)
+                {
+                    for (int j = 0; j < C_offd.RowSize(row); ++j)
+                    {
+                        int truecolorig = C_cmap[C_offd.GetJ()[C_offd.GetI()[row] + j]];
+                        if (truecolorig == truecol && truecolorig != row)
+                        {
+                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                            C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
+
+                        }
+                    }
+                } // else of if fabs_entry is large enough
+
+            }
+        } // end of if row corresponds to the non-boundary Hdiv dof
+
+    }
+}
