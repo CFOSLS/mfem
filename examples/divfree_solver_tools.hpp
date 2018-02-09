@@ -5294,10 +5294,10 @@ public:
             if (l < Operators_.Size() - 1)
                 delete Operators_[l];
 
-            delete CoarseSolver;
-            if (built_prec)
-                delete CoarsePrec_;
         }
+        delete CoarseSolver;
+        if (built_prec)
+            delete CoarsePrec_;
     }
 
 private:
