@@ -45,6 +45,8 @@
 
 #define CHECK_BNDCND
 
+//#define MARTIN_PREC
+
 //#define TIMING
 
 #ifdef TIMING
@@ -409,6 +411,296 @@ void VectorFECurlVQIntegrator::AssembleElementMatrix2(
         }
     }
 }
+
+#ifdef MARTIN_PREC
+class DivSkew4dPrec : public Solver
+{
+
+private:
+   HypreParMatrix *A;
+   ParFiniteElementSpace *fespace;
+   Coefficient *alpha_, *beta_;
+
+   //kernel operators
+   HypreParMatrix *P_d_HCurl_HDivSkew;
+
+
+   HypreParMatrix *P_H1_HCurl;
+   HypreParMatrix *H1_KernelMat;
+   HypreBoomerAMG *amgH1_Kernel;
+
+   //"image" operators
+   HypreParMatrix *P_H1_HDivSkew;
+   HypreParMatrix *H1_ImageMat;
+   HypreBoomerAMG *amgH1_Image;
+
+
+   HypreParMatrix *HCurlMat;
+   HypreSmoother * smootherDivSkew;
+   HypreSmoother * smootherCurl;
+
+   CGSolver *pcgKernel;
+   CGSolver *pcgImage;
+
+   Vector *f;
+   Vector *fKernel, *uKernel;
+   Vector *fImage, *uImage;
+   Vector *fCurl, *uCurl;
+
+   bool exactSolves;
+
+   FiniteElementCollection* fecHCurlKernel;
+   ParFiniteElementSpace *HCurlKernelFESpace;
+
+
+public:
+   ~DivSkew4dPrec()
+   {
+       delete pcgImage;
+       delete pcgKernel;
+
+       delete f;
+       delete fKernel;
+       delete uKernel;
+       delete fImage;
+       delete uImage;
+       delete fCurl;
+       delete uCurl;
+
+       delete smootherCurl;
+       delete HCurlMat;
+
+       delete P_d_HCurl_HDivSkew;
+       delete P_H1_HDivSkew;
+       delete P_H1_HCurl;
+
+       delete amgH1_Image;
+       delete H1_ImageMat;
+       delete amgH1_Kernel;
+       delete H1_KernelMat;
+
+       delete smootherDivSkew;
+
+       delete HCurlKernelFESpace;
+       delete fecHCurlKernel;
+   }
+   DivSkew4dPrec(HypreParMatrix *AUser, ParFiniteElementSpace *fespaceUser, Coefficient *alpha, Coefficient *beta,
+                 const Array<int> &essBnd, int orderKernel=1, bool exactSolvesUser=false)
+   {
+      A = AUser;
+      fespace = fespaceUser;
+      alpha_ = alpha;
+      beta_ = beta;
+
+      ParMesh *pmesh = fespace->GetParMesh();
+      int dim = pmesh->Dimension();
+
+      exactSolves = exactSolvesUser;
+
+
+
+
+      int orderIm=1;  //H1  --> H(divSkew)
+      int orderKer=orderKernel; //curl V --> H(divSkew)
+
+
+
+      smootherDivSkew = new HypreSmoother(*A, 16, 3);
+
+      Array<int> HDivSkew_essDof(fespace->GetVSize()); HDivSkew_essDof = 0;
+      fespace->GetEssentialVDofs(essBnd, HDivSkew_essDof);
+
+
+
+
+      //setup the H1 FESpace for the kernel
+      FiniteElementCollection* fecH1Kernel;
+      if (orderKer==1) { fecH1Kernel = new LinearFECollection; }
+      else { fecH1Kernel = new QuadraticFECollection; }
+
+      ParFiniteElementSpace *H1KernelFESpace = new ParFiniteElementSpace(pmesh,
+                                                                         fecH1Kernel, dim, Ordering::byVDIM);
+      Array<int> H1Kernel_essDof(H1KernelFESpace->GetVSize()); H1Kernel_essDof = 0;
+      H1KernelFESpace->GetEssentialVDofs(essBnd, H1Kernel_essDof);
+
+
+      //setup the H(curl) FESpace for the kernel
+      if (orderKer==1) { fecHCurlKernel = new ND1_4DFECollection; }
+      else { fecHCurlKernel = new ND2_4DFECollection; }
+
+      HCurlKernelFESpace = new ParFiniteElementSpace(pmesh,
+                                                                            fecHCurlKernel);
+      Array<int> HCurlKernel_essDof(HCurlKernelFESpace->GetVSize());
+      HCurlKernel_essDof = 0;
+      HCurlKernelFESpace->GetEssentialVDofs(essBnd, HCurlKernel_essDof);
+
+
+      //setup the FESpace for the H1 injection
+      FiniteElementCollection* fecH1Vec;
+      if (orderIm==1) { fecH1Vec = new LinearFECollection; }
+      else { fecH1Vec = new QuadraticFECollection; }
+      ParFiniteElementSpace *H1_ImageFESpace = new ParFiniteElementSpace(pmesh,
+                                                                         fecH1Vec, 6, Ordering::byVDIM);
+      Array<int> H1Image_essDof(H1_ImageFESpace->GetVSize()); H1Image_essDof = 0;
+      H1_ImageFESpace->GetEssentialVDofs(essBnd, H1Image_essDof);
+
+
+
+      //setup the H1 preconditioner for the kernel
+      ParBilinearForm* H1Varf = new ParBilinearForm(H1KernelFESpace);
+      H1Varf->AddDomainIntegrator(new VectorDiffusionIntegrator(*beta_));
+//      H1Varf->AddDomainIntegrator(new VectorMassIntegrator);
+      H1Varf->Assemble();
+      H1Varf->Finalize();
+      SparseMatrix &matH1(H1Varf->SpMat());
+      for (int dof=0; dof<H1Kernel_essDof.Size(); dof++) if (H1Kernel_essDof[dof]<0) { matH1.EliminateRowCol(dof); }
+      H1_KernelMat = H1Varf->ParallelAssemble();
+      delete H1Varf;
+      amgH1_Kernel = new HypreBoomerAMG(*H1_KernelMat);
+      amgH1_Kernel->SetSystemsOptions(dim);
+
+      //setup the H1 preconditioner for the image
+      ParBilinearForm* H1VecVarf = new ParBilinearForm(H1_ImageFESpace);
+      H1VecVarf->AddDomainIntegrator(new VectorDiffusionIntegrator(*alpha_, 6));
+      H1VecVarf->AddDomainIntegrator(new VectorMassIntegrator(6, beta));
+      H1VecVarf->Assemble();
+      H1VecVarf->Finalize();
+      SparseMatrix &matH1Vec(H1VecVarf->SpMat());
+      for (int dof=0; dof<H1Image_essDof.Size(); dof++) if (H1Image_essDof[dof]<0) { matH1Vec.EliminateRowCol(dof); }
+      H1_ImageMat = H1VecVarf->ParallelAssemble();
+      delete H1VecVarf;
+      amgH1_Image = new HypreBoomerAMG(*H1_ImageMat);
+      amgH1_Image->SetSystemsOptions(6);
+
+
+      //setup the injection of H1 into H(curl)
+      ParDiscreteLinearOperator *disInterpol = new ParDiscreteLinearOperator(
+         H1KernelFESpace, HCurlKernelFESpace);
+      disInterpol->AddDomainInterpolator(new IdentityInterpolator);
+      disInterpol->Assemble();
+      disInterpol->Finalize();
+      SparseMatrix* smatID = &(disInterpol->SpMat());
+      smatID->EliminateCols(H1Kernel_essDof);
+      for (int dof=0; dof<HCurlKernel_essDof.Size();
+           dof++) if (HCurlKernel_essDof[dof]<0) { smatID->EliminateRow(dof); }
+      P_H1_HCurl = disInterpol->ParallelAssemble();
+      delete disInterpol;
+
+      //setup the injection of H1 into H(DivSkew)
+      ParDiscreteLinearOperator *disInterpolIm = new ParDiscreteLinearOperator(
+         H1_ImageFESpace, fespace);
+      disInterpolIm->AddDomainInterpolator(new IdentityInterpolator);
+      disInterpolIm->Assemble();
+      disInterpolIm->Finalize();
+      SparseMatrix* smatIDIm = &(disInterpolIm->SpMat());
+      smatIDIm->EliminateCols(H1Image_essDof);
+      for (int dof=0; dof<HDivSkew_essDof.Size(); dof++) if (HDivSkew_essDof[dof]<0) { smatIDIm->EliminateRow(dof); }
+      P_H1_HDivSkew = disInterpolIm->ParallelAssemble();
+      delete disInterpolIm;
+
+
+      //setup the injection of the curl(H(curl)) into H(DivSkew)
+      ParDiscreteLinearOperator *disCurl = new ParDiscreteLinearOperator(
+         HCurlKernelFESpace, fespace);
+      disCurl->AddDomainInterpolator(new CurlInterpolator);
+      disCurl->Assemble();
+      disCurl->Finalize();
+      SparseMatrix* smatCurl = &(disCurl->SpMat());
+      smatCurl->EliminateCols(HCurlKernel_essDof);
+      for (int dof=0; dof<HDivSkew_essDof.Size(); dof++) if (HDivSkew_essDof[dof]<0) { smatCurl->EliminateRow(dof); }
+      P_d_HCurl_HDivSkew = disCurl->ParallelAssemble();
+      delete disCurl;
+
+
+
+      //setup the smoother for H(curl)
+//      Coefficient *massC = new ConstantCoefficient(1.0);
+//      Coefficient *CurlCurlC = new ConstantCoefficient(1.0);
+      ParBilinearForm *a_HCurl = new ParBilinearForm(HCurlKernelFESpace);
+      a_HCurl->AddDomainIntegrator(new CurlCurlIntegrator(*beta_));
+//      a_HCurl->AddDomainIntegrator(new CurlCurlIntegrator(*CurlCurlC));
+//      a_HCurl->AddDomainIntegrator(new VectorFEMassIntegrator(*massC));
+      a_HCurl->Assemble();
+      a_HCurl->Finalize();
+      SparseMatrix &matHCurl(a_HCurl->SpMat());
+      for (int dof=0; dof<HCurlKernel_essDof.Size();
+           dof++) if (HCurlKernel_essDof[dof]<0) { matHCurl.EliminateRowCol(dof); }
+      HCurlMat = a_HCurl->ParallelAssemble();
+      delete a_HCurl;
+      smootherCurl = new HypreSmoother(*HCurlMat, 16, 3);
+
+
+
+      f = new Vector(fespace->GetTrueVSize());
+
+      fKernel = new Vector(H1KernelFESpace->GetTrueVSize());
+      uKernel = new Vector(H1KernelFESpace->GetTrueVSize());
+
+      fImage = new Vector(H1_ImageFESpace->GetTrueVSize());
+      uImage = new Vector(H1_ImageFESpace->GetTrueVSize());
+
+      fCurl = new Vector(HCurlKernelFESpace->GetTrueVSize());
+      uCurl = new Vector(HCurlKernelFESpace->GetTrueVSize());
+
+
+      amgH1_Kernel->Mult(*fKernel, *uKernel);
+      amgH1_Image->Mult(*fImage, *uImage);
+
+      pcgKernel = new CGSolver(MPI_COMM_WORLD);
+      pcgKernel->SetOperator(*H1_KernelMat);
+      pcgKernel->SetPreconditioner(*amgH1_Kernel);
+      pcgKernel->SetRelTol(1e-16);
+      pcgKernel->SetMaxIter(100000000);
+      pcgKernel->SetPrintLevel(-2);
+
+      pcgImage = new CGSolver(MPI_COMM_WORLD);
+      pcgImage->SetOperator(*H1_ImageMat);
+      pcgImage->SetPreconditioner(*amgH1_Image);
+      pcgImage->SetRelTol(1e-16);
+      pcgImage->SetMaxIter(100000000);
+      pcgImage->SetPrintLevel(-2);
+
+
+      delete H1KernelFESpace;
+      delete fecH1Kernel;
+      delete H1_ImageFESpace;
+      delete fecH1Vec;
+   }
+
+   void setExactSolve(bool exSol)
+   {
+      exactSolves = exSol;
+   }
+
+   virtual void Mult(const Vector &x, Vector &y) const
+   {
+      smootherDivSkew->Mult(x,y);
+
+      P_H1_HDivSkew->MultTranspose(x,*fImage);
+      *uImage = 0.0;
+      if (exactSolves) { pcgImage->Mult(*fImage, *uImage); }
+      else { amgH1_Image->Mult(*fImage, *uImage); }
+      P_H1_HDivSkew->Mult(1.0, *uImage, 1.0, y);
+
+
+      *uCurl = 0.0;
+      P_d_HCurl_HDivSkew->MultTranspose(x,*fCurl);
+
+      smootherCurl->Mult(*fCurl, *uCurl);
+
+      P_H1_HCurl->MultTranspose(*fCurl,*fKernel);
+      *uKernel = 0.0;
+      if (exactSolves) { pcgKernel->Mult(*fKernel, *uKernel); }
+      else { amgH1_Kernel->Mult(*fKernel, *uKernel); }
+      P_H1_HCurl->Mult(1.0, *uKernel, 1.0, *uCurl);
+
+      P_d_HCurl_HDivSkew->Mult(1.0, *uCurl, 1.0, y);
+   }
+
+   virtual void SetOperator(const Operator &op) {};
+
+};
+#endif
 
 double uFun1_ex(const Vector& x); // Exact Solution
 double uFun1_ex_dt(const Vector& xt);
@@ -810,14 +1102,14 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
 
-    int nDimensions     = 3;
+    int nDimensions     = 4;
     int numsol          = 4;
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -2795,11 +3087,25 @@ int main(int argc, char *argv[])
                     if (prec_is_MG)
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new Multigrid(*A, TrueP_C);
+                        Operator * precU;
+#ifdef MARTIN_PREC
+                        if (dim == 4)
+                        {
+                            Coefficient *alpha = new ConstantCoefficient(1.0);
+                            Coefficient *beta = new ConstantCoefficient(0.0);
+                            int order = feorder + 1;
+                            bool exactH1Solver = false;
+                            precU = new DivSkew4dPrec(A, C_space_lvls[0], alpha, beta, ess_bdrSigma, order, exactH1Solver);
+                        }
+                        else
+                            precU = new Multigrid(*A, TrueP_C);
+#else
+                        precU = new Multigrid(*A, TrueP_C);
+#endif
+
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                     }
 
-                    //mfem_error("MG is not implemented when there is no S in the system");
                 }
             }
             else // prec is AMS-like for the div-free part (block-diagonal for the system with boomerAMG for S)
@@ -2809,39 +3115,10 @@ int main(int argc, char *argv[])
                     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        /*
-                        Operator * precU = new HypreAMS(*A, C_space);
-                        ((HypreAMS*)precU)->SetSingularProblem();
-                        */
-
-                        // Why in this case, when S is even in H1 as in the paper,
-                        // CG is saying that the operator is not pos.def.
-                        // And I checked that this is precU block that causes the trouble
-                        // For, example, the following works:
                         Operator * precU = new IdentityOperator(A->Height());
 
                         Operator * precS;
-                        /*
-                        if (strcmp(space_for_S,"H1") == 0) // S is from H1
-                        {
-                            precS = new HypreBoomerAMG(*C);
-                            ((HypreBoomerAMG*)precS)->SetPrintLevel(0);
-
-                            //FIXME: do we need to set iterative mode = false here and around this place?
-                        }
-                        else // S is from L2
-                        {
-                            precS = new HypreDiagScale(*C);
-                            //precS->SetPrintLevel(0);
-                        }
-                        */
-
                         precS = new IdentityOperator(C->Height());
-
-                        //auto precSmatrix = ((HypreDiagScale*)precS)->GetData();
-                        //SparseMatrix precSdiag;
-                        //precSmatrix->GetDiag(precSdiag);
-                        //precSdiag.Print();
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
@@ -2849,15 +3126,6 @@ int main(int argc, char *argv[])
                     else // no S, i.e. only an equation in div-free subspace
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        /*
-                        Operator * precU = new HypreAMS(*A, C_space);
-                        ((HypreAMS*)precU)->SetSingularProblem();
-                        */
-
-                        // See the remark below, for the case when S is present
-                        // CG is saying that the operator is not pos.def.
-                        // And I checked that this is precU block that causes the trouble
-                        // For, example, the following works:
                         Operator * precU = new IdentityOperator(A->Height());
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
