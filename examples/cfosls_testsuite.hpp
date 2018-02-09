@@ -28,13 +28,17 @@ double  bFunCircle2Ddiv_ex(const Vector& xt);
 double uFunTest_ex(const Vector& xt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
-    double res = t*t*exp(t) * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    double res = t*t*exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        res *= sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
         res *= sin (M_PI * z);
 
@@ -44,13 +48,17 @@ double uFunTest_ex(const Vector& xt)
 double uFunTest_ex_dt(const Vector& xt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
-    double res = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    double res = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        res *= sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
         res *= sin (M_PI * z);
 
@@ -60,13 +68,17 @@ double uFunTest_ex_dt(const Vector& xt)
 double uFunTest_ex_dt2(const Vector& xt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
-    double res = ((t*t + 2.0 * t) + (2.0 + 2.0 * t))*exp(t) * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    double res = ((t*t + 2.0 * t) + (2.0 + 2.0 * t))*exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        res *= sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
         res *= sin (M_PI * z);
 
@@ -76,21 +88,31 @@ double uFunTest_ex_dt2(const Vector& xt)
 double uFunTest_ex_laplace(const Vector& xt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
-    double res = sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y) * M_PI * M_PI;
-    if (xt.Size() == 3)
-        res *= (-1) * (2.0 * 2.0 + 3.0 * 3.0);
+    double res = sin (3.0 * M_PI * x) * M_PI * M_PI;
+    if (xt.Size() == 2)
+        res *= (3.0 * 3.0);
     else
     {
-        res *= sin (M_PI * z);
-        res *= (-1) * (2.0 * 2.0 + 3.0 * 3.0 + 1.0  * 1.0);
+        if (xt.Size() == 3)
+        {
+            res *= sin (2.0 * M_PI * y);
+            res *= (2.0 * 2.0 + 3.0 * 3.0);
+        }
+        else // 4D
+        {
+            res *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+            res *= (2.0 * 2.0 + 3.0 * 3.0 + 1.0  * 1.0);
+        }
     }
-    res *= t*t*exp(t);
+    res *= (-1) * t*t*exp(t);
 
     return res;
 }
@@ -98,21 +120,31 @@ double uFunTest_ex_laplace(const Vector& xt)
 double uFunTest_ex_dtlaplace(const Vector& xt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
     double t = xt(xt.Size()-1);
 
-    double res = sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y) * M_PI * M_PI;
-    if (xt.Size() == 3)
-        res *= (-1) * (2.0 * 2.0 + 3.0 * 3.0);
+    double res = sin (3.0 * M_PI * x) * M_PI * M_PI;
+    if (xt.Size() == 2)
+        res *= (3.0 * 3.0);
     else
     {
-        res *= sin (M_PI * z);
-        res *= (-1) * (2.0 * 2.0 + 3.0 * 3.0 + 1.0  * 1.0);
+        if (xt.Size() == 3)
+        {
+            res *= sin (2.0 * M_PI * y);
+            res *= (2.0 * 2.0 + 3.0 * 3.0);
+        }
+        else // 4D
+        {
+            res *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+            res *= (2.0 * 2.0 + 3.0 * 3.0 + 1.0  * 1.0);
+        }
     }
-    res *= (t*t + 2.0 * t)*exp(t);
+    res *= (-1) * (t*t + 2.0 * t)*exp(t);
 
     return res;
 }
@@ -120,7 +152,9 @@ double uFunTest_ex_dtlaplace(const Vector& xt)
 void uFunTest_ex_gradx(const Vector& xt, Vector& gradx )
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
@@ -128,12 +162,16 @@ void uFunTest_ex_gradx(const Vector& xt, Vector& gradx )
 
     gradx.SetSize(xt.Size() - 1);
 
-    gradx(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
-    gradx(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    gradx(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() == 3)
+    {
+        gradx(0) *= sin (2.0 * M_PI * y);
+        gradx(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
     if (xt.Size() == 4)
     {
-        gradx(0) *= sin (M_PI * z);
-        gradx(1) *= sin (M_PI * z);
+        gradx(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradx(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
         gradx(2) = t*t*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
 }
@@ -141,7 +179,9 @@ void uFunTest_ex_gradx(const Vector& xt, Vector& gradx )
 void uFunTest_ex_gradxt(const Vector& xt, Vector& gradxt)
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
@@ -149,16 +189,22 @@ void uFunTest_ex_gradxt(const Vector& xt, Vector& gradxt)
 
     gradxt.SetSize(xt.Size());
 
-    gradxt(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
-    gradxt(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    gradxt(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() == 3)
+    {
+        gradxt(0) *= sin (2.0 * M_PI * y);
+        gradxt(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
     if (xt.Size() == 4)
     {
-        gradxt(0) *= sin (M_PI * z);
-        gradxt(1) *= sin (M_PI * z);
+        gradxt(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradxt(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
         gradxt(2) = t*t*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
 
-    gradxt(xt.Size()-1) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
+    gradxt(xt.Size()-1) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        gradxt(xt.Size()-1) *= sin (2.0 * M_PI * y);
     if (xt.Size() == 4)
         gradxt(xt.Size()-1) *= sin (M_PI * z);
 }
@@ -166,7 +212,9 @@ void uFunTest_ex_gradxt(const Vector& xt, Vector& gradxt)
 void uFunTest_ex_dtgradx(const Vector& xt, Vector& gradx )
 {
     double x = xt(0);
-    double y = xt(1);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
     double z;
     if (xt.Size() == 4)
         z = xt(2);
@@ -174,14 +222,19 @@ void uFunTest_ex_dtgradx(const Vector& xt, Vector& gradx )
 
     gradx.SetSize(xt.Size() - 1);
 
-    gradx(0) = (t*t + 2.0 * t)*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x) * sin (2.0 * M_PI * y);
-    gradx(1) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    gradx(0) = (t*t + 2.0 * t)*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() == 3)
+    {
+        gradx(0) *= sin (2.0 * M_PI * y);
+        gradx(1) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
     if (xt.Size() == 4)
     {
-        gradx(0) *= sin (M_PI * z);
-        gradx(1) *= sin (M_PI * z);
+        gradx(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradx(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
         gradx(2) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
+
 }
 
 // velocity for hyperbolic problems
