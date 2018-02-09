@@ -69,11 +69,13 @@ int main(int argc, char *argv[])
 
    if (nDimensions == 3)
    {
-       mesh_file = "../data/cube_3d_moderate.mesh";
+       //mesh_file = "../data/cube_3d_moderate.mesh";
+       mesh_file = "../data/two_tets.mesh";
    }
    else // 4D case
    {
        mesh_file = "../data/cube4d_96.MFEM";
+       //mesh_file = "../data/two_pentatops.MFEM";
    }
 
    Mesh *mesh = NULL;
@@ -503,8 +505,18 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
-       if (diag1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (diag1.MaxNorm() > 1.0e-14)
+                   std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       }
+
 
        SparseMatrix offd1;
        int * cmap1;
@@ -516,8 +528,63 @@ int main(int argc, char *argv[])
 
        offd1.Add(-1.0, offd2);
 
-       if (offd1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (offd1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+                   for ( int i = 0; i < offd1.Width(); ++i)
+                   {
+                       if (cmap1[i] != cmap2[i])
+                            std::cout << "cmap1 != cmap2 at " << i << ": cmap1 = " << cmap1[i] << ", cmap2 = " << cmap2[i] << "\n";
+                   }
+
+                   for ( int row = 0; row < offd1.Height(); ++row)
+                   {
+                       std::cout << "row = " << row << "\n";
+                       if (offd1.GetI()[row] != offd2.GetI()[row])
+                           std::cout << "offd1.GetI()[row] = " << offd1.GetI()[row] << " != " << offd2.GetI()[row] << " = offd2.GetI()[row], row = " << row << "\n";
+                       int nnz_rowshift = offd1.GetI()[row];
+                       if (offd1.RowSize(row) != offd2.RowSize(row))
+                           std::cout << "offd1.RowSize(row) = " << offd1.RowSize(row) << " != " << offd2.RowSize(row) << " = offd2.RowSize(row), row = " << row << "\n";
+
+                       for (int colind = 0; colind < offd1.RowSize(row); ++colind)
+                       {
+                           int col1 = offd1.GetJ()[nnz_rowshift + colind];
+                           int truecol1 = cmap1[col1];
+                           double val1 = offd1.GetData()[nnz_rowshift + colind];
+
+                           int col2 = offd2.GetJ()[nnz_rowshift + colind];
+                           int truecol2 = cmap2[col1];
+                           double val2 = offd2.GetData()[nnz_rowshift + colind];
+
+                           //if (col1 != col2)
+                               //std::cout << "colind = " << colind << ": " << "col1 = " << col1 << "!= " << col2 << " = col2 \n";
+                           if (truecol1 != truecol2)
+                               std::cout << "colind = " << colind << ": " << "truecol1 = " << truecol1 << "!= " << truecol2 << " = truecol2 \n";
+                           if ( fabs(val1 - val2) > 1.0e-14)
+                               std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
+                       }
+
+                       std::cout << "\n";
+                   }
+
+                   //std::cout << "offd1 \n";
+                   //offd1.Print();
+                   //std::cout << "offd2 \n";
+                   //offd2.Print();
+
+
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
    }
 #endif
 
