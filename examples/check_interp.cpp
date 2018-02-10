@@ -558,7 +558,7 @@ int main(int argc, char *argv[])
                            double val1 = offd1.GetData()[nnz_rowshift + colind];
 
                            int col2 = offd2.GetJ()[nnz_rowshift + colind];
-                           int truecol2 = cmap2[col1];
+                           int truecol2 = cmap2[col2];
                            double val2 = offd2.GetData()[nnz_rowshift + colind];
 
                            //if (col1 != col2)
@@ -568,6 +568,22 @@ int main(int argc, char *argv[])
                            if ( fabs(val1 - val2) > 1.0e-14)
                                std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
                        }
+
+                       if (offd1.RowSize(row) != offd2.RowSize(row))
+                       {
+                           std::cout << "Additional columns in offd2 \n";
+                           for (int colind = offd1.RowSize(row); colind < offd2.RowSize(row); ++colind)
+                           {
+                               int col2 = offd2.GetJ()[nnz_rowshift + colind];
+                               int truecol2 = cmap2[col2];
+                               double val2 = offd2.GetData()[nnz_rowshift + colind];
+
+                               std::cout << "colind = " << colind << ": " << truecol2 << " = truecol2 \n";
+                               std::cout << "colind = " << colind << ": " << val2 << " = value2 \n";
+                           }
+
+                       }
+
 
                        std::cout << "\n";
                    }

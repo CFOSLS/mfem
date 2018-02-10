@@ -486,6 +486,7 @@ public:
    }
    DivSkew4dPrec(HypreParMatrix *AUser, ParFiniteElementSpace *fespaceUser, Coefficient *alpha, Coefficient *beta,
                  const Array<int> &essBnd, int orderKernel=1, bool exactSolvesUser=false)
+       : Solver(AUser->Height())
    {
       A = AUser;
       fespace = fespaceUser;
@@ -1107,9 +1108,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1334,7 +1335,7 @@ int main(int argc, char *argv[])
     chrono_total.Start();
 
     //DEFAULTED LINEAR SOLVER OPTIONS
-    int max_num_iter = 150000;
+    int max_num_iter = 2000;
     double rtol = 1e-12;//1e-7;//1e-9;
     double atol = 1e-14;//1e-9;//1e-12;
 
@@ -1433,11 +1434,6 @@ int main(int argc, char *argv[])
         //ess_bdrSigma = 1;
         //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
     }
-
-    // FIXME:
-    //if (verbose)
-        //std::cout << "While debugging new smoother setup and related things, temporarily setting ess boudnary for sigma equal the whole boundary! \n";
-    //ess_bdrSigma = 1;
 
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
     ess_bdrS = 0;
@@ -3091,8 +3087,11 @@ int main(int argc, char *argv[])
 #ifdef MARTIN_PREC
                         if (dim == 4)
                         {
+                            if (verbose)
+                                std::cout << "Creating an instance of DivSkew4dPrec \n";
+
                             Coefficient *alpha = new ConstantCoefficient(1.0);
-                            Coefficient *beta = new ConstantCoefficient(0.0);
+                            Coefficient *beta = new ConstantCoefficient(1.0);
                             int order = feorder + 1;
                             bool exactH1Solver = false;
                             precU = new DivSkew4dPrec(A, C_space_lvls[0], alpha, beta, ess_bdrSigma, order, exactH1Solver);
@@ -3167,7 +3166,7 @@ int main(int argc, char *argv[])
 
     if (with_prec)
         solver.SetPreconditioner(*prec);
-    solver.SetPrintLevel(0);
+    solver.SetPrintLevel(1);
     trueX = 0.0;
 
     chrono.Clear();
@@ -3577,6 +3576,9 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
+
+    MPI_Finalize();
+    return 0;
 #endif
 
     chrono.Clear();
