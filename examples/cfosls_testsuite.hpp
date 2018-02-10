@@ -163,15 +163,15 @@ void uFunTest_ex_gradx(const Vector& xt, Vector& gradx )
     gradx.SetSize(xt.Size() - 1);
 
     gradx(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
-    if (xt.Size() == 3)
+    if (xt.Size() >= 3)
     {
         gradx(0) *= sin (2.0 * M_PI * y);
         gradx(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
     }
     if (xt.Size() == 4)
     {
-        gradx(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
-        gradx(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradx(0) *= sin (M_PI * z);
+        gradx(1) *= sin (M_PI * z);
         gradx(2) = t*t*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
 }
@@ -190,15 +190,15 @@ void uFunTest_ex_gradxt(const Vector& xt, Vector& gradxt)
     gradxt.SetSize(xt.Size());
 
     gradxt(0) = t*t*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
-    if (xt.Size() == 3)
+    if (xt.Size() >= 3)
     {
         gradxt(0) *= sin (2.0 * M_PI * y);
         gradxt(1) = t*t*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
     }
     if (xt.Size() == 4)
     {
-        gradxt(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
-        gradxt(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradxt(0) *= sin (M_PI * z);
+        gradxt(1) *= sin (M_PI * z);
         gradxt(2) = t*t*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
 
@@ -223,15 +223,15 @@ void uFunTest_ex_dtgradx(const Vector& xt, Vector& gradx )
     gradx.SetSize(xt.Size() - 1);
 
     gradx(0) = (t*t + 2.0 * t)*exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
-    if (xt.Size() == 3)
+    if (xt.Size() >= 3)
     {
         gradx(0) *= sin (2.0 * M_PI * y);
         gradx(1) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
     }
     if (xt.Size() == 4)
     {
-        gradx(0) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
-        gradx(1) *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+        gradx(0) *= sin (M_PI * z);
+        gradx(1) *= sin (M_PI * z);
         gradx(2) = (t*t + 2.0 * t)*exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
 

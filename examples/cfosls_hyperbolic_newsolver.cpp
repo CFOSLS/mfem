@@ -3940,7 +3940,7 @@ int main(int argc, char *argv[])
         MFEM_ABORT("");
     }
 
-    for (int blk = 0; blk < numblocks; ++blk)
+    for (int blk = 0; blk < numblocks_funct; ++blk)
     {
         MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
