@@ -8,14 +8,20 @@
 #include <list>
 #include <unistd.h>
 
-//#define WITH_HCURL
+#define WITH_HCURL
 
-#define WITH_HDIVSKEW
+//#define WITH_HDIVSKEW
 
 using namespace std;
 using namespace mfem;
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
+
+void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2);
+
+// IDEA: Probably there is a bad orientation of boundary elements, there is not case dim = 4 in CheckBdrElementOrientation, no GetPentaOrientation
+// Just try a mesh with two tets with sref = 4, pref = 1 in 3D, and see that there is a message about two boudnary element orientations being fixed
+// In 4D there is no one to complain about it
 
 int main(int argc, char *argv[])
 {
@@ -30,9 +36,11 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 4;
+   int nDimensions     = 3;
 
-   int ser_ref_levels  = 1;
+   // sref = 3, pref = 1, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
+   // sref = 1, pref = 1, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
+   int ser_ref_levels  = 4;
    int par_ref_levels  = 1;
 
    // 2. Parse command-line options.
@@ -74,8 +82,8 @@ int main(int argc, char *argv[])
    }
    else // 4D case
    {
-       mesh_file = "../data/cube4d_96.MFEM";
-       //mesh_file = "../data/two_pentatops.MFEM";
+       //mesh_file = "../data/cube4d_96.MFEM";
+       mesh_file = "../data/two_pentatops.MFEM";
    }
 
    Mesh *mesh = NULL;
@@ -346,8 +354,22 @@ int main(int argc, char *argv[])
 
        offd1.Add(-1.0, offd2);
 
-       if (offd1.MaxNorm() > 1.0e-14)
-           std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (offd1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+
+                   Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
    }
 
    // Hdiv
@@ -388,8 +410,22 @@ int main(int argc, char *argv[])
 
        offd1.Add(-1.0, offd2);
 
-       if (offd1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (offd1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+
+                   Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
    }
 
    // L2
@@ -430,8 +466,22 @@ int main(int argc, char *argv[])
 
        offd1.Add(-1.0, offd2);
 
-       if (offd1.MaxNorm() > 1.0e-14)
-           std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (offd1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+
+                   Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
    }
 
 #ifdef WITH_HCURL
@@ -473,8 +523,23 @@ int main(int argc, char *argv[])
 
        offd1.Add(-1.0, offd2);
 
-       if (offd1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (offd1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+
+                   Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
    }
 #endif
 
@@ -536,64 +601,8 @@ int main(int argc, char *argv[])
                if (offd1.MaxNorm() > 1.0e-14)
                {
                    std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
-                   for ( int i = 0; i < offd1.Width(); ++i)
-                   {
-                       if (cmap1[i] != cmap2[i])
-                            std::cout << "cmap1 != cmap2 at " << i << ": cmap1 = " << cmap1[i] << ", cmap2 = " << cmap2[i] << "\n";
-                   }
 
-                   for ( int row = 0; row < offd1.Height(); ++row)
-                   {
-                       std::cout << "row = " << row << "\n";
-                       if (offd1.GetI()[row] != offd2.GetI()[row])
-                           std::cout << "offd1.GetI()[row] = " << offd1.GetI()[row] << " != " << offd2.GetI()[row] << " = offd2.GetI()[row], row = " << row << "\n";
-                       int nnz_rowshift = offd1.GetI()[row];
-                       if (offd1.RowSize(row) != offd2.RowSize(row))
-                           std::cout << "offd1.RowSize(row) = " << offd1.RowSize(row) << " != " << offd2.RowSize(row) << " = offd2.RowSize(row), row = " << row << "\n";
-
-                       for (int colind = 0; colind < offd1.RowSize(row); ++colind)
-                       {
-                           int col1 = offd1.GetJ()[nnz_rowshift + colind];
-                           int truecol1 = cmap1[col1];
-                           double val1 = offd1.GetData()[nnz_rowshift + colind];
-
-                           int col2 = offd2.GetJ()[nnz_rowshift + colind];
-                           int truecol2 = cmap2[col2];
-                           double val2 = offd2.GetData()[nnz_rowshift + colind];
-
-                           //if (col1 != col2)
-                               //std::cout << "colind = " << colind << ": " << "col1 = " << col1 << "!= " << col2 << " = col2 \n";
-                           if (truecol1 != truecol2)
-                               std::cout << "colind = " << colind << ": " << "truecol1 = " << truecol1 << "!= " << truecol2 << " = truecol2 \n";
-                           if ( fabs(val1 - val2) > 1.0e-14)
-                               std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
-                       }
-
-                       if (offd1.RowSize(row) != offd2.RowSize(row))
-                       {
-                           std::cout << "Additional columns in offd2 \n";
-                           for (int colind = offd1.RowSize(row); colind < offd2.RowSize(row); ++colind)
-                           {
-                               int col2 = offd2.GetJ()[nnz_rowshift + colind];
-                               int truecol2 = cmap2[col2];
-                               double val2 = offd2.GetData()[nnz_rowshift + colind];
-
-                               std::cout << "colind = " << colind << ": " << truecol2 << " = truecol2 \n";
-                               std::cout << "colind = " << colind << ": " << val2 << " = value2 \n";
-                           }
-
-                       }
-
-
-                       std::cout << "\n";
-                   }
-
-                   //std::cout << "offd1 \n";
-                   //offd1.Print();
-                   //std::cout << "offd2 \n";
-                   //offd2.Print();
-
-
+                   Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
                }
 
                // checking on a specific vector
@@ -650,4 +659,132 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
     outI[in.Height()] = nnz;
 
     return new SparseMatrix(outI, outJ, outData, in.Height(), in.Width());
+}
+
+void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2)
+{
+    /*
+     * it is not a good idea to compare cmaps
+    for ( int i = 0; i < offd1.Width(); ++i)
+    {
+        if (cmap1[i] != cmap2[i])
+             std::cout << "cmap1 != cmap2 at " << i << ": cmap1 = " << cmap1[i] << ", cmap2 = " << cmap2[i] << "\n";
+    }
+    */
+
+    for ( int row = 0; row < offd1.Height(); ++row)
+    {
+        std::cout << "row = " << row << "\n";
+
+        int nnz_rowshift1 = offd1.GetI()[row];
+        std::map<int,double> row_entries1;
+        for (int colind = 0; colind < offd1.RowSize(row); ++colind)
+        {
+            int col1 = offd1.GetJ()[nnz_rowshift1 + colind];
+            int truecol1 = cmap1[col1];
+            double val1 = offd1.GetData()[nnz_rowshift1 + colind];
+            //if (fabs(val1) > 1.0e-15)
+                 row_entries1.insert(std::make_pair(truecol1, val1));
+        }
+
+        int nnz_rowshift2 = offd2.GetI()[row];
+        std::map<int,double> row_entries2;
+        for (int colind = 0; colind < offd2.RowSize(row); ++colind)
+        {
+            int col2 = offd2.GetJ()[nnz_rowshift2 + colind];
+            int truecol2 = cmap2[col2];
+            double val2 = offd2.GetData()[nnz_rowshift2 + colind];
+            //if (fabs(val2) > 1.0e-15)
+                 row_entries2.insert(std::make_pair(truecol2, val2));
+        }
+
+        if (row_entries1.size() != row_entries2.size())
+            std::cout << "row_entries1.size() = " << row_entries1.size() << " != " << row_entries2.size() << " = row_entries2.size() \n";
+
+        std::map<int, double>::iterator it;
+        std::map<int, double>::iterator it2;
+        for ( it = row_entries1.begin(); it != row_entries1.end(); it++ )
+        {
+            int truecol1 = it->first;
+            double value1 = it->second;
+            it2 = row_entries2.find(truecol1);
+            if (it2 != row_entries2.end())
+            {
+                double value2 = it2->second;
+                if ( fabs(value2 - value1) / fabs(value1) > 1.0e-14 &&  (fabs(value1) > 1.0e-15 || fabs(value2) > 1.0e-15 ) )
+                    std::cout << "For truecol = " << truecol1 << " values are different: " << value1 << " != " << value2 << "\n";
+                row_entries2.erase(it2);
+            }
+            else
+            {
+                std::cout << "Cannot find pair (" << truecol1 << ", " << value1 << ") from row_entries1 in row_eintries2 \n";
+            }
+        }
+
+        if (row_entries1.size() != row_entries2.size())
+        {
+            for ( it2 = row_entries2.begin(); it2 != row_entries2.end(); it2++ )
+            {
+                int truecol2 = it2->first;
+                double value2 = it2->second;
+                std::cout << "additional item in row_entry2: (" << truecol2 << ", " << value2 << ") ";
+            }
+            std::cout << "\n";
+        }
+
+        //int nnz_rowshift = offd1.GetI()[row];
+        if (offd1.GetI()[row] != offd2.GetI()[row])
+            std::cout << "offd1.GetI()[row] = " << offd1.GetI()[row] << " != " << offd2.GetI()[row] << " = offd2.GetI()[row], row = " << row << "\n";
+        if (offd1.RowSize(row) != offd2.RowSize(row))
+            std::cout << "offd1.RowSize(row) = " << offd1.RowSize(row) << " != " << offd2.RowSize(row) << " = offd2.RowSize(row), row = " << row << "\n";
+
+        for (int colind = 0; colind < offd1.RowSize(row); ++colind)
+        {
+            int col1 = offd1.GetJ()[nnz_rowshift1 + colind];
+            int truecol1 = cmap1[col1];
+            double val1 = offd1.GetData()[nnz_rowshift1 + colind];
+
+            int col2 = offd2.GetJ()[nnz_rowshift2 + colind];
+            int truecol2 = cmap2[col2];
+            double val2 = offd2.GetData()[nnz_rowshift2 + colind];
+
+            //if (col1 != col2)
+                //std::cout << "colind = " << colind << ": " << "col1 = " << col1 << "!= " << col2 << " = col2 \n";
+            if (truecol1 != truecol2)
+            {
+                std::cout << "colind = " << colind << ": " << "truecol1 = " << truecol1 << "!= " << truecol2 << " = truecol2 \n";
+                std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
+            }
+            else
+            {
+                if ( fabs(val1 - val2) / fabs(val1) > 1.0e-14)
+                     std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
+            }
+        }
+
+        //int nnz_rowshift2 = offd2.GetI()[row];
+        if (offd1.RowSize(row) != offd2.RowSize(row))
+        {
+            std::cout << "Additional columns in offd2 \n";
+            for (int colind = offd1.RowSize(row); colind < offd2.RowSize(row); ++colind)
+            {
+                int col2 = offd2.GetJ()[nnz_rowshift2 + colind];
+                int truecol2 = cmap2[col2];
+                double val2 = offd2.GetData()[nnz_rowshift2 + colind];
+
+                std::cout << "colind = " << colind << ": " << truecol2 << " = truecol2 \n";
+                std::cout << "colind = " << colind << ": " << val2 << " = value2 \n";
+            }
+
+        }
+
+
+        std::cout << "\n";
+    }
+
+    //std::cout << "offd1 \n";
+    //offd1.Print();
+    //std::cout << "offd2 \n";
+    //offd2.Print();
+
 }
