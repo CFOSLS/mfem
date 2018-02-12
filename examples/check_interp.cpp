@@ -12,6 +12,8 @@
 
 //#define WITH_HDIVSKEW
 
+#define VERBOSE_OFFD
+
 using namespace std;
 using namespace mfem;
 
@@ -377,7 +379,9 @@ int main(int argc, char *argv[])
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
+#ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+#endif
                    std::cout << "\n" << std::flush;
                }
 
@@ -443,8 +447,9 @@ int main(int argc, char *argv[])
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
-
+#ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+#endif
                    std::cout << "\n" << std::flush;
                }
 
@@ -511,8 +516,9 @@ int main(int argc, char *argv[])
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
-
+#ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+#endif
                    std::cout << "\n" << std::flush;
                }
 
@@ -582,7 +588,9 @@ int main(int argc, char *argv[])
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
+#ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+#endif
                    std::cout << "\n" << std::flush;
                }
 
@@ -653,8 +661,9 @@ int main(int argc, char *argv[])
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
-
+#ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+#endif
                    std::cout << "\n" << std::flush;
                }
 
