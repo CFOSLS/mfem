@@ -14,7 +14,7 @@
 
 //#define VERBOSE_OFFD
 
-#define ZEROTOL (1.0e-13)
+#define ZEROTOL (1.0e-14)
 
 using namespace std;
 using namespace mfem;
@@ -44,8 +44,8 @@ int main(int argc, char *argv[])
 
    // sref = 3, pref = 1, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 1, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
-   int ser_ref_levels  = 1;
-   int par_ref_levels  = 1;
+   int ser_ref_levels  = 3;
+   int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
@@ -86,8 +86,8 @@ int main(int argc, char *argv[])
    }
    else // 4D case
    {
-       mesh_file = "../data/cube4d_96.MFEM";
-       //mesh_file = "../data/two_pentatops.MFEM";
+       //mesh_file = "../data/cube4d_96.MFEM";
+       mesh_file = "../data/two_pentatops.MFEM";
    }
 
    Mesh *mesh = NULL;
@@ -228,6 +228,7 @@ int main(int argc, char *argv[])
            pmesh->UniformRefinement();
            pmesh_lvls[l] = new ParMesh(*pmesh);
        }
+       pmesh_lvls[l]->PrintInfo(std::cout); if(verbose) cout << endl;
 
        // creating pfespaces for level l
        Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
@@ -417,16 +418,53 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
+       Array<int> all_bdr(pmesh_lvls[1]->bdr_attributes.Max());
+       all_bdr = 1;
+       Array<int> bdrdofs;
+       Hdiv_space_lvls[1]->GetEssentialTrueDofs(all_bdr, bdrdofs);
+
+       int tdof_offset = Hdiv_space_lvls[1]->GetMyTDofOffset();
+
+       int ngroups = pmesh_lvls[1]->GetNGroups();
+
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
+
+               std::cout << "shared face tdofs \n";
+               std::set<int> shared_facetdofs;
+
+               for (int grind = 0; grind < ngroups; ++grind)
+               {
+                   int ngroupfaces = pmesh_lvls[1]->GroupNFaces(grind);
+                   std::cout << "ngroupfaces = " << ngroupfaces << "\n";
+                   Array<int> dofs;
+                   for (int faceind = 0; faceind < ngroupfaces; ++faceind)
+                   {
+                       Hdiv_space_lvls[1]->GetSharedFaceDofs(grind, faceind, dofs);
+                       for (int dofind = 0; dofind < dofs.Size(); ++dofind)
+                       {
+                           shared_facetdofs.insert(Hdiv_space_lvls[1]->GetGlobalTDofNumber(dofs[dofind]));
+                       }
+                   }
+               }
+
+               std::set<int>::iterator it;
+               for ( it = shared_facetdofs.begin(); it != shared_facetdofs.end(); it++ )
+               {
+                   std::cout << *it << " ";
+               }
+
+               std::cout << "my tdof offset = " << tdof_offset << "\n";
                if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
+
+               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
@@ -451,6 +489,26 @@ int main(int argc, char *argv[])
                    std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+
+                   /*
+                   std::cout << "bdrdofs \n";
+                   for (int i = 0; i < bdrdofs.Size(); ++i )
+                       std::cout << bdrdofs[i] << " ";
+                   */
+
+                   std::set<int> bdr_columns;
+                   for (int i = 0; i < bdrdofs.Size(); ++i )
+                       bdr_columns.insert(bdrdofs[i]);
+
+                   std::cout << "bdr columns \n";
+                   std::set<int>::iterator it;
+                   for ( it = bdr_columns.begin(); it != bdr_columns.end(); it++ )
+                   {
+                       std::cout << *it << " ";
+                   }
+
+                   std::cout << "\n" << std::flush;
+
 #endif
                    std::cout << "\n" << std::flush;
                }
@@ -735,6 +793,8 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
     }
     */
 
+    std::multiset<int> bad_columns;
+
     for ( int row = 0; row < offd1.Height(); ++row)
     {
         std::cout << "row = " << row << "\n";
@@ -761,6 +821,18 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
                  row_entries2.insert(std::make_pair(truecol2, val2));
         }
 
+        if (row == 48 || row == 11513 || row == 11513 - 11511)
+        {
+            std::cout << "very special print: row = " << row << "\n";
+
+            std::map<int, double>::iterator it;
+            for ( it = row_entries2.begin(); it != row_entries2.end(); it++ )
+            {
+                std::cout << "(" << it->first << ", " << it->second << ") ";
+            }
+            std::cout << "\n";
+        }
+
         if (row_entries1.size() != row_entries2.size())
             std::cout << "row_entries1.size() = " << row_entries1.size() << " != " << row_entries2.size() << " = row_entries2.size() \n";
 
@@ -774,8 +846,11 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             if (it2 != row_entries2.end())
             {
                 double value2 = it2->second;
-                if ( fabs(value2 - value1) / fabs(value1) > 1.0e-14 &&  (fabs(value1) > 1.0e-15 || fabs(value2) > 1.0e-15 ) )
+                if ( fabs(value2 - value1) / fabs(value1) > ZEROTOL &&  (fabs(value1) > ZEROTOL || fabs(value2) > ZEROTOL ) )
+                {
                     std::cout << "For truecol = " << truecol1 << " values are different: " << value1 << " != " << value2 << "\n";
+                    bad_columns.insert(it2->first);
+                }
                 row_entries2.erase(it2);
             }
             else
@@ -791,6 +866,7 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
                 int truecol2 = it2->first;
                 double value2 = it2->second;
                 std::cout << "additional item in row_entry2: (" << truecol2 << ", " << value2 << ") ";
+                bad_columns.insert(it2->first);
             }
             std::cout << "\n";
         }
@@ -841,9 +917,15 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
 
         }
 
+    } // end of loop over all rows
 
-        std::cout << "\n";
+    std::cout << "bad columns \n";
+    std::multiset<int>::iterator it3;
+    for ( it3 = bad_columns.begin(); it3 != bad_columns.end(); it3++ )
+    {
+        std::cout << *it3 << " ";
     }
+    std::cout << "\n" << std::flush;
 
     //std::cout << "offd1 \n";
     //offd1.Print();
