@@ -8,9 +8,9 @@
 #include <list>
 #include <unistd.h>
 
-#define WITH_HCURL
+//#define WITH_HCURL
 
-#define WITH_HDIVSKEW
+//#define WITH_HDIVSKEW
 
 using namespace std;
 using namespace mfem;
@@ -124,13 +124,15 @@ int main(int argc, char *argv[])
            cout << "Creating parmesh(" << nDimensions <<
                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
        pmesh = new ParMesh(comm, *mesh);
+       for (int l = 0; l < par_ref_levels; l++)
+           pmesh->UniformRefinement();
        delete mesh;
    }
 
    int dim = nDimensions;
 
    // For geometric multigrid
-   int num_levels = par_ref_levels + 1;
+   int num_levels = 2; //par_ref_levels + 1;
    Array<ParMesh*> pmesh_lvls(num_levels);
    Array<ParFiniteElementSpace*> Hdiv_space_lvls(num_levels);
    Array<ParFiniteElementSpace*> L2_space_lvls(num_levels);
@@ -191,11 +193,11 @@ int main(int argc, char *argv[])
    }
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
-   Array<HypreParMatrix*> TrueP_Hdiv(par_ref_levels);
-   Array<HypreParMatrix*> TrueP_L2(par_ref_levels);
-   Array<HypreParMatrix*> TrueP_Hdivskew(par_ref_levels);
-   Array<HypreParMatrix*> TrueP_Hcurl(par_ref_levels);
-   Array<HypreParMatrix*> TrueP_H1(par_ref_levels);
+   Array<HypreParMatrix*> TrueP_Hdiv(num_levels - 1);
+   Array<HypreParMatrix*> TrueP_L2(num_levels - 1);
+   Array<HypreParMatrix*> TrueP_Hdivskew(num_levels - 1);
+   Array<HypreParMatrix*> TrueP_Hcurl(num_levels - 1);
+   Array<HypreParMatrix*> TrueP_H1(num_levels - 1);
 
    Array< SparseMatrix* > P_Hdiv_lvls(num_levels - 1);
    Array< SparseMatrix* > P_L2_lvls(num_levels - 1);
