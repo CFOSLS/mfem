@@ -12,7 +12,9 @@
 
 //#define WITH_HDIVSKEW
 
-#define VERBOSE_OFFD
+//#define VERBOSE_OFFD
+
+#define ZEROTOL (1.0e-13)
 
 using namespace std;
 using namespace mfem;
@@ -349,7 +351,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > 1.0e-14)
+               if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For H1 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
@@ -374,7 +376,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > 1.0e-14)
+               if (offd1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
@@ -419,7 +421,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > 1.0e-14)
+               if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
@@ -443,7 +445,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > 1.0e-14)
+               if (offd1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
@@ -487,7 +489,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > 1.0e-14)
+               if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For L2 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
@@ -512,7 +514,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > 1.0e-14)
+               if (offd1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
@@ -557,7 +559,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > 1.0e-14)
+               if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
@@ -583,7 +585,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > 1.0e-14)
+               if (offd1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
@@ -632,7 +634,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > 1.0e-14)
+               if (diag1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
@@ -657,7 +659,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > 1.0e-14)
+               if (offd1.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
