@@ -10,7 +10,7 @@
 
 #define WITH_HCURL
 
-//#define WITH_HDIVSKEW
+#define WITH_HDIVSKEW
 
 using namespace std;
 using namespace mfem;
@@ -36,11 +36,11 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 3;
+   int nDimensions     = 4;
 
    // sref = 3, pref = 1, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 1, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
-   int ser_ref_levels  = 4;
+   int ser_ref_levels  = 1;
    int par_ref_levels  = 1;
 
    // 2. Parse command-line options.
@@ -77,13 +77,13 @@ int main(int argc, char *argv[])
 
    if (nDimensions == 3)
    {
-       //mesh_file = "../data/cube_3d_moderate.mesh";
-       mesh_file = "../data/two_tets.mesh";
+       mesh_file = "../data/cube_3d_moderate.mesh";
+       //mesh_file = "../data/two_tets.mesh";
    }
    else // 4D case
    {
-       //mesh_file = "../data/cube4d_96.MFEM";
-       mesh_file = "../data/two_pentatops.MFEM";
+       mesh_file = "../data/cube4d_96.MFEM";
+       //mesh_file = "../data/two_pentatops.MFEM";
    }
 
    Mesh *mesh = NULL;
@@ -341,8 +341,20 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
-       if (diag1.MaxNorm() > 1.0e-14)
-           std::cout << "For H1 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (diag1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "I am " << myid << "\n";
+                   std::cout << "For H1 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "\n" << std::flush;
+               }
+
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
 
        SparseMatrix offd1;
        int * cmap1;
@@ -358,15 +370,15 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (offd1.MaxNorm() > 1.0e-14)
                {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   std::cout << "\n" << std::flush;
                }
 
-               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
@@ -397,8 +409,19 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
-       if (diag1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (diag1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "I am " << myid << "\n";
+                   std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "\n" << std::flush;
+               }
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
 
        SparseMatrix offd1;
        int * cmap1;
@@ -414,15 +437,15 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (offd1.MaxNorm() > 1.0e-14)
                {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   std::cout << "\n" << std::flush;
                }
 
-               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
@@ -453,8 +476,20 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
-       if (diag1.MaxNorm() > 1.0e-14)
-           std::cout << "For L2 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (diag1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "I am " << myid << "\n";
+                   std::cout << "For L2 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "\n" << std::flush;
+               }
+
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
 
        SparseMatrix offd1;
        int * cmap1;
@@ -470,15 +505,15 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (offd1.MaxNorm() > 1.0e-14)
                {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   std::cout << "\n" << std::flush;
                }
 
-               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
@@ -510,8 +545,21 @@ int main(int argc, char *argv[])
 
        diag1.Add(-1.0, diag2);
 
-       if (diag1.MaxNorm() > 1.0e-14)
-           std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (diag1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "I am " << myid << "\n";
+                   std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "\n" << std::flush;
+               }
+
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
 
        SparseMatrix offd1;
        int * cmap1;
@@ -527,15 +575,15 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (offd1.MaxNorm() > 1.0e-14)
                {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   std::cout << "\n" << std::flush;
                }
 
-               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
@@ -574,10 +622,12 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (diag1.MaxNorm() > 1.0e-14)
+               {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
-               std::cout << "\n" << std::flush;
+                   std::cout << "\n" << std::flush;
+               }
            }
            MPI_Barrier(comm);
        }
@@ -597,18 +647,18 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-               std::cout << "I am " << myid << "\n";
                if (offd1.MaxNorm() > 1.0e-14)
                {
+                   std::cout << "I am " << myid << "\n";
                    std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
 
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   std::cout << "\n" << std::flush;
                }
 
                // checking on a specific vector
                //Vector testort(offd1.Width());
 
-               std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
