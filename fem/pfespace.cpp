@@ -368,12 +368,21 @@ void ParFiniteElementSpace::GetSharedFaceDofs(
    pmesh->GroupFace(group, fi, l_face, ori);
    if (ori == 0)
    {
+      //std::cout << "Case ori = 0 happened \n";
       GetFaceDofs(l_face, dofs);
    }
    else
    {
+      //std::cout << "Case else to ori = 0 happened \n";
+      //std::cout << "l_face before " << l_face << " \n";
       Array<int> rdofs;
-      fec->SubDofOrder(pmesh->GetFaceBaseGeometry(l_face), 2, ori, dofs);
+      //std::cout << "Geom argument = " << pmesh->GetFaceBaseGeometry(l_face) << "\n";
+      //std::cout << "SDim argument = " << pmesh->Dimension() - 1 << "\n";
+      //std::cout << "Info argument = " << ori << "\n";
+      fec->SubDofOrder(pmesh->GetFaceBaseGeometry(l_face), pmesh->Dimension() - 1, ori, dofs);
+      //std::cout << "after SubDofOrder dofs are: \n";
+      //dofs.Print();
+      //std::cout << "l_face after " << l_face << " \n";
       GetFaceDofs(l_face, rdofs);
       for (int i = 0; i < dofs.Size(); i++)
       {

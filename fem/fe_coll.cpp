@@ -408,6 +408,7 @@ void FiniteElementCollection::SubDofOrder(int Geom, int SDim, int Info,
                   GetEdge<Geometry::TRIANGLE>(nv, v, ne, e[0], eo[0], Info);
                   break;
                case 2:
+                  std::cout << "GetFace<triangle,triangle> is active \n";
                   GetFace<Geometry::TRIANGLE,Geometry::TRIANGLE>(
                      nv, v, ne, e, eo, nf, f[0], fg[0], fo[0], Info);
                   break;
@@ -447,6 +448,10 @@ void FiniteElementCollection::SubDofOrder(int Geom, int SDim, int Info,
                   GetFace<Geometry::TETRAHEDRON,Geometry::TRIANGLE>(
                      nv, v, ne, e, eo, nf, f[0], fg[0], fo[0], Info);
                   break;
+               case 3: // new case, for the 4D case, doesn't compile now
+                   GetFace<Geometry::TETRAHEDRON,Geometry::TETRAHEDRON>(
+                      nv, v, ne, e, eo, nf, f[0], fg[0], fo[0], Info);
+               break;
                default:
                   goto not_supp;
             }
@@ -510,7 +515,10 @@ void FiniteElementCollection::SubDofOrder(int Geom, int SDim, int Info,
       // add face dofs
       if (nf > 0)
       {
+         //std::cout << "fg[0] = " << fg[0] << "\n";
          const int nfd = DofForGeometry(fg[0]); // assume same face geometry
+         //std::cout << " dofs size before faces = " << dofs.Size() << "\n";
+         //std::cout << " nf = " << nf << ", nfd = " << nfd << "\n";
          dofs.SetSize(dofs.Size()+nf*nfd);
          for (int i = 0; i < nf; i++)
          {

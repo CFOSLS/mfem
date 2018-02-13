@@ -542,6 +542,17 @@ Constants<Geometry::TETRAHEDRON>::VertToVert::I[4] = {0, 3, 5, 6};
 const int Geometry::
 Constants<Geometry::TETRAHEDRON>::VertToVert::J[6][2] =
 {{1, 0}, {2, 1}, {3, 2}, {2, 3}, {3, 4}, {3, 5}};
+const int Geometry::
+Constants<Geometry::TETRAHEDRON>::Orient[24][4] =
+{
+    // follows Mesh::GetTetOrientation
+   {0, 1, 2, 3}, {1, 0, 2, 3}, {1, 2, 0, 3}, {2, 1, 0, 3},
+   {2, 0, 1, 3}, {0, 2, 1, 3}, {0, 2, 3, 1}, {2, 0, 3, 1},
+   {2, 3, 0, 1}, {3, 2, 0, 1}, {3, 0, 2, 1}, {0, 3, 2, 1},
+   {0, 3, 1, 2}, {3, 0, 1, 2}, {3, 1, 0, 2}, {1, 3, 0, 2},
+   {1, 0, 3, 2}, {0, 1, 3, 2}, {2, 1, 3, 0}, {1, 2, 3, 0},
+   {1, 3, 2, 0}, {3, 1, 2, 0}, {3, 2, 1, 0}, {2, 3, 1, 0}
+};
 
 const int Geometry::
 Constants<Geometry::CUBE>::Edges[12][2] =

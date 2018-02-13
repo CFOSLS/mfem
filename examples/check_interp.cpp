@@ -12,7 +12,7 @@
 
 //#define WITH_HDIVSKEW
 
-//#define VERBOSE_OFFD
+#define VERBOSE_OFFD
 
 #define ZEROTOL (1.0e-14)
 
@@ -42,8 +42,8 @@ int main(int argc, char *argv[])
 
    int nDimensions     = 4;
 
-   // sref = 3, pref = 1, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
-   // sref = 1, pref = 1, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
+   // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
+   // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
    int ser_ref_levels  = 3;
    int par_ref_levels  = 0;
 
@@ -88,6 +88,7 @@ int main(int argc, char *argv[])
    {
        //mesh_file = "../data/cube4d_96.MFEM";
        mesh_file = "../data/two_pentatops.MFEM";
+       //mesh_file = "../data/two_pentatops_2.MFEM";
    }
 
    Mesh *mesh = NULL;
@@ -155,6 +156,97 @@ int main(int argc, char *argv[])
        hdiv_coll = new RT_FECollection(feorder, dim);
 
    Hdiv_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
+
+   /*
+   int ngroups = pmesh->GetNGroups();
+
+   std::cout << std::flush;
+   MPI_Barrier(comm);
+
+   for (int i = 0; i < num_procs; ++i)
+   {
+       if (myid == i)
+       {
+           std::cout << "I am " << myid << "\n";
+
+           std::set<int> shared_facetdofs;
+           std::set<int> shared_facedofs;
+
+           for (int grind = 1; grind < ngroups; ++grind)
+           {
+               std::cout << "group = " << grind << "\n";
+               int ngroupfaces = pmesh->GroupNFaces(grind);
+               std::cout << "ngroupfaces = " << ngroupfaces << "\n";
+               Array<int> dofs;
+               //if (ngroupfaces > 10)
+                    //ngroupfaces = 10;
+               for (int faceind = 0; faceind < ngroupfaces; ++faceind)
+               {
+                   std::cout << "shared face, faceind = " << faceind << " \n";
+
+                   Hdiv_space->GetSharedFaceDofs(grind, faceind, dofs);
+                   for (int dofind = 0; dofind < dofs.Size(); ++dofind)
+                   {
+                       shared_facetdofs.insert(Hdiv_space->GetGlobalTDofNumber(dofs[dofind]));
+                       std::cout << "tdof = " << Hdiv_space->GetGlobalTDofNumber(dofs[dofind]) << "\n";
+                       shared_facedofs.insert(dofs[dofind]);
+                   }
+                   if (dofs.Size() > 0)
+                   {
+                       std::cout << "dofs \n";
+                       dofs.Print();
+                   }
+                   else
+                   {
+                       std::cout << "dofs are empty for this shared face \n";
+                   }
+
+                   int l_face, ori;
+                   pmesh->GroupFace(grind, faceind, l_face, ori);
+                   const Element * face = pmesh->GetFace(l_face);
+
+                   const int * vertices = face->GetVertices();
+                   int nv = face->GetNVertices();
+                   std::cout << "its vertices: \n";
+                   for (int vind = 0; vind < nv; ++vind)
+                   {
+                       double * vcoords = pmesh->GetVertex(vertices[vind]);
+                       for (int i = 0; i < pmesh->Dimension(); ++i)
+                           std::cout << vcoords[i] << " ";
+                       std::cout << "\n";
+                   }
+                   std::cout << "\n";
+
+               }
+
+
+           }
+
+           std::set<int>::iterator it;
+           std::cout << "shared face tdofs \n";
+           for ( it = shared_facetdofs.begin(); it != shared_facetdofs.end(); it++ )
+           {
+               std::cout << *it << " ";
+           }
+           std::cout << "\n";
+
+           std::cout << "shared face dofs \n";
+           for ( it = shared_facedofs.begin(); it != shared_facedofs.end(); it++ )
+           {
+               std::cout << *it << " ";
+           }
+
+           std::cout << "\n" << std::flush;
+       }
+       MPI_Barrier(comm);
+   } // end fo loop over all processors, one after another
+
+
+   std::cout << std::flush;
+   MPI_Barrier(comm);
+   MPI_Finalize();
+   return 0;
+*/
 
    l2_coll = new L2_FECollection(feorder, nDimensions);
    L2_space = new ParFiniteElementSpace(pmesh, l2_coll);
@@ -361,6 +453,7 @@ int main(int argc, char *argv[])
 
            }
            MPI_Barrier(comm);
+
        } // end fo loop over all processors, one after another
 
        SparseMatrix offd1;
@@ -431,8 +524,7 @@ int main(int argc, char *argv[])
        {
            if (myid == i)
            {
-
-               std::cout << "shared face tdofs \n";
+               std::cout << "I am " << myid << "\n";
                std::set<int> shared_facetdofs;
 
                for (int grind = 0; grind < ngroups; ++grind)
@@ -450,6 +542,7 @@ int main(int argc, char *argv[])
                    }
                }
 
+               std::cout << "shared face tdofs \n";
                std::set<int>::iterator it;
                for ( it = shared_facetdofs.begin(); it != shared_facetdofs.end(); it++ )
                {

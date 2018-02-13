@@ -406,6 +406,49 @@ ParMesh::ParMesh(MPI_Comm comm, Mesh &mesh, int *partitioning_,
       }
    }
 
+   for (int i = 0; i < NRanks; ++i)
+   {
+       if (MyRank == i)
+       {
+           std::cout << "I am " << MyRank << "\n";
+           std::cout << "face_group.Size() = " << face_group.Size() << "\n";
+           for (int j = 0; j < face_group.Size(); j++)
+           {
+              int el[2];
+              mesh.GetFaceElements(j, &el[0], &el[1]);
+
+              if (el[1] >= 0)
+              {
+                 el[0] = partitioning[el[0]];
+                 el[1] = partitioning[el[1]];
+                 if ((el[0] == MyRank && el[1] != MyRank) ||
+                     (el[0] != MyRank && el[1] == MyRank))
+                 {
+                     std::cout << "a shared face found, j = " << j << "\n";
+                     const Element * face = mesh.GetFace(j);
+                     const int * vertices = face->GetVertices();
+                     int nv = face->GetNVertices();
+                     std::cout << "its vertices: \n";
+                     for (int vind = 0; vind < nv; ++vind)
+                     {
+                         double * vcoords = mesh.GetVertex(vertices[vind]);
+                         for (int i = 0; i < mesh.Dimension(); ++i)
+                             std::cout << vcoords[i] << " ";
+                         std::cout << "\n";
+                     }
+                     std::cout << "\n";
+                 }
+              }
+           }
+
+           //face_group.Print();
+           std::cout << "the end \n" << std::flush;
+       }
+       MPI_Barrier(comm);
+   } // end fo loop over all processors, one after another
+   std::cout << "Continuing \n" << std::flush;
+
+
    // determine shared planars
    Table *plan_element = NULL;
    int splan_counter = 0;
