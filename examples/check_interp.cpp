@@ -1,4 +1,4 @@
-//                       MFEM check for interpolation matrices in 4D
+//                       MFEM check for interpolation matrices in 3D and 4D
 
 #include "mfem.hpp"
 #include <fstream>
@@ -8,13 +8,13 @@
 #include <list>
 #include <unistd.h>
 
-//#define WITH_HCURL
+#define WITH_HCURL
 
-//#define WITH_HDIVSKEW
+#define WITH_HDIVSKEW
 
 #define VERBOSE_OFFD
 
-#define ZEROTOL (1.0e-14)
+#define ZEROTOL (5.0e-14)
 
 using namespace std;
 using namespace mfem;
@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
 
    // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
-   int ser_ref_levels  = 3;
+   int ser_ref_levels  = 1;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -86,8 +86,8 @@ int main(int argc, char *argv[])
    }
    else // 4D case
    {
-       //mesh_file = "../data/cube4d_96.MFEM";
-       mesh_file = "../data/two_pentatops.MFEM";
+       mesh_file = "../data/cube4d_96.MFEM";
+       //mesh_file = "../data/two_pentatops.MFEM";
        //mesh_file = "../data/two_pentatops_2.MFEM";
    }
 
@@ -435,19 +435,21 @@ int main(int argc, char *argv[])
        SparseMatrix diag1;
        Mass_H1c->GetDiag(diag1);
 
+       SparseMatrix diag1_copy(diag1);
+
        SparseMatrix diag2;
        PMP_H1->GetDiag(diag2);
 
-       diag1.Add(-1.0, diag2);
+       diag1_copy.Add(-1.0, diag2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > ZEROTOL)
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For H1 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "For H1 diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
 
@@ -460,25 +462,27 @@ int main(int argc, char *argv[])
        int * cmap1;
        Mass_H1c->GetOffd(offd1, cmap1);
 
+       SparseMatrix offd1_copy(offd1);
+
        SparseMatrix offd2;
        int * cmap2;
        PMP_H1->GetOffd(offd2, cmap2);
 
-       offd1.Add(-1.0, offd2);
+       offd1_copy.Add(-1.0, offd2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > ZEROTOL)
+               if (offd1_copy.MaxNorm() > ZEROTOL)
                {
-                   std::cout << "I am " << myid << "\n";
-                   std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+                   //std::cout << "I am " << myid << "\n";
+                   //std::cout << "For H1 off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
+                   //std::cout << "\n" << std::flush;
 #endif
-                   std::cout << "\n" << std::flush;
                }
 
            }
@@ -506,11 +510,14 @@ int main(int argc, char *argv[])
        SparseMatrix diag1;
        Mass_Hdivc->GetDiag(diag1);
 
+       SparseMatrix diag1_copy(diag1);
+
        SparseMatrix diag2;
        PMP_Hdiv->GetDiag(diag2);
 
-       diag1.Add(-1.0, diag2);
+       diag1_copy.Add(-1.0, diag2);
 
+       /*
        Array<int> all_bdr(pmesh_lvls[1]->bdr_attributes.Max());
        all_bdr = 1;
        Array<int> bdrdofs;
@@ -550,10 +557,10 @@ int main(int argc, char *argv[])
                }
 
                std::cout << "my tdof offset = " << tdof_offset << "\n";
-               if (diag1.MaxNorm() > ZEROTOL)
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
 
@@ -561,25 +568,28 @@ int main(int argc, char *argv[])
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
+       */
 
        SparseMatrix offd1;
        int * cmap1;
        Mass_Hdivc->GetOffd(offd1, cmap1);
 
+       SparseMatrix offd1_copy(offd1);
+
        SparseMatrix offd2;
        int * cmap2;
        PMP_Hdiv->GetOffd(offd2, cmap2);
 
-       offd1.Add(-1.0, offd2);
+       offd1_copy.Add(-1.0, offd2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > ZEROTOL)
+               if (offd1_copy.MaxNorm() > ZEROTOL)
                {
-                   std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+                   //std::cout << "I am " << myid << "\n";
+                   //std::cout << "For Hdiv off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
 
@@ -589,10 +599,13 @@ int main(int argc, char *argv[])
                        std::cout << bdrdofs[i] << " ";
                    */
 
+                   /*
                    std::set<int> bdr_columns;
                    for (int i = 0; i < bdrdofs.Size(); ++i )
                        bdr_columns.insert(bdrdofs[i]);
+                   */
 
+                   /*
                    std::cout << "bdr columns \n";
                    std::set<int>::iterator it;
                    for ( it = bdr_columns.begin(); it != bdr_columns.end(); it++ )
@@ -601,14 +614,154 @@ int main(int argc, char *argv[])
                    }
 
                    std::cout << "\n" << std::flush;
-
+                   */
+                   //std::cout << "\n" << std::flush;
 #endif
-                   std::cout << "\n" << std::flush;
                }
 
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
+
+       std::cout << "\n" << std::flush;
+       MPI_Barrier(comm);
+
+       // checking on a particular vector
+       /*
+       Vector truevec_c(TrueP_Hdiv[0]->Width());
+       truevec_c = 0.0;
+       int ort_index;
+       if (myid == 0)
+       {
+           ort_index = 48;// 4D, two_pentatops.MFEM, sref = 3, pref = 0
+           //ort_index = 9;// 3D, cube_3d_moderate, sref = 0, pref = 0
+           truevec_c[ort_index] = 1.0;
+       }
+
+
+       Vector Atruevec_c(TrueP_Hdiv[0]->Width());
+       Mass_Hdivc->Mult(truevec_c, Atruevec_c);
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "My Atruvec_c \n";
+               int nnz_found = 0.0;
+               for (int i = 0; i < Atruevec_c.Size(); ++i)
+                   if (fabs(Atruevec_c[i]) > ZEROTOL)
+                   {
+                        std::cout << "Atruevec_c[" << i << "] = " << Atruevec_c[i] << " ";
+                        nnz_found ++;
+                   }
+               std::cout << "\n";
+               std::cout << "nnz_found in Atruevec_c = " << nnz_found << "\n";
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end of the loop over all processors, one after another
+
+       // checking the marked row of Mass_Hdiv_c for proc 0
+       if (myid == 0)
+       {
+           int row = ort_index;
+           std::cout << "row = " << row << "\n";
+           int nnz_rowshift_diag = diag1.GetI()[row];
+           for (int colind = 0; colind < diag1.RowSize(row); ++colind)
+           {
+               int col1 = diag1.GetJ()[nnz_rowshift_diag + colind];
+               double val1 = diag1.GetData()[nnz_rowshift_diag + colind];
+               std::cout << "col1 = " << col1 << ", value1 = " << val1 << "\n";
+           }
+           std::cout << "GetRowNorml1 for diag1 = " << diag1.GetRowNorml1(row) << "\n";
+
+           int nnz_rowshift_offd = offd1.GetI()[row];
+           for (int colind = 0; colind < offd1.RowSize(row); ++colind)
+           {
+               int col1 = offd1.GetJ()[nnz_rowshift_offd + colind];
+               int truecol1 = cmap1[col1];
+               double val1 = offd1.GetData()[nnz_rowshift_offd + colind];
+               std::cout << "col1 = " << col1 << ", truecol1 = " << truecol1 << " value1 = " << val1 << "\n";
+           }
+           std::cout << "GetRowNorml1 for offd1 = " << offd1.GetRowNorml1(row) << "\n";
+
+           std::cout << "\n" << std::flush;
+       }
+       MPI_Barrier(comm);
+
+       Vector truevec_f(TrueP_Hdiv[0]->Height());
+       TrueP_Hdiv[0]->Mult(truevec_c, truevec_f);
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "My truvec_f \n";
+               int nnz_found = 0.0;
+               for (int i = 0; i < truevec_f.Size(); ++i)
+                   if (fabs(truevec_f[i]) > ZEROTOL)
+                   {
+                        std::cout << "truevec_f[" << i << "] = " << truevec_f[i] << " ";
+                        nnz_found ++;
+                   }
+               std::cout << "\n";
+               std::cout << "nnz_found in truevec_f = " << nnz_found << "\n";
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end of the loop over all processors, one after another
+
+       Vector truevec_cback(TrueP_Hdiv[0]->Width());
+       TrueP_Hdiv[0]->MultTranspose(truevec_f, truevec_cback);
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "My truvec_cback \n";
+               int nnz_found = 0.0;
+               for (int i = 0; i < truevec_cback.Size(); ++i)
+                   if (fabs(truevec_cback[i]) > ZEROTOL)
+                   {
+                        std::cout << "truevec_cback[" << i << "] = " << truevec_cback[i] << " ";
+                        nnz_found ++;
+                   }
+               std::cout << "\n";
+               std::cout << "nnz_found in truevec_cback = " << nnz_found << "\n";
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end of the loop over all processors, one after another
+
+       Vector Atruevec_f(TrueP_Hdiv[0]->Height());
+       Mass_Hdivf->Mult(truevec_f, Atruevec_f);
+
+       Vector Atruevec_cback(TrueP_Hdiv[0]->Width());
+       TrueP_Hdiv[0]->MultTranspose(Atruevec_f, Atruevec_cback);
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "My Atruvec_cback \n";
+               int nnz_found = 0.0;
+               for (int i = 0; i < Atruevec_cback.Size(); ++i)
+                   if (fabs(Atruevec_cback[i]) > ZEROTOL)
+                   {
+                        std::cout << "Atruevec_cback[" << i << "] = " << Atruevec_cback[i] << " ";
+                        nnz_found ++;
+                   }
+               std::cout << "\n";
+               std::cout << "nnz_found in Atruevec_cback = " << nnz_found << "\n";
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end of the loop over all processors, one after another
+       */
+
    }
 
    // L2
@@ -631,19 +784,21 @@ int main(int argc, char *argv[])
        SparseMatrix diag1;
        Mass_L2c->GetDiag(diag1);
 
+       SparseMatrix diag1_copy(diag1);
+
        SparseMatrix diag2;
        PMP_L2->GetDiag(diag2);
 
-       diag1.Add(-1.0, diag2);
+       diag1_copy.Add(-1.0, diag2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > ZEROTOL)
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For L2 diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "For L2 diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
 
@@ -655,24 +810,26 @@ int main(int argc, char *argv[])
        int * cmap1;
        Mass_L2c->GetOffd(offd1, cmap1);
 
+       SparseMatrix offd1_copy(offd1);
+
        SparseMatrix offd2;
        int * cmap2;
        PMP_L2->GetOffd(offd2, cmap2);
 
-       offd1.Add(-1.0, offd2);
+       offd1_copy.Add(-1.0, offd2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > ZEROTOL)
+               if (offd1_copy.MaxNorm() > ZEROTOL)
                {
-                   std::cout << "I am " << myid << "\n";
-                   std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+                   //std::cout << "I am " << myid << "\n";
+                   //std::cout << "For L2 off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
 #endif
-                   std::cout << "\n" << std::flush;
+                   //std::cout << "\n" << std::flush;
                }
 
            }
@@ -701,19 +858,21 @@ int main(int argc, char *argv[])
        SparseMatrix diag1;
        Mass_Hcurlc->GetDiag(diag1);
 
+       SparseMatrix diag1_copy(diag1);
+
        SparseMatrix diag2;
        PMP_Hcurl->GetDiag(diag2);
 
-       diag1.Add(-1.0, diag2);
+       diag1_copy.Add(-1.0, diag2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > ZEROTOL)
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
 
@@ -726,25 +885,26 @@ int main(int argc, char *argv[])
        int * cmap1;
        Mass_Hcurlc->GetOffd(offd1, cmap1);
 
+       SparseMatrix offd1_copy(offd1);
+
        SparseMatrix offd2;
        int * cmap2;
        PMP_Hcurl->GetOffd(offd2, cmap2);
 
-       offd1.Add(-1.0, offd2);
+       offd1_copy.Add(-1.0, offd2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > ZEROTOL)
+               if (offd1_copy.MaxNorm() > ZEROTOL)
                {
-                   std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
-
+                   //std::cout << "I am " << myid << "\n";
+                   //std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
 #endif
-                   std::cout << "\n" << std::flush;
+                   //std::cout << "\n" << std::flush;
                }
 
            }
@@ -776,48 +936,100 @@ int main(int argc, char *argv[])
        SparseMatrix diag1;
        Mass_Hdivskewc->GetDiag(diag1);
 
+       SparseMatrix diag1_copy(diag1);
+
        SparseMatrix diag2;
        PMP_Hdivskew->GetDiag(diag2);
 
-       diag1.Add(-1.0, diag2);
+       diag1_copy.Add(-1.0, diag2);
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (diag1.MaxNorm() > ZEROTOL)
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1.MaxNorm() << "! \n";
+                   std::cout << "For Hdivskew diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
                    std::cout << "\n" << std::flush;
                }
            }
            MPI_Barrier(comm);
        }
 
+       /*
+       int tdof_offset = Hdivskew_space_lvls[1]->GetMyTDofOffset();
 
-       SparseMatrix offd1;
-       int * cmap1;
-       Mass_Hdivskewc->GetOffd(offd1, cmap1);
-
-       SparseMatrix offd2;
-       int * cmap2;
-       PMP_Hdivskew->GetOffd(offd2, cmap2);
-
-       offd1.Add(-1.0, offd2);
+       int ngroups = pmesh_lvls[1]->GetNGroups();
 
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
-               if (offd1.MaxNorm() > ZEROTOL)
+               std::cout << "I am " << myid << "\n";
+               std::set<int> shared_planartdofs;
+
+               for (int grind = 0; grind < ngroups; ++grind)
+               {
+                   int ngroupplanars = pmesh_lvls[1]->GroupNPlanars(grind);
+                   std::cout << "ngroupplanars = " << ngroupplanars << "\n";
+                   Array<int> dofs;
+                   for (int planarind = 0; planarind < ngroupplanars; ++planarind)
+                   {
+                       Hdivskew_space_lvls[1]->GetSharedPlanarDofs(grind, planarind, dofs);
+                       for (int dofind = 0; dofind < dofs.Size(); ++dofind)
+                       {
+                           shared_planartdofs.insert(Hdivskew_space_lvls[1]->GetGlobalTDofNumber(dofs[dofind]));
+                       }
+                   }
+               }
+
+               std::cout << "shared planar tdofs \n";
+               std::set<int>::iterator it;
+               for ( it = shared_planartdofs.begin(); it != shared_planartdofs.end(); it++ )
+               {
+                   std::cout << *it << " ";
+               }
+
+               std::cout << "my tdof offset = " << tdof_offset << "\n";
+               if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
-                   std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1.MaxNorm() << "! \n";
+                   std::cout << "For Hdiv diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
+                   std::cout << "\n" << std::flush;
+               }
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+       */
+
+
+       SparseMatrix offd1;
+       int * cmap1;
+       Mass_Hdivskewc->GetOffd(offd1, cmap1);
+
+       SparseMatrix offd1_copy(offd1);
+
+       SparseMatrix offd2;
+       int * cmap2;
+       PMP_Hdivskew->GetOffd(offd2, cmap2);
+
+       offd1_copy.Add(-1.0, offd2);
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (offd1_copy.MaxNorm() > ZEROTOL)
+               {
+                   //std::cout << "I am " << myid << "\n";
+                   //std::cout << "For Hdivskew off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
 #endif
-                   std::cout << "\n" << std::flush;
+                   //std::cout << "\n" << std::flush;
                }
 
                // checking on a specific vector
@@ -890,8 +1102,6 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
 
     for ( int row = 0; row < offd1.Height(); ++row)
     {
-        std::cout << "row = " << row << "\n";
-
         int nnz_rowshift1 = offd1.GetI()[row];
         std::map<int,double> row_entries1;
         for (int colind = 0; colind < offd1.RowSize(row); ++colind)
@@ -899,7 +1109,7 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             int col1 = offd1.GetJ()[nnz_rowshift1 + colind];
             int truecol1 = cmap1[col1];
             double val1 = offd1.GetData()[nnz_rowshift1 + colind];
-            //if (fabs(val1) > 1.0e-15)
+            if (fabs(val1) > ZEROTOL)
                  row_entries1.insert(std::make_pair(truecol1, val1));
         }
 
@@ -910,10 +1120,11 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             int col2 = offd2.GetJ()[nnz_rowshift2 + colind];
             int truecol2 = cmap2[col2];
             double val2 = offd2.GetData()[nnz_rowshift2 + colind];
-            //if (fabs(val2) > 1.0e-15)
+            if (fabs(val2) > ZEROTOL)
                  row_entries2.insert(std::make_pair(truecol2, val2));
         }
 
+        /*
         if (row == 48 || row == 11513 || row == 11513 - 11511)
         {
             std::cout << "very special print: row = " << row << "\n";
@@ -925,9 +1136,13 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             }
             std::cout << "\n";
         }
+        */
 
         if (row_entries1.size() != row_entries2.size())
+        {
+            std::cout << "row = " << row << ": ";
             std::cout << "row_entries1.size() = " << row_entries1.size() << " != " << row_entries2.size() << " = row_entries2.size() \n";
+        }
 
         std::map<int, double>::iterator it;
         std::map<int, double>::iterator it2;
@@ -939,8 +1154,9 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             if (it2 != row_entries2.end())
             {
                 double value2 = it2->second;
-                if ( fabs(value2 - value1) / fabs(value1) > ZEROTOL &&  (fabs(value1) > ZEROTOL || fabs(value2) > ZEROTOL ) )
+                if ( fabs(value2 - value1) > ZEROTOL &&  (fabs(value1) > ZEROTOL || fabs(value2) > ZEROTOL ) )
                 {
+                    std::cout << "row = " << row << ": ";
                     std::cout << "For truecol = " << truecol1 << " values are different: " << value1 << " != " << value2 << "\n";
                     bad_columns.insert(it2->first);
                 }
@@ -948,12 +1164,14 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             }
             else
             {
-                std::cout << "Cannot find pair (" << truecol1 << ", " << value1 << ") from row_entries1 in row_eintries2 \n";
+                std::cout << "row = " << row << ": ";
+                std::cout << "Cannot find pair (" << truecol1 << ", " << value1 << ") from row_entries1 in row_entries2 \n";
             }
         }
 
-        if (row_entries1.size() != row_entries2.size())
+        if (row_entries2.size() != 0)
         {
+            std::cout << "row = " << row << ": ";
             for ( it2 = row_entries2.begin(); it2 != row_entries2.end(); it2++ )
             {
                 int truecol2 = it2->first;
@@ -963,12 +1181,16 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             }
             std::cout << "\n";
         }
-
         //int nnz_rowshift = offd1.GetI()[row];
-        if (offd1.GetI()[row] != offd2.GetI()[row])
-            std::cout << "offd1.GetI()[row] = " << offd1.GetI()[row] << " != " << offd2.GetI()[row] << " = offd2.GetI()[row], row = " << row << "\n";
+        //if (offd1.GetI()[row] != offd2.GetI()[row])
+            //std::cout << "offd1.GetI()[row] = " << offd1.GetI()[row] << " != " << offd2.GetI()[row] << " = offd2.GetI()[row], row = " << row << "\n";
+
+        /*
         if (offd1.RowSize(row) != offd2.RowSize(row))
-            std::cout << "offd1.RowSize(row) = " << offd1.RowSize(row) << " != " << offd2.RowSize(row) << " = offd2.RowSize(row), row = " << row << "\n";
+        {
+            std::cout << "row = " << row << ": ";
+            std::cout << "offd1.RowSize(row) = " << offd1.RowSize(row) << " != " << offd2.RowSize(row) << " = offd2.RowSize(row) \n";
+        }
 
         for (int colind = 0; colind < offd1.RowSize(row); ++colind)
         {
@@ -984,19 +1206,24 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
                 //std::cout << "colind = " << colind << ": " << "col1 = " << col1 << "!= " << col2 << " = col2 \n";
             if (truecol1 != truecol2)
             {
+                std::cout << "row = " << row << ": ";
                 std::cout << "colind = " << colind << ": " << "truecol1 = " << truecol1 << "!= " << truecol2 << " = truecol2 \n";
                 std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
             }
             else
             {
                 if ( fabs(val1 - val2) / fabs(val1) > 1.0e-14)
-                     std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
+                {
+                    std::cout << "row = " << row << ": ";
+                    std::cout << "colind = " << colind << ": " << "value1 = " << val1 << "!= " << val2 << " = value2 \n";
+                }
             }
         }
 
         //int nnz_rowshift2 = offd2.GetI()[row];
         if (offd1.RowSize(row) != offd2.RowSize(row))
         {
+            std::cout << "row = " << row << ": ";
             std::cout << "Additional columns in offd2 \n";
             for (int colind = offd1.RowSize(row); colind < offd2.RowSize(row); ++colind)
             {
@@ -1009,17 +1236,28 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             }
 
         }
+        */
 
     } // end of loop over all rows
 
-    std::cout << "bad columns \n";
-    std::multiset<int>::iterator it3;
-    for ( it3 = bad_columns.begin(); it3 != bad_columns.end(); it3++ )
+    if (bad_columns.size() > 0)
     {
-        std::cout << *it3 << " ";
+        std::cout << "bad columns \n";
+        std::multiset<int>::iterator it3;
+        for ( it3 = bad_columns.begin(); it3 != bad_columns.end(); it3++ )
+        {
+            std::cout << *it3 << " ";
+        }
+        std::cout << "\n" << std::flush;
     }
-    std::cout << "\n" << std::flush;
 
+    //std::cout << "full offd1 \n";
+    //offd1.Print();
+    //std::cout << "\n" << std::flush;
+
+    //std::cout << "offd1 max norm = " << offd1.MaxNorm() << "\n";
+    //std::cout << "offd2 max norm = " << offd2.MaxNorm() << "\n";
+    //std::cout << "\n" << std::flush;
     //std::cout << "offd1 \n";
     //offd1.Print();
     //std::cout << "offd2 \n";

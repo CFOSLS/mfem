@@ -406,6 +406,7 @@ ParMesh::ParMesh(MPI_Comm comm, Mesh &mesh, int *partitioning_,
       }
    }
 
+   /*
    for (int i = 0; i < NRanks; ++i)
    {
        if (MyRank == i)
@@ -447,7 +448,7 @@ ParMesh::ParMesh(MPI_Comm comm, Mesh &mesh, int *partitioning_,
        MPI_Barrier(comm);
    } // end fo loop over all processors, one after another
    std::cout << "Continuing \n" << std::flush;
-
+   */
 
    // determine shared planars
    Table *plan_element = NULL;
@@ -1748,6 +1749,20 @@ void ParMesh::ExchangeFaceNbrData()
                info += GetQuadOrientation(sf_v, lf->GetVertices());
             }
          }
+         /*
+         if (Dim == 4)
+         {
+            Element *lf = faces[lface];
+            const int *sf_v = shared_faces[sface[i]]->GetVertices();
+
+            std::cout << "Got into Dim == 4 case in pmesh ExchangeFaceNbrData \n";
+            MFEM_ABORT("Got into Dim == 4 case in pmesh ExchangeFaceNbrData");
+            if  (lf->GetGeometryType() == Geometry::TETRAHEDRON)
+            {
+               info += GetTetOrientation(sf_v, lf->GetVertices());
+            }
+         }
+         */
          send_face_nbr_facedata.AddConnection(fn, info);
       }
    }

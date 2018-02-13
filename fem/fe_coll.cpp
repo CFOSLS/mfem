@@ -408,7 +408,6 @@ void FiniteElementCollection::SubDofOrder(int Geom, int SDim, int Info,
                   GetEdge<Geometry::TRIANGLE>(nv, v, ne, e[0], eo[0], Info);
                   break;
                case 2:
-                  std::cout << "GetFace<triangle,triangle> is active \n";
                   GetFace<Geometry::TRIANGLE,Geometry::TRIANGLE>(
                      nv, v, ne, e, eo, nf, f[0], fg[0], fo[0], Info);
                   break;
