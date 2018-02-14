@@ -91,6 +91,9 @@ int main(int argc, char *argv[])
        //mesh_file = "../data/two_pentatops_2.MFEM";
    }
 
+   if (verbose)
+       std::cout << "Number of mpi processes: " << num_procs << "\n" << std::flush;
+
    Mesh *mesh = NULL;
 
    ParMesh * pmesh;
@@ -1154,7 +1157,7 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
             if (it2 != row_entries2.end())
             {
                 double value2 = it2->second;
-                if ( fabs(value2 - value1) > ZEROTOL &&  (fabs(value1) > ZEROTOL || fabs(value2) > ZEROTOL ) )
+                if ( fabs(value2 - value1) / fabs(value1) > ZEROTOL &&  (fabs(value1) > ZEROTOL || fabs(value2) > ZEROTOL ) )
                 {
                     std::cout << "row = " << row << ": ";
                     std::cout << "For truecol = " << truecol1 << " values are different: " << value1 << " != " << value2 << "\n";

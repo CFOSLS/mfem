@@ -57,16 +57,14 @@
 
 #include "divfree_solver_tools.hpp"
 
+#define MYZEROTOL (1.0e-13)
+
 // must be always active
 #define USE_CURLMATRIX
 
 //#define BAD_TEST
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
-
-
-
-#define MYZEROTOL (1.0e-13)
 
 using namespace std;
 using namespace mfem;
@@ -1424,6 +1422,8 @@ int main(int argc, char *argv[])
 
     MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
 
+    ////////////////////////////////// new
+
     int dim = nDimensions;
 
     Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
@@ -1644,8 +1644,8 @@ int main(int argc, char *argv[])
 
    Array<SparseMatrix*> P_WT(num_levels - 1); //AE_e matrices
 
-    //const int finest_level = 0;
-    //const int coarsest_level = num_levels - 1;
+    chrono.Clear();
+    chrono.Start();
 
     if (verbose)
         std::cout << "Creating a hierarchy of meshes by successive refinements "
@@ -1739,14 +1739,6 @@ int main(int argc, char *argv[])
         else // dim == 4
             Divfree_op.AddDomainInterpolator(new DivSkewInterpolator);
         Divfree_op.Assemble();
-        // FIXME: Only for debugging
-        //Vector tempsol(Divfree_op.Width());
-        //tempsol = 0.0;
-        //Vector temprhs(Divfree_op.Height());
-        //temprhs = 0.0;
-        //Divfree_op.EliminateTrialDofs(all_bdrSigma, tempsol, temprhs);
-
-        //Divfree_op.EliminateTestDofs(ess_bdrSigma);
         Divfree_op.Finalize();
         Divfree_mat_lvls[l] = Divfree_op.LoseMat();
 
@@ -1804,8 +1796,6 @@ int main(int argc, char *argv[])
             }
 
             Funct_mat_offsets_lvls[l]->SetSize(numblocks_funct + 1);
-            //SparseMatrix Aloc = Ablock->SpMat();
-            //Array<int> offsets(2);
             (*Funct_mat_offsets_lvls[l])[0] = 0;
             (*Funct_mat_offsets_lvls[l])[1] = Ablock->Height();
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1824,8 +1814,6 @@ int main(int argc, char *argv[])
             ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[l], W_space_lvls[l]);
             Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
             Bblock->Assemble();
-            //Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *constrfform); // // makes res for sigma_special happier
-            //Bblock->EliminateTestDofs(ess_bdrSigma);
             Bblock->Finalize();
             Constraint_mat_lvls[l] = Bblock->LoseMat();
 
@@ -2601,6 +2589,8 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
 
+    //////////////////////////////////////////////////
+
 #ifdef OLD_CODE
     chrono.Clear();
     chrono.Start();
@@ -2655,19 +2645,13 @@ int main(int argc, char *argv[])
     //VectorFunctionCoefficient f(dim, f_exact);
     //VectorFunctionCoefficient vone(dim, vone_exact);
     //VectorFunctionCoefficient vminusone(dim, vminusone_exact);
+    //ConstantCoefficient minusone(-1.0);
     //VectorFunctionCoefficient E(dim, E_exact);
     //VectorFunctionCoefficient curlE(dim, curlE_exact);
 
     //----------------------------------------------------------
     // Setting boundary conditions.
     //----------------------------------------------------------
-
-    Array<int> ess_tdof_listU, ess_bdrU(pmesh->bdr_attributes.Max());
-    ess_bdrU = 0;
-    if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr cnds on sigma
-        ess_bdrU[0] = 1;
-
-    C_space->GetEssentialTrueDofs(ess_bdrU, ess_tdof_listU);
 
     if (verbose)
     {
@@ -2676,8 +2660,6 @@ int main(int argc, char *argv[])
         all_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
         std::cout << "ess bdr Sigma: \n";
         ess_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
-        std::cout << "ess bdr U: \n";
-        ess_bdrU.Print(std::cout, pmesh->bdr_attributes.Max());
         std::cout << "ess bdr S: \n";
         ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
     }
@@ -2692,8 +2674,6 @@ int main(int argc, char *argv[])
     ParLinearForm *gform;
     HypreParMatrix *Bdiv;
 
-    //SparseMatrix *M_local;
-    //SparseMatrix *B_local;
     Vector F_fine(P_W[0]->Height());
     Vector G_fine(P_R[0]->Height());
     Vector sigmahat_pau;
@@ -2738,9 +2718,6 @@ int main(int argc, char *argv[])
 
             F_fine = *gform;
             G_fine = .0;
-
-            //std::cout << "Looking at B_local \n";
-            //B_local->Print();
 
             divp.div_part(ref_levels,
                           M_local, B_local,
@@ -2846,8 +2823,7 @@ int main(int argc, char *argv[])
     ParGridFunction *u_exact = new ParGridFunction(C_space);
     u_exact->ProjectCoefficient(*Mytest.divfreepart);
 
-    ParGridFunction *S_exact;
-    S_exact = new ParGridFunction(S_space);
+    ParGridFunction *S_exact = new ParGridFunction(S_space);
     S_exact->ProjectCoefficient(*Mytest.scalarS);
 
     ParGridFunction * sigma_exact = new ParGridFunction(R_space);
@@ -2903,18 +2879,6 @@ int main(int argc, char *argv[])
     else // dim == 4
         Divfree_op.AddDomainInterpolator(new DivSkewInterpolator());
     Divfree_op.Assemble();
-    //Divfree_op.EliminateTestDofs(ess_bdrSigma); is it needed here? I think no, we have bdr conditions for sigma already applied to M
-    //ParGridFunction* rhside_Hcurl = new ParGridFunction(C_space);
-    /*
-    {
-        Vector temprhs(Divfree_op.Height());
-        temprhs = 0.0;
-        Vector tempsol(Divfree_op.Width());
-        tempsol = 0.0;
-        Divfree_op.EliminateTrialDofs(ess_bdrSigma, tempsol, temprhs);//xblks.GetBlock(0), temprhs);
-    }
-    */
-    //Divfree_op.EliminateTestDofs(ess_bdrSigma);
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
@@ -2934,7 +2898,7 @@ int main(int argc, char *argv[])
 
     HypreParMatrix *M = Mblock->ParallelAssemble();
 
-    // curl-curl matrix for H(curl) in 3D
+    // div-free operator matrix (curl in 3D, divskew in 4D)
     // either as DivfreeT_dop * M * Divfree_dop
     auto tempmat = ParMult(DivfreeT_dop,M);
     auto A = ParMult(tempmat, Divfree_dop);
@@ -3011,7 +2975,7 @@ int main(int argc, char *argv[])
         MainOp->SetBlock(1,0, CH);
         MainOp->SetBlock(1,1, C);
     }
-#else
+#else // if using the integrators for creating the div-free system
     if (verbose)
         std::cout << "This case is not supported any more \n";
     MPI_Finalize();
@@ -3024,7 +2988,8 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
     if (verbose)
-        cout<<"Discretized problem is assembled in "<< chrono.RealTime() <<" seconds.\n";
+        std::cout << "Discretized problem is assembled" << endl << flush;
+
     chrono.Clear();
     chrono.Start();
 
@@ -3140,8 +3105,9 @@ int main(int argc, char *argv[])
                 }
             }
         }
+
         if (verbose)
-            cout << "Preconditioner is ready \n";
+            cout << "Preconditioner is ready" << endl << flush;
     }
     else
         if (verbose)
@@ -3151,13 +3117,9 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
 
-
     CGSolver solver(comm);
     if (verbose)
-        cout << "Linear solver: CG \n";
-    //solver = new MINRESSolver(comm);
-    //if (verbose)
-        //cout << "Linear solver: MINRES \n";
+        cout << "Linear solver: CG" << endl << flush;
 
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
@@ -3190,6 +3152,7 @@ int main(int argc, char *argv[])
 
     ParGridFunction * u = new ParGridFunction(C_space);
     ParGridFunction * S;
+
     u->Distribute(&(trueX.GetBlock(0)));
 
     // 13. Extract the parallel grid function corresponding to the finite element
@@ -3229,11 +3192,6 @@ int main(int argc, char *argv[])
     else // dim == 4
         Divfree_h.AddDomainInterpolator(new DivSkewInterpolator());
     Divfree_h.Assemble();
-    Vector tmp1(Divfree_h.Width());
-    tmp1 = 0.0;
-    Vector tmp2(Divfree_h.Height());
-    tmp1 = 0.0;
-    Divfree_h.EliminateTrialDofs(ess_bdrSigma, tmp1, tmp2);
     Divfree_h.Mult(*u, *opdivfreepart);
 
     // FIXME: remove this
@@ -3279,7 +3237,6 @@ int main(int argc, char *argv[])
     *sigma = *Sigmahat;         // particular solution
     *sigma += *opdivfreepart;   // plus div-free guy
 
-
     // FIXME: remove this
     {
         const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
@@ -3292,34 +3249,6 @@ int main(int argc, char *argv[])
                           << "exact val = " << (*sigma_exact)[tdof] << ", index = " << tdof << "\n";
         }
     }
-
-    /*
-    // checking the divergence of sigma
-    {
-        Vector trueSigma(R_space->TrueVSize());
-        sigma->ParallelProject(trueSigma);
-
-        ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space, W_space));
-        Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-        Dblock->Assemble();
-        Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
-        Dblock->Finalize();
-        HypreParMatrix * D = Dblock->ParallelAssemble();
-
-        Vector trueDivSigma(W_space->TrueVSize());
-        D->Mult(trueSigma, trueDivsigma);
-
-        Vector trueF(W_space->TrueVSize());
-        ParLinearForm * gform = new ParLinearForm(W_space);
-        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
-        gform->Assemble();
-        gform->ParallelAssemble(trueF);
-
-        trueDivsigma -= trueF; // now it is div sigma - f, on true dofs from L_2 space
-
-        double local_divres =
-    }
-    */
 
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
@@ -3397,7 +3326,6 @@ int main(int argc, char *argv[])
     Div.AddDomainInterpolator(new DivergenceInterpolator());
     ParGridFunction DivSigma(W_space);
     Div.Assemble();
-    Div.EliminateTestDofs(ess_bdrSigma);
     Div.Mult(*sigma, DivSigma);
 
     double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
@@ -3577,8 +3505,8 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
 
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 #endif
 
     chrono.Clear();
@@ -3647,117 +3575,6 @@ int main(int argc, char *argv[])
             Xinit_truedofs.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
         }
     }
-
-    //MPI_Finalize();
-    //return 0;
-
-    // testing some matrix properties:
-    // realizing that we miss canonical projections to have
-    // coarsened curl orthogonal to coarsened divergence
-    /*
-    // 1. looking at (P_RT)^T * P_RT - it is not diagonal!
-    SparseMatrix * temppp = Transpose(P_Func[0]->GetBlock(0,0));
-    SparseMatrix * testtt = Mult(*temppp, P_Func[0]->GetBlock(0,0));
-
-    //testtt->Print();
-
-    // 2. looking at B_0 * C_0
-    SparseMatrix * testtt2 = Mult(Bloc,Divfree_op_sp);
-    //testtt2->Print();
-
-    // 3. looking at B_0 * (P_RT)^T * P_RT * C_0
-    SparseMatrix * temppp2 = Mult(Bloc,P_Func[0]->GetBlock(0,0));
-    SparseMatrix * temppp3 = Mult(*temppp,Divfree_op_sp);
-
-    SparseMatrix * testtt3 = Mult(*temppp2,*temppp3);
-    //testtt3->Print();
-    */
-
-
-    /*
-    Vector ones_v(pmesh->Dimension());
-    ones_v = 1.0;
-    VectorConstantCoefficient ones_vcoeff(ones_v);
-
-    Vector Truevec1(C_space_lvls[0]->GetTrueVSize());
-    ParGridFunction * hcurl_guy = new ParGridFunction(C_space_lvls[0]);
-    hcurl_guy->ProjectCoefficient(ones_vcoeff);
-    hcurl_guy->ParallelProject(Truevec1);
-
-    if (myid == 0)
-    {
-        ofstream ofs("hcurl_guy_0.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 1)
-    {
-        ofstream ofs("hcurl_guy_1.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 2)
-    {
-        ofstream ofs("hcurl_guy_2.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-    if (myid == 3)
-    {
-        ofstream ofs("hcurl_guy_3.txt");
-        ofs << Truevec1.Size() << "\n";
-        Truevec1.Print(ofs,1);
-    }
-
-    Vector Truevec2(R_space_lvls[0]->GetTrueVSize());
-    ParGridFunction * hdiv_guy = new ParGridFunction(R_space_lvls[0]);
-    hdiv_guy->ProjectCoefficient(ones_vcoeff);
-    hdiv_guy->ParallelProject(Truevec2);
-
-    if (myid == 0)
-    {
-        ofstream ofs("hdiv_guy_0.txt");
-        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 1)
-    {
-        ofstream ofs("hdiv_guy_1.txt");
-        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 2)
-    {
-        ofstream ofs("hdiv_guy_2.txt");
-        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-    if (myid == 3)
-    {
-        ofstream ofs("hdiv_guy_3.txt");
-        std::cout << "Truevec2 size = " << Truevec2.Size() << "\n";
-        ofs << Truevec2.Size() << "\n";
-        Truevec2.Print(ofs,1);
-    }
-
-    Vector error1(Truevec2.Size());
-    error1 = Truevec2;
-
-    int local_size1 = error1.Size();
-    int global_size1 = 0;
-    MPI_Allreduce(&local_size1, &global_size1, 1, MPI_INT, MPI_SUM, comm);
-
-    double local_normsq1 = error1 * error1;
-    double global_norm1 = 0.0;
-    MPI_Allreduce(&local_normsq1, &global_norm1, 1, MPI_DOUBLE, MPI_SUM, comm);
-    global_norm1 = sqrt (global_norm1 / global_size1);
-
-    if (verbose)
-        std::cout << "error1 norm special = " << global_norm1 << "\n";
-    */
 
     chrono.Stop();
     if (verbose)
@@ -3963,9 +3780,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "error3 norm special = " << global_norm3 << "\n";
-
-    //MPI_Finalize();
-    //return 0;
 
     if (verbose)
         std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
@@ -4209,7 +4023,7 @@ int main(int argc, char *argv[])
 
     trueXtest = 0.0;
 
-    // trueRhstest = F - M * particular solution (= residual), on true dofs
+    // trueRhstest = F - Funct * particular solution (= residual), on true dofs
     BlockVector truetemp(blocktest_offsets);
     BlockMattest->Mult(ParticSol, truetemp);
     trueRhstest -= truetemp;
@@ -4243,21 +4057,6 @@ int main(int argc, char *argv[])
 
 #ifdef TIMING
     double temp_sum;
-    /*
-    for (int i = 0; i < num_procs; ++i)
-    {
-        if (myid == i && myid % 10 == 0)
-        {
-            std::cout << "I am " << myid << "\n";
-            std::cout << "Look at my list for mult timings: \n";
-
-            for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
-                std::cout << *i << " ";
-            std::cout << "\n" << std::flush;
-        }
-        MPI_Barrier(comm);
-    }
-    */
 
     temp_sum = 0.0;
     for (list<double>::iterator i = Times_mult->begin(); i != Times_mult->end(); ++i)
@@ -4571,16 +4370,6 @@ int main(int argc, char *argv[])
     BlockVector NewRhs(new_trueoffsets);
     NewRhs = 0.0;
 
-    /*
-    double * pointer1 = NULL;
-    double * pointer2 = NULL;
-
-    if (pointer1 == pointer2)
-        std::cout << "NULL equals NULL \n";
-    else
-        std::cout << "NULL != NULL \n";
-    */
-
     if (numblocks_funct > 1)
     {
         if (verbose)
@@ -4738,21 +4527,6 @@ int main(int argc, char *argv[])
 #endif
 
     NewSigmahat->Distribute(&(NewX.GetBlock(0)));
-
-
-    /*
-    // FIXME: Remove this
-    ParGridFunction * SolDofs = new ParGridFunction(R_space_lvls[0]);
-    SolDofs->Distribute(NewSigmahat);
-
-    MFEM_ASSERT(CheckConstrRes(*SolDofs, *Constraint_mat_lvls[0], &Floc, "in the main code for the newsigmahat"), "Failure");
-
-    if (verbose)
-        std::cout << "Success \n";
-    MPI_Finalize();
-    return 0;
-    */
-
 
     // FIXME: remove this
     {
