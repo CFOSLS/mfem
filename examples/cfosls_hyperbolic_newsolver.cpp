@@ -1105,7 +1105,7 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 2;
     int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
@@ -2982,6 +2982,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         BT->Mult(-1.0, tempHdiv_true, 1.0, trueRhs.GetBlock(1));
 
+    /*
     for (int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> *temp;
@@ -2996,6 +2997,7 @@ int main(int argc, char *argv[])
             trueRhs.GetBlock(blk)[tdof] = 0.0;
         }
     }
+    */
     /*
     {
         MFEM_ASSERT(CheckBdrError(trueRhs.GetBlock(0), NULL, *EssBdrTrueDofs_Hcurl[0], true),
