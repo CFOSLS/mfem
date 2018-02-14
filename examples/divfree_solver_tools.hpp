@@ -5263,8 +5263,8 @@ public:
 
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-8));
-        CoarseSolver->SetMaxIter(50);
+        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetMaxIter(100);
         CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
@@ -5334,19 +5334,26 @@ void Multigrid::Mult(const Vector & x, Vector & y) const
 
 void Multigrid::MG_Cycle() const
 {
-    // PreSmoothing
     const HypreParMatrix& Operator_l = *Operators_[current_level];
     const HypreSmoother& Smoother_l = *Smoothers_[current_level];
 
     Vector& residual_l = *residual[current_level];
     Vector& correction_l = *correction[current_level];
 
-    Smoother_l.Mult(residual_l, correction_l);
-    Operator_l.Mult(-1.0, correction_l, 1.0, residual_l);
+    // PreSmoothing
+    //if (current_level > 0)
+    //{
+        Smoother_l.Mult(residual_l, correction_l);
+        Operator_l.Mult(-1.0, correction_l, 1.0, residual_l);
+    //}
+    //else
+        //correction_l = residual_l;
+
 
     // Coarse grid correction
     if (current_level > 0)
     {
+
         const HypreParMatrix& P_l = *P_[current_level-1];
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
@@ -5359,6 +5366,7 @@ void Multigrid::MG_Cycle() const
         P_l.Mult(*correction[current_level-1], cor_cor);
         correction_l += cor_cor;
         Operator_l.Mult(-1.0, cor_cor, 1.0, residual_l);
+
     }
     else
     {
@@ -5370,8 +5378,12 @@ void Multigrid::MG_Cycle() const
     }
 
     // PostSmoothing
-    Smoother_l.Mult(residual_l, cor_cor);
+    //if (current_level > 0)
+        Smoother_l.Mult(residual_l, cor_cor);
+    //else
+        //cor_cor = residual_l;
     correction_l += cor_cor;
+
 }
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
