@@ -651,7 +651,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     bool aniso_refine = false;
     bool refine_t_first = false;
@@ -2250,6 +2250,7 @@ int main(int argc, char *argv[])
     BlockOperator *MainOp = new BlockOperator(block_trueOffsets);
 
     // curl or divskew operator from C_space into R_space
+    /*
     ParDiscreteLinearOperator Divfree_op(C_space, R_space); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     if (dim == 3)
         Divfree_op.AddDomainInterpolator(new CurlInterpolator());
@@ -2258,6 +2259,10 @@ int main(int argc, char *argv[])
     Divfree_op.Assemble();
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+    HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+    */
+
+    HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
 
     // mass matrix for H(div)
@@ -2325,6 +2330,21 @@ int main(int argc, char *argv[])
     //trueRhs.GetBlock(1) -= tempH1_true;
     BT->Mult(-1.0, tempHdiv_true, 1.0, trueRhs.GetBlock(1));
 
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueRhs.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
+
     // setting block operator of the system
     MainOp->SetBlock(0,0, A);
     MainOp->SetBlock(0,1, CHT);
@@ -2338,8 +2358,8 @@ int main(int argc, char *argv[])
     return -1;
 #endif
 
-    delete Divfree_dop;
-    delete DivfreeT_dop;
+    //delete Divfree_dop;
+    //delete DivfreeT_dop;
     delete rhside_Hdiv;
 
     chrono.Stop();
@@ -2444,6 +2464,21 @@ int main(int argc, char *argv[])
     chrono.Start();
     solver.Mult(trueRhs, trueX);
     chrono.Stop();
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueX.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
 
     if (verbose)
     {

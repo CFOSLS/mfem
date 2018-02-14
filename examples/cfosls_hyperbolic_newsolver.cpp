@@ -1101,12 +1101,12 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
 
-    int nDimensions     = 4;
+    int nDimensions     = 3;
     int numsol          = 4;
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2829,6 +2829,17 @@ int main(int argc, char *argv[])
     ParGridFunction * sigma_exact = new ParGridFunction(R_space);
     sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
+    {
+        Vector Sigmahat_truedofs(R_space->TrueVSize());
+        Sigmahat->ParallelProject(Sigmahat_truedofs);
+
+        Vector sigma_exact_truedofs((R_space->TrueVSize()));
+        sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+        MFEM_ASSERT(CheckBdrError(Sigmahat_truedofs, &sigma_exact_truedofs, *EssBdrTrueDofs_Funct_lvls[0][0], true),
+                                  "for the particular solution Sigmahat in the old code");
+    }
+
     // FIXME: remove this
     {
         const Array<int> *temp = EssBdrDofs_Funct_lvls[0][0];
@@ -2872,6 +2883,7 @@ int main(int argc, char *argv[])
 
     BlockOperator *MainOp = new BlockOperator(block_trueOffsets);
 
+    /*
     // curl or divskew operator from C_space into R_space
     ParDiscreteLinearOperator Divfree_op(C_space, R_space); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     if (dim == 3)
@@ -2882,6 +2894,10 @@ int main(int argc, char *argv[])
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+    */
+    HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
+    HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+
 
     // mass matrix for H(div)
     ParBilinearForm *Mblock(new ParBilinearForm(R_space));
@@ -2967,6 +2983,31 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         BT->Mult(-1.0, tempHdiv_true, 1.0, trueRhs.GetBlock(1));
 
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueRhs.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
+    /*
+    {
+        MFEM_ASSERT(CheckBdrError(trueRhs.GetBlock(0), NULL, *EssBdrTrueDofs_Hcurl[0], true),
+                                  "for the rhside, block 0, for div-free system in the old code");
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            MFEM_ASSERT(CheckBdrError(trueRhs.GetBlock(1), NULL, *EssBdrTrueDofs_Funct_lvls[0][1], true),
+                                  "for the rhside, block 1, for div-free system in the old code");
+    }
+    */
+
+
     // setting block operator of the system
     MainOp->SetBlock(0,0, A);
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -2982,8 +3023,8 @@ int main(int argc, char *argv[])
     return -1;
 #endif
 
-    delete Divfree_dop;
-    delete DivfreeT_dop;
+    //delete Divfree_dop;
+    //delete DivfreeT_dop;
     delete rhside_Hdiv;
 
     chrono.Stop();
@@ -3136,6 +3177,26 @@ int main(int argc, char *argv[])
     solver.Mult(trueRhs, trueX);
     chrono.Stop();
 
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueX.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
+
+    //MFEM_ASSERT(CheckBdrError(trueX.GetBlock(0), NULL, *EssBdrTrueDofs_Hcurl[0], true),
+                              //"for u_truedofs in the old code");
+    //MFEM_ASSERT(CheckBdrError(trueX.GetBlock(1), NULL, *EssBdrTrueDofs_Funct_lvls[0][1], true),
+                              //"for S_truedofs from trueX in the old code");
+
     if (verbose)
     {
         if (solver.GetConverged())
@@ -3186,6 +3247,7 @@ int main(int argc, char *argv[])
     }
 
     ParGridFunction * opdivfreepart = new ParGridFunction(R_space);
+    /*
     DiscreteLinearOperator Divfree_h(C_space, R_space);
     if (dim == 3)
         Divfree_h.AddDomainInterpolator(new CurlInterpolator());
@@ -3193,6 +3255,13 @@ int main(int argc, char *argv[])
         Divfree_h.AddDomainInterpolator(new DivSkewInterpolator());
     Divfree_h.Assemble();
     Divfree_h.Mult(*u, *opdivfreepart);
+    */
+    Vector u_truedofs(Divfree_hpmat_mod_lvls[0]->Width());
+    u->ParallelProject(u_truedofs);
+
+    Vector opdivfree_truedofs(Divfree_hpmat_mod_lvls[0]->Height());
+    Divfree_hpmat_mod_lvls[0]->Mult(u_truedofs, opdivfree_truedofs);
+    opdivfreepart->Distribute(opdivfree_truedofs);
 
     // FIXME: remove this
     {

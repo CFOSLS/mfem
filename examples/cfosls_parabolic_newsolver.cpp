@@ -1411,7 +1411,7 @@ int main(int argc, char *argv[])
         ParBilinearForm *Ablock(new ParBilinearForm(R_space_lvls[l]));
         Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
         Ablock->Assemble();
-        Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
+        //Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
 
         // getting pointers to dof_truedof matrices
@@ -2495,6 +2495,21 @@ int main(int argc, char *argv[])
     //trueRhs.GetBlock(1) -= tempH1_true;
     BT->Mult(-1.0, tempHdiv_true, 1.0, trueRhs.GetBlock(1));
 
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueRhs.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
+
     // setting block operator of the system
     MainOp->SetBlock(0,0, A);
     MainOp->SetBlock(0,1, CHT);
@@ -2614,6 +2629,21 @@ int main(int argc, char *argv[])
     chrono.Start();
     solver.Mult(trueRhs, trueX);
     chrono.Stop();
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            int tdof = (*temp)[tdofind];
+            trueX.GetBlock(blk)[tdof] = 0.0;
+        }
+    }
 
     if (verbose)
     {
