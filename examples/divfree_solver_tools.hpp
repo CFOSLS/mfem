@@ -5102,8 +5102,9 @@ public:
         CoarseSolver->SetAbsTol(sqrt(1e-32));
         CoarseSolver->SetRelTol(sqrt(1e-8));
         CoarseSolver->SetMaxIter(50);
-        CoarseSolver->SetPrintLevel(0);
+        CoarseSolver->SetPrintLevel(1);
         CoarseSolver->SetOperator(*Operators_[0]);
+        CoarseSolver->iterative_mode = false;
 
         if (!CoarsePrec_)
         {
@@ -5266,6 +5267,7 @@ public:
         CoarseSolver->SetMaxIter(50);
         CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
+        CoarseSolver->iterative_mode = false;
 
         if (!CoarsePrec_)
         {
