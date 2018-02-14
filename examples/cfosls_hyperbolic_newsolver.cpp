@@ -2883,7 +2883,6 @@ int main(int argc, char *argv[])
 
     BlockOperator *MainOp = new BlockOperator(block_trueOffsets);
 
-    /*
     // curl or divskew operator from C_space into R_space
     ParDiscreteLinearOperator Divfree_op(C_space, R_space); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     if (dim == 3)
@@ -2894,9 +2893,9 @@ int main(int argc, char *argv[])
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
-    */
-    HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
-    HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+
+    //HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
+    //HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
 
 
     // mass matrix for H(div)
@@ -3023,8 +3022,8 @@ int main(int argc, char *argv[])
     return -1;
 #endif
 
-    //delete Divfree_dop;
-    //delete DivfreeT_dop;
+    delete Divfree_dop;
+    delete DivfreeT_dop;
     delete rhside_Hdiv;
 
     chrono.Stop();

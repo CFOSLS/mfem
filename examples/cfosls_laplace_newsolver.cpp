@@ -2928,7 +2928,6 @@ int main(int argc, char *argv[])
     delete Divfree_dop;
     delete DivfreeT_dop;
     delete rhside_Hdiv;
-#endif
 
     if (verbose)
     {
@@ -2942,6 +2941,7 @@ int main(int argc, char *argv[])
     }
     MPI_Finalize();
     return 0;
+#endif
 
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
