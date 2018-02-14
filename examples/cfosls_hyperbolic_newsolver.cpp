@@ -2815,7 +2815,32 @@ int main(int argc, char *argv[])
 
     chrono.Stop();
     if (verbose)
-        cout<<"Particular solution found in "<< chrono.RealTime() <<" seconds.\n";
+        cout << "Particular solution found in "<< chrono.RealTime() <<" seconds.\n";
+
+    if (verbose)
+        std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
+
+    {
+        ParLinearForm * constrfform = new ParLinearForm(W_space);
+        constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        constrfform->Assemble();
+
+        Vector Floc(P_W[0]->Height());
+        Floc = *constrfform;
+
+        Vector Sigmahat_truedofs(R_space->TrueVSize());
+        Sigmahat->ParallelProject(Sigmahat_truedofs);
+
+        if (!CheckConstrRes(Sigmahat_truedofs, *Constraint_global, &Floc, "in the old code for the particular solution"))
+        {
+            std::cout << "Failure! \n";
+        }
+        else
+            if (verbose)
+                std::cout << "Success \n";
+
+    }
+
     chrono.Clear();
     chrono.Start();
 
@@ -2884,6 +2909,7 @@ int main(int argc, char *argv[])
     BlockOperator *MainOp = new BlockOperator(block_trueOffsets);
 
     // curl or divskew operator from C_space into R_space
+    /*
     ParDiscreteLinearOperator Divfree_op(C_space, R_space); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     if (dim == 3)
         Divfree_op.AddDomainInterpolator(new CurlInterpolator());
@@ -2893,9 +2919,10 @@ int main(int argc, char *argv[])
     Divfree_op.Finalize();
     HypreParMatrix * Divfree_dop = Divfree_op.ParallelAssemble(); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+    */
 
-    //HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
-    //HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
+    HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
+    HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
 
 
     // mass matrix for H(div)
@@ -2982,7 +3009,6 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         BT->Mult(-1.0, tempHdiv_true, 1.0, trueRhs.GetBlock(1));
 
-    /*
     for (int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> *temp;
@@ -2997,7 +3023,6 @@ int main(int argc, char *argv[])
             trueRhs.GetBlock(blk)[tdof] = 0.0;
         }
     }
-    */
     /*
     {
         MFEM_ASSERT(CheckBdrError(trueRhs.GetBlock(0), NULL, *EssBdrTrueDofs_Hcurl[0], true),
@@ -3024,8 +3049,8 @@ int main(int argc, char *argv[])
     return -1;
 #endif
 
-    delete Divfree_dop;
-    delete DivfreeT_dop;
+    //delete Divfree_dop;
+    //delete DivfreeT_dop;
     delete rhside_Hdiv;
 
     chrono.Stop();
@@ -3107,6 +3132,7 @@ int main(int argc, char *argv[])
                             precU = new Multigrid(*A, TrueP_C);
 #else
                         precU = new Multigrid(*A, TrueP_C);
+                        //precU = new IdentityOperator(A->Height());
 #endif
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
@@ -3177,6 +3203,9 @@ int main(int argc, char *argv[])
     chrono.Start();
     solver.Mult(trueRhs, trueX);
     chrono.Stop();
+
+    MFEM_ASSERT(CheckBdrError(trueX.GetBlock(0), NULL, *EssBdrTrueDofs_Hcurl[0], true),
+                              "for u_truedofs in the old code");
 
     for (int blk = 0; blk < numblocks; ++blk)
     {
@@ -3377,6 +3406,7 @@ int main(int argc, char *argv[])
 
     if (verbose)
     {
+        std::cout << "err_sigma = " << err_sigma << ", norm_sigma = " << norm_sigma << "\n";
         if ( norm_sigma > MYZEROTOL )
             cout << "|| sigma_h - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
         else
@@ -3577,7 +3607,7 @@ int main(int argc, char *argv[])
 
     //MPI_Finalize();
     //return 0;
-#endif
+#endif // for #ifdef OLD_CODE
 
     chrono.Clear();
     chrono.Start();
@@ -3768,7 +3798,7 @@ int main(int argc, char *argv[])
     {
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(50);
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-8));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
     }
 #endif
