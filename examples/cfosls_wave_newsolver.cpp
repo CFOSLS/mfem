@@ -2940,7 +2940,11 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
+#ifdef OLD_CODE
+    Sigmahat->ParallelProject(ParticSol);
+#else
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+#endif
 
     chrono.Stop();
 
