@@ -391,9 +391,10 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    if (coarse_prec)
-        coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(0);
+    //if (coarse_prec)
+        //coarseSolver->SetPreconditioner(*coarse_prec);
+    coarseSolver->SetPrintLevel(1);
+    coarseSolver->iterative_mode = false;
 
     finalized = true;
 }
@@ -410,6 +411,31 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
 
+    /*
+#ifdef COMPARE_MG
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfreeop_T->Mult(xblock->GetBlock(blk), coarsetrueRhs->GetBlock(blk));
+        else
+        {
+            coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
+        }
+    }
+
+    coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfreeop.Mult(coarsetrueX->GetBlock(blk), yblock->GetBlock(blk));
+        else
+            yblock->GetBlock(blk) = coarsetrueX->GetBlock(blk);
+    }
+
+    return;
+#endif
+    */
 
     //Divfreeop.MultTranspose(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
     //Divfreeop_T->Mult(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
@@ -2818,6 +2844,48 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     chrono.Start();
 #endif
 
+    /*
+#ifdef COMPARE_MG
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+    }
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfree_hpmat_nobnd->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+        else
+            truerhs->GetBlock(blk) = xblock->GetBlock(blk);
+    }
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+        Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
+            Divfree_hpmat_nobnd->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+        else
+            yblock->GetBlock(blk) = truex->GetBlock(blk);
+    }
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+        }
+    }
+
+
+    return;
+#endif
+    */
+
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> *temp = essbdrtruedofs_Funct[blk];
@@ -4100,9 +4168,15 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                                      "before the smoother update: ", 1);
             next_sol -= *truesolupdate_lvls[0];
 #endif
+
+#ifdef NO_PRESMOOTH
+            *truetempvec2_lvls[l] = 0.0;
+#else
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+#endif
+
 #ifdef TIMING
             MPI_Barrier(comm);
             chrono.Stop();
@@ -4168,9 +4242,12 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono.Start();
 #endif
 
+#ifdef NO_COARSESOLVE
+    *truesolupdate_lvls[num_levels - 1] = 0.0;
+#else
     // BOTTOM: solve the global problem at the coarsest level
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
-    //*truesolupdate_lvls[num_levels - 1] = 0.0;
+#endif
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -4237,10 +4314,16 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             chrono.Clear();
             chrono.Start();
 #endif
+
             // smooth at the finer level
             if (Smoothers_lvls[l - 1])
             {
+#ifdef NO_POSTSMOOTH
+                *truetempvec_lvls[l - 1] = 0.0;
+#else
                 Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
+#endif
+
 #ifdef TIMING
                 MPI_Barrier(comm);
                 chrono.Stop();
@@ -4263,6 +4346,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
                 time_resupdate += chrono.RealTime();
 #endif
             }
+
 
 #ifdef TIMING
             MPI_Barrier(comm);
@@ -4311,6 +4395,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[0];
+
+    //truesolupdate_lvls[0]->Print();
+    //next_sol.Print();
 
 #ifdef CHECK_CONSTR
     if (!preconditioner_mode)
@@ -5100,8 +5187,8 @@ public:
 
         CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
         CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-6));
-        CoarseSolver->SetMaxIter(20);
+        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetMaxIter(100);
         CoarseSolver->SetPrintLevel(1);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
@@ -5243,10 +5330,15 @@ public:
         Operators_.Last() = &Operator;
         for (int l = Operators_.Size()-1; l > 0; l--)
         {
+            /*
             // Two steps RAP
-            unique_ptr<HypreParMatrix> PT( P[l-1]->Transpose() );
             unique_ptr<HypreParMatrix> AP( ParMult(Operators_[l], P[l-1]) );
             Operators_[l-1] = ParMult(PT.get(), AP.get());
+            Operators_[l-1]->CopyRowStarts();
+            */
+
+            Operators_[l-1] = RAP(P[l-1], Operators_[l], P[l-1]);
+            Operators_[l-1]->CopyColStarts();
             Operators_[l-1]->CopyRowStarts();
         }
 
@@ -5263,9 +5355,9 @@ public:
 
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-6));
-        CoarseSolver->SetMaxIter(20);
-        CoarseSolver->SetPrintLevel(0);
+        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetMaxIter(1);
+        CoarseSolver->SetPrintLevel(2);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 
@@ -5278,7 +5370,7 @@ public:
             CoarsePrec_ = new HypreSmoother(A_c, HypreSmoother::Type::l1GS, 1);
         }
 
-        CoarseSolver->SetPreconditioner(*CoarsePrec_);
+        //CoarseSolver->SetPreconditioner(*CoarsePrec_);
 
     }
 
@@ -5301,6 +5393,10 @@ public:
         if (built_prec)
             delete CoarsePrec_;
     }
+#ifdef COMPARE_MG
+    CGSolver * GetCoarseSolver() const {return CoarseSolver;}
+    HypreParMatrix * GetCoarseOp() const {return Operators_[0];}
+#endif
 
 private:
     void MG_Cycle() const;
@@ -5340,15 +5436,14 @@ void Multigrid::MG_Cycle() const
     Vector& residual_l = *residual[current_level];
     Vector& correction_l = *correction[current_level];
 
+#ifndef NO_PRESMOOTH
     // PreSmoothing
-    //if (current_level > 0)
-    //{
+    if (current_level > 0)
+    {
         Smoother_l.Mult(residual_l, correction_l);
         Operator_l.Mult(-1.0, correction_l, 1.0, residual_l);
-    //}
-    //else
-        //correction_l = residual_l;
-
+    }
+#endif
 
     // Coarse grid correction
     if (current_level > 0)
@@ -5370,19 +5465,27 @@ void Multigrid::MG_Cycle() const
     }
     else
     {
+        CoarseSolver->Mult(residual_l, correction_l);
+#ifdef NO_COARSESOLVE
+        correction_l = 0.0;
+#endif
+        /*
         cor_cor.SetSize(residual_l.Size());
 
         CoarseSolver->Mult(residual_l, cor_cor);
         correction_l += cor_cor;
         Operator_l.Mult(-1.0, cor_cor, 1.0, residual_l);
+        */
     }
 
+#ifndef NO_POSTSMOOTH
     // PostSmoothing
-    //if (current_level > 0)
+    if (current_level > 0)
+    {
         Smoother_l.Mult(residual_l, cor_cor);
-    //else
-        //cor_cor = residual_l;
-    correction_l += cor_cor;
+        correction_l += cor_cor;
+    }
+#endif
 
 }
 
