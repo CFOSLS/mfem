@@ -48,9 +48,12 @@
 //#define MARTIN_PREC
 
 #define COMPARE_MG
+
+#ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 //#define NO_COARSESOLVE
 #define NO_POSTSMOOTH
 #define NO_PRESMOOTH
+#endif
 
 //#define TIMING
 
@@ -4234,21 +4237,195 @@ int main(int argc, char *argv[])
     Divfree_hpmat_mod_lvls[0]->MultTranspose(inHdivvec, inHcurlvec);
 
 #ifdef CHECK_BNDCND
+    auto Divfree_T = Divfree_hpmat_mod_lvls[0]->Transpose();
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
     {
-        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
-        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        if (myid == i)
         {
-            if ( fabs(inHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            std::cout << "I am " << myid << "\n";
+
+            const Array<int> *temp2 = EssBdrTrueDofs_Funct_lvls[0][0];
+
+            Array<int> bndtdofs_Hdiv(R_space_lvls[0]->TrueVSize());
+            bndtdofs_Hdiv = 0;
+            //std::cout << "bnd tdofs Hdiv \n";
+            for ( int tdofind = 0; tdofind < temp2->Size(); ++tdofind)
             {
-                std::cout << "bnd cnd is violated for inHcurlvec, value = "
-                          << inHcurlvec[(*temp)[tdofind]]
-                          << ", index = " << (*temp)[tdofind] << "\n";
-                std::cout << " ... was corrected \n";
+                //std::cout << (*temp2)[tdofind] << " ";
+                bndtdofs_Hdiv[(*temp2)[tdofind]] = 1;
             }
-            inHcurlvec[(*temp)[tdofind]] = 0.0;
+            //std::cout << "\n";
+
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+
+            Array<int> bndtdofs_Hcurl(C_space_lvls[0]->TrueVSize());
+            bndtdofs_Hcurl = 0;
+            //std::cout << "bnd tdofs Hcurl \n";
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << (*temp)[tdofind] << " ";
+                bndtdofs_Hcurl[(*temp)[tdofind]] = 1;
+            }
+            //std::cout << "\n";
+
+            int special_row;
+            bool found = false;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                if ( fabs(inHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for inHcurlvec, value = "
+                              << inHcurlvec[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                    std::cout << " ... was corrected \n";
+                    if (found == false)
+                    {
+                        special_row = (*temp)[tdofind];
+                        found = true;
+                    }
+                }
+                inHcurlvec[(*temp)[tdofind]] = 0.0;
+            }
+
+            if (found)
+            {
+                int special_col2;
+                int special_col3;
+                bool found2 = false;
+                bool found3 = false;
+
+                SparseMatrix spmat;
+                Divfree_T->GetDiag(spmat);
+
+                {
+                    std::cout << "Looking for incorrect values in the diag part of Divfree_T \n";
+                    int row = special_row;
+                    int row_shift = spmat.GetI()[row];
+                    std::cout << "row = " << row << "\n";
+                    for (int j = 0; j < spmat.RowSize(row); ++j)
+                    {
+                        int col = spmat.GetJ()[row_shift + j];
+                        double value = spmat.GetData()[row_shift + j];
+                        if (fabs(value) > 1.0e-14)
+                        {
+                            std::cout << "(" << col << ", " << value << ") ";
+                            std::cout << "for hdivvec value = " << inHdivvec[col] << " ";
+                            if (bndtdofs_Hdiv[col] != 0)
+                                std::cout << " at the boundary! ";
+                            else
+                            {
+                                std::cout << "not at the boundary! ";
+                                found2 = true;
+                                special_col2 = col;
+                            }
+
+                        }
+                    }
+                    std::cout << "\n";
+                }
+
+                SparseMatrix spmat_offd;
+                int * cmap_offd;
+                Divfree_T->GetOffd(spmat_offd, cmap_offd);
+
+                {
+                    std::cout << "Looking for incorrect values in the offd part of Divfree_T \n";
+                    int row = special_row;
+                    int row_shift = spmat_offd.GetI()[row];
+                    std::cout << "row = " << row << "\n";
+                    for (int j = 0; j < spmat_offd.RowSize(row); ++j)
+                    {
+                        int col = spmat_offd.GetJ()[row_shift + j];
+                        int truecol = cmap_offd[col];
+                        double value = spmat_offd.GetData()[row_shift + j];
+                        if (fabs(value) > 1.0e-14)
+                        {
+                            std::cout << "col = " << col << ": (" << truecol << ", " << value << ") ";
+                            //std::cout << "for hdivvec value = " << inHdivvec[col] << " ";
+                            if (bndtdofs_Hdiv[col] != 0)
+                                std::cout << " at the boundary! ";
+                            else
+                            {
+                                std::cout << "not at the boundary! ";
+                                found3 = true;
+                                special_col3 = truecol;
+                            }
+
+                        }
+                    }
+                    std::cout << "\n";
+                }
+
+            }
+
         }
+        MPI_Barrier(comm);
     }
-#endif
+    delete Divfree_T;
+
+#if 0
+    // delete this after fixing the problem
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i && myid == 1)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            /*
+            SparseMatrix spmat2;
+            Divfree_hpmat_mod_lvls[0]->GetDiag(spmat2);
+
+            if (found2)
+            {
+                std::cout << "Looking for incorrect values in the diagonal part of Divfree \n";
+                int row = special_col2;
+                int row_shift = spmat2.GetI()[row];
+                std::cout << "row = " << row << "\n";
+                for (int j = 0; j < spmat2.RowSize(row); ++j)
+                {
+                    std::cout << "(" << spmat2.GetJ()[row_shift + j] << ", " << spmat2.GetData()[row_shift + j] << ") ";
+                }
+                std::cout << "\n";
+            }
+            */
+
+            SparseMatrix spmat2_offd;
+            int * cmap2_offd;
+            Divfree_hpmat_mod_lvls[0]->GetOffd(spmat2_offd, cmap2_offd);
+
+            int * row_starts = Divfree_hpmat_mod_lvls[0]->GetRowStarts();
+            std::cout << "rowstarts: " << row_starts[0] << ", " << row_starts[1] << "\n";
+
+            int tdof_offset = C_space_lvls[0]->GetMyTDofOffset();
+            std::cout << "tdof_offset = " << tdof_offset << "\n";
+            int special_truecol = 3821;
+            int special_col = special_truecol - row_starts[0];
+
+            std::cout << "Looking for incorrect values in the off-diagonal part of Divfree on proc 1 \n";
+            std::cout << "height = " << spmat2_offd.Height() << "\n";
+            int row = special_col;
+            int row_shift = spmat2_offd.GetI()[row];
+            std::cout << "row = " << row << "\n";
+            for (int j = 0; j < spmat2_offd.RowSize(row); ++j)
+            {
+                int col = spmat2_offd.GetJ()[row_shift + j];
+                std::cout << "col = " << col << ": ( " << cmap2_offd[col] << ", " << spmat2_offd.GetData()[row_shift + j] << ") ";
+            }
+            std::cout << "\n";
+
+        }
+        MPI_Barrier(comm);
+    }
+#endif // for #if 0
+
+#endif // for CHECK_BND
+
+    //MPI_Finalize();
+    //return 0;
 
     // studying why inHcurlvec has nonzeros at the boundary
     /*
@@ -4306,7 +4483,6 @@ int main(int argc, char *argv[])
     return 0;
     */
 
-    /*
     Vector outHdivvec(NewSolver.Height());
 
     if (verbose)
@@ -4334,7 +4510,6 @@ int main(int argc, char *argv[])
         std::cout << "|| NewMG * vec - C MG * C^T vec || = " << diff_norm << "\n";
         std::cout << "|| NewMG * vec - C MG * C^T vec || / || C MG * C^T vec || = " << diff_norm / geommg_norm << "\n";
     }
-    */
 
     if (verbose)
         std::cout << " \nComparing separately smoothers \n";
@@ -4343,6 +4518,63 @@ int main(int argc, char *argv[])
     Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
 
     HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+
+    // checking that A has 1's on the diagonal and 0's for other columns for boundary entries
+
+    /*
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+
+            Array<int> bndtdofs(C_space_lvls[0]->TrueVSize());
+            bndtdofs = 0;
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                std::cout << (*temp)[tdofind] << " ";
+                bndtdofs[(*temp)[tdofind]] = 1;
+            }
+            std::cout << "\n";
+
+            //if (verbose)
+                //bndtdofs.Print();
+
+            int tdof_offset = C_space_lvls[0]->GetMyTDofOffset();
+
+            SparseMatrix diag;
+            A->GetDiag(diag);
+
+            for (int row = 0; row < diag.Height(); ++row)
+            {
+                if ( bndtdofs[row + tdof_offset] != 0)
+                {
+                    int nnz_shift = diag.GetI()[row];
+                    for (int j = 0; j < diag.RowSize(row); ++j)
+                    {
+                        int col = diag.GetJ()[nnz_shift + j];
+                        if ( col != row && fabs(diag.GetData()[nnz_shift + j]) > 1.0e-14 )
+                        {
+                            if (bndtdofs[col + tdof_offset] == 0)
+                            {
+                                std::cout << "Found nonzero for the boundary row = " << row << "(" << col << ", " << diag.GetData()[nnz_shift + j] << ") \n";
+                                std::cout << "which lives not on the boundary! \n";
+                            }
+                        }
+                    }
+                } // end of if row is for the boundary tdof
+            }// end of loop over rows
+        }
+        MPI_Barrier(comm);
+    }
+    MPI_Finalize();
+    return 0;
+
+    */
+
 
     Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
     Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
@@ -4369,13 +4601,23 @@ int main(int argc, char *argv[])
     diffsmoo = outSmooHdivvec;
     diffsmoo -= out2SmooHdivvec;
 
-    double diffsmoo_norm = diffsmoo.Norml2() / sqrt (diffsmoo.Size());
-    double geommgsmoo_norm = out2SmooHdivvec.Norml2() / sqrt(out2SmooHdivvec.Size());
-    if (verbose)
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
     {
-        std::cout << "|| diff of smoothers action || = " << diffsmoo_norm << "\n";
-        std::cout << "|| diff of smoothers action || / || geommg smoother action || = " << diffsmoo_norm / geommgsmoo_norm << "\n";
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            double diffsmoo_norm = diffsmoo.Norml2() / sqrt (diffsmoo.Size());
+            double geommgsmoo_norm = out2SmooHdivvec.Norml2() / sqrt(out2SmooHdivvec.Size());
+            std::cout << "|| diff of smoothers action || = " << diffsmoo_norm << "\n";
+            std::cout << "|| diff of smoothers action || / || geommg smoother action || = " << diffsmoo_norm / geommgsmoo_norm << "\n";
+        }
+        MPI_Barrier(comm);
     }
+
+    //MPI_Finalize();
+    //return 0;
 
 
     /*
@@ -4540,9 +4782,9 @@ int main(int argc, char *argv[])
                 std::cout << "bnd cnd is violated for inHcurlvec, value = "
                           << inHcurlvec[(*temp)[tdofind]]
                           << ", index = " << (*temp)[tdofind] << "\n";
-                std::cout << " ... was corrected \n";
+                //std::cout << " ... was corrected \n";
             }
-            inHcurlvec[(*temp)[tdofind]] = 0.0;
+            //inHcurlvec[(*temp)[tdofind]] = 0.0;
         }
 
     }
@@ -4584,6 +4826,9 @@ int main(int argc, char *argv[])
     check -= inCoarseHcurlvec;
     std::cout << "check_norm = " << check.Norml2() / sqrt (check.Size()) << "\n";
 
+    MPI_Barrier(comm);
+    std::cout << std::flush;
+    MPI_Barrier(comm);
 
     CGSolver * Geommg_Coarsesolver = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseSolver();
     Vector outCoarseHcurlvec(Geommg_Coarsesolver->Height());
@@ -4601,12 +4846,20 @@ int main(int argc, char *argv[])
 
     //diffcoarse.Print();
 
-    double diffcoarse_norm = diffcoarse.Norml2() / sqrt (diffcoarse.Size());
-    double geommgcoarse_norm = out2FineCoarseHdivvec.Norml2() / sqrt(out2FineCoarseHdivvec.Size());
-    if (verbose)
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
     {
-        std::cout << "|| diff of coarse solvers action || = " << diffcoarse_norm << "\n";
-        std::cout << "|| diff of coarse solvers action || / || geommg coarse solver action || = " << diffcoarse_norm / geommgcoarse_norm << "\n";
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            double diffcoarse_norm = diffcoarse.Norml2() / sqrt (diffcoarse.Size());
+            double geommgcoarse_norm = out2FineCoarseHdivvec.Norml2() / sqrt(out2FineCoarseHdivvec.Size());
+            std::cout << "|| diff of coarse solvers action || = " << diffcoarse_norm << "\n";
+            std::cout << "|| diff of coarse solvers action || / || geommg coarse solver action || = " << diffcoarse_norm / geommgcoarse_norm << "\n";
+            std::cout << "\n" << std::flush;
+        }
+        MPI_Barrier(comm);
     }
 
     MPI_Finalize();

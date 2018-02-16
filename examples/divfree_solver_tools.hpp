@@ -494,6 +494,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     }
     */
 
+
     // imposing bnd conditions on the internal solver input vector
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -5356,8 +5357,12 @@ public:
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
         CoarseSolver->SetRelTol(sqrt(1e-12));
+#ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(1);
-        CoarseSolver->SetPrintLevel(2);
+#else
+        CoarseSolver->SetMaxIter(100);
+#endif
+        CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 
@@ -5733,7 +5738,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                     for (int j = 0; j < C_diag.RowSize(row); ++j)
                     {
                         int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
-                        if (colorig == col && btd_flags[colorig] != 0)
+                        if (colorig == col)
                         {
                             //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
                             C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
@@ -5757,6 +5762,8 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
     HYPRE_Int * C_cmap;
     Op_hpmat.GetOffd(C_offd, C_cmap);
 
+    //int * row_starts = Op_hpmat.GetRowStarts();
+
     for (int row = 0; row < C_td_btd_offd.Height(); ++row)
     {
         if (btd_flags_range[row] == 0)
@@ -5771,10 +5778,18 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                 {
                     for (int j = 0; j < C_offd.RowSize(row); ++j)
                     {
-                        int truecolorig = C_cmap[C_offd.GetJ()[C_offd.GetI()[row] + j]];
-                        if (truecolorig == truecol && btd_flags[truecolorig] != 0)
+                        int col = C_offd.GetJ()[C_offd.GetI()[row] + j];
+                        int truecolorig = C_cmap[col];
+                        /*
+                        int tdof_for_truecolorig;
+                        if (truecolorig < row_starts[0])
+                            tdof_for_truecolorig = truecolorig;
+                        else
+                            tdof_for_truecolorig = truecolorig - row_starts[1];
+                        */
+                        if (truecolorig == truecol)
                         {
-                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                            //std::cout << "Changes made in off-d: row = " << row << ", col = " << col << ", truecol = " << truecolorig << "\n";
                             C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
 
                         }
