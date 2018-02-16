@@ -4251,6 +4251,7 @@ int main(int argc, char *argv[])
 #endif
 
     // studying why inHcurlvec has nonzeros at the boundary
+    /*
     {
         std::cout << "bnd indices for Hdiv \n";
         const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
@@ -4303,6 +4304,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+    */
 
     /*
     Vector outHdivvec(NewSolver.Height());
@@ -4500,7 +4502,6 @@ int main(int argc, char *argv[])
             }
             inCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
         }
-
     }
 #endif
     CGSolver * Geommg_Coarsesolver = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseSolver();
@@ -4529,6 +4530,24 @@ int main(int argc, char *argv[])
 
     // comparison with transfers from and to the finest level
 
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for inHcurlvec, value = "
+                          << inHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            inHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
     Vector inCoarseHdivvec(CoarsestSolver->Width());
     TrueP_R[0]->MultTranspose(inHdivvec, inCoarseHdivvec); // project
 
@@ -4538,7 +4557,7 @@ int main(int argc, char *argv[])
     Vector outFineCoarseHdivvec(TrueP_R[0]->Height());
     TrueP_R[0]->Mult(outCoarseHdivvec, outFineCoarseHdivvec); // interpolate back
 
-    Vector inCoarseHcurlvec(CoarsestSolver->Width());
+    Vector inCoarseHcurlvec(TrueP_C[0]->Width());
     TrueP_C[0]->MultTranspose(inHcurlvec, inCoarseHcurlvec); // project after moving from Hcurl
 
 #ifdef CHECK_BNDCND
@@ -4580,7 +4599,7 @@ int main(int argc, char *argv[])
     diffcoarse = outFineCoarseHdivvec;
     diffcoarse -= out2FineCoarseHdivvec;
 
-    diffcoarse.Print();
+    //diffcoarse.Print();
 
     double diffcoarse_norm = diffcoarse.Norml2() / sqrt (diffcoarse.Size());
     double geommgcoarse_norm = out2FineCoarseHdivvec.Norml2() / sqrt(out2FineCoarseHdivvec.Size());

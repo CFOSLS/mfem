@@ -5733,7 +5733,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                     for (int j = 0; j < C_diag.RowSize(row); ++j)
                     {
                         int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
-                        if (colorig == col && colorig != row)
+                        if (colorig == col && btd_flags[colorig] != 0)
                         {
                             //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
                             C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
@@ -5772,7 +5772,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                     for (int j = 0; j < C_offd.RowSize(row); ++j)
                     {
                         int truecolorig = C_cmap[C_offd.GetJ()[C_offd.GetI()[row] + j]];
-                        if (truecolorig == truecol && truecolorig != row)
+                        if (truecolorig == truecol && btd_flags[truecolorig] != 0)
                         {
                             //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
                             C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
