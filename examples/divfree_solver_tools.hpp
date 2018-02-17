@@ -393,7 +393,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     //if (coarse_prec)
         //coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(1);
+    coarseSolver->SetPrintLevel(0);
     coarseSolver->iterative_mode = false;
 
     finalized = true;
@@ -411,7 +411,6 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
 
-    /*
 #ifdef COMPARE_MG
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -424,6 +423,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     }
 
     coarseSolver->Mult(*coarsetrueRhs, *coarsetrueX);
+    // imposing bnd conditions on the internal solver output vector
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -435,7 +435,6 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
     return;
 #endif
-    */
 
     //Divfreeop.MultTranspose(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
     //Divfreeop_T->Mult(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
@@ -5316,10 +5315,16 @@ class Multigrid : public Solver
 public:
     Multigrid(HypreParMatrix &Operator,
               const Array<HypreParMatrix*> &P,
+#ifdef BND_FOR_MULTIGRID
+              const std::vector<Array<int>*> & EssBdrTDofs_lvls,
+#endif
               Solver *CoarsePrec = NULL)
         :
           Solver(Operator.GetNumRows()),
           P_(P),
+#ifdef BND_FOR_MULTIGRID
+          essbdrtdofs_lvls(EssBdrTDofs_lvls),
+#endif
           Operators_(P.Size()+1),
           Smoothers_(Operators_.Size()),
           current_level(Operators_.Size()-1),
@@ -5358,7 +5363,7 @@ public:
         CoarseSolver->SetAbsTol(sqrt(1e-32));
         CoarseSolver->SetRelTol(sqrt(1e-12));
 #ifdef COMPARE_MG
-        CoarseSolver->SetMaxIter(1);
+        CoarseSolver->SetMaxIter(NCOARSEITER);
 #else
         CoarseSolver->SetMaxIter(100);
 #endif
@@ -5408,6 +5413,10 @@ private:
 
     const Array<HypreParMatrix*> &P_;
 
+#ifdef BND_FOR_MULTIGRID
+    const std::vector<Array<int>*> & essbdrtdofs_lvls;
+#endif
+
     Array<HypreParMatrix*> Operators_;
     Array<HypreSmoother*> Smoothers_;
 
@@ -5429,6 +5438,17 @@ private:
 void Multigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
+
+#ifdef BND_FOR_MULTIGRID
+    //std::cout << "x size = " << x.Size() << "\n";
+    const Array<int> *temp = essbdrtdofs_lvls[0];
+    for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+    {
+        //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
+        (*residual[Operators_.Size() - 1])[(*temp)[tdofind]] = 0.0;
+    }
+#endif
+
     correction.Last()->SetDataAndSize(y.GetData(), y.Size());
     MG_Cycle();
 }
@@ -5458,6 +5478,14 @@ void Multigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
 
+#ifdef BND_FOR_MULTIGRID
+        const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level];
+        //std::cout << "level of essbdrdofs = " << Operators_.Size() - current_level << "\n";
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            (*residual[current_level - 1])[(*temp)[tdofind]] = 0.0;
+        }
+#endif
         current_level--;
         MG_Cycle();
         current_level++;
@@ -5470,7 +5498,23 @@ void Multigrid::MG_Cycle() const
     }
     else
     {
+#ifdef BND_FOR_MULTIGRID
+        const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level - 1];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            residual_l[(*temp)[tdofind]] = 0.0;
+        }
+#endif
+
         CoarseSolver->Mult(residual_l, correction_l);
+
+#ifdef BND_FOR_MULTIGRID
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            correction_l[(*temp)[tdofind]] = 0.0;
+        }
+#endif
+
 #ifdef NO_COARSESOLVE
         correction_l = 0.0;
 #endif

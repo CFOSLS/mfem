@@ -47,12 +47,20 @@
 
 //#define MARTIN_PREC
 
-#define COMPARE_MG
+//#define COMPARE_MG
+
+#define BND_FOR_MULTIGRID
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
+
+#define NCOARSEITER 2
+
 //#define NO_COARSESOLVE
 #define NO_POSTSMOOTH
 #define NO_PRESMOOTH
+
+//#define COMPARE_COARSE_SOLVERS
+//#define COMPARE_SMOOTHERS
 #endif
 
 //#define TIMING
@@ -1553,10 +1561,12 @@ int main(int argc, char *argv[])
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
     std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels);
+    std::vector<Array<int>* > EssBdrTrueDofs_H1(num_levels);
 #else
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels - 1);
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels - 1); // FIXME: Proably, minus 1 for all Hcurl entries?
     std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels - 1);
+    std::vector<Array<int>* > EssBdrTrueDofs_H1(num_levels - 1);
 #endif
 
     std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
@@ -1593,10 +1603,14 @@ int main(int argc, char *argv[])
        {
            EssBdrDofs_Hcurl[l] = new Array<int>;
            EssBdrTrueDofs_Hcurl[l] = new Array<int>;
+           if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+               EssBdrTrueDofs_H1[l] = new Array<int>;
        }
 #else
        EssBdrDofs_Hcurl[l] = new Array<int>;
        EssBdrTrueDofs_Hcurl[l] = new Array<int>;
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           EssBdrTrueDofs_H1[l] = new Array<int>;
 #endif
        Funct_mat_offsets_lvls[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -1726,10 +1740,14 @@ int main(int argc, char *argv[])
         {
             C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
             C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+                H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_H1[l]);
         }
 #else
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
         C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_H1[l]);
 #endif
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
@@ -2056,6 +2074,22 @@ int main(int argc, char *argv[])
 
     for (int l = 0; l < num_levels; ++l)
     {
+        /* cannot do this
+        if (l == 0)
+        {
+            ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
+            if (dim == 3)
+                Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
+            else // dim == 4
+                Divfree_op2.AddDomainInterpolator(new DivSkewInterpolator);
+            Divfree_op2.Assemble();
+            Divfree_op2.Finalize();
+            Divfree_hpmat_mod_lvls[l] = Divfree_op2.ParallelAssemble();
+        }
+        else
+            Divfree_hpmat_mod_lvls[l] = RAP(TrueP_R[l-1], Divfree_hpmat_mod_lvls[l-1], TrueP_C[l-1]);
+        */
+
         ParDiscreteLinearOperator Divfree_op2(C_space_lvls[l], R_space_lvls[l]); // from Hcurl or HDivSkew(C_space) to Hdiv(R_space)
         if (dim == 3)
             Divfree_op2.AddDomainInterpolator(new CurlInterpolator);
@@ -3185,9 +3219,13 @@ int main(int argc, char *argv[])
                     else
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+#ifdef BND_FOR_MULTIGRID
+                        Operator * precU = new Multigrid(*A, TrueP_C, EssBdrTrueDofs_Hcurl);
+                        Operator * precS = new Multigrid(*C, TrueP_H, EssBdrTrueDofs_H1);
+#else
                         Operator * precU = new Multigrid(*A, TrueP_C);
-
                         Operator * precS = new Multigrid(*C, TrueP_H);
+#endif
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
                     }
@@ -3216,7 +3254,11 @@ int main(int argc, char *argv[])
                         else
                             precU = new Multigrid(*A, TrueP_C);
 #else
+#ifdef BND_FOR_MULTIGRID
+                        precU = new Multigrid(*A, TrueP_C, EssBdrTrueDofs_Hcurl);
+#else
                         precU = new Multigrid(*A, TrueP_C);
+#endif
                         //precU = new IdentityOperator(A->Height());
 #endif
 
@@ -3890,7 +3932,7 @@ int main(int argc, char *argv[])
     else // L2 case requires more iterations
     {
 #ifdef COMPARE_MG
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(1);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(NCOARSEITER);
 #else
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
 #endif
@@ -4511,13 +4553,19 @@ int main(int argc, char *argv[])
         std::cout << "|| NewMG * vec - C MG * C^T vec || / || C MG * C^T vec || = " << diff_norm / geommg_norm << "\n";
     }
 
-    if (verbose)
-        std::cout << " \nComparing separately smoothers \n";
+    // checking that A is exactly CT Funct_0 C in serial
+    SparseMatrix diag1;
+    A->GetDiag(diag1);
 
-    Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
-    Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
+    HypreParMatrix * A_Funct = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0] );
 
-    HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+    SparseMatrix diag2;
+    A_Funct->GetDiag(diag2);
+
+    SparseMatrix diag2_copy(diag2);
+    diag2_copy.Add(-1.0, diag1);
+
+    std::cout << "diag(A) - diag(CT Funct_0 C) norm = " << diag2_copy.MaxNorm() << "\n";
 
     // checking that A has 1's on the diagonal and 0's for other columns for boundary entries
 
@@ -4575,6 +4623,15 @@ int main(int argc, char *argv[])
 
     */
 
+#ifdef COMPARE_SMOOTHERS
+
+    if (verbose)
+        std::cout << " \nComparing separately smoothers \n";
+
+    Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
+    Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
+
+    HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
 
     Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
     Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
@@ -4662,7 +4719,10 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "diag4 - diag1 norm = " << diag4.MaxNorm() << "\n";
 
+    */
+#endif
 
+#if 0
     HypreParMatrix * prod1 = ParMult(Divfree_hpmat_mod_lvls[0], TrueP_C[0]);
     SparseMatrix diag_prod1;
     prod1->GetDiag(diag_prod1);
@@ -4671,24 +4731,78 @@ int main(int argc, char *argv[])
     SparseMatrix diag_prod2;
     prod2->GetDiag(diag_prod2);
 
-    diag_prod2.Add(-1.0, diag_prod1);
+    SparseMatrix diag_prod2_copy(diag_prod2);
+    diag_prod2_copy.Add(-1.0, diag_prod1);
 
     //diag_prod2.Print();
-#if 0
-    for (int i = 0; i < diag_prod2.Height(); ++i)
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
     {
-        for (int j = 0; j < diag_prod2.RowSize(i); ++j)
-            if (fabs(diag_prod2.GetData()[diag_prod2.GetI()[i] + j]) > 1.0e-13)
+        if (myid == i)
+        {
+            const Array<int> *temp2 = EssBdrTrueDofs_Funct_lvls[0][0];
+
+            Array<int> bndtdofs_Hdiv(R_space_lvls[0]->TrueVSize());
+            bndtdofs_Hdiv = 0;
+            //std::cout << "bnd tdofs Hdiv \n";
+            for ( int tdofind = 0; tdofind < temp2->Size(); ++tdofind)
             {
-                std::cout << "nonzero entry, (" << i << ", " << diag_prod2.GetJ()[diag_prod2.GetI()[i] + j] << ", " << diag_prod2.GetData()[diag_prod2.GetI()[i] + j] << "\n";
+                //std::cout << (*temp2)[tdofind] << " ";
+                bndtdofs_Hdiv[(*temp2)[tdofind]] = 1;
             }
+            //std::cout << "\n";
+
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+
+            Array<int> bndtdofs_Hcurl(C_space_lvls[1]->TrueVSize());
+            bndtdofs_Hcurl = 0;
+            //std::cout << "bnd tdofs Hcurl \n";
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                bndtdofs_Hcurl[(*temp)[tdofind]] = 1;
+            }
+
+            std::cout << "I am " << myid << "\n";
+
+            for (int i = 0; i < diag_prod2_copy.Height(); ++i)
+            {
+                for (int j = 0; j < diag_prod2_copy.RowSize(i); ++j)
+                {
+                    int col = diag_prod2_copy.GetJ()[diag_prod2_copy.GetI()[i] + j];
+                    if (fabs(diag_prod2_copy.GetData()[diag_prod2_copy.GetI()[i] + j]) > 1.0e-13)
+                    {
+                        if (!(bndtdofs_Hdiv[i] != 0 && bndtdofs_Hcurl[col] != 0) )
+                        {
+                            std::cout << "nonzero entry of type ";
+                            if (bndtdofs_Hdiv[i] != 0)
+                                std::cout << "b-";
+                            else
+                                std::cout << "i-";
+                            if (bndtdofs_Hcurl[col] != 0)
+                                std::cout << "-b ";
+                            else
+                                std::cout << "-i ";
+                            std::cout << ": (" << i << ", " << col << ", " << diag_prod1.GetData()[diag_prod1.GetI()[i] + j] << ") vs ";
+                            std::cout << " (" << i << ", " << col << ", " << diag_prod2.GetData()[diag_prod2.GetI()[i] + j] << ") \n";
+                        }
+                        else
+                        {
+                            std::cout << "for bb nonzero entry, (" << i << ", " << col << ", " << diag_prod1.GetData()[diag_prod1.GetI()[i] + j] << ") vs ";
+                            std::cout << " (" << i << ", " << col << ", " << diag_prod2.GetData()[diag_prod2.GetI()[i] + j] << ") \n";
+                        }
+                    }
+                }
+            }
+        }
+        MPI_Barrier(comm);
     }
-#endif
 
     if (verbose)
-        std::cout << "diag(P_R C1) - diag(C_0 P_C) norm = " << diag_prod2.MaxNorm() << "\n";
-    */
+        std::cout << "diag(P_R C1) - diag(C_0 P_C) norm = " << diag_prod2_copy.MaxNorm() << "\n";
+#endif // for #if 0
 
+#ifdef COMPARE_COARSE_SOLVERS
     if (verbose)
         std::cout << " \nComparing separately coarse level solvers \n";
 
@@ -4861,6 +4975,7 @@ int main(int argc, char *argv[])
         }
         MPI_Barrier(comm);
     }
+#endif // for #ifdef COMPARE_COARSE_SOLVERS
 
     MPI_Finalize();
     return 0;
