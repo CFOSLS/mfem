@@ -411,6 +411,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     *coarsetrueX = 0.0;
     *coarsetrueRhs = 0.0;
 
+    /*
 #ifdef COMPARE_MG
     for ( int blk = 0; blk < numblocks; ++blk)
     {
@@ -435,6 +436,7 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
     return;
 #endif
+    */
 
     //Divfreeop.MultTranspose(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));
     //Divfreeop_T->Mult(xblock->GetBlock(0), coarsetrueRhs->GetBlock(0));

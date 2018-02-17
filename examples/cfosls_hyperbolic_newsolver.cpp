@@ -47,21 +47,23 @@
 
 //#define MARTIN_PREC
 
-//#define COMPARE_MG
+#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
-#define NCOARSEITER 2
+#define NCOARSEITER 1
 
 //#define NO_COARSESOLVE
 #define NO_POSTSMOOTH
 #define NO_PRESMOOTH
 
-//#define COMPARE_COARSE_SOLVERS
+#define COMPARE_COARSE_SOLVERS
 //#define COMPARE_SMOOTHERS
 #endif
+
+hypothesis - coarse operator in geometric mg spoils the boundary conditions?
 
 //#define TIMING
 
@@ -4910,9 +4912,44 @@ int main(int argc, char *argv[])
     Vector outCoarseHdivvec(CoarsestSolver->Height());
     CoarsestSolver->Mult(inCoarseHdivvec, outCoarseHdivvec); // coarse solve
 
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[1][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outCoarseHdivvec, value = "
+                          << outCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
     Vector outFineCoarseHdivvec(TrueP_R[0]->Height());
     TrueP_R[0]->Mult(outCoarseHdivvec, outFineCoarseHdivvec); // interpolate back
 
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFineCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outFineCoarseHdivvec, value = "
+                          << outFineCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outFoneCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
     Vector inCoarseHcurlvec(TrueP_C[0]->Width());
     TrueP_C[0]->MultTranspose(inHcurlvec, inCoarseHcurlvec); // project after moving from Hcurl
 
@@ -4948,11 +4985,64 @@ int main(int argc, char *argv[])
     Vector outCoarseHcurlvec(Geommg_Coarsesolver->Height());
     Geommg_Coarsesolver->Mult(inCoarseHcurlvec, outCoarseHcurlvec); // solve
 
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outCoarseHcurlvec, value = "
+                          << outCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            outCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
     Vector outFineCoarseHcurlvec(TrueP_C[0]->Height());
     TrueP_C[0]->Mult(outCoarseHcurlvec, outFineCoarseHcurlvec);   // interpolate back
 
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFineCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outFineCoarseHcurlvec, value = "
+                          << outCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outFineCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
     Vector out2FineCoarseHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
     Divfree_hpmat_mod_lvls[0]->Mult(outFineCoarseHcurlvec, out2FineCoarseHdivvec); // move to Hdiv back
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(out2FineCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for out2FineCoarseHdivvec, value = "
+                          << out2FineCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //out2FineCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
 
     Vector diffcoarse(R_space_lvls[0]->TrueVSize());
     diffcoarse = outFineCoarseHdivvec;
