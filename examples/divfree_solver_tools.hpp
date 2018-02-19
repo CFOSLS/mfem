@@ -236,6 +236,15 @@ public:
         std::cout << "atol: " << atol << "\n";
         std::cout << std::flush;
     }
+
+#ifdef COMPARE_MG
+    void SetCoarseOperator(Array2D<HypreParMatrix*> & CoarseOperator)
+    {
+        for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+            for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+                coarse_matrix->SetBlock(blk1, blk2, CoarseOperator(blk1, blk2));
+    }
+#endif
 };
 
 CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,

@@ -15,10 +15,13 @@
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
+//#define WITH_DIVCONSTRAINT_SOLVER
+
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
+// must be always on
 #define NEW_SMOOTHERSETUP
 
 // activates a check for the symmetry of the new smoother setup
@@ -47,23 +50,23 @@
 
 //#define MARTIN_PREC
 
-#define COMPARE_MG
+//#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
-#define NCOARSEITER 1
+#define NCOARSEITER 2
 
 //#define NO_COARSESOLVE
-#define NO_POSTSMOOTH
-#define NO_PRESMOOTH
+//#define NO_POSTSMOOTH
+//#define NO_PRESMOOTH
 
-#define COMPARE_COARSE_SOLVERS
+//#define COMPARE_COARSE_SOLVERS
 //#define COMPARE_SMOOTHERS
-#endif
+#endif // for ifdef COMPARE_MG
 
-hypothesis - coarse operator in geometric mg spoils the boundary conditions?
+//hypothesis - coarse operator in geometric mg spoils the boundary conditions?
 
 //#define TIMING
 
@@ -2713,85 +2716,9 @@ int main(int argc, char *argv[])
 
     //////////////////////////////////////////////////
 
-#ifdef OLD_CODE
+#if !defined (WITH_DIVCONSTRAINT_SOLVER) || defined (OLD_CODE)
     chrono.Clear();
     chrono.Start();
-
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
-    //    use the Raviart-Thomas finite elements of the specified order.
-
-    int numblocks = 1;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        numblocks++;
-
-    Array<int> block_offsets(numblocks + 1); // number of variables + 1
-    block_offsets[0] = 0;
-    block_offsets[1] = C_space->GetVSize();
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        block_offsets[2] = S_space->GetVSize();
-    block_offsets.PartialSum();
-
-    Array<int> block_trueOffsets(numblocks + 1); // number of variables + 1
-    block_trueOffsets[0] = 0;
-    block_trueOffsets[1] = C_space->TrueVSize();
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        block_trueOffsets[2] = S_space->TrueVSize();
-    block_trueOffsets.PartialSum();
-
-    HYPRE_Int dimC = C_space->GlobalTrueVSize();
-    HYPRE_Int dimR = R_space->GlobalTrueVSize();
-    HYPRE_Int dimS;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        dimS = S_space->GlobalTrueVSize();
-    if (verbose)
-    {
-        std::cout << "***********************************************************\n";
-        std::cout << "dim(C) = " << dimC << "\n";
-        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        {
-            std::cout << "dim(S) = " << dimS << ", ";
-            std::cout << "dim(C+S) = " << dimC + dimS << "\n";
-        }
-        if (withDiv)
-            std::cout << "dim(R) = " << dimR << "\n";
-        std::cout << "***********************************************************\n";
-    }
-
-    BlockVector xblks(block_offsets), rhsblks(block_offsets);
-    BlockVector trueX(block_trueOffsets), trueRhs(block_trueOffsets);
-    xblks = 0.0;
-    rhsblks = 0.0;
-    trueX = 0.0;
-    trueRhs = 0.0;
-
-    //VectorFunctionCoefficient f(dim, f_exact);
-    //VectorFunctionCoefficient vone(dim, vone_exact);
-    //VectorFunctionCoefficient vminusone(dim, vminusone_exact);
-    //ConstantCoefficient minusone(-1.0);
-    //VectorFunctionCoefficient E(dim, E_exact);
-    //VectorFunctionCoefficient curlE(dim, curlE_exact);
-
-    //----------------------------------------------------------
-    // Setting boundary conditions.
-    //----------------------------------------------------------
-
-    if (verbose)
-    {
-        std::cout << "Boundary conditions: \n";
-        std::cout << "all bdr Sigma: \n";
-        all_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
-        std::cout << "ess bdr Sigma: \n";
-        ess_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
-        std::cout << "ess bdr S: \n";
-        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
-    }
-
-    chrono.Stop();
-    if (verbose)
-        std::cout << "Small things in OLD_CODE were done in "<< chrono.RealTime() <<" seconds.\n";
-    chrono.Clear();
-    chrono.Start();
-
     ParGridFunction * Sigmahat = new ParGridFunction(R_space);
     ParLinearForm *gform;
     HypreParMatrix *Bdiv;
@@ -2962,6 +2889,85 @@ int main(int argc, char *argv[])
                 std::cout << "Success \n";
 
     }
+#endif
+
+
+#ifdef OLD_CODE
+    chrono.Clear();
+    chrono.Start();
+
+    // 6. Define a parallel finite element space on the parallel mesh. Here we
+    //    use the Raviart-Thomas finite elements of the specified order.
+
+    int numblocks = 1;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        numblocks++;
+
+    Array<int> block_offsets(numblocks + 1); // number of variables + 1
+    block_offsets[0] = 0;
+    block_offsets[1] = C_space->GetVSize();
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        block_offsets[2] = S_space->GetVSize();
+    block_offsets.PartialSum();
+
+    Array<int> block_trueOffsets(numblocks + 1); // number of variables + 1
+    block_trueOffsets[0] = 0;
+    block_trueOffsets[1] = C_space->TrueVSize();
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        block_trueOffsets[2] = S_space->TrueVSize();
+    block_trueOffsets.PartialSum();
+
+    HYPRE_Int dimC = C_space->GlobalTrueVSize();
+    HYPRE_Int dimR = R_space->GlobalTrueVSize();
+    HYPRE_Int dimS;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        dimS = S_space->GlobalTrueVSize();
+    if (verbose)
+    {
+        std::cout << "***********************************************************\n";
+        std::cout << "dim(C) = " << dimC << "\n";
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        {
+            std::cout << "dim(S) = " << dimS << ", ";
+            std::cout << "dim(C+S) = " << dimC + dimS << "\n";
+        }
+        if (withDiv)
+            std::cout << "dim(R) = " << dimR << "\n";
+        std::cout << "***********************************************************\n";
+    }
+
+    BlockVector xblks(block_offsets), rhsblks(block_offsets);
+    BlockVector trueX(block_trueOffsets), trueRhs(block_trueOffsets);
+    xblks = 0.0;
+    rhsblks = 0.0;
+    trueX = 0.0;
+    trueRhs = 0.0;
+
+    //VectorFunctionCoefficient f(dim, f_exact);
+    //VectorFunctionCoefficient vone(dim, vone_exact);
+    //VectorFunctionCoefficient vminusone(dim, vminusone_exact);
+    //ConstantCoefficient minusone(-1.0);
+    //VectorFunctionCoefficient E(dim, E_exact);
+    //VectorFunctionCoefficient curlE(dim, curlE_exact);
+
+    //----------------------------------------------------------
+    // Setting boundary conditions.
+    //----------------------------------------------------------
+
+    if (verbose)
+    {
+        std::cout << "Boundary conditions: \n";
+        std::cout << "all bdr Sigma: \n";
+        all_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
+        std::cout << "ess bdr Sigma: \n";
+        ess_bdrSigma.Print(std::cout, pmesh->bdr_attributes.Max());
+        std::cout << "ess bdr S: \n";
+        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
+    }
+
+    chrono.Stop();
+    if (verbose)
+        std::cout << "Small things in OLD_CODE were done in "<< chrono.RealTime() <<" seconds.\n";
 
     chrono.Clear();
     chrono.Start();
@@ -3833,6 +3839,7 @@ int main(int argc, char *argv[])
     std::list<double>* Times_up = new std::list<double>;
 #endif
 
+#ifdef WITH_DIVCONSTRAINT_SOLVER
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
@@ -3850,6 +3857,7 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder->ResetSolverParams();
+#endif
 
     GeneralMinConstrSolver NewSolver( comm, num_levels,
                      TrueP_Func, EssBdrTrueDofs_Funct_lvls,
@@ -3893,10 +3901,10 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-#ifdef OLD_CODE
-    Sigmahat->ParallelProject(ParticSol);
-#else
+#ifdef WITH_DIVCONSTRAINT_SOLVER
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+#else
+    Sigmahat->ParallelProject(ParticSol);
 #endif
 
     chrono.Stop();
@@ -4526,6 +4534,12 @@ int main(int argc, char *argv[])
     MPI_Finalize();
     return 0;
     */
+
+    HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+    Array2D<HypreParMatrix*> CoarseOperator(numblocks_funct, numblocks_funct);
+    CoarseOperator(0,0) = A_coarse;
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetCoarseOperator(CoarseOperator);
+
 
     Vector outHdivvec(NewSolver.Height());
 
