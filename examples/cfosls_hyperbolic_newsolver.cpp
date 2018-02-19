@@ -53,7 +53,7 @@
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
-#define NCOARSEITER 2
+#define NCOARSEITER 4
 
 //#define NO_COARSESOLVE
 //#define NO_POSTSMOOTH
@@ -62,8 +62,6 @@
 //#define COMPARE_COARSE_SOLVERS
 //#define COMPARE_SMOOTHERS
 #endif // for ifdef COMPARE_MG
-
-//hypothesis - coarse operator in geometric mg spoils the boundary conditions?
 
 //#define TIMING
 
@@ -80,7 +78,6 @@
 // must be always active
 #define USE_CURLMATRIX
 
-//#define BAD_TEST
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
 
@@ -1124,7 +1121,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1635,6 +1632,7 @@ int main(int argc, char *argv[])
 
    Array<Operator*> Smoothers_lvls(num_levels - 1);
 
+   //std::vector<Array2D<HypreParMatrix*> *> PtFunctP_lvls(num_levels);
 
    Operator* CoarsestSolver;
    CoarsestProblemSolver* CoarsestSolver_partfinder;
@@ -2164,7 +2162,7 @@ int main(int argc, char *argv[])
                 delete BTblock;
             }
         }
-        else // doing RAP for  the Functional matrix as an Array2D<HypreParMatrix*>
+        else // doing RAP for the Functional matrix as an Array2D<HypreParMatrix*>
         {
              // TODO: Rewrite this in a general form
             (*Funct_hpmat_lvls[l])(0,0) = RAP(TrueP_R[l-1], (*Funct_hpmat_lvls[l-1])(0,0), TrueP_R[l-1]);
@@ -3858,20 +3856,20 @@ int main(int argc, char *argv[])
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
     BlockVector ParticSol(new_trueoffsets);
-    //Vector ParticSol(sigma_exact_truedofs.Size());
 
     chrono.Stop();
     if (verbose)
         std::cout << "New solver and PartSolFinder were created in "<< chrono.RealTime() <<" seconds.\n";
+    chrono.Clear();
+    chrono.Start();
+
+#ifdef WITH_DIVCONSTRAINT_SOLVER
     if (verbose)
     {
         std::cout << "CoarsestSolver parameters for the PartSolFinder: \n" << std::flush;
         CoarsestSolver_partfinder->PrintSolverParams();
     }
-    chrono.Clear();
-    chrono.Start();
 
-#ifdef WITH_DIVCONSTRAINT_SOLVER
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 #else
     Sigmahat->ParallelProject(ParticSol);
@@ -4231,12 +4229,11 @@ int main(int argc, char *argv[])
         NewSolver.PrintAllOptions();
 
 #ifdef  COMPARE_MG
-
     if (verbose)
         std::cout << "\nComparing geometric MG with modified new MG (w/o Schwarz smoother) \n";
 
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
-    MFEM_ASSERT(num_procs == 1, "Right now the check operates only in serial case \n");
+    //MFEM_ASSERT(num_procs == 1, "Right now the check operates only in serial case \n");
     MFEM_ASSERT(num_levels = 2, "Check works only for 2-level case \n");
 
     Vector inHdivvec(NewSolver.Width());
@@ -4505,10 +4502,10 @@ int main(int argc, char *argv[])
     return 0;
     */
 
-    HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
-    Array2D<HypreParMatrix*> CoarseOperator(numblocks_funct, numblocks_funct);
-    CoarseOperator(0,0) = A_coarse;
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetCoarseOperator(CoarseOperator);
+    //HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+    //Array2D<HypreParMatrix*> CoarseOperator(numblocks_funct, numblocks_funct);
+    //CoarseOperator(0,0) = A_coarse;
+    //((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetCoarseOperator(CoarseOperator);
 
 
     Vector outHdivvec(NewSolver.Height());
@@ -4554,7 +4551,6 @@ int main(int argc, char *argv[])
     std::cout << "diag(A) - diag(CT Funct_0 C) norm = " << diag2_copy.MaxNorm() << "\n";
 
     // checking that A has 1's on the diagonal and 0's for other columns for boundary entries
-
     /*
     MPI_Barrier(comm);
     for (int i = 0; i < num_procs; ++i)
@@ -4569,10 +4565,10 @@ int main(int argc, char *argv[])
             bndtdofs = 0;
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                std::cout << (*temp)[tdofind] << " ";
+                //std::cout << (*temp)[tdofind] << " ";
                 bndtdofs[(*temp)[tdofind]] = 1;
             }
-            std::cout << "\n";
+            //std::cout << "\n";
 
             //if (verbose)
                 //bndtdofs.Print();
@@ -4582,6 +4578,7 @@ int main(int argc, char *argv[])
             SparseMatrix diag;
             A->GetDiag(diag);
 
+            std::cout << "Checking diagonal part of A in geom mg \n";
             for (int row = 0; row < diag.Height(); ++row)
             {
                 if ( bndtdofs[row + tdof_offset] != 0)
@@ -4606,7 +4603,6 @@ int main(int argc, char *argv[])
     }
     MPI_Finalize();
     return 0;
-
     */
 
 #ifdef COMPARE_SMOOTHERS
@@ -4662,50 +4658,6 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
-
-    /*
-    if (verbose)
-        std::cout << " \nComparing coarse level matrices \n";
-    SparseMatrix diag1;
-    //A->GetDiag(diag1);
-    HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
-    A_coarse->GetDiag(diag1);
-
-    SparseMatrix diag2;
-    //std::cout << "size of Divfree_hpmat_mod_lvls[1] = " << Divfree_hpmat_mod_lvls[0]->Height() << " x " << Divfree_hpmat_mod_lvls[0]->Width() << "\n";
-    //std::cout << "size of (*Funct_hpmat_lvls[1])(0,0)] = " << (*Funct_hpmat_lvls[1])(0,0)->Height() << " x " << (*Funct_hpmat_lvls[1])(0,0)->Width() << "\n";
-    HypreParMatrix * HcurlOp = RAP(Divfree_hpmat_mod_lvls[1], (*Funct_hpmat_lvls[1])(0,0), Divfree_hpmat_mod_lvls[1]);
-    HcurlOp->GetDiag(diag2);
-
-    diag2.Add(-1.0, diag1);
-
-    if (verbose)
-        std::cout << "diag2 - diag1 norm = " << diag2.MaxNorm() << "\n";
-
-    HypreParMatrix * tempm = RAP(TrueP_R[0], (*Funct_hpmat_lvls[0])(0,0), TrueP_R[0] );
-
-    HypreParMatrix * HcurlOp_2 = RAP(Divfree_hpmat_mod_lvls[1], tempm, Divfree_hpmat_mod_lvls[1]);
-
-    SparseMatrix diag3;
-    HcurlOp_2->GetDiag(diag3);
-
-    diag3.Add(-1.0, diag1);
-
-    if (verbose)
-        std::cout << "diag3 - diag1 norm = " << diag3.MaxNorm() << "\n";
-
-    HypreParMatrix * tempmm = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0]);
-    HypreParMatrix * HcurlOp_3 = RAP(TrueP_C[0], tempmm, TrueP_C[0] );
-
-    SparseMatrix diag4;
-    HcurlOp_3->GetDiag(diag4);
-
-    diag4.Add(-1.0, diag1);
-
-    if (verbose)
-        std::cout << "diag4 - diag1 norm = " << diag4.MaxNorm() << "\n";
-
-    */
 #endif
 
 #if 0
@@ -4791,6 +4743,54 @@ int main(int argc, char *argv[])
 #ifdef COMPARE_COARSE_SOLVERS
     if (verbose)
         std::cout << " \nComparing separately coarse level solvers \n";
+
+    /*
+    if (verbose)
+        std::cout << " \nComparing coarsest level matrices \n";
+    {
+        SparseMatrix diag1;
+        //A->GetDiag(diag1);
+        HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+        A_coarse->GetDiag(diag1);
+
+        SparseMatrix diag2;
+        //std::cout << "size of Divfree_hpmat_mod_lvls[1] = " << Divfree_hpmat_mod_lvls[0]->Height() << " x " << Divfree_hpmat_mod_lvls[0]->Width() << "\n";
+        //std::cout << "size of (*Funct_hpmat_lvls[1])(0,0)] = " << (*Funct_hpmat_lvls[1])(0,0)->Height() << " x " << (*Funct_hpmat_lvls[1])(0,0)->Width() << "\n";
+        HypreParMatrix * HcurlOp = RAP(Divfree_hpmat_mod_lvls[1], (*Funct_hpmat_lvls[1])(0,0), Divfree_hpmat_mod_lvls[1]);
+        HcurlOp->GetDiag(diag2);
+
+        diag2.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag2 - diag1 norm = " << diag2.MaxNorm() << "\n";
+
+        HypreParMatrix * tempm = RAP(TrueP_R[0], (*Funct_hpmat_lvls[0])(0,0), TrueP_R[0] );
+
+        HypreParMatrix * HcurlOp_2 = RAP(Divfree_hpmat_mod_lvls[1], tempm, Divfree_hpmat_mod_lvls[1]);
+
+        SparseMatrix diag3;
+        HcurlOp_2->GetDiag(diag3);
+
+        diag3.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag3 - diag1 norm = " << diag3.MaxNorm() << "\n";
+
+        HypreParMatrix * tempmm = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0]);
+        HypreParMatrix * HcurlOp_3 = RAP(TrueP_C[0], tempmm, TrueP_C[0] );
+
+        SparseMatrix diag4;
+        HcurlOp_3->GetDiag(diag4);
+
+        diag4.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag4 - diag1 norm = " << diag4.MaxNorm() << "\n";
+
+        MPI_Finalize();
+        return 0;
+    }
+    */
 
     // comparison at the coarsest level
     /*
@@ -5049,6 +5049,43 @@ int main(int argc, char *argv[])
         }
         MPI_Barrier(comm);
     }
+
+    if (verbose)
+        std::cout << " \nChecking the coarsest level matrix in geometric MG \n";
+
+    {
+        HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+
+        Vector testinCoarseHcurlvec(A_coarse->Width());
+        testinCoarseHcurlvec = 1.0;
+        {
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                std::cout << (*temp)[tdofind] << " ";
+                testinCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+            }
+            std::cout << "\n";
+
+        }
+
+        Vector testCoarseHcurlvec(A_coarse->Height());
+        A_coarse->Mult(inCoarseHcurlvec, testCoarseHcurlvec);
+        {
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                if ( fabs(testCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for testCoarseHcurlvec, value = "
+                              << testCoarseHcurlvec[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                }
+            }
+
+        }
+    }
+
 #endif // for #ifdef COMPARE_COARSE_SOLVERS
 
     MPI_Finalize();
@@ -6727,15 +6764,6 @@ void E_exact(const Vector &xt, Vector &E)
         E(0) = sin(kappa * xt(1));
         E(1) = sin(kappa * xt(2));
         E(2) = sin(kappa * xt(0));
-#ifdef BAD_TEST
-        double x = xt(0);
-        double y = xt(1);
-        double t = xt(2);
-
-        E(0) = x * x * (1-x) * (1-x) * y * y * (1-y) * (1-y) * t * t * (1-t) * (1-t);
-        E(1) = 0.0;
-        E(2) = 0.0;
-#endif
     }
 }
 
@@ -6747,15 +6775,6 @@ void curlE_exact(const Vector &xt, Vector &curlE)
         curlE(0) = - kappa * cos(kappa * xt(2));
         curlE(1) = - kappa * cos(kappa * xt(0));
         curlE(2) = - kappa * cos(kappa * xt(1));
-#ifdef BAD_TEST
-        double x = xt(0);
-        double y = xt(1);
-        double t = xt(2);
-
-        curlE(0) = 0.0;
-        curlE(1) =  2.0 * t * (1-t) * (1.-2.*t) * x * x * (1-x) * (1-x) * y * y * (1-y) * (1-y);
-        curlE(2) = -2.0 * y * (1-y) * (1.-2.*y) * x * x * (1-x) * (1-x) * t * t * (1-t) * (1-t);
-#endif
     }
 }
 

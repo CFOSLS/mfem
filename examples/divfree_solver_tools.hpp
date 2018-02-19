@@ -18,6 +18,250 @@ using std::unique_ptr;
 // activates some additional checks
 //#define DEBUG_INFO
 
+
+/// Conjugate gradient method which checks for boundary conditions (used for debugging)
+class CGSolver_mod : public CGSolver
+{
+protected:
+    Array<int>& check_indices;
+
+    bool IndicesAreCorrect(const Vector& vec) const;
+
+public:
+   CGSolver_mod(Array<int>& Check_Indices) : CGSolver(), check_indices(Check_Indices) {}
+
+#ifdef MFEM_USE_MPI
+   CGSolver_mod(MPI_Comm _comm, Array<int>& Check_Indices) : CGSolver(_comm), check_indices(Check_Indices) { }
+#endif
+
+   virtual void Mult(const Vector &b, Vector &x) const;
+
+};
+
+bool CGSolver_mod::IndicesAreCorrect(const Vector& vec) const
+{
+    bool res = true;
+
+    for (int i = 0; i < check_indices.Size(); ++i)
+        if (fabs(vec[check_indices[i]]) > 1.0e-14)
+        {
+            std::cout << "index " << i << "has a nonzero value: " << vec[check_indices[i]] << "\n";
+            res = false;
+        }
+
+    return res;
+}
+
+void CGSolver_mod::Mult(const Vector &b, Vector &x) const
+{
+   int i;
+   double r0, den, nom, nom0, betanom, alpha, beta;
+
+   //std::cout << "look at b at the entrance \n";
+   //b.Print();
+   std::cout << "check for b: " << IndicesAreCorrect(b) << "\n";
+   MFEM_ASSERT(IndicesAreCorrect(b), "Indices check fails for b \n");
+
+   if (iterative_mode)
+   {
+      oper->Mult(x, r);
+      subtract(b, r, r); // r = b - A x
+   }
+   else
+   {
+      r = b;
+      x = 0.0;
+   }
+
+   MFEM_ASSERT(IndicesAreCorrect(r), "Indices check fails for r \n");
+   std::cout << "check for initial r: " << IndicesAreCorrect(r) << "\n";
+   check_indices.Print();
+   for ( int i = 0; i < check_indices.Size(); ++i)
+       std::cout << r[check_indices[i]] << " ";
+   std::cout << "\n";
+   //std::cout << "look at the initial residual\n";
+   //r.Print();
+
+   if (prec)
+   {
+      prec->Mult(r, z); // z = B r
+      //std::cout << "look at preconditioned residual at the entrance \n";
+      //z.Print();
+      d = z;
+   }
+   else
+   {
+      d = r;
+   }
+
+   std::cout << "check for initial d: " << IndicesAreCorrect(d) << "\n";
+   MFEM_ASSERT(IndicesAreCorrect(b), "Indices check fails for d \n");
+
+   //std::cout << "look at residual at the entrance \n";
+   //r.Print();
+
+   nom0 = nom = Dot(d, r);
+   MFEM_ASSERT(IsFinite(nom), "nom = " << nom);
+
+   std::cout << "nom = " << nom << "\n";
+
+   if (print_level == 1 || print_level == 3)
+   {
+      cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+           << nom << (print_level == 3 ? " ...\n" : "\n");
+   }
+
+   r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol);
+   if (nom <= r0)
+   {
+      converged = 1;
+      final_iter = 0;
+      final_norm = sqrt(nom);
+      return;
+   }
+
+   oper->Mult(d, z);  // z = A d
+   den = Dot(z, d);
+   MFEM_ASSERT(IsFinite(den), "den = " << den);
+
+   if (print_level >= 0 && den < 0.0)
+   {
+      cout << "Negative denominator in step 0 of PCG: " << den << '\n';
+   }
+
+   if (den == 0.0)
+   {
+      converged = 0;
+      final_iter = 0;
+      final_norm = sqrt(nom);
+      return;
+   }
+
+   // start iteration
+   converged = 0;
+   final_iter = max_iter;
+   for (i = 1; true; )
+   {
+      alpha = nom/den;
+      add(x,  alpha, d, x);     //  x = x + alpha d
+      add(r, -alpha, z, r);     //  r = r - alpha A d
+
+      std::cout << "check for new r: " << IndicesAreCorrect(r) << ", i = " << i << " \n";
+
+      if (prec)
+      {
+         prec->Mult(r, z);      //  z = B r
+         std::cout << "check for new z: " << IndicesAreCorrect(z) << ", i = " << i << " \n";
+         betanom = Dot(r, z);
+      }
+      else
+      {
+         betanom = Dot(r, r);
+      }
+
+      MFEM_ASSERT(IsFinite(betanom), "betanom = " << betanom);
+
+      if (print_level == 1)
+      {
+         cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+              << betanom << '\n';
+      }
+
+      if (betanom < r0)
+      {
+         if (print_level == 2)
+         {
+            cout << "Number of PCG iterations: " << i << '\n';
+         }
+         else if (print_level == 3)
+         {
+            cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+                 << betanom << '\n';
+         }
+         converged = 1;
+         final_iter = i;
+         break;
+      }
+
+      if (++i > max_iter)
+      {
+         break;
+      }
+
+      beta = betanom/nom;
+      if (prec)
+      {
+         add(z, beta, d, d);   //  d = z + beta d
+         std::cout << "check for new d: " << IndicesAreCorrect(d) << ", i = " << i << " \n";
+      }
+      else
+      {
+         add(r, beta, d, d);
+      }
+      oper->Mult(d, z);       //  z = A d
+      den = Dot(d, z);
+      MFEM_ASSERT(IsFinite(den), "den = " << den);
+      if (den <= 0.0)
+      {
+         if (print_level >= 0 && Dot(d, d) > 0.0)
+            cout << "PCG: The operator is not positive definite. (Ad, d) = "
+                 << den << '\n';
+      }
+      nom = betanom;
+   }
+   if (print_level >= 0 && !converged)
+   {
+      if (print_level != 1)
+      {
+         if (print_level != 3)
+         {
+            cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+                 << nom0 << " ...\n";
+         }
+         cout << "   Iteration : " << setw(3) << final_iter << "  (B r, r) = "
+              << betanom << '\n';
+      }
+      cout << "PCG: No convergence!" << '\n';
+   }
+   if (print_level >= 1 || (print_level >= 0 && !converged))
+   {
+      cout << "Average reduction factor = "
+           << pow (betanom/nom0, 0.5/final_iter) << '\n';
+   }
+   final_norm = sqrt(betanom);
+}
+
+// class for Op_new = beta * Identity  + gamma * Op
+class MyAXPYOperator : public Operator
+{
+private:
+    Operator & op;
+    double beta;
+    double gamma;
+public:
+    MyAXPYOperator(Operator& Op, double Beta = 0.0, double Gamma = 1.0)
+        : Operator(Op.Height(),Op.Width()), op(Op), beta(Beta), gamma(Gamma) {}
+
+    // Operator application
+    void Mult(const Vector& x, Vector& y) const;
+};
+
+// Computes y = beta * x + gamma * Op  * x
+void MyAXPYOperator::Mult(const Vector& x, Vector& y) const
+{
+    op.Mult(x, y);
+    y *= gamma; // y = gamma * Op * x
+
+    Vector tmp(x.Size());
+    tmp = x;
+    tmp *= beta; // tmp = beta * x
+
+    y += tmp;    // y +=  beta * x, finally
+}
+
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range );
+void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs );
+
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2)
@@ -354,6 +598,34 @@ void CoarsestProblemHcurlSolver::Setup() const
                 {
                     HcurlFunct_global(blk1, blk2)  = Funct_blk;
                 }
+
+//#ifdef COMPARE_MG
+                const Array<int> *temp_range;
+                const Array<int> *temp_dom;
+                if (blk1 == 0)
+                    temp_range = &essbdrtruedofs_Hcurl;
+                else
+                    temp_range = essbdrtruedofs_blocks[blk1];
+
+                if (blk2 == 0)
+                    temp_dom = &essbdrtruedofs_Hcurl;
+                else
+                    temp_dom = essbdrtruedofs_blocks[blk2];
+
+                Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
+                HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
+                Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+                HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
+                if (blk1 == blk2)
+                    Eliminate_bb_block(*HcurlFunct_global(blk1, blk2), *temp_dom);
+                SparseMatrix diag;
+                HcurlFunct_global(blk1, blk2)->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+
+                HcurlFunct_global(blk1, blk2)->CopyColStarts();
+                HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                delete temphpmat;
+//#endif
             } // else of if Funct_blk != NULL
 
         }
@@ -400,8 +672,8 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    //if (coarse_prec)
-        //coarseSolver->SetPreconditioner(*coarse_prec);
+    if (coarse_prec)
+        coarseSolver->SetPreconditioner(*coarse_prec);
     coarseSolver->SetPrintLevel(0);
     coarseSolver->iterative_mode = false;
 
@@ -3030,8 +3302,22 @@ void HcurlGSSSmoother::Setup() const
                                 "cases numblocks = 1 or 2 only \n");
 
     CTMC_global = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
+
+    const Array<int> *temp_dom = &essbdrtruedofs_Hcurl;
+
+    Eliminate_ib_block(*CTMC_global, *temp_dom, *temp_dom );
+    HypreParMatrix * temphpmat = CTMC_global->Transpose();
+    Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
+    CTMC_global = temphpmat->Transpose();
+    Eliminate_bb_block(*CTMC_global, *temp_dom);
+    SparseMatrix diag;
+    CTMC_global->GetDiag(diag);
+    diag.MoveDiagonalFirst();
+
     CTMC_global->CopyRowStarts();
     CTMC_global->CopyColStarts();
+    delete temphpmat;
+
 
     /*
     SparseMatrix diagg;
@@ -3056,16 +3342,11 @@ void HcurlGSSSmoother::Setup() const
 #endif
 }
 
-// TODO: Add as an option using blas and lapack versions for solving local problems
 // TODO: Test after all with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
 // TODO: Clean up the function descriptions
 // TODO: Clean up the variables names
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
-// TODO: Make dof_truedof an optional data member so that either dof_truedof or
-// TODO: global funct matrices (and offsets) are given at all level, maybe via two different constructors
-// TODO: In the latter case ComputeTrueRes can be rewritten using global matrices and dof_truedof
-// TODO: can remain unused at all.
 
 class GeneralMinConstrSolver : public Solver
 {
@@ -5034,14 +5315,14 @@ void MonolithicMultigrid::MG_Cycle() const
 class Multigrid : public Solver
 {
 public:
-    Multigrid(HypreParMatrix &Operator,
+    Multigrid(HypreParMatrix &Op,
               const Array<HypreParMatrix*> &P,
 #ifdef BND_FOR_MULTIGRID
               const std::vector<Array<int>*> & EssBdrTDofs_lvls,
 #endif
               Solver *CoarsePrec = NULL)
         :
-          Solver(Operator.GetNumRows()),
+          Solver(Op.GetNumRows()),
           P_(P),
 #ifdef BND_FOR_MULTIGRID
           essbdrtdofs_lvls(EssBdrTDofs_lvls),
@@ -5054,7 +5335,7 @@ public:
           CoarsePrec_(CoarsePrec),
           built_prec(false)
     {
-        Operators_.Last() = &Operator;
+        Operators_.Last() = &Op;
         for (int l = Operators_.Size()-1; l > 0; l--)
         {
             /*
@@ -5064,9 +5345,24 @@ public:
             Operators_[l-1]->CopyRowStarts();
             */
 
+
             Operators_[l-1] = RAP(P[l-1], Operators_[l], P[l-1]);
+//#ifdef COMPARE_MG
+            Eliminate_ib_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l], *essbdrtdofs_lvls[Operators_.Size() - l] );
+            HypreParMatrix * temphpmat = Operators_[l-1]->Transpose();
+            Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l], *essbdrtdofs_lvls[Operators_.Size() - l] );
+            Operators_[l-1] = temphpmat->Transpose();
             Operators_[l-1]->CopyColStarts();
             Operators_[l-1]->CopyRowStarts();
+            SparseMatrix diag;
+            Operators_[l-1]->GetDiag(diag);
+            diag.MoveDiagonalFirst();
+            delete temphpmat;
+            //Eliminate_bb_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l]);
+//#else
+            Operators_[l-1]->CopyColStarts();
+            Operators_[l-1]->CopyRowStarts();
+//#endif
         }
 
         for (int l = 0; l < Operators_.Size(); l++)
@@ -5080,6 +5376,7 @@ public:
                 correction[l] = new Vector();
         }
 
+        //CoarseSolver = new CGSolver_mod(Operators_[0]->GetComm(), *essbdrtdofs_lvls[Operators_.Size() - 1]);
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
         CoarseSolver->SetRelTol(sqrt(1e-12));
@@ -5096,12 +5393,105 @@ public:
         {
             built_prec = true;
 
-            HypreParMatrix &A_c = (HypreParMatrix&)(*Operators_[0]);
+            /*
+            essbdrtdofs_lvls[Operators_.Size() - 1]->Print();
 
-            CoarsePrec_ = new HypreSmoother(A_c, HypreSmoother::Type::l1GS, 1);
+            SparseMatrix diag;
+            Operators_[0]->GetDiag(diag);
+            //diag.Print();
+
+            Vector vecdiag;
+            diag.GetDiag(vecdiag);
+
+            std::cout << "zero entries which appear at the diagonal of coarse matrix \n";
+            for (int i = 0; i < vecdiag.Size(); ++i)
+            {
+                //std::cout << vecdiag[i] << " ";
+                //if ( fabs(vecdiag[i]) < 1.0e-14)
+                    //std::cout << " is zero! i = " << i << " ";
+                //std::cout << "\n";
+                if ( fabs(vecdiag[i]) < 1.0e-14)
+                    std::cout << i << " ";
+            }
+            std::cout << "\n";
+            */
+
+            //vecdiag.Print();
+
+            //std::cout << "diag unsymmetry measure = " << diag.IsSymmetric() << "\n";
+
+            CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::l1GS, 1);
+            //CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::l1Jacobi, 1);
+            //CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::Jacobi, 1);
+
+            /*
+            Vector testvec1(CoarsePrec_->Width());
+            testvec1 = 1.0;
+            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - 1];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+                testvec1[(*temp)[tdofind]] = 0.0;
+            Vector testvec2(CoarsePrec_->Height());
+            CoarsePrec_->Mult(testvec1, testvec2);
+            testvec2.Print();
+
+            {
+                Array<double> eigenvalues;
+                int nev = 20;
+                int seed = 75;
+                int maxiter = 600;
+                double eigtol = 1.0e-8;
+                {
+
+                    HypreLOBPCG * lobpcg = new HypreLOBPCG(MPI_COMM_WORLD);
+
+                    lobpcg->SetNumModes(nev);
+                    lobpcg->SetRandomSeed(seed);
+                    lobpcg->SetMaxIter(maxiter);
+                    lobpcg->SetTol(eigtol);
+                    lobpcg->SetPrintLevel(1);
+                    // checking for A
+                    lobpcg->SetOperator(A_c);
+
+                    // 4. Compute the eigenmodes and extract the array of eigenvalues. Define a
+                    //    parallel grid function to represent each of the eigenmodes returned by
+                    //    the solver.
+                    lobpcg->Solve();
+                    lobpcg->GetEigenvalues(eigenvalues);
+
+                    std::cout << "The computed minimal eigenvalues for M are: \n";
+                    eigenvalues.Print();
+                }
+
+                double beta = eigenvalues[0] * 10000.0; // should be enough
+                Operator * revA_op = new MyAXPYOperator(A_c, beta, -1.0);
+                {
+                    HypreLOBPCG * lobpcg2 = new HypreLOBPCG(MPI_COMM_WORLD);
+
+                    lobpcg2->SetNumModes(nev);
+                    lobpcg2->SetRandomSeed(seed);
+                    lobpcg2->SetMaxIter(maxiter);
+                    lobpcg2->SetTol(eigtol*1.0e-4);
+                    lobpcg2->SetPrintLevel(1);
+                    // checking for beta * Id - A
+                    lobpcg2->SetOperator(*revA_op);
+
+                    // 4. Compute the eigenmodes and extract the array of eigenvalues. Define a
+                    //    parallel grid function to represent each of the eigenmodes returned by
+                    //    the solver.
+                    lobpcg2->Solve();
+                    lobpcg2->GetEigenvalues(eigenvalues);
+
+                    std::cout << "The computed maximal eigenvalues for M are: \n";
+                    for ( int i = 0; i < nev; ++i)
+                        eigenvalues[i] = beta - eigenvalues[i];
+                     eigenvalues.Print();
+                }
+
+            }
+            */
         }
 
-        //CoarseSolver->SetPreconditioner(*CoarsePrec_);
+        CoarseSolver->SetPreconditioner(*CoarsePrec_);
 
     }
 
@@ -5476,6 +5866,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
 
     int ntdofs_range = Op_hpmat.Height();
 
+    //std::cout << "Op_hpmat = " << Op_hpmat.Height() << " x " << Op_hpmat.Width() << "\n";
     Array<int> btd_flags_range(ntdofs_range);
     btd_flags_range = 0;
     for ( int i = 0; i < EssBdrTrueDofs_range.Size(); ++i )
@@ -5498,7 +5889,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                 int col = C_td_btd_diag.GetJ()[nnz_ind];
                 double fabs_entry = fabs(C_td_btd_diag.GetData()[nnz_ind]);
 
-                if (fabs_entry > 1.0e-10)
+                if (fabs_entry > 1.0e-14)
                 {
                     for (int j = 0; j < C_diag.RowSize(row); ++j)
                     {
@@ -5513,7 +5904,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                 } // else of if fabs_entry is large enough
 
             }
-        } // end of if row corresponds to the non-boundary Hdiv dof
+        } // end of if row corresponds to the non-boundary range dof
     }
 
     //C_diag.Print();
@@ -5539,7 +5930,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                 int truecol = C_td_btd_cmap[C_td_btd_offd.GetJ()[nnz_ind]];
                 double fabs_entry = fabs(C_td_btd_offd.GetData()[nnz_ind]);
 
-                if (fabs_entry > 1.0e-10)
+                if (fabs_entry > 1.0e-14)
                 {
                     for (int j = 0; j < C_offd.RowSize(row); ++j)
                     {
@@ -5562,7 +5953,68 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                 } // else of if fabs_entry is large enough
 
             }
-        } // end of if row corresponds to the non-boundary Hdiv dof
+        } // end of if row corresponds to the non-boundary range dof
+
+    }
+}
+
+
+// Replaces "bb" block in the Operator acting in the same space,
+// assembled as a HypreParMatrix, which connects boundary dofs to boundary dofs by identity
+void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs )
+{
+    MFEM_ASSERT(Op_hpmat.Width() == Op_hpmat.Height(), "The matrix must be square in Eliminate_bb_block()! \n");
+
+    int ntdofs = Op_hpmat.Width();
+
+    Array<int> btd_flags(ntdofs);
+    btd_flags = 0;
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs \n";
+    //EssBdrTrueDofs.Print();
+
+    for ( int i = 0; i < EssBdrTrueDofs.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs[i];
+        btd_flags[tdof] = 1;
+    }
+
+    SparseMatrix C_diag;
+    Op_hpmat.GetDiag(C_diag);
+
+    // processing local-to-process block of the matrix
+    for (int row = 0; row < C_diag.Height(); ++row)
+    {
+        if (btd_flags[row] != 0) // if the row tdof is at the boundary
+        {
+            for (int j = 0; j < C_diag.RowSize(row); ++j)
+            {
+                int col = C_diag.GetJ()[C_diag.GetI()[row] + j];
+                if  (col == row)
+                    C_diag.GetData()[C_diag.GetI()[row] + j] = 1.0;
+                else
+                    C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
+            }
+        } // end of if row corresponds to the boundary tdof
+    }
+
+    //C_diag.Print();
+
+    SparseMatrix C_offd;
+    HYPRE_Int * C_cmap;
+    Op_hpmat.GetOffd(C_offd, C_cmap);
+
+    // processing the off-diagonal block of the matrix
+    for (int row = 0; row < C_offd.Height(); ++row)
+    {
+        if (btd_flags[row] != 0) // if the row tdof is at the boundary
+        {
+            for (int j = 0; j < C_offd.RowSize(row); ++j)
+            {
+                C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
+            }
+
+        } // end of if row corresponds to the boundary tdof
 
     }
 }
