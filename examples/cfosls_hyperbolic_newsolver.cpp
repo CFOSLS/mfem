@@ -21,9 +21,6 @@
 // in parallel GS smoother works a little bit different from serial
 #define WITH_SMOOTHERS
 
-// must be always on
-#define NEW_SMOOTHERSETUP
-
 // activates a check for the symmetry of the new smoother setup
 //#define CHECK_SPDSMOOTHER
 
@@ -1587,10 +1584,8 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls(num_levels);
     Array<SparseMatrix*> Constraint_mat_lvls(num_levels);
 
-#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     Array<HypreParMatrix*> Divfree_hpmat_mod_lvls(num_levels);
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_levels);
-#endif
 
     BlockOperator* Funct_global;
     std::vector<Operator*> Funct_global_lvls(num_levels);
@@ -1626,9 +1621,7 @@ int main(int argc, char *argv[])
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
-#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
        Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numblocks_funct, numblocks_funct);
-#endif
    }
 
    const SparseMatrix* P_C_local;
@@ -2108,7 +2101,6 @@ int main(int argc, char *argv[])
         Eliminate_ib_block(*Divfree_hpmat_mod_lvls[l], *EssBdrTrueDofs_Hcurl[l], *EssBdrTrueDofs_Funct_lvls[l][0]);
     }
 
-#if defined NEW_SMOOTHERSETUP || defined HCURL_COARSESOLVER
     for (int l = 0; l < num_levels; ++l)
     {
         if (l == 0)
@@ -2246,8 +2238,6 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
-#endif
-#if defined NEW_SMOOTHERSETUP
     for (int l = 0; l < num_levels; ++l)
     {
         if (l == 0)
@@ -2271,15 +2261,6 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
-#else
-    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]);
-    Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-    Bblock->Assemble();
-    Bblock->Finalize();
-    Constraint_global = Bblock->ParallelAssemble();
-    delete Bblock;
-#endif
-
     for (int l = num_levels - 1; l >=0; --l)
     {
         if (l < num_levels - 1)
@@ -2300,19 +2281,10 @@ int main(int argc, char *argv[])
                     SweepsNum.Print();
                 }
             }
-#ifdef NEW_SMOOTHERSETUP
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_mod_lvls[l],
                                                      *EssBdrTrueDofs_Hcurl[l],
                                                      EssBdrTrueDofs_Funct_lvls[l],
                                                      &SweepsNum, offsets_global);
-#else
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_mat_lvls[l], *Divfree_mat_lvls[l],
-                                                     *Dof_TrueDof_Hcurl_lvls[l], Dof_TrueDof_Func_lvls[l],
-                                                     *EssBdrDofs_Hcurl[l], *EssBdrTrueDofs_Hcurl[l],
-                                                     EssBdrDofs_Funct_lvls[l], EssBdrTrueDofs_Funct_lvls[l],
-                                                     &SweepsNum, offsets_global);
-#endif
-
 #else // for #ifdef WITH_SMOOTHERS
             Smoothers_lvls[l] = NULL;
 #endif
@@ -2613,7 +2585,6 @@ int main(int argc, char *argv[])
     //return 0;
     */
 
-#if defined NEW_SMOOTHERSETUP
     /*
     // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
     SparseMatrix d_td_Hdiv_diag;
@@ -2643,7 +2614,6 @@ int main(int argc, char *argv[])
     std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
     MPI_Barrier(comm);
     */
-#endif
 
 #ifdef TIMING
     //testing the smoother performance
@@ -5871,7 +5841,6 @@ int main(int argc, char *argv[])
                 delete Smoothers_lvls[l];
 #endif
 
-#if defined NEW_SMOOTHERSETUP
         if (l < num_levels - 1)
             delete Divfree_hpmat_mod_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
@@ -5879,7 +5848,6 @@ int main(int argc, char *argv[])
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))
                     delete (*Funct_hpmat_lvls[l])(blk1,blk2);
         //delete Funct_hpmat_lvls[l];
-#endif
 
         if (l < num_levels - 1)
         {
