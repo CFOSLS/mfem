@@ -720,6 +720,8 @@ public:
 };
 #endif
 
+int ipow(int base, int exp);
+
 double uFun1_ex(const Vector& x); // Exact Solution
 double uFun1_ex_dt(const Vector& xt);
 void uFun1_ex_gradx(const Vector& xt, Vector& grad);
@@ -1125,7 +1127,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 3;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1140,7 +1142,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -2282,7 +2284,13 @@ int main(int argc, char *argv[])
             for ( int blk = 0; blk < numblocks_funct; ++blk)
                 offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
             offsets_global.PartialSum();
-            SweepsNum = 1;
+            SweepsNum = ipow(5, l);
+            if (verbose)
+            {
+                std::cout << "Sweeps num: \n";
+                SweepsNum.Print();
+            }
+            /*
             if (l == 0)
             {
                 if (verbose)
@@ -2291,6 +2299,7 @@ int main(int argc, char *argv[])
                     SweepsNum.Print();
                 }
             }
+            */
             Smoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_mod_lvls[l],
                                                      *EssBdrTrueDofs_Hcurl[l],
                                                      EssBdrTrueDofs_Funct_lvls[l],
@@ -7054,3 +7063,16 @@ void uFun1_ex_gradx(const Vector& xt, Vector& gradx )
     gradx = 0.0;
 }
 
+int ipow(int base, int exp)
+{
+    int result = 1;
+    while (exp)
+    {
+        if (exp & 1)
+            result *= base;
+        exp >>= 1;
+        base *= base;
+    }
+
+    return result;
+}
