@@ -47,21 +47,25 @@
 
 //#define MARTIN_PREC
 
-//#define COMPARE_MG
+#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
+#define BLKDIAG_SMOOTHER
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
-#define NCOARSEITER 4
+#define NCOARSEITER 1
 
 //#define NO_COARSESOLVE
-//#define NO_POSTSMOOTH
-//#define NO_PRESMOOTH
+#define NO_POSTSMOOTH
+#define NO_PRESMOOTH
 
 //#define COMPARE_COARSE_SOLVERS
 //#define COMPARE_SMOOTHERS
 #endif // for ifdef COMPARE_MG
+
+TODO: impose boundary conditions after Pt and do the bnd cnds elimination for matrix blocks
+in MonolithicMultigrid
 
 //#define TIMING
 
@@ -1121,9 +1125,9 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1136,7 +1140,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -1555,6 +1559,10 @@ int main(int argc, char *argv[])
     std::vector<std::vector<Array<int>* > > EssBdrDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
     std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_Funct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
 
+#ifdef OLD_CODE
+    std::vector<std::vector<Array<int>* > > EssBdrTrueDofs_HcurlFunct_lvls(num_levels, std::vector<Array<int>* >(numblocks_funct));
+#endif
+
     Array< SparseMatrix* > P_C_lvls(num_levels - 1);
 #ifdef HCURL_COARSESOLVER
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
@@ -1595,6 +1603,7 @@ int main(int argc, char *argv[])
        BdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
+       EssBdrTrueDofs_HcurlFunct_lvls[l][0] = new Array<int>;
 #ifndef HCURL_COARSESOLVER
        if (l < num_levels - 1)
        {
@@ -1615,6 +1624,7 @@ int main(int argc, char *argv[])
            BdrDofs_Funct_lvls[l][1] = new Array<int>;
            EssBdrDofs_Funct_lvls[l][1] = new Array<int>;
            EssBdrTrueDofs_Funct_lvls[l][1] = new Array<int>;
+           EssBdrTrueDofs_HcurlFunct_lvls[l][1] = new Array<int>;
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
@@ -1742,6 +1752,7 @@ int main(int argc, char *argv[])
 #else
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
         C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+        C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_HcurlFunct_lvls[l][0]);
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_H1[l]);
 #endif
@@ -1750,6 +1761,7 @@ int main(int argc, char *argv[])
             H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_Funct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_Funct_lvls[l][1]);
+            H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_HcurlFunct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
         }
 
@@ -3190,7 +3202,11 @@ int main(int argc, char *argv[])
                             P[l]->SetBlock(1, 1, TrueP_H[l]);
                         }
 
+#ifdef BND_FOR_MULTIGRID
+                        prec = new MonolithicMultigrid(*MainOp, P, EssBdrTrueDofs_HcurlFunct_lvls, block_offsets);
+#else
                         prec = new MonolithicMultigrid(*MainOp, P);
+#endif
                     }
                     else
                     {
@@ -3856,6 +3872,7 @@ int main(int argc, char *argv[])
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
     BlockVector ParticSol(new_trueoffsets);
+    ParticSol = 0.0;
 
     chrono.Stop();
     if (verbose)
@@ -3872,7 +3889,7 @@ int main(int argc, char *argv[])
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 #else
-    Sigmahat->ParallelProject(ParticSol);
+    Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif
 
     chrono.Stop();
@@ -4232,10 +4249,33 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "\nComparing geometric MG with modified new MG (w/o Schwarz smoother) \n";
 
-    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
+    //MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
     //MFEM_ASSERT(num_procs == 1, "Right now the check operates only in serial case \n");
-    MFEM_ASSERT(num_levels = 2, "Check works only for 2-level case \n");
+    //MFEM_ASSERT(num_levels == 2, "Check works only for 2-level case \n");
 
+    Array<int> offsets_new(numblocks_funct + 1);
+    offsets_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        offsets_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_new.PartialSum();
+
+    BlockVector inFunctvec(offsets_new);
+    inFunctvec.GetBlock(0) = sigma_exact_truedofs;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        inFunctvec.GetBlock(1) = S_exact_truedofs;
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inFunctvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for inFunctvec, blk = " << blk << ",  value = "
+                          << inFunctvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+    /*
     Vector inHdivvec(NewSolver.Width());
     inHdivvec = sigma_exact_truedofs;
 
@@ -4251,11 +4291,43 @@ int main(int argc, char *argv[])
         }
     }
 #endif
+    */
 
-    Vector inHcurlvec( Divfree_hpmat_mod_lvls[0]->Width());
-    Divfree_hpmat_mod_lvls[0]->MultTranspose(inHdivvec, inHcurlvec);
+    Array<int> offsets_hcurlfunct_new(numblocks_funct + 1);
+    offsets_hcurlfunct_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            offsets_hcurlfunct_new[blk + 1] = Divfree_hpmat_mod_lvls[0]->Width();
+        else
+            offsets_hcurlfunct_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_hcurlfunct_new.PartialSum();
 
+    BlockVector inFunctHcurlvec(offsets_hcurlfunct_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->MultTranspose(inFunctvec.GetBlock(0), inFunctHcurlvec.GetBlock(0));
+        else
+            inFunctHcurlvec.GetBlock(blk) = inFunctvec.GetBlock(blk);
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for inFunctHcurlvec, blk = " << blk << ",  value = "
+                          << inFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+    /*
+     * checking the Divfree and Divfree_T operators
 #ifdef CHECK_BNDCND
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
     auto Divfree_T = Divfree_hpmat_mod_lvls[0]->Transpose();
     MPI_Barrier(comm);
     for (int i = 0; i < num_procs; ++i)
@@ -4385,63 +4457,8 @@ int main(int argc, char *argv[])
     }
     delete Divfree_T;
 
-#if 0
-    // delete this after fixing the problem
-    MPI_Barrier(comm);
-    for (int i = 0; i < num_procs; ++i)
-    {
-        if (myid == i && myid == 1)
-        {
-            std::cout << "I am " << myid << "\n";
-
-            /*
-            SparseMatrix spmat2;
-            Divfree_hpmat_mod_lvls[0]->GetDiag(spmat2);
-
-            if (found2)
-            {
-                std::cout << "Looking for incorrect values in the diagonal part of Divfree \n";
-                int row = special_col2;
-                int row_shift = spmat2.GetI()[row];
-                std::cout << "row = " << row << "\n";
-                for (int j = 0; j < spmat2.RowSize(row); ++j)
-                {
-                    std::cout << "(" << spmat2.GetJ()[row_shift + j] << ", " << spmat2.GetData()[row_shift + j] << ") ";
-                }
-                std::cout << "\n";
-            }
-            */
-
-            SparseMatrix spmat2_offd;
-            int * cmap2_offd;
-            Divfree_hpmat_mod_lvls[0]->GetOffd(spmat2_offd, cmap2_offd);
-
-            int * row_starts = Divfree_hpmat_mod_lvls[0]->GetRowStarts();
-            std::cout << "rowstarts: " << row_starts[0] << ", " << row_starts[1] << "\n";
-
-            int tdof_offset = C_space_lvls[0]->GetMyTDofOffset();
-            std::cout << "tdof_offset = " << tdof_offset << "\n";
-            int special_truecol = 3821;
-            int special_col = special_truecol - row_starts[0];
-
-            std::cout << "Looking for incorrect values in the off-diagonal part of Divfree on proc 1 \n";
-            std::cout << "height = " << spmat2_offd.Height() << "\n";
-            int row = special_col;
-            int row_shift = spmat2_offd.GetI()[row];
-            std::cout << "row = " << row << "\n";
-            for (int j = 0; j < spmat2_offd.RowSize(row); ++j)
-            {
-                int col = spmat2_offd.GetJ()[row_shift + j];
-                std::cout << "col = " << col << ": ( " << cmap2_offd[col] << ", " << spmat2_offd.GetData()[row_shift + j] << ") ";
-            }
-            std::cout << "\n";
-
-        }
-        MPI_Barrier(comm);
-    }
-#endif // for #if 0
-
 #endif // for CHECK_BND
+    */
 
     //MPI_Finalize();
     //return 0;
@@ -4507,33 +4524,83 @@ int main(int argc, char *argv[])
     //CoarseOperator(0,0) = A_coarse;
     //((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetCoarseOperator(CoarseOperator);
 
-
-    Vector outHdivvec(NewSolver.Height());
+    BlockVector outFunctvec(offsets_new);
 
     if (verbose)
         std::cout << "Computing action for the new MG ... \n";
-    NewSolver.Mult(inHdivvec, outHdivvec);
+    NewSolver.Mult(inFunctvec, outFunctvec);
 
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFunctvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for outFunctvec, blk = " << blk << ",  value = "
+                          << outFunctvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
 
-    Vector outHcurlvec(prec->Height());
-    outHcurlvec = 0.0;
+    BlockVector outFunctHcurlvec(offsets_hcurlfunct_new);
+    outFunctHcurlvec = 0.0;
     if (verbose)
         std::cout << "Computing action for the geometric MG ... \n";
-    prec->Mult(inHcurlvec, outHcurlvec);
+    prec->Mult(inFunctHcurlvec, outFunctHcurlvec);
 
-    Vector out2Hdivvec(Divfree_hpmat_mod_lvls[0]->Height());
-    Divfree_hpmat_mod_lvls[0]->Mult(outHcurlvec, out2Hdivvec);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for outFunctHcurlvec, blk = " << blk << ",  value = "
+                          << outFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
 
-    Vector diff(R_space_lvls[0]->TrueVSize());
-    diff = outHdivvec;
-    diff -= out2Hdivvec;
+    BlockVector out2Functvec(offsets_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->Mult(outFunctHcurlvec.GetBlock(0), out2Functvec.GetBlock(0));
+        else
+            out2Functvec.GetBlock(blk) = outFunctHcurlvec.GetBlock(blk);
+
+    BlockVector diff(offsets_new);
+    diff = outFunctvec;
+    diff -= out2Functvec;
+
+    /*
+    std::cout << "blk 0 \n";
+    diff.GetBlock(0).Print();
+    if (numblocks_funct > 1)
+    {
+        std::cout << "blk 1 \n";
+        diff.GetBlock(1).Print();
+    }
+    */
 
     double diff_norm = diff.Norml2() / sqrt (diff.Size());
-    double geommg_norm = out2Hdivvec.Norml2() / sqrt(out2Hdivvec.Size());
+    double geommg_norm = out2Functvec.Norml2() / sqrt(out2Functvec.Size());
     if (verbose)
     {
         std::cout << "|| NewMG * vec - C MG * C^T vec || = " << diff_norm << "\n";
         std::cout << "|| NewMG * vec - C MG * C^T vec || / || C MG * C^T vec || = " << diff_norm / geommg_norm << "\n";
+    }
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        double diffblk_norm = diff.GetBlock(blk).Norml2() / sqrt (diff.GetBlock(blk).Size());
+        if (verbose)
+        {
+            std::cout << "|| NewMG * vec - C MG * C^T vec ||, block " << blk << " = " << diffblk_norm << "\n";
+        }
     }
 
     // checking that A is exactly CT Funct_0 C in serial
@@ -4610,33 +4677,88 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << " \nComparing separately smoothers \n";
 
-    Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
-    Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
+    BlockVector outSmooHdivvec(offsets_new);
+    Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+
+    //std::cout << "inFunctvec \n";
+    //inFunctvec.Print();
+
+    //std::cout << "outSmooHdivvec\n";
+    //outSmooHdivvec.Print();
+
+    /*
+    inFunctvec = outSmooHdivvec; // iter no 2
+
+    //std::cout << "outSmooHdivvec after the 1st iteration \n";
+    //outSmooHdivvec.Print();
+
+    Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+    */
+
+    //Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
+    //Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
 
     HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+    HypreSmoother * Smoothers_fromMG_1;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        Smoothers_fromMG_1 = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
 
-    Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
-    Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
+    BlockVector outSmooHcurlvec(offsets_hcurlfunct_new);
+    Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+
+    /*
+    //std::cout << "outSmooHdivvec after the 1st iteration \n";
+    //outSmooHdivvec.Print();
+
+    inFunctHcurlvec = outSmooHcurlvec; // iter no 2
+    Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+        Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+    */
+
+    //Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
+    //Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
 
 #ifdef CHECK_BNDCND
-    const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
-    for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+    for (int blk = 0; blk < numblocks_funct; ++blk)
     {
-        if ( fabs(outSmooHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
-            std::cout << "bnd cnd is violated for outSmooHcurlvec, value = "
-                      << outSmooHcurlvec[(*temp)[tdofind]]
-                      << ", index = " << (*temp)[tdofind] << "\n";
-            std::cout << "... was corrected \n";
-            outSmooHcurlvec[(*temp)[tdofind]] = 0.0;
+            //std::cout << "index = " << (*temp)[tdofind] << "\n";
+            if ( fabs(outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outSmooHcurlvec, blk = " << blk << ", value = "
+                          << outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << "... was corrected \n";
+                //outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
         }
     }
 #endif
 
-    Vector out2SmooHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
-    Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec, out2SmooHdivvec);
+    BlockVector out2SmooHdivvec(offsets_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec.GetBlock(0), out2SmooHdivvec.GetBlock(0));
+        else
+            out2SmooHdivvec.GetBlock(blk) = outSmooHcurlvec.GetBlock(blk);
+    }
 
-    Vector diffsmoo(R_space_lvls[0]->TrueVSize());
+    //Vector out2SmooHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
+    //Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec, out2SmooHdivvec);
+
+    BlockVector diffsmoo(offsets_new);
+    //Vector diffsmoo(R_space_lvls[0]->TrueVSize());
     diffsmoo = outSmooHdivvec;
     diffsmoo -= out2SmooHdivvec;
 

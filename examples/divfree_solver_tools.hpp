@@ -231,34 +231,6 @@ void CGSolver_mod::Mult(const Vector &b, Vector &x) const
    final_norm = sqrt(betanom);
 }
 
-// class for Op_new = beta * Identity  + gamma * Op
-class MyAXPYOperator : public Operator
-{
-private:
-    Operator & op;
-    double beta;
-    double gamma;
-public:
-    MyAXPYOperator(Operator& Op, double Beta = 0.0, double Gamma = 1.0)
-        : Operator(Op.Height(),Op.Width()), op(Op), beta(Beta), gamma(Gamma) {}
-
-    // Operator application
-    void Mult(const Vector& x, Vector& y) const;
-};
-
-// Computes y = beta * x + gamma * Op  * x
-void MyAXPYOperator::Mult(const Vector& x, Vector& y) const
-{
-    op.Mult(x, y);
-    y *= gamma; // y = gamma * Op * x
-
-    Vector tmp(x.Size());
-    tmp = x;
-    tmp *= beta; // tmp = beta * x
-
-    y += tmp;    // y +=  beta * x, finally
-}
-
 void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range );
 void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs );
 
@@ -617,10 +589,12 @@ void CoarsestProblemHcurlSolver::Setup() const
                 Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                 HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
                 if (blk1 == blk2)
+                {
                     Eliminate_bb_block(*HcurlFunct_global(blk1, blk2), *temp_dom);
-                SparseMatrix diag;
-                HcurlFunct_global(blk1, blk2)->GetDiag(diag);
-                diag.MoveDiagonalFirst();
+                    SparseMatrix diag;
+                    HcurlFunct_global(blk1, blk2)->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+                }
 
                 HcurlFunct_global(blk1, blk2)->CopyColStarts();
                 HcurlFunct_global(blk1, blk2)->CopyRowStarts();
@@ -4176,7 +4150,15 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #else
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+
+            //std::cout << "input to smoother inside new mg \n";
+            //truetempvec_lvls[l]->Print();
+
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+
+            //std::cout << "output to smoother inside new mg \n";
+            //truetempvec2_lvls[l]->Print();
+
 #endif
 
 #ifdef TIMING
@@ -4323,6 +4305,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef NO_POSTSMOOTH
                 *truetempvec_lvls[l - 1] = 0.0;
 #else
+                //std::cout << "input to smoother inside new mg at the upward loop \n";
+                //truetempvec2_lvls[l - 1]->Print();
+
                 Smoothers_lvls[l - 1]->MultTranspose(*truetempvec2_lvls[l - 1], *truetempvec_lvls[l - 1] );
 #endif
 
@@ -5079,10 +5064,13 @@ private:
 
             yblock.GetBlock(0) = 0.0;
             B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
-
+#ifdef BLKDIAG_SMOOTHER
+            B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
+#else
             tmp1 = xblock.GetBlock(1);
             A10.Mult(-1.0, yblock.GetBlock(0), 1.0, tmp1);
             B11->Mult(tmp1, yblock.GetBlock(1));
+#endif
         }
 
         virtual void MultTranspose(const Vector & x, Vector & y) const
@@ -5093,9 +5081,13 @@ private:
             yblock.GetBlock(1) = 0.0;
             B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
 
+#ifdef BLKDIAG_SMOOTHER
+            B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+#else
             tmp01 = xblock.GetBlock(0);
             A01.Mult(-1.0, yblock.GetBlock(1), 1.0, tmp01);
             B00->Mult(tmp01, yblock.GetBlock(0));
+#endif
         }
 
         virtual void SetOperator(const Operator &op) { }
@@ -5123,10 +5115,18 @@ private:
 public:
     MonolithicMultigrid(BlockOperator &Op,
                         const Array<BlockOperator*> &P,
+#ifdef BND_FOR_MULTIGRID
+                        const std::vector<std::vector<Array<int>*> > & EssBdrTDofs_lvls,
+                        const Array<int> & Block_Offsets,
+#endif
                         Solver* Coarse_Prec = NULL)
         :
           Solver(Op.RowOffsets().Last()),
           P_(P),
+#ifdef BND_FOR_MULTIGRID
+          essbdrtdofs_lvls(EssBdrTDofs_lvls),
+          block_offsets(Block_Offsets),
+#endif
           Operators_(P.Size()+1),
           Smoothers_(Operators_.Size()),
           current_level(Operators_.Size()-1),
@@ -5136,6 +5136,10 @@ public:
           built_prec(false)
     {
         Operators_.Last() = &Op;
+
+#ifdef BND_FOR_MULTIGRID
+        xblock = new BlockVector(block_offsets);
+#endif
 
         for (int l = Operators_.Size()-1; l >= 0; l--)
         {
@@ -5190,7 +5194,11 @@ public:
         CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
         CoarseSolver->SetAbsTol(sqrt(1e-32));
         CoarseSolver->SetRelTol(sqrt(1e-12));
+#ifdef COMPARE_MG
+        CoarseSolver->SetMaxIter(NCOARSEITER);
+#else
         CoarseSolver->SetMaxIter(100);
+#endif
         CoarseSolver->SetPrintLevel(1);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
@@ -5239,6 +5247,12 @@ private:
 
     const Array<BlockOperator*> &P_;
 
+#ifdef BND_FOR_MULTIGRID
+    const std::vector<std::vector<Array<int>*> > & essbdrtdofs_lvls;
+    const Array<int> & block_offsets;
+    mutable BlockVector * xblock;
+#endif
+
     Array<BlockOperator*> Operators_;
     Array<BlockSmoother*> Smoothers_;
 
@@ -5260,6 +5274,20 @@ private:
 void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
+
+#ifdef BND_FOR_MULTIGRID
+    xblock->Update((*residual.Last()).GetData(), block_offsets);
+    for (int blk = 0; blk < block_offsets.Size() - 1; ++blk)
+    {
+        const Array<int> *temp = essbdrtdofs_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
+            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+        }
+    }
+#endif
+
     correction.Last()->SetDataAndSize(y.GetData(), y.Size());
     MG_Cycle();
 }
@@ -5275,10 +5303,15 @@ void MonolithicMultigrid::MG_Cycle() const
     Vector help(residual_l.Size());
     help = 0.0;
 
-    Smoother_l.Mult(residual_l, correction_l);
-
-    Operator_l.Mult(correction_l, help);
-    residual_l -= help;
+#ifndef NO_PRESMOOTH
+    // PreSmoothing
+    if (current_level > 0)
+    {
+        Smoother_l.Mult(residual_l, correction_l);
+        Operator_l.Mult(correction_l, help);
+        residual_l -= help;
+    }
+#endif
 
     // Coarse grid correction
     if (current_level > 0)
@@ -5299,17 +5332,30 @@ void MonolithicMultigrid::MG_Cycle() const
     }
     else
     {
+#ifdef NO_COARSESOLVE
+        correction_l = 0.0;
+#else
+        CoarseSolver->Mult(residual_l, correction_l);
+#endif
+        /*
         cor_cor.SetSize(residual_l.Size());
 
         CoarseSolver->Mult(residual_l, cor_cor);
         correction_l += cor_cor;
         Operator_l.Mult(cor_cor, help);
         residual_l -= help;
+        */
     }
 
+#ifndef NO_POSTSMOOTH
     // PostSmoothing
-    Smoother_l.MultTranspose(residual_l, cor_cor);
-    correction_l += cor_cor;
+    if (current_level > 0)
+    {
+        Smoother_l.MultTranspose(residual_l, cor_cor);
+        correction_l += cor_cor;
+    }
+#endif
+
 }
 
 class Multigrid : public Solver
@@ -5433,61 +5479,6 @@ public:
             Vector testvec2(CoarsePrec_->Height());
             CoarsePrec_->Mult(testvec1, testvec2);
             testvec2.Print();
-
-            {
-                Array<double> eigenvalues;
-                int nev = 20;
-                int seed = 75;
-                int maxiter = 600;
-                double eigtol = 1.0e-8;
-                {
-
-                    HypreLOBPCG * lobpcg = new HypreLOBPCG(MPI_COMM_WORLD);
-
-                    lobpcg->SetNumModes(nev);
-                    lobpcg->SetRandomSeed(seed);
-                    lobpcg->SetMaxIter(maxiter);
-                    lobpcg->SetTol(eigtol);
-                    lobpcg->SetPrintLevel(1);
-                    // checking for A
-                    lobpcg->SetOperator(A_c);
-
-                    // 4. Compute the eigenmodes and extract the array of eigenvalues. Define a
-                    //    parallel grid function to represent each of the eigenmodes returned by
-                    //    the solver.
-                    lobpcg->Solve();
-                    lobpcg->GetEigenvalues(eigenvalues);
-
-                    std::cout << "The computed minimal eigenvalues for M are: \n";
-                    eigenvalues.Print();
-                }
-
-                double beta = eigenvalues[0] * 10000.0; // should be enough
-                Operator * revA_op = new MyAXPYOperator(A_c, beta, -1.0);
-                {
-                    HypreLOBPCG * lobpcg2 = new HypreLOBPCG(MPI_COMM_WORLD);
-
-                    lobpcg2->SetNumModes(nev);
-                    lobpcg2->SetRandomSeed(seed);
-                    lobpcg2->SetMaxIter(maxiter);
-                    lobpcg2->SetTol(eigtol*1.0e-4);
-                    lobpcg2->SetPrintLevel(1);
-                    // checking for beta * Id - A
-                    lobpcg2->SetOperator(*revA_op);
-
-                    // 4. Compute the eigenmodes and extract the array of eigenvalues. Define a
-                    //    parallel grid function to represent each of the eigenmodes returned by
-                    //    the solver.
-                    lobpcg2->Solve();
-                    lobpcg2->GetEigenvalues(eigenvalues);
-
-                    std::cout << "The computed maximal eigenvalues for M are: \n";
-                    for ( int i = 0; i < nev; ++i)
-                        eigenvalues[i] = beta - eigenvalues[i];
-                     eigenvalues.Print();
-                }
-
-            }
             */
         }
 
@@ -5617,7 +5608,11 @@ void Multigrid::MG_Cycle() const
         }
 #endif
 
+#ifdef NO_COARSESOLVE
+        correction_l = 0.0;
+#else
         CoarseSolver->Mult(residual_l, correction_l);
+#endif
 
 #ifdef BND_FOR_MULTIGRID
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
@@ -5626,9 +5621,6 @@ void Multigrid::MG_Cycle() const
         }
 #endif
 
-#ifdef NO_COARSESOLVE
-        correction_l = 0.0;
-#endif
         /*
         cor_cor.SetSize(residual_l.Size());
 
