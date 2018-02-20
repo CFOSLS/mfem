@@ -64,8 +64,8 @@
 //#define COMPARE_SMOOTHERS
 #endif // for ifdef COMPARE_MG
 
-TODO: impose boundary conditions after Pt and do the bnd cnds elimination for matrix blocks
-in MonolithicMultigrid
+//TODO: impose boundary conditions after Pt and do the bnd cnds elimination for matrix blocks
+//in MonolithicMultigrid
 
 //#define TIMING
 
@@ -3171,6 +3171,7 @@ int main(int argc, char *argv[])
     Array<BlockOperator*> P;
     std::vector<Array<int> *> offsets_f;
     std::vector<Array<int> *> offsets_c;
+
     if (with_prec)
     {
         if(dim<=4)
@@ -3203,7 +3204,7 @@ int main(int argc, char *argv[])
                         }
 
 #ifdef BND_FOR_MULTIGRID
-                        prec = new MonolithicMultigrid(*MainOp, P, EssBdrTrueDofs_HcurlFunct_lvls, block_offsets);
+                        prec = new MonolithicMultigrid(*MainOp, P, EssBdrTrueDofs_HcurlFunct_lvls);
 #else
                         prec = new MonolithicMultigrid(*MainOp, P);
 #endif

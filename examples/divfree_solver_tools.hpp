@@ -646,8 +646,8 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    if (coarse_prec)
-        coarseSolver->SetPreconditioner(*coarse_prec);
+    //if (coarse_prec)
+        //coarseSolver->SetPreconditioner(*coarse_prec);
     coarseSolver->SetPrintLevel(0);
     coarseSolver->iterative_mode = false;
 
@@ -5117,7 +5117,6 @@ public:
                         const Array<BlockOperator*> &P,
 #ifdef BND_FOR_MULTIGRID
                         const std::vector<std::vector<Array<int>*> > & EssBdrTDofs_lvls,
-                        const Array<int> & Block_Offsets,
 #endif
                         Solver* Coarse_Prec = NULL)
         :
@@ -5125,7 +5124,6 @@ public:
           P_(P),
 #ifdef BND_FOR_MULTIGRID
           essbdrtdofs_lvls(EssBdrTDofs_lvls),
-          block_offsets(Block_Offsets),
 #endif
           Operators_(P.Size()+1),
           Smoothers_(Operators_.Size()),
@@ -5138,12 +5136,19 @@ public:
         Operators_.Last() = &Op;
 
 #ifdef BND_FOR_MULTIGRID
-        xblock = new BlockVector(block_offsets);
+        block_offsets.resize(Operators_.Size());
+        block_viewers.resize(Operators_.Size());
 #endif
 
         for (int l = Operators_.Size()-1; l >= 0; l--)
         {
             Array<int>& Offsets = Operators_[l]->RowOffsets();
+#ifdef BND_FOR_MULTIGRID
+            block_viewers[l] = new BlockVector;
+            block_offsets[l] = new Array<int>(Offsets.Size());
+            for (int i = 0; i < Offsets.Size(); ++i)
+                (*block_offsets[l])[i] = Offsets[i];
+#endif
 
             if (l < Operators_.Size() - 1)
                 correction[l] = new Vector(Offsets.Last());
@@ -5153,6 +5158,7 @@ public:
                 correction[l] = new Vector();
 
             residual[l] = new Vector(Offsets.Last());
+
 
             HypreParMatrix &A00 = (HypreParMatrix&)Operators_[l]->GetBlock(0,0);
             HypreParMatrix &A11 = (HypreParMatrix&)Operators_[l]->GetBlock(1,1);
@@ -5167,6 +5173,7 @@ public:
                 HypreParMatrix& P0 = (HypreParMatrix&)P[l-1]->GetBlock(0,0);
                 HypreParMatrix& P1 = (HypreParMatrix&)P[l-1]->GetBlock(1,1);
 
+                /*
                 unique_ptr<HypreParMatrix> P0T(P0.Transpose());
                 unique_ptr<HypreParMatrix> P1T(P1.Transpose());
 
@@ -5181,6 +5188,41 @@ public:
                 HypreParMatrix *A01_c(ParMult(P0T.get(), A01P1.get()));
                 A01_c->CopyRowStarts();
                 HypreParMatrix *A10_c(A01_c->Transpose());
+                */
+
+                HypreParMatrix * A00_c = RAP(&P0, &A00, &P0);
+                {
+                    Eliminate_ib_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                    HypreParMatrix * temphpmat = A00_c->Transpose();
+                    Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                    A00_c = temphpmat->Transpose();
+                    A00_c->CopyColStarts();
+                    A00_c->CopyRowStarts();
+                    SparseMatrix diag;
+                    A00_c->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+                    delete temphpmat;
+                    //Eliminate_bb_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l]);
+                }
+
+                HypreParMatrix * A11_c = RAP(&P1, &A11, &P1);
+                {
+                    Eliminate_ib_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                    HypreParMatrix * temphpmat = A11_c->Transpose();
+                    Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                    A11_c = temphpmat->Transpose();
+                    A11_c->CopyColStarts();
+                    A11_c->CopyRowStarts();
+                    SparseMatrix diag;
+                    A11_c->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+                    delete temphpmat;
+                    //Eliminate_bb_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l]);
+                }
+
+                HypreParMatrix * A01_c = RAP(&P0, &A01, &P1);
+                HypreParMatrix * A10_c = A01_c->Transpose();
+
 
                 Operators_[l-1] = new BlockOperator(P[l-1]->ColOffsets());
                 Operators_[l-1]->SetBlock(0, 0, A00_c);
@@ -5188,6 +5230,7 @@ public:
                 Operators_[l-1]->SetBlock(1, 0, A10_c);
                 Operators_[l-1]->SetBlock(1, 1, A11_c);
                 Operators_[l-1]->owns_blocks = 1;
+
             }
         }
 
@@ -5219,7 +5262,7 @@ public:
             ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(1, precS);
         }
 
-        CoarseSolver->SetPreconditioner(*CoarsePrec_);
+        //CoarseSolver->SetPreconditioner(*CoarsePrec_);
     }
 
     virtual void Mult(const Vector & x, Vector & y) const;
@@ -5249,8 +5292,8 @@ private:
 
 #ifdef BND_FOR_MULTIGRID
     const std::vector<std::vector<Array<int>*> > & essbdrtdofs_lvls;
-    const Array<int> & block_offsets;
-    mutable BlockVector * xblock;
+    mutable std::vector<Array<int>*>  block_offsets;
+    mutable std::vector<BlockVector*> block_viewers;
 #endif
 
     Array<BlockOperator*> Operators_;
@@ -5276,14 +5319,14 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
     *residual.Last() = x;
 
 #ifdef BND_FOR_MULTIGRID
-    xblock->Update((*residual.Last()).GetData(), block_offsets);
-    for (int blk = 0; blk < block_offsets.Size() - 1; ++blk)
+    block_viewers[Operators_.Size() - 1]->Update((*residual.Last()).GetData(), *block_offsets[Operators_.Size() - 1]);
+    for (int blk = 0; blk < block_offsets.size() - 1; ++blk)
     {
         const Array<int> *temp = essbdrtdofs_lvls[0][blk];
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
-            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            block_viewers[Operators_.Size() - 1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
         }
     }
 #endif
@@ -5320,6 +5363,21 @@ void MonolithicMultigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
 
+        /*
+#ifdef BND_FOR_MULTIGRID
+        block_viewers[current_level-1]->Update((*residual[current_level-1]).GetData(), *block_offsets[current_level-1]);
+        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
+        {
+            const Array<int> *temp = essbdrtdofs_lvls[current_level-1][blk];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
+                block_viewers[current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+#endif
+        */
+
         current_level--;
         MG_Cycle();
         current_level++;
@@ -5335,7 +5393,35 @@ void MonolithicMultigrid::MG_Cycle() const
 #ifdef NO_COARSESOLVE
         correction_l = 0.0;
 #else
+        /*
+#ifdef BND_FOR_MULTIGRID
+        block_viewers[Operators_.Size() - current_level-1]->Update(residual_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
+        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
+        {
+            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
+                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+#endif
+        */
         CoarseSolver->Mult(residual_l, correction_l);
+        /*
+#ifdef BND_FOR_MULTIGRID
+        block_viewers[Operators_.Size() - current_level-1]->Update(correction_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
+        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
+        {
+            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
+                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+            }
+        }
+#endif
+        */
 #endif
         /*
         cor_cor.SetSize(residual_l.Size());
