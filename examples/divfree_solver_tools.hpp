@@ -646,8 +646,8 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetRelTol(rtol);
     coarseSolver->SetMaxIter(maxIter);
     coarseSolver->SetOperator(*coarse_matrix);
-    //if (coarse_prec)
-        //coarseSolver->SetPreconditioner(*coarse_prec);
+    if (coarse_prec)
+        coarseSolver->SetPreconditioner(*coarse_prec);
     coarseSolver->SetPrintLevel(0);
     coarseSolver->iterative_mode = false;
 

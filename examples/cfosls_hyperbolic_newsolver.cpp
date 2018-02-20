@@ -47,18 +47,18 @@
 
 //#define MARTIN_PREC
 
-#define COMPARE_MG
+//#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 #define BLKDIAG_SMOOTHER
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
-#define NCOARSEITER 1
+#define NCOARSEITER 4
 
 //#define NO_COARSESOLVE
-#define NO_POSTSMOOTH
-#define NO_PRESMOOTH
+//#define NO_POSTSMOOTH
+//#define NO_PRESMOOTH
 
 //#define COMPARE_COARSE_SOLVERS
 //#define COMPARE_SMOOTHERS
@@ -1127,7 +1127,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
