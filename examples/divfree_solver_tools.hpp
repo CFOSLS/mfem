@@ -5452,6 +5452,9 @@ public:
 #ifdef BND_FOR_MULTIGRID
               const std::vector<Array<int>*> & EssBdrTDofs_lvls,
 #endif
+#ifdef COARSEPREC_AMS
+              ParFiniteElementSpace * C_space_coarsest = NULL,
+#endif
               Solver *CoarsePrec = NULL)
         :
           Solver(Op.GetNumRows()),
@@ -5464,6 +5467,9 @@ public:
           current_level(Operators_.Size()-1),
           correction(Operators_.Size()),
           residual(Operators_.Size()),
+#ifdef COARSEPREC_AMS
+          curl_space_coarsest(C_space_coarsest),
+#endif
           CoarsePrec_(CoarsePrec),
           built_prec(false)
     {
@@ -5552,7 +5558,14 @@ public:
 
             //std::cout << "diag unsymmetry measure = " << diag.IsSymmetric() << "\n";
 
+#ifdef COARSEPREC_AMS
+            CoarsePrec_ = new HypreAMS(*Operators_[0], curl_space_coarsest);
+#ifndef WITH_PENALTY
+            ((HypreAMS*)CoarsePrec_)->SetSingularProblem();
+#endif
+#else
             CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::l1GS, 1);
+#endif
             //CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::l1Jacobi, 1);
             //CoarsePrec_ = new HypreSmoother(*Operators_[0], HypreSmoother::Type::Jacobi, 1);
 
@@ -5619,6 +5632,11 @@ private:
 
     mutable CGSolver *CoarseSolver;
     Solver * CoarsePrec_;
+
+#ifdef COARSEPREC_AMS
+    mutable ParFiniteElementSpace * curl_space_coarsest;
+#endif
+
 
     mutable bool built_prec;
 };

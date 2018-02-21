@@ -54,6 +54,8 @@
 #define BND_FOR_MULTIGRID
 #define BLKDIAG_SMOOTHER
 
+#define COARSEPREC_AMS
+
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
 #define NCOARSEITER 4
@@ -1146,7 +1148,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -3299,7 +3301,12 @@ int main(int argc, char *argv[])
                             precU = new Multigrid(*A, TrueP_C);
 #else
 #ifdef BND_FOR_MULTIGRID
+
+#ifdef COARSEPREC_AMS
+                        precU = new Multigrid(*A, TrueP_C, EssBdrTrueDofs_Hcurl, C_space_lvls[num_levels - 1]);
+#else
                         precU = new Multigrid(*A, TrueP_C, EssBdrTrueDofs_Hcurl);
+#endif
 #else
                         precU = new Multigrid(*A, TrueP_C);
 #endif
