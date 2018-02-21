@@ -5492,8 +5492,8 @@ public:
             delete temphpmat;
             //Eliminate_bb_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l]);
 //#else
-            //Operators_[l-1]->CopyColStarts();
-            //Operators_[l-1]->CopyRowStarts();
+            Operators_[l-1]->CopyColStarts();
+            Operators_[l-1]->CopyRowStarts();
 //#endif
         }
 

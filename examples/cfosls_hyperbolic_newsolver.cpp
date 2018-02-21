@@ -58,7 +58,7 @@
 
 #define NCOARSEITER 4
 
-//#define NO_COARSESOLVE
+#define NO_COARSESOLVE
 //#define NO_POSTSMOOTH
 //#define NO_PRESMOOTH
 
@@ -84,7 +84,7 @@
 // must be always active
 #define USE_CURLMATRIX
 
-#define WITH_PENALTY
+//#define WITH_PENALTY
 
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
@@ -1131,7 +1131,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1146,7 +1146,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -1455,6 +1455,7 @@ int main(int argc, char *argv[])
 
     double reg_param;
     reg_param = 0.1 * h_min * h_min;
+    reg_param *= 1.0 / (pow(2.0, par_ref_levels) * pow(2.0, par_ref_levels));
     if (verbose)
         std::cout << "regularization parameter: " << reg_param << "\n";
     ConstantCoefficient reg_coeff(reg_param);
@@ -2310,7 +2311,7 @@ int main(int argc, char *argv[])
             for ( int blk = 0; blk < numblocks_funct; ++blk)
                 offsets_global[blk + 1] = Dof_TrueDof_Func_lvls[l][blk]->Width();
             offsets_global.PartialSum();
-            SweepsNum = ipow(5, l);
+            SweepsNum = ipow(1, l);
             if (verbose)
             {
                 std::cout << "Sweeps num: \n";
@@ -3092,6 +3093,18 @@ int main(int argc, char *argv[])
     A->CopyRowStarts();
     A->CopyColStarts();
 
+    Eliminate_ib_block(*A, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Hcurl[0] );
+    HypreParMatrix * temphpmat = A->Transpose();
+    Eliminate_ib_block(*temphpmat, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Hcurl[0] );
+    A = temphpmat->Transpose();
+    A->CopyColStarts();
+    A->CopyRowStarts();
+    SparseMatrix diag;
+    A->GetDiag(diag);
+    diag.MoveDiagonalFirst();
+    delete temphpmat;
+    Eliminate_bb_block(*A, *EssBdrTrueDofs_Hcurl[0]);
+
     HypreParMatrix *C, *CH, *CHT, *B, *BT;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
@@ -3315,10 +3328,22 @@ int main(int argc, char *argv[])
                     }
                     else // no S, i.e. only an equation in div-free subspace
                     {
-                        prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-                        Operator * precU = new IdentityOperator(A->Height());
+                        //prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+                        //Operator * precU = new IdentityOperator(A->Height());
 
-                        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
+                        //Operator * precU = new HypreAMS(*A, C_space);
+                        //((HypreAMS*)precU)->SetSingularProblem();
+
+                        //((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
+
+                        prec = new HypreAMS(*A, C_space);
+                        ((HypreAMS*)prec)->SetSingularProblem();
+                        //((HypreAMS*)prec)->SetPrintLevel(2);
+
+                        //prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+                        //Operator * precU = new IdentityOperator(A->Height());
+                        //((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
+
                     }
 
                 }
