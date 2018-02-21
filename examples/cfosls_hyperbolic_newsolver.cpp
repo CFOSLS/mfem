@@ -1129,10 +1129,10 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 3;
-    int par_ref_levels  = 1;
+    int ser_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -2209,17 +2209,67 @@ int main(int argc, char *argv[])
             (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
             (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
 
+            {
+                const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][0];
+
+                Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom, *temp_dom );
+                HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,0)->Transpose();
+                Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
+                (*Funct_hpmat_lvls[l])(0,0) = temphpmat->Transpose();
+                Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom);
+                SparseMatrix diag;
+                (*Funct_hpmat_lvls[l])(0,0)->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+
+                (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
+                (*Funct_hpmat_lvls[l])(0,0)->CopyColStarts();
+                delete temphpmat;
+            }
+
+
             if (strcmp(space_for_S,"H1") == 0)
             {
-                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[l-1], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[l-1]);
-                (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[num_levels - 2 - (l-1)], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[num_levels - 2 - (l-1)]);
+                //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+                //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+
+                {
+                    const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][1];
+
+                    Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom, *temp_dom );
+                    HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(1,1)->Transpose();
+                    Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
+                    (*Funct_hpmat_lvls[l])(1,1) = temphpmat->Transpose();
+                    Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom);
+                    SparseMatrix diag;
+                    (*Funct_hpmat_lvls[l])(1,1)->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+
+                    (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+                    (*Funct_hpmat_lvls[l])(1,1)->CopyColStarts();
+                    delete temphpmat;
+                }
 
                 HypreParMatrix * P_R_T = TrueP_R[l-1]->Transpose();
-                HypreParMatrix * temp1 = ParMult((*Funct_hpmat_lvls[l-1])(0,1), TrueP_H[l-1]);
+                HypreParMatrix * temp1 = ParMult((*Funct_hpmat_lvls[l-1])(0,1), TrueP_H[num_levels - 2 - (l-1)]);
                 (*Funct_hpmat_lvls[l])(0,1) = ParMult(P_R_T, temp1);
-                (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
-                (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+                //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+                //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+
+                {
+                    const Array<int> *temp_range = EssBdrTrueDofs_Funct_lvls[l][0];
+                    const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][1];
+
+                    Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,1), *temp_dom, *temp_range );
+                    HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,1)->Transpose();
+                    Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+                    (*Funct_hpmat_lvls[l])(0,1) = temphpmat->Transpose();
+                    (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+                    (*Funct_hpmat_lvls[l])(0,1)->CopyColStarts();
+                    delete temphpmat;
+                }
+
+
 
                 (*Funct_hpmat_lvls[l])(1,0) = (*Funct_hpmat_lvls[l])(0,1)->Transpose();
                 (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
@@ -4094,7 +4144,11 @@ int main(int argc, char *argv[])
 #else
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
+#ifdef COMPARE_MG
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(NCOARSEITER);
+#else
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+#endif
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
@@ -4855,104 +4909,110 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << " \nComparing separately smoothers \n";
 
-    BlockVector outSmooHdivvec(offsets_new);
-    Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (verbose)
+            std::cout << "level: " << l << "\n";
 
-    //std::cout << "inFunctvec \n";
-    //inFunctvec.Print();
+        BlockVector outSmooHdivvec(offsets_new);
+        Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
 
-    //std::cout << "outSmooHdivvec\n";
-    //outSmooHdivvec.Print();
+        //std::cout << "inFunctvec \n";
+        //inFunctvec.Print();
 
-    /*
-    inFunctvec = outSmooHdivvec; // iter no 2
+        //std::cout << "outSmooHdivvec\n";
+        //outSmooHdivvec.Print();
 
-    //std::cout << "outSmooHdivvec after the 1st iteration \n";
-    //outSmooHdivvec.Print();
+        /*
+        inFunctvec = outSmooHdivvec; // iter no 2
 
-    Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
-    */
+        //std::cout << "outSmooHdivvec after the 1st iteration \n";
+        //outSmooHdivvec.Print();
 
-    //Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
-    //Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
+        Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+        */
 
-    HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
-    HypreSmoother * Smoothers_fromMG_1;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        Smoothers_fromMG_1 = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
+        //Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
+        //Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
 
-    BlockVector outSmooHcurlvec(offsets_hcurlfunct_new);
-    Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+        HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * Smoothers_fromMG_1;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Smoothers_fromMG_1 = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
 
-    /*
-    //std::cout << "outSmooHdivvec after the 1st iteration \n";
-    //outSmooHdivvec.Print();
+        BlockVector outSmooHcurlvec(offsets_hcurlfunct_new);
+        Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
 
-    inFunctHcurlvec = outSmooHcurlvec; // iter no 2
-    Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
-        Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
-    */
+        /*
+        //std::cout << "outSmooHdivvec after the 1st iteration \n";
+        //outSmooHdivvec.Print();
 
-    //Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
-    //Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
+        inFunctHcurlvec = outSmooHcurlvec; // iter no 2
+        Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+            Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+        */
+
+        //Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
+        //Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
 
 #ifdef CHECK_BNDCND
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-    {
-        const Array<int> *temp;
-        if (blk == 0)
-            temp = EssBdrTrueDofs_Hcurl[0];
-        else
-            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
-
-        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        for (int blk = 0; blk < numblocks_funct; ++blk)
         {
-            //std::cout << "index = " << (*temp)[tdofind] << "\n";
-            if ( fabs(outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+            const Array<int> *temp;
+            if (blk == 0)
+                temp = EssBdrTrueDofs_Hcurl[0];
+            else
+                temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                std::cout << "bnd cnd is violated for outSmooHcurlvec, blk = " << blk << ", value = "
-                          << outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
-                          << ", index = " << (*temp)[tdofind] << "\n";
-                //std::cout << "... was corrected \n";
-                //outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+                //std::cout << "index = " << (*temp)[tdofind] << "\n";
+                if ( fabs(outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for outSmooHcurlvec, blk = " << blk << ", value = "
+                              << outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                    //std::cout << "... was corrected \n";
+                    //outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+                }
             }
         }
-    }
 #endif
 
-    BlockVector out2SmooHdivvec(offsets_new);
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-    {
-        if (blk == 0)
-            Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec.GetBlock(0), out2SmooHdivvec.GetBlock(0));
-        else
-            out2SmooHdivvec.GetBlock(blk) = outSmooHcurlvec.GetBlock(blk);
-    }
-
-    //Vector out2SmooHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
-    //Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec, out2SmooHdivvec);
-
-    BlockVector diffsmoo(offsets_new);
-    //Vector diffsmoo(R_space_lvls[0]->TrueVSize());
-    diffsmoo = outSmooHdivvec;
-    diffsmoo -= out2SmooHdivvec;
-
-    MPI_Barrier(comm);
-    for (int i = 0; i < num_procs; ++i)
-    {
-        if (myid == i)
+        BlockVector out2SmooHdivvec(offsets_new);
+        for (int blk = 0; blk < numblocks_funct; ++blk)
         {
-            std::cout << "I am " << myid << "\n";
-
-            double diffsmoo_norm = diffsmoo.Norml2() / sqrt (diffsmoo.Size());
-            double geommgsmoo_norm = out2SmooHdivvec.Norml2() / sqrt(out2SmooHdivvec.Size());
-            std::cout << "|| diff of smoothers action || = " << diffsmoo_norm << "\n";
-            std::cout << "|| diff of smoothers action || / || geommg smoother action || = " << diffsmoo_norm / geommgsmoo_norm << "\n";
+            if (blk == 0)
+                Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec.GetBlock(0), out2SmooHdivvec.GetBlock(0));
+            else
+                out2SmooHdivvec.GetBlock(blk) = outSmooHcurlvec.GetBlock(blk);
         }
+
+        //Vector out2SmooHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
+        //Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec, out2SmooHdivvec);
+
+        BlockVector diffsmoo(offsets_new);
+        //Vector diffsmoo(R_space_lvls[0]->TrueVSize());
+        diffsmoo = outSmooHdivvec;
+        diffsmoo -= out2SmooHdivvec;
+
         MPI_Barrier(comm);
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::cout << "I am " << myid << "\n";
+
+                double diffsmoo_norm = diffsmoo.Norml2() / sqrt (diffsmoo.Size());
+                double geommgsmoo_norm = out2SmooHdivvec.Norml2() / sqrt(out2SmooHdivvec.Size());
+                std::cout << "|| diff of smoothers action || = " << diffsmoo_norm << "\n";
+                std::cout << "|| diff of smoothers action || / || geommg smoother action || = " << diffsmoo_norm / geommgsmoo_norm << "\n";
+            }
+            MPI_Barrier(comm);
+        }
     }
 
     //MPI_Finalize();

@@ -2853,8 +2853,10 @@ protected:
     // global CTMC as HypreParMatrix
     mutable HypreParMatrix* CTMC_global;
 
-    // stores global Funct blocks for all blocks except row = 0 or col = 0
-    mutable Array2D<HypreParMatrix *> Funct_restblocks_global;
+    // stores global HcurlFunct blocks
+    // this means that first row and first column are modified using the Divfree operator
+    // and the rest are the same as in Funct
+    mutable Array2D<HypreParMatrix *> HcurlFunct_global;
 
     // structures used when all dofs are relaxed (via HypreSmoothers):
     mutable Array<Operator*> Smoothers;
@@ -2881,6 +2883,11 @@ protected:
     mutable BlockVector * xblock;
     mutable BlockVector * yblock;
 
+#ifndef BLKDIAG_SMOOTHER
+    mutable Vector * tmp1;
+    mutable Vector * tmp2;
+#endif
+
 public:
     ~HcurlGSSSmoother();
     HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
@@ -2905,7 +2912,11 @@ public:
     virtual void Mult (const Vector & x, Vector & y) const;
 
     // Action of the transpose operator
+#ifndef BLKDIAG_SMOOTHER
+    virtual void MultTranspose (const Vector & x, Vector & y) const;
+#else
     virtual void MultTranspose (const Vector & x, Vector & y) const {Mult(x,y);}
+#endif
 
     // service routines
     int GetSweepsNumber(int block) const {return sweeps_num[block];}
@@ -2937,8 +2948,17 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     delete truerhs;
     delete truex;
 
+#ifndef BLKDIAG_SMOOTHER
+    delete tmp1;
+    delete tmp2;
+#endif
+
     //delete CTMC;
-    delete CTMC_global;
+    //delete CTMC_global;
+    for (int blk1 = 0; blk1 < numblocks; ++blk1)
+        for (int blk2 = 0; blk2 < numblocks; ++blk2)
+            if (blk1 == 0 || blk2 == 0)
+                delete HcurlFunct_global(blk1,blk2);
 
     for (int i = 0; i < Smoothers.Size(); ++i)
         delete Smoothers[i];
@@ -2995,12 +3015,6 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
     else
         sweeps_num = 1;
 
-    Funct_restblocks_global.SetSize(numblocks, numblocks);
-    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
-        Funct_restblocks_global(rowblk,0) = NULL;
-    for (int colblk = 0; colblk < numblocks; ++colblk)
-        Funct_restblocks_global(0,colblk) = NULL;
-
     Setup();
 }
 
@@ -3027,6 +3041,11 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
 
+#ifndef BLKDIAG_SMOOTHER
+    tmp1 = new Vector(Divfree_hpmat_nobnd->Width());
+    tmp2 = new Vector(xblock->GetBlock(1).Size());
+#endif
+
     trueblock_offsets.SetSize(numblocks + 1);
     trueblock_offsets[0] = 0;
     for ( int blk = 0; blk < numblocks; ++blk)
@@ -3047,8 +3066,146 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
     else
         sweeps_num = 1;
 
+    HcurlFunct_global.SetSize(numblocks, numblocks);
+    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
+        for (int colblk = 0; colblk < numblocks; ++colblk)
+            HcurlFunct_global(rowblk, colblk) = NULL;
+
     Setup();
 }
+
+#ifndef BLKDIAG_SMOOTHER
+void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
+{
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono2.Clear();
+    chrono2.Start();
+#endif
+
+    if (print_level)
+        std::cout << "Smoothing with HcurlGSS smoother \n";
+
+    xblock->Update(x.GetData(), block_offsets);
+    yblock->Update(y.GetData(), block_offsets);
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+    }
+
+#ifdef CHECK_BNDCND
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for xblock! blk = " << blk << ", value = "
+                          << xblock->GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            Divfree_hpmat_nobnd->MultTranspose(xblock->GetBlock(0), truerhs->GetBlock(0));
+        else
+            truerhs->GetBlock(blk) = xblock->GetBlock(blk);
+
+        // imposing boundary conditions on the righthand side
+        if (blk == 0) // in Hcurl
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+            {
+                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                truerhs->GetBlock(0)[tdof] = 0.0;
+            }
+    }
+
+    *truex = 0.0;
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_beforeintmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    if (numblocks == 1)
+    {
+        Smoothers[0]->Mult(truerhs->GetBlock(0), truex->GetBlock(0));
+    }
+    else // numblocks = 2
+    {
+        Smoothers[1]->Mult(truerhs->GetBlock(1), truex->GetBlock(1));
+        *tmp1 = truerhs->GetBlock(0);
+        HcurlFunct_global(0,1)->Mult(-1.0, truex->GetBlock(1), 1.0, *tmp1);
+        Smoothers[0]->Mult(*tmp1, truex->GetBlock(0));
+    }
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_intmult += chrono.RealTime();
+    MPI_Barrier(comm);
+    chrono.Clear();
+    chrono.Start();
+#endif
+
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // in Hcurl
+            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+            {
+                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                truex->GetBlock(blk)[tdof] = 0.0;
+            }
+    }
+
+    // computing the solution update in the H(div) x other blocks space
+    // in two steps:
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0) // first component should be transferred from Hcurl to Hdiv
+            Divfree_hpmat_nobnd->Mult(truex->GetBlock(0), yblock->GetBlock(0));
+        else
+            yblock->GetBlock(blk) = truex->GetBlock(blk);
+    }
+
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+        }
+    }
+
+#ifdef TIMING
+    MPI_Barrier(comm);
+    chrono.Stop();
+    time_afterintmult += chrono.RealTime();
+
+    MPI_Barrier(comm);
+    chrono2.Stop();
+    time_globalmult += chrono2.RealTime();
+#endif
+
+}
+#endif
 
 void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 {
@@ -3188,9 +3345,28 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
 
     //truerhs->GetBlock(0).Print();
+    //std::cout << "input to Smoothers mult \n";
+    //truerhs->Print();
 
+#ifdef BLKDIAG_SMOOTHER
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+#else
+    if (numblocks == 1)
+    {
+        Smoothers[0]->Mult(truerhs->GetBlock(0), truex->GetBlock(0));
+    }
+    else // numblocks = 2
+    {
+        Smoothers[0]->Mult(truerhs->GetBlock(0), truex->GetBlock(0));
+        *tmp2 = truerhs->GetBlock(1);
+        HcurlFunct_global(1,0)->Mult(-1.0, truex->GetBlock(0), 1.0, *tmp2);
+        Smoothers[1]->Mult(*tmp2, truex->GetBlock(1));
+    }
+#endif // for #else to #ifdef BLKDIAG
+
+    //std::cout << "output to Smoothers mult \n";
+    //truex->Print();
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3275,6 +3451,84 @@ void HcurlGSSSmoother::Setup() const
     MFEM_ASSERT(numblocks <= 2, "HcurlGSSSmoother::Setup was implemented for the "
                                 "cases numblocks = 1 or 2 only \n");
 
+    HypreParMatrix * Divfree_hpmat_nobnd_T = Divfree_hpmat_nobnd->Transpose();
+    for ( int blk1 = 0; blk1 < numblocks; ++blk1)
+    {
+        for ( int blk2 = 0; blk2 < numblocks; ++blk2)
+        {
+            HypreParMatrix * Funct_blk = (*Funct_hpmat)(blk1,blk2);
+
+            if (Funct_blk)
+            {
+                if (blk1 == 0)
+                {
+                    HypreParMatrix * temp1 = ParMult(Divfree_hpmat_nobnd_T, Funct_blk);
+                    temp1->CopyRowStarts();
+                    temp1->CopyColStarts();
+
+                    if (blk2 == 0)
+                    {
+                        HcurlFunct_global(blk1, blk2) = RAP(Divfree_hpmat_nobnd, Funct_blk, Divfree_hpmat_nobnd);
+
+                        //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+
+                        HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                        HcurlFunct_global(blk1, blk2)->CopyColStarts();
+
+                        delete temp1;
+                    }
+                    else
+                        HcurlFunct_global(blk1, blk2) = temp1;
+
+                }
+                else if (blk2 == 0)
+                {
+                    HcurlFunct_global(blk1, blk2) = ParMult(Funct_blk,
+                                                                  Divfree_hpmat_nobnd);
+                    HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                    HcurlFunct_global(blk1, blk2)->CopyColStarts();
+                }
+                else
+                {
+                    HcurlFunct_global(blk1, blk2)  = Funct_blk;
+                }
+
+//#ifdef COMPARE_MG
+                const Array<int> *temp_range;
+                const Array<int> *temp_dom;
+                if (blk1 == 0)
+                    temp_range = &essbdrtruedofs_Hcurl;
+                else
+                    temp_range = essbdrtruedofs_Funct[blk1];
+
+                if (blk2 == 0)
+                    temp_dom = &essbdrtruedofs_Hcurl;
+                else
+                    temp_dom = essbdrtruedofs_Funct[blk2];
+
+                Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
+                HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
+                Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+                HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
+                if (blk1 == blk2)
+                {
+                    Eliminate_bb_block(*HcurlFunct_global(blk1, blk2), *temp_dom);
+                    SparseMatrix diag;
+                    HcurlFunct_global(blk1, blk2)->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+                }
+
+                HcurlFunct_global(blk1, blk2)->CopyColStarts();
+                HcurlFunct_global(blk1, blk2)->CopyRowStarts();
+                delete temphpmat;
+//#endif
+            } // else of if Funct_blk != NULL
+
+        }
+    }
+
+
+    /*
     CTMC_global = RAP(Divfree_hpmat_nobnd, (*Funct_hpmat)(0,0), Divfree_hpmat_nobnd);
 
     const Array<int> *temp_dom = &essbdrtruedofs_Hcurl;
@@ -3292,20 +3546,19 @@ void HcurlGSSSmoother::Setup() const
     CTMC_global->CopyColStarts();
     delete temphpmat;
 
+    HcurlFunct_global(0,0) = CTMC_global;
 
-    /*
-    SparseMatrix diagg;
-    CTMC_global->GetDiag(diagg);
-    diagg.EliminateZeroRows();
-    */
 
     Smoothers[0] = new HypreSmoother(*CTMC_global, HypreSmoother::Type::l1GS, sweeps_num[0]);
+    */
+
+    Smoothers[0] = new HypreSmoother(*HcurlFunct_global(0,0), HypreSmoother::Type::l1GS, sweeps_num[0]);
     if (numblocks > 1) // i.e. if S exists in the functional
     {
         //Smoothers[1] = new HypreBoomerAMG(*Funct_restblocks_global(1,1));
         //((HypreBoomerAMG*)(Smoothers[1]))->SetPrintLevel(0);
         //((HypreBoomerAMG*)(Smoothers[1]))->iterative_mode = false;
-        Smoothers[1] = new HypreSmoother( *(*Funct_hpmat)(1,1), HypreSmoother::Type::l1GS, sweeps_num[1]);
+        Smoothers[1] = new HypreSmoother( *HcurlFunct_global(1,1), HypreSmoother::Type::l1GS, sweeps_num[1]);
     }
 
     truex = new BlockVector(trueblock_offsets);
@@ -3892,6 +4145,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         chrono3.Start();
 #endif
 
+        //std::cout << "righthand side on the entrance to Solve() \n";
+        //xblock_truedofs->Print();
+
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
 
 #ifdef TIMING
@@ -4178,6 +4434,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+            //std::cout << "new residual inside new mg \n";
+            //truetempvec_lvls[l]->Print();
 
 #ifdef TIMING
             MPI_Barrier(comm);
@@ -5220,10 +5479,20 @@ public:
                     A11_c->GetDiag(diag);
                     diag.MoveDiagonalFirst();
                     delete temphpmat;
-                    //Eliminate_bb_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l]);
+                    //Eliminate_bb_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1]);
                 }
 
                 HypreParMatrix * A01_c = RAP(&P0, &A01, &P1);
+                {
+                    Eliminate_ib_block(*A01_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                    HypreParMatrix * temphpmat = A01_c->Transpose();
+                    Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                    A01_c = temphpmat->Transpose();
+                    A01_c->CopyColStarts();
+                    A01_c->CopyRowStarts();
+                    delete temphpmat;
+                }
+
                 HypreParMatrix * A10_c = A01_c->Transpose();
 
 
@@ -5238,14 +5507,14 @@ public:
         }
 
         CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
-        CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetAbsTol(sqrt(1e-15));
+        CoarseSolver->SetRelTol(sqrt(1e-6));
 #ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(NCOARSEITER);
 #else
         CoarseSolver->SetMaxIter(100);
 #endif
-        CoarseSolver->SetPrintLevel(1);
+        CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 
@@ -5265,7 +5534,7 @@ public:
             ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(1, precS);
         }
 
-        //CoarseSolver->SetPreconditioner(*CoarsePrec_);
+        CoarseSolver->SetPreconditioner(*CoarsePrec_);
     }
 
     virtual void Mult(const Vector & x, Vector & y) const;
@@ -5321,6 +5590,7 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
 
+    /*
 #ifdef BND_FOR_MULTIGRID
     block_viewers[Operators_.Size() - 1]->Update((*residual.Last()).GetData(), *block_offsets[Operators_.Size() - 1]);
     for (unsigned int blk = 0; blk < block_offsets.size() - 1; ++blk)
@@ -5333,6 +5603,7 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
         }
     }
 #endif
+    */
 
     correction.Last()->SetDataAndSize(y.GetData(), y.Size());
     MG_Cycle();
@@ -5353,9 +5624,19 @@ void MonolithicMultigrid::MG_Cycle() const
     // PreSmoothing
     if (current_level > 0)
     {
+        //std::cout << "residual before presmoothing \n";
+        //residual_l.Print();
+
         Smoother_l.Mult(residual_l, correction_l);
+
+        //std::cout << "correction after presmoothing \n";
+        //correction_l.Print();
+
         Operator_l.Mult(correction_l, help);
         residual_l -= help;
+
+        //std::cout << "new residual after presmoothing \n";
+        //residual_l.Print();
     }
 #endif
 
@@ -5366,12 +5647,11 @@ void MonolithicMultigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
 
-        /*
 #ifdef BND_FOR_MULTIGRID
         block_viewers[current_level-1]->Update((*residual[current_level-1]).GetData(), *block_offsets[current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
+        for (int blk = 0; blk < block_offsets[current_level-1]->Size() - 1; ++blk)
         {
-            const Array<int> *temp = essbdrtdofs_lvls[current_level-1][blk];
+            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level][blk];
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
                 //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
@@ -5379,7 +5659,6 @@ void MonolithicMultigrid::MG_Cycle() const
             }
         }
 #endif
-        */
 
         current_level--;
         MG_Cycle();
@@ -5396,35 +5675,7 @@ void MonolithicMultigrid::MG_Cycle() const
 #ifdef NO_COARSESOLVE
         correction_l = 0.0;
 #else
-        /*
-#ifdef BND_FOR_MULTIGRID
-        block_viewers[Operators_.Size() - current_level-1]->Update(residual_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
-        {
-            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
-                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
-        }
-#endif
-        */
         CoarseSolver->Mult(residual_l, correction_l);
-        /*
-#ifdef BND_FOR_MULTIGRID
-        block_viewers[Operators_.Size() - current_level-1]->Update(correction_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
-        {
-            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
-                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
-        }
-#endif
-        */
 #endif
         /*
         cor_cor.SetSize(residual_l.Size());
@@ -5655,6 +5906,9 @@ private:
 void Multigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
+
+    //std::cout << "inout x \n";
+    //residual.Last()->Print();
 
 #ifdef BND_FOR_MULTIGRID
     //std::cout << "x size = " << x.Size() << "\n";
