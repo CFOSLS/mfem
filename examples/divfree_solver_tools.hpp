@@ -2950,7 +2950,8 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
 
 #ifndef BLKDIAG_SMOOTHER
     delete tmp1;
-    delete tmp2;
+    if (numblocks > 1)
+        delete tmp2;
 #endif
 
     //delete CTMC;
@@ -3043,7 +3044,8 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
 
 #ifndef BLKDIAG_SMOOTHER
     tmp1 = new Vector(Divfree_hpmat_nobnd->Width());
-    tmp2 = new Vector(xblock->GetBlock(1).Size());
+    if (numblocks > 1)
+        tmp2 = new Vector(xblock->GetBlock(1).Size());
 #endif
 
     trueblock_offsets.SetSize(numblocks + 1);
@@ -5779,13 +5781,13 @@ public:
         //CoarseSolver = new CGSolver_mod(Operators_[0]->GetComm(), *essbdrtdofs_lvls[Operators_.Size() - 1]);
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-6));
+        CoarseSolver->SetRelTol(sqrt(1e-15));
 #ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(NCOARSEITER);
 #else
         CoarseSolver->SetMaxIter(100);
 #endif
-        CoarseSolver->SetPrintLevel(1);
+        CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 

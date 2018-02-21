@@ -52,9 +52,9 @@
 //#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
-#define BLKDIAG_SMOOTHER
+//#define BLKDIAG_SMOOTHER
 
-#define COARSEPREC_AMS
+//#define COARSEPREC_AMS
 
 #ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
 
@@ -83,7 +83,7 @@
 // must be always active
 #define USE_CURLMATRIX
 
-#define WITH_PENALTY
+//#define WITH_PENALTY
 
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
@@ -1132,20 +1132,19 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
     bool refine_t_first = false;
 
-    bool withDiv = true;
     bool with_multilevel = true;
     bool monolithicMG = false;
 
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 3;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -1271,6 +1270,54 @@ int main(int argc, char *argv[])
 #else
     if (verbose)
         std::cout << "CHECK_CONSTR passive \n";
+#endif
+
+#ifdef BND_FOR_MULTIGRID
+    if (verbose)
+        std::cout << "BND_FOR_MULTIGRID active \n";
+#else
+    if (verbose)
+        std::cout << "BND_FOR_MULTIGRID passive \n";
+#endif
+
+#ifdef BLKDIAG_SMOOTHER
+    if (verbose)
+        std::cout << "BLKDIAG_SMOOTHER active \n";
+#else
+    if (verbose)
+        std::cout << "BLKDIAG_SMOOTHER passive \n";
+#endif
+
+#ifdef COARSEPREC_AMS
+    if (verbose)
+        std::cout << "COARSEPREC_AMS active \n";
+#else
+    if (verbose)
+        std::cout << "COARSEPREC_AMS passive \n";
+#endif
+
+#ifdef COMPARE_MG
+    if (verbose)
+        std::cout << "COMPARE_MG active \n";
+#else
+    if (verbose)
+        std::cout << "COMPARE_MG passive \n";
+#endif
+
+#ifdef WITH_PENALTY
+    if (verbose)
+        std::cout << "WITH_PENALTY active \n";
+#else
+    if (verbose)
+        std::cout << "WITH_PENALTY passive \n";
+#endif
+
+#ifdef K_IDENTITY
+    if (verbose)
+        std::cout << "K_IDENTITY active \n";
+#else
+    if (verbose)
+        std::cout << "K_IDENTITY passive \n";
 #endif
 
     std::cout << std::flush;
@@ -1700,9 +1747,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Creating a hierarchy of meshes by successive refinements "
                      "(with multilevel and multigrid prerequisites) \n";
-
-    if (!withDiv && verbose)
-        std::cout << "Multilevel code cannot be used without withDiv flag \n";
 
     for (int l = num_levels - 1; l >= 0; --l)
     {
@@ -2791,140 +2835,132 @@ int main(int argc, char *argv[])
     Vector F_fine(P_W[0]->Height());
     Vector G_fine(P_R[0]->Height());
     Vector sigmahat_pau;
-    if (withDiv)
+
+    if (with_multilevel)
     {
-        if (with_multilevel)
+        if (verbose)
+            std::cout << "Using multilevel algorithm for finding a particular solution \n";
+
+        ConstantCoefficient k(1.0);
+
+        SparseMatrix *M_local;
+        ParBilinearForm *mVarf;
+        if (useM_in_divpart)
         {
-            if (verbose)
-                std::cout << "Using multilevel algorithm for finding a particular solution \n";
-
-            ConstantCoefficient k(1.0);
-
-            SparseMatrix *M_local;
-            ParBilinearForm *mVarf;
-            if (useM_in_divpart)
-            {
-                mVarf = new ParBilinearForm(R_space);
-                mVarf->AddDomainIntegrator(new VectorFEMassIntegrator(k));
-                mVarf->Assemble();
-                mVarf->Finalize();
-                SparseMatrix &M_fine(mVarf->SpMat());
-                M_local = &M_fine;
-            }
-            else
-            {
-                M_local = NULL;
-            }
-
-            ParMixedBilinearForm *bVarf(new ParMixedBilinearForm(R_space, W_space));
-            bVarf->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-            bVarf->Assemble();
-            bVarf->Finalize();
-            Bdiv = bVarf->ParallelAssemble();
-            SparseMatrix &B_fine = bVarf->SpMat();
-            SparseMatrix *B_local = &B_fine;
-
-            //Right hand size
-
-            gform = new ParLinearForm(W_space);
-            gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
-            gform->Assemble();
-
-            F_fine = *gform;
-            G_fine = .0;
-
-            divp.div_part(ref_levels,
-                          M_local, B_local,
-                          G_fine,
-                          F_fine,
-                          P_W, P_R, P_W,
-                          Element_dofs_R,
-                          Element_dofs_W,
-                          Dof_TrueDof_Func_lvls[num_levels - 1][0],
-                          Dof_TrueDof_L2_lvls[num_levels - 1],
-                          sigmahat_pau,
-                          *EssBdrDofs_Funct_lvls[num_levels - 1][0]);
-
-    #ifdef MFEM_DEBUG
-            Vector sth(F_fine.Size());
-            B_fine.Mult(sigmahat_pau, sth);
-            sth -= F_fine;
-            std::cout << "sth.Norml2() = " << sth.Norml2() << "\n";
-            MFEM_ASSERT(sth.Norml2()<1e-8, "The particular solution does not satisfy the divergence constraint");
-    #endif
-
-            //delete M_local;
-            //delete B_local;
-            delete bVarf;
-            delete mVarf;
-
-            *Sigmahat = sigmahat_pau;
+            mVarf = new ParBilinearForm(R_space);
+            mVarf->AddDomainIntegrator(new VectorFEMassIntegrator(k));
+            mVarf->Assemble();
+            mVarf->Finalize();
+            SparseMatrix &M_fine(mVarf->SpMat());
+            M_local = &M_fine;
         }
         else
         {
-            if (verbose)
-                std::cout << "Solving Poisson problem for finding a particular solution \n";
-            ParGridFunction *sigma_exact;
-            ParMixedBilinearForm *Bblock;
-            HypreParMatrix *BdivT;
-            HypreParMatrix *BBT;
-            HypreParVector *Rhs;
-
-            sigma_exact = new ParGridFunction(R_space);
-            sigma_exact->ProjectCoefficient(*Mytest.sigma);
-
-            gform = new ParLinearForm(W_space);
-            gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
-            gform->Assemble();
-
-            Bblock = new ParMixedBilinearForm(R_space, W_space);
-            Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-            Bblock->Assemble();
-            Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *gform);
-
-            Bblock->Finalize();
-            Bdiv = Bblock->ParallelAssemble();
-            BdivT = Bdiv->Transpose();
-            BBT = ParMult(Bdiv, BdivT);
-            Rhs = gform->ParallelAssemble();
-
-            HypreBoomerAMG * invBBT = new HypreBoomerAMG(*BBT);
-            invBBT->SetPrintLevel(0);
-
-            mfem::CGSolver solver(comm);
-            solver.SetPrintLevel(0);
-            solver.SetMaxIter(70000);
-            solver.SetRelTol(1.0e-12);
-            solver.SetAbsTol(1.0e-14);
-            solver.SetPreconditioner(*invBBT);
-            solver.SetOperator(*BBT);
-
-            Vector * Temphat = new Vector(W_space->TrueVSize());
-            *Temphat = 0.0;
-            solver.Mult(*Rhs, *Temphat);
-
-            Vector * Temp = new Vector(R_space->TrueVSize());
-            BdivT->Mult(*Temphat, *Temp);
-
-            Sigmahat->Distribute(*Temp);
-            //Sigmahat->SetFromTrueDofs(*Temp);
-
-            delete sigma_exact;
-            delete invBBT;
-            delete BBT;
-            delete Bblock;
-            delete Rhs;
-            delete Temphat;
-            delete Temp;
+            M_local = NULL;
         }
 
+        ParMixedBilinearForm *bVarf(new ParMixedBilinearForm(R_space, W_space));
+        bVarf->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        bVarf->Assemble();
+        bVarf->Finalize();
+        Bdiv = bVarf->ParallelAssemble();
+        SparseMatrix &B_fine = bVarf->SpMat();
+        SparseMatrix *B_local = &B_fine;
+
+        //Right hand size
+
+        gform = new ParLinearForm(W_space);
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform->Assemble();
+
+        F_fine = *gform;
+        G_fine = .0;
+
+        divp.div_part(ref_levels,
+                      M_local, B_local,
+                      G_fine,
+                      F_fine,
+                      P_W, P_R, P_W,
+                      Element_dofs_R,
+                      Element_dofs_W,
+                      Dof_TrueDof_Func_lvls[num_levels - 1][0],
+                      Dof_TrueDof_L2_lvls[num_levels - 1],
+                      sigmahat_pau,
+                      *EssBdrDofs_Funct_lvls[num_levels - 1][0]);
+
+#ifdef MFEM_DEBUG
+        Vector sth(F_fine.Size());
+        B_fine.Mult(sigmahat_pau, sth);
+        sth -= F_fine;
+        std::cout << "sth.Norml2() = " << sth.Norml2() << "\n";
+        MFEM_ASSERT(sth.Norml2()<1e-8, "The particular solution does not satisfy the divergence constraint");
+#endif
+
+        //delete M_local;
+        //delete B_local;
+        delete bVarf;
+        delete mVarf;
+
+        *Sigmahat = sigmahat_pau;
     }
-    else // solving a div-free system with some analytical solution for the div-free part
+    else
     {
         if (verbose)
-            std::cout << "Using exact sigma minus curl of a given function from H(curl,0) (in 3D) as a particular solution \n";
-        Sigmahat->ProjectCoefficient(*Mytest.sigmahat);
+            std::cout << "Solving Poisson problem for finding a particular solution \n";
+        ParGridFunction *sigma_exact;
+        ParMixedBilinearForm *Bblock;
+        HypreParMatrix *BdivT;
+        HypreParMatrix *BBT;
+        HypreParVector *Rhs;
+
+        sigma_exact = new ParGridFunction(R_space);
+        sigma_exact->ProjectCoefficient(*Mytest.sigma);
+
+        gform = new ParLinearForm(W_space);
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform->Assemble();
+
+        Bblock = new ParMixedBilinearForm(R_space, W_space);
+        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Bblock->Assemble();
+        Bblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *gform);
+
+        Bblock->Finalize();
+        Bdiv = Bblock->ParallelAssemble();
+        BdivT = Bdiv->Transpose();
+        BBT = ParMult(Bdiv, BdivT);
+        Rhs = gform->ParallelAssemble();
+
+        HypreBoomerAMG * invBBT = new HypreBoomerAMG(*BBT);
+        invBBT->SetPrintLevel(0);
+
+        mfem::CGSolver solver(comm);
+        solver.SetPrintLevel(0);
+        solver.SetMaxIter(70000);
+        solver.SetRelTol(1.0e-12);
+        solver.SetAbsTol(1.0e-14);
+        solver.SetPreconditioner(*invBBT);
+        solver.SetOperator(*BBT);
+
+        Vector * Temphat = new Vector(W_space->TrueVSize());
+        *Temphat = 0.0;
+        solver.Mult(*Rhs, *Temphat);
+
+        Vector * Temp = new Vector(R_space->TrueVSize());
+        BdivT->Mult(*Temphat, *Temp);
+
+        Sigmahat->Distribute(*Temp);
+        //Sigmahat->SetFromTrueDofs(*Temp);
+
+        delete sigma_exact;
+        delete invBBT;
+        delete BBT;
+        delete Bblock;
+        delete Rhs;
+        delete Temphat;
+        delete Temp;
     }
+
     // in either way now Sigmahat is a function from H(div) s.t. div Sigmahat = div sigma = f
 
     chrono.Stop();
@@ -2996,8 +3032,7 @@ int main(int argc, char *argv[])
             std::cout << "dim(S) = " << dimS << ", ";
             std::cout << "dim(C+S) = " << dimC + dimS << "\n";
         }
-        if (withDiv)
-            std::cout << "dim(R) = " << dimR << "\n";
+        std::cout << "dim(R) = " << dimR << "\n";
         std::cout << "***********************************************************\n";
     }
 
@@ -3071,10 +3106,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (withDiv)
-        xblks.GetBlock(0) = 0.0;
-    else
-        xblks.GetBlock(0) = *u_exact;
+    xblks.GetBlock(0) = 0.0;
 
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S from H1 or (S from L2 and no elimination)
         xblks.GetBlock(1) = *S_exact;
@@ -3603,25 +3635,6 @@ int main(int argc, char *argv[])
         irs[i] = &(IntRules.Get(i, order_quad));
     }
 
-    double err_u, norm_u;
-
-    if (!withDiv)
-    {
-        err_u = u->ComputeL2Error(*Mytest.divfreepart, irs);
-        norm_u = ComputeGlobalLpNorm(2, *Mytest.divfreepart, *pmesh, irs);
-
-        if (verbose)
-        {
-            if ( norm_u > MYZEROTOL )
-            {
-                //std::cout << "norm_u = " << norm_u << "\n";
-                cout << "|| u - u_ex || / || u_ex || = " << err_u / norm_u << endl;
-            }
-            else
-                cout << "|| u || = " << err_u << " (u_ex = 0)" << endl;
-        }
-    }
-
     ParGridFunction * opdivfreepart = new ParGridFunction(R_space);
     /*
     DiscreteLinearOperator Divfree_h(C_space, R_space);
@@ -3651,30 +3664,6 @@ int main(int argc, char *argv[])
                           << (*opdivfreepart)[tdof]
                           << ", index = " << tdof << "\n";
             }
-        }
-    }
-
-
-    ParGridFunction * opdivfreepart_exact;
-    double err_opdivfreepart, norm_opdivfreepart;
-
-    if (!withDiv)
-    {
-        opdivfreepart_exact = new ParGridFunction(R_space);
-        opdivfreepart_exact->ProjectCoefficient(*Mytest.opdivfreepart);
-
-        err_opdivfreepart = opdivfreepart->ComputeL2Error(*Mytest.opdivfreepart, irs);
-        norm_opdivfreepart = ComputeGlobalLpNorm(2, *Mytest.opdivfreepart, *pmesh, irs);
-
-        if (verbose)
-        {
-            if (norm_opdivfreepart > MYZEROTOL )
-            {
-                //cout << "|| opdivfreepart_ex || = " << norm_opdivfreepart << endl;
-                cout << "|| Divfree_h u_h - opdivfreepart_ex || / || opdivfreepart_ex || = " << err_opdivfreepart / norm_opdivfreepart << endl;
-            }
-            else
-                cout << "|| Divfree_h u_h || = " << err_opdivfreepart << " (divfreepart_ex = 0)" << endl;
         }
     }
 
@@ -3908,19 +3897,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         cout << "Computing projection errors \n";
-
-    if(verbose && !withDiv)
-    {
-        double projection_error_u = u_exact->ComputeL2Error(*Mytest.divfreepart, irs);
-        if ( norm_u > MYZEROTOL )
-        {
-            //std::cout << "Debug: || u_ex || = " << norm_u << "\n";
-            //std::cout << "Debug: proj error = " << projection_error_u << "\n";
-            cout << "|| u_ex - Pi_h u_ex || / || u_ex || = " << projection_error_u / norm_u << endl;
-        }
-        else
-            cout << "|| Pi_h u_ex || = " << projection_error_u << " (u_ex = 0) \n ";
-    }
 
     double projection_error_sigma = sigma_exact->ComputeL2Error(*Mytest.sigma, irs);
 
@@ -6318,11 +6294,8 @@ int main(int argc, char *argv[])
 
     delete hdiv_coll;
     delete R_space;
-    if (withDiv)
-    {
-        delete l2_coll;
-        delete W_space;
-    }
+    delete l2_coll;
+    delete W_space;
     delete hdivfree_coll;
     delete C_space;
 
@@ -6354,11 +6327,8 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef OLD_CODE
-    if (withDiv)
-    {
-        delete gform;
-        delete Bdiv;
-    }
+    delete gform;
+    delete Bdiv;
 
     delete u_exact;
     delete S_exact;
