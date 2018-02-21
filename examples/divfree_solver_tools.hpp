@@ -648,7 +648,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(1);
+    coarseSolver->SetPrintLevel(0);
     coarseSolver->iterative_mode = false;
 
     finalized = true;
@@ -5256,14 +5256,14 @@ public:
         }
 
         CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
-        CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetAbsTol(sqrt(1e-15));
+        CoarseSolver->SetRelTol(sqrt(1e-6));
 #ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(NCOARSEITER);
 #else
         CoarseSolver->SetMaxIter(100);
 #endif
-        CoarseSolver->SetPrintLevel(1);
+        CoarseSolver->SetPrintLevel(0);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 

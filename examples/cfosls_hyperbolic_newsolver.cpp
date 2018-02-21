@@ -47,7 +47,7 @@
 
 //#define MARTIN_PREC
 
-#define COMPARE_MG
+//#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 #define BLKDIAG_SMOOTHER
