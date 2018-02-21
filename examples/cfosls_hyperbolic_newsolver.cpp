@@ -47,6 +47,8 @@
 
 //#define MARTIN_PREC
 
+//#define SPECIAL_COARSECHECK
+
 //#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
@@ -81,6 +83,8 @@
 
 // must be always active
 #define USE_CURLMATRIX
+
+#define WITH_PENALTY
 
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
@@ -1127,7 +1131,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1440,6 +1444,22 @@ int main(int argc, char *argv[])
         pmesh = make_shared<ParMesh>(comm, *mesh);
         delete mesh;
     }
+
+#ifdef WITH_PENALTY
+    if (verbose)
+        std::cout << "regularization is ON \n";
+    double h_min, h_max, kappa_min, kappa_max;
+    pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+    if (verbose)
+        std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+    double reg_param;
+    reg_param = 0.1 * h_min * h_min;
+    if (verbose)
+        std::cout << "regularization parameter: " << reg_param << "\n";
+    ConstantCoefficient reg_coeff(reg_param);
+#endif
+
 
     MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
 
@@ -1784,6 +1804,9 @@ int main(int argc, char *argv[])
             Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
         else
             Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
         Ablock->Assemble();
         Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
         Ablock->Finalize();
@@ -2123,6 +2146,9 @@ int main(int argc, char *argv[])
                 Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
             else
                 Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
             Ablock->Assemble();
             Ablock->EliminateEssentialBC(ess_bdrSigma);//, *sigma_exact_finest, *fform); // makes res for sigma_special happier
             Ablock->Finalize();
@@ -3051,6 +3077,9 @@ int main(int argc, char *argv[])
     }
     else // no S, hence we need the matrix weight
         Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+    Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
     Mblock->Assemble();
     Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *rhside_Hdiv);
     Mblock->Finalize();
@@ -3368,6 +3397,96 @@ int main(int argc, char *argv[])
                       << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
+
+#ifdef SPECIAL_COARSECHECK
+    {
+        if (verbose)
+            std::cout << "Performing a special coarsest problem convergence check \n";
+
+        /*
+        ParBilinearForm *Mblock = new ParBilinearForm(R_space_lvls[num_levels - 1]);
+        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
+        Mblock->Assemble();
+        Vector temp1(Mblock->Width());
+        temp1 = 0.0;
+        Vector temp2(Mblock->Width());
+        Mblock->EliminateEssentialBC(ess_bdrSigma, temp1, temp2);
+        Mblock->Finalize();
+
+        HypreParMatrix *M = Mblock->ParallelAssemble();
+        */
+
+        auto M = (*Funct_hpmat_lvls[num_levels - 1])(0,0);
+
+        auto A = RAP(Divfree_hpmat_mod_lvls[num_levels - 1], M, Divfree_hpmat_mod_lvls[num_levels - 1]);
+
+        Eliminate_ib_block(*A, *EssBdrTrueDofs_Hcurl[num_levels - 1], *EssBdrTrueDofs_Hcurl[num_levels - 1] );
+        HypreParMatrix * temphpmat = A->Transpose();
+        Eliminate_ib_block(*temphpmat, *EssBdrTrueDofs_Hcurl[num_levels - 1], *EssBdrTrueDofs_Hcurl[num_levels - 1] );
+        A = temphpmat->Transpose();
+        A->CopyColStarts();
+        A->CopyRowStarts();
+        SparseMatrix diag;
+        A->GetDiag(diag);
+        diag.MoveDiagonalFirst();
+        delete temphpmat;
+        //Eliminate_bb_block(*A, *EssBdrTrueDofs_Hcurl[num_levels - 1]);
+
+        //A->CopyRowStarts();
+        //A->CopyColStarts();
+
+        Vector checkvec(Divfree_hpmat_mod_lvls[num_levels - 1]->Height());
+        ParGridFunction * sigma_exact_tdofs_coarsest = new ParGridFunction(R_space_lvls[num_levels - 1]);
+        sigma_exact_tdofs_coarsest->ProjectCoefficient(*Mytest.sigma);
+        sigma_exact_tdofs_coarsest->ParallelProject(checkvec);
+
+        Vector checkRhs(A->Height());
+        Divfree_hpmat_mod_lvls[num_levels - 1]->MultTranspose(checkvec, checkRhs);
+        Vector checkX(A->Width());
+
+        //delete M;
+        //delete Mblock;
+
+        HypreSmoother * prec = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+
+        CGSolver solver(comm);
+        if (verbose)
+            cout << "Linear solver: CG" << endl << flush;
+
+        if (verbose)
+            std::cout << "Coarsest problem size = " << A->Height() << "\n";
+
+        solver.SetAbsTol(sqrt(1.0e-64));
+        solver.SetRelTol(sqrt(1.0e-30));
+        solver.SetMaxIter(400);
+        solver.SetOperator(*A);
+
+        solver.SetPreconditioner(*prec);
+        solver.SetPrintLevel(1);
+        checkX = 0.0;
+
+        chrono.Clear();
+        chrono.Start();
+        solver.Mult(checkRhs, checkX);
+        chrono.Stop();
+
+        if (verbose)
+        {
+            if (solver.GetConverged())
+                std::cout << "Linear solver check converged in " << solver.GetNumIterations()
+                          << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
+            else
+                std::cout << "Linear solver check did not converge in " << solver.GetNumIterations()
+                          << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
+            std::cout << "Linear solver check took " << chrono.RealTime() << "s. \n";
+        }
+
+    }
+#endif
+
 
     chrono.Clear();
     chrono.Start();
@@ -4180,6 +4299,9 @@ int main(int argc, char *argv[])
         Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator);
     else
         Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+    Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
     Ablocktest->Assemble();
     Ablocktest->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fformtest);
     Ablocktest->Finalize();
