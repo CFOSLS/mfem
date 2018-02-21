@@ -3316,6 +3316,9 @@ void HcurlGSSSmoother::Setup() const
 #endif
 }
 
+// TODO: Fix the block case - boundary conditions for the vectors and matrices in the geometric multigrid
+// TODO: Implement the Gauss-Seidel smoother for the block case for the new multigrid (i.e. add off-diagonal blocks)
+// TODO: so that finally for the block case geometric MG and new MG w/o Schwarz smoother give the same result
 // TODO: Test after all with nonzero boundary conditions for sigma
 // TODO: Check the timings and make it faster
 // TODO: Clean up the function descriptions
@@ -5495,6 +5498,14 @@ public:
             SparseMatrix diag;
             Operators_[l-1]->GetDiag(diag);
             diag.MoveDiagonalFirst();
+            /*
+#if defined(COARSEPREC_AMS) && defined(WITH_PENALTY)
+            if (l - 1 == 0)
+            {
+                diag.
+            }
+#endif
+            */
             delete temphpmat;
             //Eliminate_bb_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l]);
 //#else
@@ -5517,13 +5528,13 @@ public:
         //CoarseSolver = new CGSolver_mod(Operators_[0]->GetComm(), *essbdrtdofs_lvls[Operators_.Size() - 1]);
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
         CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-12));
+        CoarseSolver->SetRelTol(sqrt(1e-6));
 #ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(NCOARSEITER);
 #else
         CoarseSolver->SetMaxIter(100);
 #endif
-        CoarseSolver->SetPrintLevel(0);
+        CoarseSolver->SetPrintLevel(1);
         CoarseSolver->SetOperator(*Operators_[0]);
         CoarseSolver->iterative_mode = false;
 

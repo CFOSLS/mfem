@@ -68,9 +68,6 @@
 //#define COMPARE_SMOOTHERS
 #endif // for ifdef COMPARE_MG
 
-//TODO: impose boundary conditions after Pt and do the bnd cnds elimination for matrix blocks
-//in MonolithicMultigrid
-
 //#define TIMING
 
 #ifdef TIMING
@@ -86,7 +83,7 @@
 // must be always active
 #define USE_CURLMATRIX
 
-//#define WITH_PENALTY
+#define WITH_PENALTY
 
 //#define ONLY_DIVFREEPART
 //#define K_IDENTITY
@@ -1132,8 +1129,8 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int ser_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1148,7 +1145,7 @@ int main(int argc, char *argv[])
     bool useM_in_divpart = true;
 
     // solver options
-    int prec_option = 2;        // defines whether to use preconditioner or not, and which one
+    int prec_option = 1;        // defines whether to use preconditioner or not, and which one
     bool prec_is_MG;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
@@ -1456,7 +1453,7 @@ int main(int argc, char *argv[])
         std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
 
     double reg_param;
-    reg_param = 0.1 * h_min * h_min;
+    reg_param = 1.0 * h_min * h_min;
     reg_param *= 1.0 / (pow(2.0, par_ref_levels) * pow(2.0, par_ref_levels));
     if (verbose)
         std::cout << "regularization parameter: " << reg_param << "\n";
@@ -3070,7 +3067,6 @@ int main(int argc, char *argv[])
     HypreParMatrix * Divfree_dop = Divfree_hpmat_mod_lvls[0];
     HypreParMatrix * DivfreeT_dop = Divfree_dop->Transpose();
 
-
     // mass matrix for H(div)
     ParBilinearForm *Mblock(new ParBilinearForm(R_space));
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -3106,6 +3102,24 @@ int main(int argc, char *argv[])
     diag.MoveDiagonalFirst();
     delete temphpmat;
     Eliminate_bb_block(*A, *EssBdrTrueDofs_Hcurl[0]);
+
+    /*
+    ParBilinearForm *Checkblock(new ParBilinearForm(C_space_lvls[0]));
+    //Checkblock->AddDomainIntegrator(new CurlCurlIntegrator);
+    Checkblock->AddDomainIntegrator(new CurlCurlIntegrator(*Mytest.Ktilda));
+#ifdef WITH_PENALTY
+    Checkblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
+#endif
+    Checkblock->Assemble();
+    {
+        Vector temp1(Checkblock->Width());
+        temp1 = 0.0;
+        Vector temp2(Checkblock->Width());
+        Checkblock->EliminateEssentialBC(ess_bdrSigma, temp1, temp2);
+    }
+    Checkblock->Finalize();
+    auto A = Checkblock->ParallelAssemble();
+    */
 
     HypreParMatrix *C, *CH, *CHT, *B, *BT;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
