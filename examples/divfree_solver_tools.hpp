@@ -648,7 +648,7 @@ void CoarsestProblemHcurlSolver::Setup() const
     coarseSolver->SetOperator(*coarse_matrix);
     if (coarse_prec)
         coarseSolver->SetPreconditioner(*coarse_prec);
-    coarseSolver->SetPrintLevel(0);
+    coarseSolver->SetPrintLevel(1);
     coarseSolver->iterative_mode = false;
 
     finalized = true;
@@ -3188,9 +3188,14 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
 
     //truerhs->GetBlock(0).Print();
+    //std::cout << "input to Smoothers mult \n";
+    //truerhs->Print();
 
     for ( int blk = 0; blk < numblocks; ++blk)
         Smoothers[blk]->Mult(truerhs->GetBlock(blk), truex->GetBlock(blk));
+
+    //std::cout << "output to Smoothers mult \n";
+    //truex->Print();
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3889,6 +3894,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         chrono3.Start();
 #endif
 
+        //std::cout << "righthand side on the entrance to Solve() \n";
+        //xblock_truedofs->Print();
+
         Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
 
 #ifdef TIMING
@@ -4175,6 +4183,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+            //std::cout << "new residual inside new mg \n";
+            //truetempvec_lvls[l]->Print();
 
 #ifdef TIMING
             MPI_Barrier(comm);
@@ -5217,10 +5228,20 @@ public:
                     A11_c->GetDiag(diag);
                     diag.MoveDiagonalFirst();
                     delete temphpmat;
-                    //Eliminate_bb_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l]);
+                    //Eliminate_bb_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1]);
                 }
 
                 HypreParMatrix * A01_c = RAP(&P0, &A01, &P1);
+                {
+                    Eliminate_ib_block(*A01_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                    HypreParMatrix * temphpmat = A01_c->Transpose();
+                    Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                    A01_c = temphpmat->Transpose();
+                    A01_c->CopyColStarts();
+                    A01_c->CopyRowStarts();
+                    delete temphpmat;
+                }
+
                 HypreParMatrix * A10_c = A01_c->Transpose();
 
 
@@ -5262,7 +5283,7 @@ public:
             ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(1, precS);
         }
 
-        //CoarseSolver->SetPreconditioner(*CoarsePrec_);
+        CoarseSolver->SetPreconditioner(*CoarsePrec_);
     }
 
     virtual void Mult(const Vector & x, Vector & y) const;
@@ -5318,6 +5339,7 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
 
+    /*
 #ifdef BND_FOR_MULTIGRID
     block_viewers[Operators_.Size() - 1]->Update((*residual.Last()).GetData(), *block_offsets[Operators_.Size() - 1]);
     for (int blk = 0; blk < block_offsets.size() - 1; ++blk)
@@ -5330,6 +5352,7 @@ void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
         }
     }
 #endif
+    */
 
     correction.Last()->SetDataAndSize(y.GetData(), y.Size());
     MG_Cycle();
@@ -5350,9 +5373,19 @@ void MonolithicMultigrid::MG_Cycle() const
     // PreSmoothing
     if (current_level > 0)
     {
+        //std::cout << "residual before presmoothing \n";
+        //residual_l.Print();
+
         Smoother_l.Mult(residual_l, correction_l);
+
+        //std::cout << "correction after presmoothing \n";
+        //correction_l.Print();
+
         Operator_l.Mult(correction_l, help);
         residual_l -= help;
+
+        //std::cout << "new residual after presmoothing \n";
+        //residual_l.Print();
     }
 #endif
 
@@ -5363,12 +5396,11 @@ void MonolithicMultigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
 
-        /*
 #ifdef BND_FOR_MULTIGRID
         block_viewers[current_level-1]->Update((*residual[current_level-1]).GetData(), *block_offsets[current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
+        for (int blk = 0; blk < block_offsets[current_level-1]->Size() - 1; ++blk)
         {
-            const Array<int> *temp = essbdrtdofs_lvls[current_level-1][blk];
+            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level][blk];
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
                 //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
@@ -5376,7 +5408,6 @@ void MonolithicMultigrid::MG_Cycle() const
             }
         }
 #endif
-        */
 
         current_level--;
         MG_Cycle();
@@ -5393,35 +5424,7 @@ void MonolithicMultigrid::MG_Cycle() const
 #ifdef NO_COARSESOLVE
         correction_l = 0.0;
 #else
-        /*
-#ifdef BND_FOR_MULTIGRID
-        block_viewers[Operators_.Size() - current_level-1]->Update(residual_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
-        {
-            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
-                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
-        }
-#endif
-        */
         CoarseSolver->Mult(residual_l, correction_l);
-        /*
-#ifdef BND_FOR_MULTIGRID
-        block_viewers[Operators_.Size() - current_level-1]->Update(correction_l.GetData(), *block_offsets[Operators_.Size() - current_level-1]);
-        for (int blk = 0; blk < block_offsets[Operators_.Size() - current_level-1]->Size() - 1; ++blk)
-        {
-            const Array<int> *temp = essbdrtdofs_lvls[Operators_.Size() - current_level-1][blk];
-            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
-            {
-                //std::cout << "tdof = " << (*temp)[tdofind] << "\n";
-                block_viewers[Operators_.Size() - current_level-1]->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
-            }
-        }
-#endif
-        */
 #endif
         /*
         cor_cor.SetSize(residual_l.Size());
@@ -5626,6 +5629,9 @@ private:
 void Multigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
+
+    //std::cout << "inout x \n";
+    //residual.Last()->Print();
 
 #ifdef BND_FOR_MULTIGRID
     //std::cout << "x size = " << x.Size() << "\n";
