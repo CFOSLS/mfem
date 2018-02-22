@@ -50,8 +50,21 @@
 #define BND_FOR_MULTIGRID
 //#define BLKDIAG_SMOOTHER
 
+//#define COMPARE_MG
+
 //#define COARSEPREC_AMS
 
+#ifdef COMPARE_MG // options for multigrid, specific for detailed comparison of mg
+
+#define NCOARSEITER 4
+
+//#define NO_COARSESOLVE
+//#define NO_POSTSMOOTH
+//#define NO_PRESMOOTH
+
+//#define COMPARE_COARSE_SOLVERS
+//#define COMPARE_SMOOTHERS
+#endif // for ifdef COMPARE_MG
 
 //#define TIMING
 
@@ -659,7 +672,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 3;
 
     bool aniso_refine = false;
     bool refine_t_first = false;
@@ -816,6 +829,14 @@ int main(int argc, char *argv[])
 #else
     if (verbose)
         std::cout << "COARSEPREC_AMS passive \n";
+#endif
+
+#ifdef COMPARE_MG
+    if (verbose)
+        std::cout << "COMPARE_MG active \n";
+#else
+    if (verbose)
+        std::cout << "COMPARE_MG passive \n";
 #endif
 
     std::cout << std::flush;
@@ -2412,11 +2433,28 @@ int main(int argc, char *argv[])
 
     HypreParMatrix *M = Mblock->ParallelAssemble();
 
+    /*
+    std::cout << "Comparing M in the old code and (0,0) block of the Functional \n";
+    {
+        SparseMatrix diag1;
+        M->GetDiag(diag1);
+
+        SparseMatrix diag2;
+        (*Funct_hpmat_lvls[0])(0,0)->GetDiag(diag2);
+
+        SparseMatrix diag2_copy(diag2);
+        diag2_copy.Add(-1.0, diag1);
+
+        //diag2_copy.Print();
+        std::cout << "diag(M) - Funct_00 norm = " << diag2_copy.MaxNorm() << "\n";
+    }
+    */
+
     // div-free operator matrix (curl in 3D, divskew in 4D)
     // either as DivfreeT_dop * M * Divfree_dop
     auto A = RAP(Divfree_dop, M, Divfree_dop);
-    A->CopyRowStarts();
-    A->CopyColStarts();
+    //A->CopyRowStarts();
+    //A->CopyColStarts();
 
     Eliminate_ib_block(*A, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Hcurl[0] );
     HypreParMatrix * temphpmat = A->Transpose();
@@ -2429,6 +2467,26 @@ int main(int argc, char *argv[])
     diag.MoveDiagonalFirst();
     delete temphpmat;
     Eliminate_bb_block(*A, *EssBdrTrueDofs_Hcurl[0]);
+
+    /*
+    {
+        SparseMatrix diag1;
+        A->GetDiag(diag1);
+
+        HypreParMatrix * A_Funct = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0] );
+
+        SparseMatrix diag2;
+        A_Funct->GetDiag(diag2);
+
+        SparseMatrix diag2_copy(diag2);
+        diag2_copy.Add(-1.0, diag1);
+
+        //diag2_copy.Print();
+        std::cout << "diag(A) - diag(CT Funct_0 C) norm = " << diag2_copy.MaxNorm() << "\n";
+    }
+    MPI_Finalize();
+    return 0;
+    */
 
     /*
     ParBilinearForm *Checkblock(new ParBilinearForm(C_space_lvls[0]));
@@ -2624,6 +2682,8 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
+
+#ifndef COMPARE_MG
 
     CGSolver solver(comm);
     if (verbose)
@@ -2914,7 +2974,9 @@ int main(int argc, char *argv[])
 
     //MPI_Finalize();
     //return 0;
-#endif
+#endif // for #ifndef COMPARE_MG
+
+#endif // for #ifdef OLD_CODE
 
     chrono.Clear();
     chrono.Start();
@@ -3088,7 +3150,11 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
+#ifdef COMPARE_MG
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(NCOARSEITER);
+#else
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+#endif
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
@@ -3369,6 +3435,985 @@ int main(int argc, char *argv[])
     BlockMattest->SetBlock(1,0, Dtest);
     BlockMattest->SetBlock(1,1, Ctest);
 
+    NewSolver.SetAsPreconditioner(true);
+    NewSolver.SetPrintLevel(0);
+    if (verbose)
+        NewSolver.PrintAllOptions();
+
+#ifdef  COMPARE_MG
+    if (verbose)
+        std::cout << "\nComparing geometric MG with modified new MG (w/o Schwarz smoother) \n";
+
+    //MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
+    //MFEM_ASSERT(num_procs == 1, "Right now the check operates only in serial case \n");
+    //MFEM_ASSERT(num_levels == 2, "Check works only for 2-level case \n");
+
+    Array<int> offsets_new(numblocks_funct + 1);
+    offsets_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        offsets_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_new.PartialSum();
+
+    BlockVector inFunctvec(offsets_new);
+    inFunctvec.GetBlock(0) = sigma_exact_truedofs;
+    inFunctvec.GetBlock(1) = S_exact_truedofs;
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inFunctvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for inFunctvec, blk = " << blk << ",  value = "
+                          << inFunctvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+    /*
+    Vector inHdivvec(NewSolver.Width());
+    inHdivvec = sigma_exact_truedofs;
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for inHdivvec, value = "
+                          << inHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+#endif
+    */
+
+    Array<int> offsets_hcurlfunct_new(numblocks_funct + 1);
+    offsets_hcurlfunct_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            offsets_hcurlfunct_new[blk + 1] = Divfree_hpmat_mod_lvls[0]->Width();
+        else
+            offsets_hcurlfunct_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_hcurlfunct_new.PartialSum();
+
+    BlockVector inFunctHcurlvec(offsets_hcurlfunct_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->MultTranspose(inFunctvec.GetBlock(0), inFunctHcurlvec.GetBlock(0));
+        else
+            inFunctHcurlvec.GetBlock(blk) = inFunctvec.GetBlock(blk);
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for inFunctHcurlvec, blk = " << blk << ",  value = "
+                          << inFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+    /*
+     * checking the Divfree and Divfree_T operators
+#ifdef CHECK_BNDCND
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Right now the check works only for S in L2 case!\n");
+    auto Divfree_T = Divfree_hpmat_mod_lvls[0]->Transpose();
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            const Array<int> *temp2 = EssBdrTrueDofs_Funct_lvls[0][0];
+
+            Array<int> bndtdofs_Hdiv(R_space_lvls[0]->TrueVSize());
+            bndtdofs_Hdiv = 0;
+            //std::cout << "bnd tdofs Hdiv \n";
+            for ( int tdofind = 0; tdofind < temp2->Size(); ++tdofind)
+            {
+                //std::cout << (*temp2)[tdofind] << " ";
+                bndtdofs_Hdiv[(*temp2)[tdofind]] = 1;
+            }
+            //std::cout << "\n";
+
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+
+            Array<int> bndtdofs_Hcurl(C_space_lvls[0]->TrueVSize());
+            bndtdofs_Hcurl = 0;
+            //std::cout << "bnd tdofs Hcurl \n";
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << (*temp)[tdofind] << " ";
+                bndtdofs_Hcurl[(*temp)[tdofind]] = 1;
+            }
+            //std::cout << "\n";
+
+            int special_row;
+            bool found = false;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                if ( fabs(inHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for inHcurlvec, value = "
+                              << inHcurlvec[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                    std::cout << " ... was corrected \n";
+                    if (found == false)
+                    {
+                        special_row = (*temp)[tdofind];
+                        found = true;
+                    }
+                }
+                inHcurlvec[(*temp)[tdofind]] = 0.0;
+            }
+
+            if (found)
+            {
+                int special_col2;
+                int special_col3;
+                bool found2 = false;
+                bool found3 = false;
+
+                SparseMatrix spmat;
+                Divfree_T->GetDiag(spmat);
+
+                {
+                    std::cout << "Looking for incorrect values in the diag part of Divfree_T \n";
+                    int row = special_row;
+                    int row_shift = spmat.GetI()[row];
+                    std::cout << "row = " << row << "\n";
+                    for (int j = 0; j < spmat.RowSize(row); ++j)
+                    {
+                        int col = spmat.GetJ()[row_shift + j];
+                        double value = spmat.GetData()[row_shift + j];
+                        if (fabs(value) > 1.0e-14)
+                        {
+                            std::cout << "(" << col << ", " << value << ") ";
+                            std::cout << "for hdivvec value = " << inHdivvec[col] << " ";
+                            if (bndtdofs_Hdiv[col] != 0)
+                                std::cout << " at the boundary! ";
+                            else
+                            {
+                                std::cout << "not at the boundary! ";
+                                found2 = true;
+                                special_col2 = col;
+                            }
+
+                        }
+                    }
+                    std::cout << "\n";
+                }
+
+                SparseMatrix spmat_offd;
+                int * cmap_offd;
+                Divfree_T->GetOffd(spmat_offd, cmap_offd);
+
+                {
+                    std::cout << "Looking for incorrect values in the offd part of Divfree_T \n";
+                    int row = special_row;
+                    int row_shift = spmat_offd.GetI()[row];
+                    std::cout << "row = " << row << "\n";
+                    for (int j = 0; j < spmat_offd.RowSize(row); ++j)
+                    {
+                        int col = spmat_offd.GetJ()[row_shift + j];
+                        int truecol = cmap_offd[col];
+                        double value = spmat_offd.GetData()[row_shift + j];
+                        if (fabs(value) > 1.0e-14)
+                        {
+                            std::cout << "col = " << col << ": (" << truecol << ", " << value << ") ";
+                            //std::cout << "for hdivvec value = " << inHdivvec[col] << " ";
+                            if (bndtdofs_Hdiv[col] != 0)
+                                std::cout << " at the boundary! ";
+                            else
+                            {
+                                std::cout << "not at the boundary! ";
+                                found3 = true;
+                                special_col3 = truecol;
+                            }
+
+                        }
+                    }
+                    std::cout << "\n";
+                }
+
+            }
+
+        }
+        MPI_Barrier(comm);
+    }
+    delete Divfree_T;
+
+#endif // for CHECK_BND
+    */
+
+    //MPI_Finalize();
+    //return 0;
+
+    // studying why inHcurlvec has nonzeros at the boundary
+    /*
+    {
+        std::cout << "bnd indices for Hdiv \n";
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            std::cout << (*temp)[tdofind] << " ";
+        }
+        std::cout << "\n";
+    }
+
+    {
+        std::cout << "bnd indices for Hcurl \n";
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            std::cout << (*temp)[tdofind] << " ";
+        }
+        std::cout << "\n";
+    }
+
+
+    SparseMatrix spmat;
+    Divfree_hpmat_mod_lvls[0]->Transpose()->GetDiag(spmat);
+
+    {
+        int row = 2;
+        int row_shift = spmat.GetI()[row];
+        std::cout << "row = " << row << "\n";
+        for (int j = 0; j < spmat.RowSize(row); ++j)
+        {
+            std::cout << "(" << spmat.GetJ()[row_shift + j] << ", " << spmat.GetData()[row_shift + j] << ") ";
+            std::cout << "for hdivvec value = " << inHdivvec[spmat.GetJ()[row_shift + j]] << " ";
+        }
+        std::cout << "\n";
+    }
+
+    SparseMatrix spmat2;
+    Divfree_hpmat_mod_lvls[0]->GetDiag(spmat2);
+    {
+        int row = 2;
+        int row_shift = spmat2.GetI()[row];
+        std::cout << "row = " << row << "\n";
+        for (int j = 0; j < spmat2.RowSize(row); ++j)
+        {
+            std::cout << "(" << spmat2.GetJ()[row_shift + j] << ", " << spmat2.GetData()[row_shift + j] << ") ";
+        }
+        std::cout << "\n";
+    }
+
+
+    MPI_Finalize();
+    return 0;
+    */
+
+    //HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+    //Array2D<HypreParMatrix*> CoarseOperator(numblocks_funct, numblocks_funct);
+    //CoarseOperator(0,0) = A_coarse;
+    //((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetCoarseOperator(CoarseOperator);
+
+    BlockVector outFunctvec(offsets_new);
+
+    if (verbose)
+        std::cout << "Computing action for the new MG ... \n";
+    NewSolver.Mult(inFunctvec, outFunctvec);
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFunctvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for outFunctvec, blk = " << blk << ",  value = "
+                          << outFunctvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+
+    BlockVector outFunctHcurlvec(offsets_hcurlfunct_new);
+    outFunctHcurlvec = 0.0;
+    if (verbose)
+        std::cout << "Computing action for the geometric MG ... \n";
+    prec->Mult(inFunctHcurlvec, outFunctHcurlvec);
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        const Array<int> *temp;
+        if (blk == 0)
+            temp = EssBdrTrueDofs_Hcurl[0];
+        else
+            temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                std::cout << "bnd cnd is violated for outFunctHcurlvec, blk = " << blk << ",  value = "
+                          << outFunctHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+        }
+    }
+
+    BlockVector out2Functvec(offsets_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->Mult(outFunctHcurlvec.GetBlock(0), out2Functvec.GetBlock(0));
+        else
+            out2Functvec.GetBlock(blk) = outFunctHcurlvec.GetBlock(blk);
+
+    BlockVector diff(offsets_new);
+    diff = outFunctvec;
+    diff -= out2Functvec;
+
+    /*
+    std::cout << "blk 0 \n";
+    diff.GetBlock(0).Print();
+    if (numblocks_funct > 1)
+    {
+        std::cout << "blk 1 \n";
+        diff.GetBlock(1).Print();
+    }
+    */
+
+    double diff_norm = diff.Norml2() / sqrt (diff.Size());
+    double geommg_norm = out2Functvec.Norml2() / sqrt(out2Functvec.Size());
+    if (verbose)
+    {
+        std::cout << "|| NewMG * vec - C MG * C^T vec || = " << diff_norm << "\n";
+        std::cout << "|| NewMG * vec - C MG * C^T vec || / || C MG * C^T vec || = " << diff_norm / geommg_norm << "\n";
+    }
+
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+    {
+        double diffblk_norm = diff.GetBlock(blk).Norml2() / sqrt (diff.GetBlock(blk).Size());
+        if (verbose)
+        {
+            std::cout << "|| NewMG * vec - C MG * C^T vec ||, block " << blk << " = " << diffblk_norm << "\n";
+        }
+    }
+
+    // checking that A is exactly CT Funct_0 C in serial
+    SparseMatrix diag1;
+    A->GetDiag(diag1);
+
+    HypreParMatrix * A_Funct = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0] );
+
+    SparseMatrix diag2;
+    A_Funct->GetDiag(diag2);
+
+    SparseMatrix diag2_copy(diag2);
+    diag2_copy.Add(-1.0, diag1);
+
+    //diag2_copy.Print();
+    std::cout << "diag(A) - diag(CT Funct_0 C) norm = " << diag2_copy.MaxNorm() << "\n";
+
+    // checking that A has 1's on the diagonal and 0's for other columns for boundary entries
+    /*
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+
+            Array<int> bndtdofs(C_space_lvls[0]->TrueVSize());
+            bndtdofs = 0;
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << (*temp)[tdofind] << " ";
+                bndtdofs[(*temp)[tdofind]] = 1;
+            }
+            //std::cout << "\n";
+
+            //if (verbose)
+                //bndtdofs.Print();
+
+            int tdof_offset = C_space_lvls[0]->GetMyTDofOffset();
+
+            SparseMatrix diag;
+            A->GetDiag(diag);
+
+            std::cout << "Checking diagonal part of A in geom mg \n";
+            for (int row = 0; row < diag.Height(); ++row)
+            {
+                if ( bndtdofs[row + tdof_offset] != 0)
+                {
+                    int nnz_shift = diag.GetI()[row];
+                    for (int j = 0; j < diag.RowSize(row); ++j)
+                    {
+                        int col = diag.GetJ()[nnz_shift + j];
+                        if ( col != row && fabs(diag.GetData()[nnz_shift + j]) > 1.0e-14 )
+                        {
+                            if (bndtdofs[col + tdof_offset] == 0)
+                            {
+                                std::cout << "Found nonzero for the boundary row = " << row << "(" << col << ", " << diag.GetData()[nnz_shift + j] << ") \n";
+                                std::cout << "which lives not on the boundary! \n";
+                            }
+                        }
+                    }
+                } // end of if row is for the boundary tdof
+            }// end of loop over rows
+        }
+        MPI_Barrier(comm);
+    }
+    MPI_Finalize();
+    return 0;
+    */
+
+#ifdef COMPARE_SMOOTHERS
+
+    if (verbose)
+        std::cout << " \nComparing separately smoothers \n";
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (verbose)
+            std::cout << "level: " << l << "\n";
+
+        BlockVector outSmooHdivvec(offsets_new);
+        Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+
+        //std::cout << "inFunctvec \n";
+        //inFunctvec.Print();
+
+        //std::cout << "outSmooHdivvec\n";
+        //outSmooHdivvec.Print();
+
+        /*
+        inFunctvec = outSmooHdivvec; // iter no 2
+
+        //std::cout << "outSmooHdivvec after the 1st iteration \n";
+        //outSmooHdivvec.Print();
+
+        Smoothers_lvls[0]->Mult(inFunctvec, outSmooHdivvec);
+        */
+
+        //Vector outSmooHdivvec(Smoothers_lvls[0]->Height());
+        //Smoothers_lvls[0]->Mult(inHdivvec, outSmooHdivvec);
+
+        HypreSmoother * Smoothers_fromMG_0 = new HypreSmoother(*A, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * Smoothers_fromMG_1;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Smoothers_fromMG_1 = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
+
+        BlockVector outSmooHcurlvec(offsets_hcurlfunct_new);
+        Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+
+        /*
+        //std::cout << "outSmooHdivvec after the 1st iteration \n";
+        //outSmooHdivvec.Print();
+
+        inFunctHcurlvec = outSmooHcurlvec; // iter no 2
+        Smoothers_fromMG_0->Mult(inFunctHcurlvec.GetBlock(0), outSmooHcurlvec.GetBlock(0));
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+            Smoothers_fromMG_1->Mult(inFunctHcurlvec.GetBlock(1), outSmooHcurlvec.GetBlock(1));
+        */
+
+        //Vector outSmooHcurlvec(Smoothers_fromMG_0->Height());
+        //Smoothers_fromMG_0->Mult(inHcurlvec, outSmooHcurlvec);
+
+#ifdef CHECK_BNDCND
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            const Array<int> *temp;
+            if (blk == 0)
+                temp = EssBdrTrueDofs_Hcurl[0];
+            else
+                temp = EssBdrTrueDofs_Funct_lvls[0][blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                //std::cout << "index = " << (*temp)[tdofind] << "\n";
+                if ( fabs(outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for outSmooHcurlvec, blk = " << blk << ", value = "
+                              << outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                    //std::cout << "... was corrected \n";
+                    //outSmooHcurlvec.GetBlock(blk)[(*temp)[tdofind]] = 0.0;
+                }
+            }
+        }
+#endif
+
+        BlockVector out2SmooHdivvec(offsets_new);
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            if (blk == 0)
+                Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec.GetBlock(0), out2SmooHdivvec.GetBlock(0));
+            else
+                out2SmooHdivvec.GetBlock(blk) = outSmooHcurlvec.GetBlock(blk);
+        }
+
+        //Vector out2SmooHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
+        //Divfree_hpmat_mod_lvls[0]->Mult(outSmooHcurlvec, out2SmooHdivvec);
+
+        BlockVector diffsmoo(offsets_new);
+        //Vector diffsmoo(R_space_lvls[0]->TrueVSize());
+        diffsmoo = outSmooHdivvec;
+        diffsmoo -= out2SmooHdivvec;
+
+        MPI_Barrier(comm);
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::cout << "I am " << myid << "\n";
+
+                double diffsmoo_norm = diffsmoo.Norml2() / sqrt (diffsmoo.Size());
+                double geommgsmoo_norm = out2SmooHdivvec.Norml2() / sqrt(out2SmooHdivvec.Size());
+                std::cout << "|| diff of smoothers action || = " << diffsmoo_norm << "\n";
+                std::cout << "|| diff of smoothers action || / || geommg smoother action || = " << diffsmoo_norm / geommgsmoo_norm << "\n";
+            }
+            MPI_Barrier(comm);
+        }
+    }
+
+    //MPI_Finalize();
+    //return 0;
+
+#endif
+
+#if 0
+    HypreParMatrix * prod1 = ParMult(Divfree_hpmat_mod_lvls[0], TrueP_C[0]);
+    SparseMatrix diag_prod1;
+    prod1->GetDiag(diag_prod1);
+
+    HypreParMatrix * prod2 = ParMult(TrueP_R[0], Divfree_hpmat_mod_lvls[1]);
+    SparseMatrix diag_prod2;
+    prod2->GetDiag(diag_prod2);
+
+    SparseMatrix diag_prod2_copy(diag_prod2);
+    diag_prod2_copy.Add(-1.0, diag_prod1);
+
+    //diag_prod2.Print();
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            const Array<int> *temp2 = EssBdrTrueDofs_Funct_lvls[0][0];
+
+            Array<int> bndtdofs_Hdiv(R_space_lvls[0]->TrueVSize());
+            bndtdofs_Hdiv = 0;
+            //std::cout << "bnd tdofs Hdiv \n";
+            for ( int tdofind = 0; tdofind < temp2->Size(); ++tdofind)
+            {
+                //std::cout << (*temp2)[tdofind] << " ";
+                bndtdofs_Hdiv[(*temp2)[tdofind]] = 1;
+            }
+            //std::cout << "\n";
+
+
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+
+            Array<int> bndtdofs_Hcurl(C_space_lvls[1]->TrueVSize());
+            bndtdofs_Hcurl = 0;
+            //std::cout << "bnd tdofs Hcurl \n";
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                bndtdofs_Hcurl[(*temp)[tdofind]] = 1;
+            }
+
+            std::cout << "I am " << myid << "\n";
+
+            for (int i = 0; i < diag_prod2_copy.Height(); ++i)
+            {
+                for (int j = 0; j < diag_prod2_copy.RowSize(i); ++j)
+                {
+                    int col = diag_prod2_copy.GetJ()[diag_prod2_copy.GetI()[i] + j];
+                    if (fabs(diag_prod2_copy.GetData()[diag_prod2_copy.GetI()[i] + j]) > 1.0e-13)
+                    {
+                        if (!(bndtdofs_Hdiv[i] != 0 && bndtdofs_Hcurl[col] != 0) )
+                        {
+                            std::cout << "nonzero entry of type ";
+                            if (bndtdofs_Hdiv[i] != 0)
+                                std::cout << "b-";
+                            else
+                                std::cout << "i-";
+                            if (bndtdofs_Hcurl[col] != 0)
+                                std::cout << "-b ";
+                            else
+                                std::cout << "-i ";
+                            std::cout << ": (" << i << ", " << col << ", " << diag_prod1.GetData()[diag_prod1.GetI()[i] + j] << ") vs ";
+                            std::cout << " (" << i << ", " << col << ", " << diag_prod2.GetData()[diag_prod2.GetI()[i] + j] << ") \n";
+                        }
+                        else
+                        {
+                            std::cout << "for bb nonzero entry, (" << i << ", " << col << ", " << diag_prod1.GetData()[diag_prod1.GetI()[i] + j] << ") vs ";
+                            std::cout << " (" << i << ", " << col << ", " << diag_prod2.GetData()[diag_prod2.GetI()[i] + j] << ") \n";
+                        }
+                    }
+                }
+            }
+        }
+        MPI_Barrier(comm);
+    }
+
+    if (verbose)
+        std::cout << "diag(P_R C1) - diag(C_0 P_C) norm = " << diag_prod2_copy.MaxNorm() << "\n";
+#endif // for #if 0
+
+#ifdef COMPARE_COARSE_SOLVERS
+    if (verbose)
+        std::cout << " \nComparing separately coarse level solvers \n";
+
+    /*
+    if (verbose)
+        std::cout << " \nComparing coarsest level matrices \n";
+    {
+        SparseMatrix diag1;
+        //A->GetDiag(diag1);
+        HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+        A_coarse->GetDiag(diag1);
+
+        SparseMatrix diag2;
+        //std::cout << "size of Divfree_hpmat_mod_lvls[1] = " << Divfree_hpmat_mod_lvls[0]->Height() << " x " << Divfree_hpmat_mod_lvls[0]->Width() << "\n";
+        //std::cout << "size of (*Funct_hpmat_lvls[1])(0,0)] = " << (*Funct_hpmat_lvls[1])(0,0)->Height() << " x " << (*Funct_hpmat_lvls[1])(0,0)->Width() << "\n";
+        HypreParMatrix * HcurlOp = RAP(Divfree_hpmat_mod_lvls[1], (*Funct_hpmat_lvls[1])(0,0), Divfree_hpmat_mod_lvls[1]);
+        HcurlOp->GetDiag(diag2);
+
+        diag2.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag2 - diag1 norm = " << diag2.MaxNorm() << "\n";
+
+        HypreParMatrix * tempm = RAP(TrueP_R[0], (*Funct_hpmat_lvls[0])(0,0), TrueP_R[0] );
+
+        HypreParMatrix * HcurlOp_2 = RAP(Divfree_hpmat_mod_lvls[1], tempm, Divfree_hpmat_mod_lvls[1]);
+
+        SparseMatrix diag3;
+        HcurlOp_2->GetDiag(diag3);
+
+        diag3.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag3 - diag1 norm = " << diag3.MaxNorm() << "\n";
+
+        HypreParMatrix * tempmm = RAP(Divfree_hpmat_mod_lvls[0], (*Funct_hpmat_lvls[0])(0,0), Divfree_hpmat_mod_lvls[0]);
+        HypreParMatrix * HcurlOp_3 = RAP(TrueP_C[0], tempmm, TrueP_C[0] );
+
+        SparseMatrix diag4;
+        HcurlOp_3->GetDiag(diag4);
+
+        diag4.Add(-1.0, diag1);
+
+        if (verbose)
+            std::cout << "diag4 - diag1 norm = " << diag4.MaxNorm() << "\n";
+
+        MPI_Finalize();
+        return 0;
+    }
+    */
+
+    // comparison at the coarsest level
+    /*
+    Vector inCoarseHdivvec(CoarsestSolver->Width());
+    TrueP_R[0]->MultTranspose(inHdivvec, inCoarseHdivvec); // project
+
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[1][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            inCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[1][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for inCoarseHdivvec, value = "
+                          << inCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            inCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    Vector outCoarseHdivvec(CoarsestSolver->Height());
+    CoarsestSolver->Mult(inCoarseHdivvec, outCoarseHdivvec); // coarse solve
+
+    Vector inCoarseHcurlvec( Divfree_hpmat_mod_lvls[1]->Width());
+    Divfree_hpmat_mod_lvls[1]->MultTranspose(inCoarseHdivvec, inCoarseHcurlvec); // move to coarse Hcurl
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for inCoarseHcurlvec, value = "
+                          << inCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            inCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+    }
+#endif
+    CGSolver * Geommg_Coarsesolver = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseSolver();
+    Vector outCoarseHcurlvec(Geommg_Coarsesolver->Height());
+    Geommg_Coarsesolver->Mult(inCoarseHcurlvec, outCoarseHcurlvec); // solve in coarse Hcurl
+
+    Vector out2CoarseHdivvec(Divfree_hpmat_mod_lvls[1]->Height());
+    Divfree_hpmat_mod_lvls[1]->Mult(outCoarseHcurlvec, out2CoarseHdivvec); // move to coarse Hdiv back
+
+    Vector diffcoarse(R_space_lvls[1]->TrueVSize());
+    diffcoarse = outCoarseHdivvec;
+    diffcoarse -= out2CoarseHdivvec;
+
+    for (int i = 0; i < diffcoarse.Size(); ++i)
+        if (fabs(diffcoarse[i] > 1.0e-13))
+            std::cout << "nonzero entry: (" << i << ", " << diffcoarse[i] << ") \n";
+
+    double diffcoarse_norm = diffcoarse.Norml2() / sqrt (diffcoarse.Size());
+    double geommgcoarse_norm = out2CoarseHdivvec.Norml2() / sqrt(out2CoarseHdivvec.Size());
+    if (verbose)
+    {
+        std::cout << "|| diff of coarse solvers action || = " << diffcoarse_norm << "\n";
+        std::cout << "|| diff of coarse solvers action || / || geommg coarse solver action || = " << diffcoarse_norm / geommgcoarse_norm << "\n";
+    }
+    */
+
+    // comparison with transfers from and to the finest level
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for inHcurlvec, value = "
+                          << inHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //inHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    Vector inCoarseHdivvec(CoarsestSolver->Width());
+    TrueP_R[0]->MultTranspose(inHdivvec, inCoarseHdivvec); // project
+
+    Vector outCoarseHdivvec(CoarsestSolver->Height());
+    CoarsestSolver->Mult(inCoarseHdivvec, outCoarseHdivvec); // coarse solve
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[1][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outCoarseHdivvec, value = "
+                          << outCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    Vector outFineCoarseHdivvec(TrueP_R[0]->Height());
+    TrueP_R[0]->Mult(outCoarseHdivvec, outFineCoarseHdivvec); // interpolate back
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFineCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outFineCoarseHdivvec, value = "
+                          << outFineCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outFoneCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+    Vector inCoarseHcurlvec(TrueP_C[0]->Width());
+    TrueP_C[0]->MultTranspose(inHcurlvec, inCoarseHcurlvec); // project after moving from Hcurl
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(inCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for inCoarseHcurlvec, value = "
+                          << inCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            inCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    // checking that at coarse level Curl^T * Hdivvec = Hcurlvec
+    Vector check(Divfree_hpmat_mod_lvls[1]->Width());
+    Divfree_hpmat_mod_lvls[1]->MultTranspose(inCoarseHdivvec, check);
+    check -= inCoarseHcurlvec;
+    std::cout << "check_norm = " << check.Norml2() / sqrt (check.Size()) << "\n";
+
+    MPI_Barrier(comm);
+    std::cout << std::flush;
+    MPI_Barrier(comm);
+
+    CGSolver * Geommg_Coarsesolver = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseSolver();
+    Vector outCoarseHcurlvec(Geommg_Coarsesolver->Height());
+    Geommg_Coarsesolver->Mult(inCoarseHcurlvec, outCoarseHcurlvec); // solve
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outCoarseHcurlvec, value = "
+                          << outCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                std::cout << " ... was corrected \n";
+            }
+            outCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    Vector outFineCoarseHcurlvec(TrueP_C[0]->Height());
+    TrueP_C[0]->Mult(outCoarseHcurlvec, outFineCoarseHcurlvec);   // interpolate back
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Hcurl[0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(outFineCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for outFineCoarseHcurlvec, value = "
+                          << outCoarseHcurlvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //outFineCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+    Vector out2FineCoarseHdivvec(Divfree_hpmat_mod_lvls[0]->Height());
+    Divfree_hpmat_mod_lvls[0]->Mult(outFineCoarseHcurlvec, out2FineCoarseHdivvec); // move to Hdiv back
+
+#ifdef CHECK_BNDCND
+    {
+        const Array<int> *temp = EssBdrTrueDofs_Funct_lvls[0][0];
+        for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+        {
+            if ( fabs(out2FineCoarseHdivvec[(*temp)[tdofind]]) > 1.0e-14 )
+            {
+                std::cout << "bnd cnd is violated for out2FineCoarseHdivvec, value = "
+                          << out2FineCoarseHdivvec[(*temp)[tdofind]]
+                          << ", index = " << (*temp)[tdofind] << "\n";
+                //std::cout << " ... was corrected \n";
+            }
+            //out2FineCoarseHdivvec[(*temp)[tdofind]] = 0.0;
+        }
+
+    }
+#endif
+
+    Vector diffcoarse(R_space_lvls[0]->TrueVSize());
+    diffcoarse = outFineCoarseHdivvec;
+    diffcoarse -= out2FineCoarseHdivvec;
+
+    //diffcoarse.Print();
+
+    MPI_Barrier(comm);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+
+            double diffcoarse_norm = diffcoarse.Norml2() / sqrt (diffcoarse.Size());
+            double geommgcoarse_norm = out2FineCoarseHdivvec.Norml2() / sqrt(out2FineCoarseHdivvec.Size());
+            std::cout << "|| diff of coarse solvers action || = " << diffcoarse_norm << "\n";
+            std::cout << "|| diff of coarse solvers action || / || geommg coarse solver action || = " << diffcoarse_norm / geommgcoarse_norm << "\n";
+            std::cout << "\n" << std::flush;
+        }
+        MPI_Barrier(comm);
+    }
+
+    if (verbose)
+        std::cout << " \nChecking the coarsest level matrix in geometric MG \n";
+
+    {
+        HypreParMatrix * A_coarse = ((Multigrid*) (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(0))))->GetCoarseOp();
+
+        Vector testinCoarseHcurlvec(A_coarse->Width());
+        testinCoarseHcurlvec = 1.0;
+        {
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                std::cout << (*temp)[tdofind] << " ";
+                testinCoarseHcurlvec[(*temp)[tdofind]] = 0.0;
+            }
+            std::cout << "\n";
+
+        }
+
+        Vector testCoarseHcurlvec(A_coarse->Height());
+        A_coarse->Mult(inCoarseHcurlvec, testCoarseHcurlvec);
+        {
+            const Array<int> *temp = EssBdrTrueDofs_Hcurl[1];
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
+            {
+                if ( fabs(testCoarseHcurlvec[(*temp)[tdofind]]) > 1.0e-14 )
+                {
+                    std::cout << "bnd cnd is violated for testCoarseHcurlvec, value = "
+                              << testCoarseHcurlvec[(*temp)[tdofind]]
+                              << ", index = " << (*temp)[tdofind] << "\n";
+                }
+            }
+
+        }
+    }
+
+#endif // for #ifdef COMPARE_COARSE_SOLVERS
+
+    MPI_Finalize();
+    return 0;
+#else
     int TestmaxIter(400);
 
     CGSolver Testsolver(MPI_COMM_WORLD);
@@ -3583,6 +4628,7 @@ int main(int argc, char *argv[])
         std::cout << "Errors in USE_AS_A_PREC were computed in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
+#endif
 
 #else // for USE_AS_A_PREC
 
@@ -3923,6 +4969,8 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 
+#ifndef COMPARE_MG
+
     chrono.Stop();
     if (verbose)
         std::cout << "Deallocating memory \n";
@@ -4134,7 +5182,7 @@ int main(int argc, char *argv[])
     chrono_total.Stop();
     if (verbose)
         std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
-
+#endif
     MPI_Finalize();
     return 0;
 }

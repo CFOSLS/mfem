@@ -5780,8 +5780,8 @@ public:
 
         //CoarseSolver = new CGSolver_mod(Operators_[0]->GetComm(), *essbdrtdofs_lvls[Operators_.Size() - 1]);
         CoarseSolver = new CGSolver(Operators_[0]->GetComm());
-        CoarseSolver->SetAbsTol(sqrt(1e-32));
-        CoarseSolver->SetRelTol(sqrt(1e-15));
+        CoarseSolver->SetAbsTol(sqrt(1e-15));
+        CoarseSolver->SetRelTol(sqrt(1e-6));
 #ifdef COMPARE_MG
         CoarseSolver->SetMaxIter(NCOARSEITER);
 #else

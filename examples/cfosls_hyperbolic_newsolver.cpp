@@ -49,7 +49,7 @@
 
 //#define SPECIAL_COARSECHECK
 
-//#define COMPARE_MG
+#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 //#define BLKDIAG_SMOOTHER
@@ -3909,7 +3909,7 @@ int main(int argc, char *argv[])
 
     //MPI_Finalize();
     //return 0;
-#endif // for #ifdef COMPARE_MG
+#endif // for #ifndef COMPARE_MG
 
 #endif // for #ifdef OLD_CODE
 

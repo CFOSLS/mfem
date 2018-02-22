@@ -830,8 +830,8 @@ int main(int argc, char *argv[])
     int numsol          = -34;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int ser_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     bool aniso_refine = false;
     bool refine_t_first = false;
