@@ -1132,7 +1132,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1711,7 +1711,6 @@ int main(int argc, char *argv[])
 
    Array<Operator*> Smoothers_lvls(num_levels - 1);
 
-   //std::vector<Array2D<HypreParMatrix*> *> PtFunctP_lvls(num_levels);
 
    Operator* CoarsestSolver;
    CoarsestProblemSolver* CoarsestSolver_partfinder;
@@ -2321,16 +2320,6 @@ int main(int argc, char *argv[])
 
                 delete P_R_T;
                 delete temp1;
-            }
-
-
-            for (int blk1 = 0; blk1 < numblocks_funct; ++blk1)
-            {
-                for (int blk2 = 0; blk2 < numblocks_funct; ++blk2)
-                {
-
-                }
-
             }
 
         } // end of else for if (l == 0)
@@ -3636,15 +3625,6 @@ int main(int argc, char *argv[])
     }
 
     ParGridFunction * opdivfreepart = new ParGridFunction(R_space);
-    /*
-    DiscreteLinearOperator Divfree_h(C_space, R_space);
-    if (dim == 3)
-        Divfree_h.AddDomainInterpolator(new CurlInterpolator());
-    else // dim == 4
-        Divfree_h.AddDomainInterpolator(new DivSkewInterpolator());
-    Divfree_h.Assemble();
-    Divfree_h.Mult(*u, *opdivfreepart);
-    */
     Vector u_truedofs(Divfree_hpmat_mod_lvls[0]->Width());
     u->ParallelProject(u_truedofs);
 
@@ -4168,7 +4148,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][blk]->Size(); ++i)
         {
             int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][blk])[i];
-            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-16 )
+            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-14 )
             {
                 std::cout << "blk = " << blk << ": bnd cnd is violated for the ParticSol! \n";
                 std::cout << "tdofind = " << tdofind << ", value = " << ParticSol.GetBlock(blk)[tdofind] << "\n";
@@ -6066,53 +6046,6 @@ int main(int argc, char *argv[])
     {
         char vishost[] = "localhost";
         int  visport   = 19916;
-
-        if (!withDiv)
-        {
-            socketstream uex_sock(vishost, visport);
-            uex_sock << "parallel " << num_procs << " " << myid << "\n";
-            uex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            uex_sock << "solution\n" << *pmesh << *u_exact << "window_title 'u_exact'"
-                   << endl;
-
-            socketstream uh_sock(vishost, visport);
-            uh_sock << "parallel " << num_procs << " " << myid << "\n";
-            uh_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            uh_sock << "solution\n" << *pmesh << *u << "window_title 'u_h'"
-                   << endl;
-
-            *u -= *u_exact;
-            socketstream udiff_sock(vishost, visport);
-            udiff_sock << "parallel " << num_procs << " " << myid << "\n";
-            udiff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            udiff_sock << "solution\n" << *pmesh << *u << "window_title 'u_h - u_exact'"
-                   << endl;
-
-            socketstream opdivfreepartex_sock(vishost, visport);
-            opdivfreepartex_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepartex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepartex_sock << "solution\n" << *pmesh << *opdivfreepart_exact << "window_title 'curl u_exact'"
-                   << endl;
-
-            socketstream opdivfreepart_sock(vishost, visport);
-            opdivfreepart_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepart_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepart_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h'"
-                   << endl;
-
-            *opdivfreepart -= *opdivfreepart_exact;
-            socketstream opdivfreepartdiff_sock(vishost, visport);
-            opdivfreepartdiff_sock << "parallel " << num_procs << " " << myid << "\n";
-            opdivfreepartdiff_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            opdivfreepartdiff_sock << "solution\n" << *pmesh << *opdivfreepart << "window_title 'curl u_h - curl u_exact'"
-                   << endl;
-        }
 
         //if (withS)
         {
