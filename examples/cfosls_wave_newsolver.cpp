@@ -3155,8 +3155,8 @@ int main(int argc, char *argv[])
 #else
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
 #endif
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-32));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-12));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #endif
     if (verbose)

@@ -3510,9 +3510,9 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->SetRelTol(1.0e-9); // -9 for USE_AS_A_PREC
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(20);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-32));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-12));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #endif
     if (verbose)

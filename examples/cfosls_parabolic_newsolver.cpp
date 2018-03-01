@@ -830,8 +830,8 @@ int main(int argc, char *argv[])
     int numsol          = -34;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 3;
-    int par_ref_levels  = 1;
+    int ser_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     bool aniso_refine = false;
     bool refine_t_first = false;
@@ -3260,8 +3260,8 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->ResetSolverParams();
 #else
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-32));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-12));
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
 #endif
     if (verbose)

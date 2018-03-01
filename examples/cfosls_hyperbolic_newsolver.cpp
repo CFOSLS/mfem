@@ -4105,8 +4105,8 @@ int main(int argc, char *argv[])
 #else
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
 #endif
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-15));
-        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-6));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-32));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-12));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
     }
     else // L2 case requires more iterations
@@ -4241,12 +4241,6 @@ int main(int argc, char *argv[])
         std::cout << "Intermediate things were done in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
-
-    ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
-
-    ParGridFunction * NewS;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        NewS = new ParGridFunction(H_space_lvls[0]);
 
     //Vector Tempx(sigma_exact_finest->Size());
     //Tempx = 0.0;
