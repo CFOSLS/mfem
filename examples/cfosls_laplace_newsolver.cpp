@@ -28,7 +28,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define SOLVE_WITH_LOCALSOLVERS
+#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC

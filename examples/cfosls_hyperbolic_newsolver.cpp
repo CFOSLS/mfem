@@ -35,8 +35,6 @@
 
 //#define CHECK_SPDCOARSESTSOLVER
 
-//#define DEBUG_SMOOTHER
-
 // activates a check for the symmetry of the new solver
 //#define CHECK_SPDSOLVER
 
@@ -45,11 +43,9 @@
 
 #define CHECK_BNDCND
 
-//#define MARTIN_PREC
-
 //#define SPECIAL_COARSECHECK
 
-#define COMPARE_MG
+//#define COMPARE_MG
 
 #define BND_FOR_MULTIGRID
 //#define BLKDIAG_SMOOTHER
@@ -68,6 +64,7 @@
 //#define COMPARE_SMOOTHERS
 #endif // for ifdef COMPARE_MG
 
+// activates more detailed timing of the new multigrid code
 //#define TIMING
 
 #ifdef TIMING
@@ -80,12 +77,10 @@
 
 #define MYZEROTOL (1.0e-13)
 
-// must be always active
-#define USE_CURLMATRIX
-
 //#define WITH_PENALTY
 
 //#define ONLY_DIVFREEPART
+
 //#define K_IDENTITY
 
 using namespace std;
@@ -431,297 +426,6 @@ void VectorFECurlVQIntegrator::AssembleElementMatrix2(
         }
     }
 }
-
-#ifdef MARTIN_PREC
-class DivSkew4dPrec : public Solver
-{
-
-private:
-   HypreParMatrix *A;
-   ParFiniteElementSpace *fespace;
-   Coefficient *alpha_, *beta_;
-
-   //kernel operators
-   HypreParMatrix *P_d_HCurl_HDivSkew;
-
-
-   HypreParMatrix *P_H1_HCurl;
-   HypreParMatrix *H1_KernelMat;
-   HypreBoomerAMG *amgH1_Kernel;
-
-   //"image" operators
-   HypreParMatrix *P_H1_HDivSkew;
-   HypreParMatrix *H1_ImageMat;
-   HypreBoomerAMG *amgH1_Image;
-
-
-   HypreParMatrix *HCurlMat;
-   HypreSmoother * smootherDivSkew;
-   HypreSmoother * smootherCurl;
-
-   CGSolver *pcgKernel;
-   CGSolver *pcgImage;
-
-   Vector *f;
-   Vector *fKernel, *uKernel;
-   Vector *fImage, *uImage;
-   Vector *fCurl, *uCurl;
-
-   bool exactSolves;
-
-   FiniteElementCollection* fecHCurlKernel;
-   ParFiniteElementSpace *HCurlKernelFESpace;
-
-
-public:
-   ~DivSkew4dPrec()
-   {
-       delete pcgImage;
-       delete pcgKernel;
-
-       delete f;
-       delete fKernel;
-       delete uKernel;
-       delete fImage;
-       delete uImage;
-       delete fCurl;
-       delete uCurl;
-
-       delete smootherCurl;
-       delete HCurlMat;
-
-       delete P_d_HCurl_HDivSkew;
-       delete P_H1_HDivSkew;
-       delete P_H1_HCurl;
-
-       delete amgH1_Image;
-       delete H1_ImageMat;
-       delete amgH1_Kernel;
-       delete H1_KernelMat;
-
-       delete smootherDivSkew;
-
-       delete HCurlKernelFESpace;
-       delete fecHCurlKernel;
-   }
-   DivSkew4dPrec(HypreParMatrix *AUser, ParFiniteElementSpace *fespaceUser, Coefficient *alpha, Coefficient *beta,
-                 const Array<int> &essBnd, int orderKernel=1, bool exactSolvesUser=false)
-       : Solver(AUser->Height())
-   {
-      A = AUser;
-      fespace = fespaceUser;
-      alpha_ = alpha;
-      beta_ = beta;
-
-      ParMesh *pmesh = fespace->GetParMesh();
-      int dim = pmesh->Dimension();
-
-      exactSolves = exactSolvesUser;
-
-
-
-
-      int orderIm=1;  //H1  --> H(divSkew)
-      int orderKer=orderKernel; //curl V --> H(divSkew)
-
-
-
-      smootherDivSkew = new HypreSmoother(*A, 16, 3);
-
-      Array<int> HDivSkew_essDof(fespace->GetVSize()); HDivSkew_essDof = 0;
-      fespace->GetEssentialVDofs(essBnd, HDivSkew_essDof);
-
-
-
-
-      //setup the H1 FESpace for the kernel
-      FiniteElementCollection* fecH1Kernel;
-      if (orderKer==1) { fecH1Kernel = new LinearFECollection; }
-      else { fecH1Kernel = new QuadraticFECollection; }
-
-      ParFiniteElementSpace *H1KernelFESpace = new ParFiniteElementSpace(pmesh,
-                                                                         fecH1Kernel, dim, Ordering::byVDIM);
-      Array<int> H1Kernel_essDof(H1KernelFESpace->GetVSize()); H1Kernel_essDof = 0;
-      H1KernelFESpace->GetEssentialVDofs(essBnd, H1Kernel_essDof);
-
-
-      //setup the H(curl) FESpace for the kernel
-      if (orderKer==1) { fecHCurlKernel = new ND1_4DFECollection; }
-      else { fecHCurlKernel = new ND2_4DFECollection; }
-
-      HCurlKernelFESpace = new ParFiniteElementSpace(pmesh,
-                                                                            fecHCurlKernel);
-      Array<int> HCurlKernel_essDof(HCurlKernelFESpace->GetVSize());
-      HCurlKernel_essDof = 0;
-      HCurlKernelFESpace->GetEssentialVDofs(essBnd, HCurlKernel_essDof);
-
-
-      //setup the FESpace for the H1 injection
-      FiniteElementCollection* fecH1Vec;
-      if (orderIm==1) { fecH1Vec = new LinearFECollection; }
-      else { fecH1Vec = new QuadraticFECollection; }
-      ParFiniteElementSpace *H1_ImageFESpace = new ParFiniteElementSpace(pmesh,
-                                                                         fecH1Vec, 6, Ordering::byVDIM);
-      Array<int> H1Image_essDof(H1_ImageFESpace->GetVSize()); H1Image_essDof = 0;
-      H1_ImageFESpace->GetEssentialVDofs(essBnd, H1Image_essDof);
-
-
-
-      //setup the H1 preconditioner for the kernel
-      ParBilinearForm* H1Varf = new ParBilinearForm(H1KernelFESpace);
-      H1Varf->AddDomainIntegrator(new VectorDiffusionIntegrator(*beta_));
-//      H1Varf->AddDomainIntegrator(new VectorMassIntegrator);
-      H1Varf->Assemble();
-      H1Varf->Finalize();
-      SparseMatrix &matH1(H1Varf->SpMat());
-      for (int dof=0; dof<H1Kernel_essDof.Size(); dof++) if (H1Kernel_essDof[dof]<0) { matH1.EliminateRowCol(dof); }
-      H1_KernelMat = H1Varf->ParallelAssemble();
-      delete H1Varf;
-      amgH1_Kernel = new HypreBoomerAMG(*H1_KernelMat);
-      amgH1_Kernel->SetSystemsOptions(dim);
-
-      //setup the H1 preconditioner for the image
-      ParBilinearForm* H1VecVarf = new ParBilinearForm(H1_ImageFESpace);
-      H1VecVarf->AddDomainIntegrator(new VectorDiffusionIntegrator(*alpha_, 6));
-      H1VecVarf->AddDomainIntegrator(new VectorMassIntegrator(6, beta));
-      H1VecVarf->Assemble();
-      H1VecVarf->Finalize();
-      SparseMatrix &matH1Vec(H1VecVarf->SpMat());
-      for (int dof=0; dof<H1Image_essDof.Size(); dof++) if (H1Image_essDof[dof]<0) { matH1Vec.EliminateRowCol(dof); }
-      H1_ImageMat = H1VecVarf->ParallelAssemble();
-      delete H1VecVarf;
-      amgH1_Image = new HypreBoomerAMG(*H1_ImageMat);
-      amgH1_Image->SetSystemsOptions(6);
-
-
-      //setup the injection of H1 into H(curl)
-      ParDiscreteLinearOperator *disInterpol = new ParDiscreteLinearOperator(
-         H1KernelFESpace, HCurlKernelFESpace);
-      disInterpol->AddDomainInterpolator(new IdentityInterpolator);
-      disInterpol->Assemble();
-      disInterpol->Finalize();
-      SparseMatrix* smatID = &(disInterpol->SpMat());
-      smatID->EliminateCols(H1Kernel_essDof);
-      for (int dof=0; dof<HCurlKernel_essDof.Size();
-           dof++) if (HCurlKernel_essDof[dof]<0) { smatID->EliminateRow(dof); }
-      P_H1_HCurl = disInterpol->ParallelAssemble();
-      delete disInterpol;
-
-      //setup the injection of H1 into H(DivSkew)
-      ParDiscreteLinearOperator *disInterpolIm = new ParDiscreteLinearOperator(
-         H1_ImageFESpace, fespace);
-      disInterpolIm->AddDomainInterpolator(new IdentityInterpolator);
-      disInterpolIm->Assemble();
-      disInterpolIm->Finalize();
-      SparseMatrix* smatIDIm = &(disInterpolIm->SpMat());
-      smatIDIm->EliminateCols(H1Image_essDof);
-      for (int dof=0; dof<HDivSkew_essDof.Size(); dof++) if (HDivSkew_essDof[dof]<0) { smatIDIm->EliminateRow(dof); }
-      P_H1_HDivSkew = disInterpolIm->ParallelAssemble();
-      delete disInterpolIm;
-
-
-      //setup the injection of the curl(H(curl)) into H(DivSkew)
-      ParDiscreteLinearOperator *disCurl = new ParDiscreteLinearOperator(
-         HCurlKernelFESpace, fespace);
-      disCurl->AddDomainInterpolator(new CurlInterpolator);
-      disCurl->Assemble();
-      disCurl->Finalize();
-      SparseMatrix* smatCurl = &(disCurl->SpMat());
-      smatCurl->EliminateCols(HCurlKernel_essDof);
-      for (int dof=0; dof<HDivSkew_essDof.Size(); dof++) if (HDivSkew_essDof[dof]<0) { smatCurl->EliminateRow(dof); }
-      P_d_HCurl_HDivSkew = disCurl->ParallelAssemble();
-      delete disCurl;
-
-
-
-      //setup the smoother for H(curl)
-//      Coefficient *massC = new ConstantCoefficient(1.0);
-//      Coefficient *CurlCurlC = new ConstantCoefficient(1.0);
-      ParBilinearForm *a_HCurl = new ParBilinearForm(HCurlKernelFESpace);
-      a_HCurl->AddDomainIntegrator(new CurlCurlIntegrator(*beta_));
-//      a_HCurl->AddDomainIntegrator(new CurlCurlIntegrator(*CurlCurlC));
-//      a_HCurl->AddDomainIntegrator(new VectorFEMassIntegrator(*massC));
-      a_HCurl->Assemble();
-      a_HCurl->Finalize();
-      SparseMatrix &matHCurl(a_HCurl->SpMat());
-      for (int dof=0; dof<HCurlKernel_essDof.Size();
-           dof++) if (HCurlKernel_essDof[dof]<0) { matHCurl.EliminateRowCol(dof); }
-      HCurlMat = a_HCurl->ParallelAssemble();
-      delete a_HCurl;
-      smootherCurl = new HypreSmoother(*HCurlMat, 16, 3);
-
-
-
-      f = new Vector(fespace->GetTrueVSize());
-
-      fKernel = new Vector(H1KernelFESpace->GetTrueVSize());
-      uKernel = new Vector(H1KernelFESpace->GetTrueVSize());
-
-      fImage = new Vector(H1_ImageFESpace->GetTrueVSize());
-      uImage = new Vector(H1_ImageFESpace->GetTrueVSize());
-
-      fCurl = new Vector(HCurlKernelFESpace->GetTrueVSize());
-      uCurl = new Vector(HCurlKernelFESpace->GetTrueVSize());
-
-
-      amgH1_Kernel->Mult(*fKernel, *uKernel);
-      amgH1_Image->Mult(*fImage, *uImage);
-
-      pcgKernel = new CGSolver(MPI_COMM_WORLD);
-      pcgKernel->SetOperator(*H1_KernelMat);
-      pcgKernel->SetPreconditioner(*amgH1_Kernel);
-      pcgKernel->SetRelTol(1e-16);
-      pcgKernel->SetMaxIter(100000000);
-      pcgKernel->SetPrintLevel(-2);
-
-      pcgImage = new CGSolver(MPI_COMM_WORLD);
-      pcgImage->SetOperator(*H1_ImageMat);
-      pcgImage->SetPreconditioner(*amgH1_Image);
-      pcgImage->SetRelTol(1e-16);
-      pcgImage->SetMaxIter(100000000);
-      pcgImage->SetPrintLevel(-2);
-
-
-      delete H1KernelFESpace;
-      delete fecH1Kernel;
-      delete H1_ImageFESpace;
-      delete fecH1Vec;
-   }
-
-   void setExactSolve(bool exSol)
-   {
-      exactSolves = exSol;
-   }
-
-   virtual void Mult(const Vector &x, Vector &y) const
-   {
-      smootherDivSkew->Mult(x,y);
-
-      P_H1_HDivSkew->MultTranspose(x,*fImage);
-      *uImage = 0.0;
-      if (exactSolves) { pcgImage->Mult(*fImage, *uImage); }
-      else { amgH1_Image->Mult(*fImage, *uImage); }
-      P_H1_HDivSkew->Mult(1.0, *uImage, 1.0, y);
-
-
-      *uCurl = 0.0;
-      P_d_HCurl_HDivSkew->MultTranspose(x,*fCurl);
-
-      smootherCurl->Mult(*fCurl, *uCurl);
-
-      P_H1_HCurl->MultTranspose(*fCurl,*fKernel);
-      *uKernel = 0.0;
-      if (exactSolves) { pcgKernel->Mult(*fKernel, *uKernel); }
-      else { amgH1_Kernel->Mult(*fKernel, *uKernel); }
-      P_H1_HCurl->Mult(1.0, *uKernel, 1.0, *uCurl);
-
-      P_d_HCurl_HDivSkew->Mult(1.0, *uCurl, 1.0, y);
-   }
-
-   virtual void SetOperator(const Operator &op) {};
-
-};
-#endif
 
 int ipow(int base, int exp);
 
@@ -1130,7 +834,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1633,17 +1337,10 @@ int main(int argc, char *argv[])
 #endif
 
     Array< SparseMatrix* > P_C_lvls(num_levels - 1);
-#ifdef HCURL_COARSESOLVER
     Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels);
     std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels);
     std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels);
     std::vector<Array<int>* > EssBdrTrueDofs_H1(num_levels);
-#else
-    Array<HypreParMatrix* > Dof_TrueDof_Hcurl_lvls(num_levels - 1);
-    std::vector<Array<int>* > EssBdrDofs_Hcurl(num_levels - 1); // FIXME: Proably, minus 1 for all Hcurl entries?
-    std::vector<Array<int>* > EssBdrTrueDofs_Hcurl(num_levels - 1);
-    std::vector<Array<int>* > EssBdrTrueDofs_H1(num_levels - 1);
-#endif
 
     std::vector<Array<int>* > EssBdrDofs_H1(num_levels);
     Array< SparseMatrix* > P_H_lvls(num_levels - 1);
@@ -1672,28 +1369,23 @@ int main(int argc, char *argv[])
        BdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrDofs_Funct_lvls[l][0] = new Array<int>;
        EssBdrTrueDofs_Funct_lvls[l][0] = new Array<int>;
+#ifdef OLD_CODE
        EssBdrTrueDofs_HcurlFunct_lvls[l][0] = new Array<int>;
-#ifndef HCURL_COARSESOLVER
-       if (l < num_levels - 1)
-       {
-           EssBdrDofs_Hcurl[l] = new Array<int>;
-           EssBdrTrueDofs_Hcurl[l] = new Array<int>;
-           if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-               EssBdrTrueDofs_H1[l] = new Array<int>;
-       }
-#else
+#endif
        EssBdrDofs_Hcurl[l] = new Array<int>;
        EssBdrTrueDofs_Hcurl[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
            EssBdrTrueDofs_H1[l] = new Array<int>;
-#endif
+
        Funct_mat_offsets_lvls[l] = new Array<int>;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        {
            BdrDofs_Funct_lvls[l][1] = new Array<int>;
            EssBdrDofs_Funct_lvls[l][1] = new Array<int>;
            EssBdrTrueDofs_Funct_lvls[l][1] = new Array<int>;
+#ifdef OLD_CODE
            EssBdrTrueDofs_HcurlFunct_lvls[l][1] = new Array<int>;
+#endif
            EssBdrDofs_H1[l] = new Array<int>;
        }
 
@@ -1806,27 +1498,22 @@ int main(int argc, char *argv[])
         R_space_lvls[l]->GetEssentialVDofs(all_bdrSigma, *BdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Funct_lvls[l][0]);
         R_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Funct_lvls[l][0]);
-#ifndef HCURL_COARSESOLVER
-        if (l < num_levels - 1)
-        {
-            C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
-            C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-                H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_H1[l]);
-        }
-#else
         C_space_lvls[l]->GetEssentialVDofs(ess_bdrSigma, *EssBdrDofs_Hcurl[l]);
         C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_Hcurl[l]);
+#ifdef OLD_CODE
         C_space_lvls[l]->GetEssentialTrueDofs(ess_bdrSigma, *EssBdrTrueDofs_HcurlFunct_lvls[l][0]);
+#endif
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_H1[l]);
-#endif
+
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             H_space_lvls[l]->GetEssentialVDofs(all_bdrS, *BdrDofs_Funct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_Funct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_Funct_lvls[l][1]);
+#ifdef OLD_CODE
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_HcurlFunct_lvls[l][1]);
+#endif
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
         }
 
@@ -1855,10 +1542,7 @@ int main(int argc, char *argv[])
         Ablock->Finalize();
 
         // getting pointers to dof_truedof matrices
-#ifndef HCURL_COARSESOLVER
-        if (l < num_levels - 1)
-#endif
-          Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
+        Dof_TrueDof_Hcurl_lvls[l] = C_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Func_lvls[l][0] = R_space_lvls[l]->Dof_TrueDof_Matrix();
         Dof_TrueDof_Hdiv_lvls[l] = Dof_TrueDof_Func_lvls[l][0];
         Dof_TrueDof_L2_lvls[l] = W_space_lvls[l]->Dof_TrueDof_Matrix();
@@ -3102,7 +2786,6 @@ int main(int argc, char *argv[])
 
     ConstantCoefficient zero(.0);
 
-#ifdef USE_CURLMATRIX
     if (verbose)
         std::cout << "Creating div-free system using the explicit discrete div-free operator \n";
 
@@ -3287,12 +2970,6 @@ int main(int argc, char *argv[])
         MainOp->SetBlock(1,0, CH);
         MainOp->SetBlock(1,1, C);
     }
-#else // if using the integrators for creating the div-free system
-    if (verbose)
-        std::cout << "This case is not supported any more \n";
-    MPI_Finalize();
-    return -1;
-#endif
 
     //delete Divfree_dop;
     //delete DivfreeT_dop;
@@ -3370,21 +3047,6 @@ int main(int argc, char *argv[])
                     {
                         prec = new BlockDiagonalPreconditioner(block_trueOffsets);
                         Operator * precU;
-#ifdef MARTIN_PREC
-                        if (dim == 4)
-                        {
-                            if (verbose)
-                                std::cout << "Creating an instance of DivSkew4dPrec \n";
-
-                            Coefficient *alpha = new ConstantCoefficient(1.0);
-                            Coefficient *beta = new ConstantCoefficient(1.0);
-                            int order = feorder + 1;
-                            bool exactH1Solver = false;
-                            precU = new DivSkew4dPrec(A, C_space_lvls[0], alpha, beta, ess_bdrSigma, order, exactH1Solver);
-                        }
-                        else
-                            precU = new Multigrid(*A, TrueP_C);
-#else
 #ifdef BND_FOR_MULTIGRID
 
 #ifdef COARSEPREC_AMS
@@ -3396,7 +3058,6 @@ int main(int argc, char *argv[])
                         precU = new Multigrid(*A, TrueP_C);
 #endif
                         //precU = new IdentityOperator(A->Height());
-#endif
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                     }
@@ -3814,7 +3475,6 @@ int main(int argc, char *argv[])
 
         }
 
-#ifdef USE_CURLMATRIX
         // Check value of functional and mass conservation
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
@@ -3871,7 +3531,7 @@ int main(int argc, char *argv[])
 
             delete trueRhs_part;
         }
-#endif
+
         delete S_exact;
     }
 
@@ -4047,7 +3707,7 @@ int main(int argc, char *argv[])
         std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
 
     NewSolver.SetRelTol(newsolver_reltol);
-    NewSolver.SetMaxIter(40);
+    NewSolver.SetMaxIter(200);
     NewSolver.SetPrintLevel(0);
     NewSolver.SetStopCriteriaType(0);
     //NewSolver.SetLocalSolvers(LocalSolver_lvls);
@@ -4241,6 +3901,12 @@ int main(int argc, char *argv[])
         std::cout << "Intermediate things were done in " << chrono.RealTime() <<" seconds.\n";
     chrono.Clear();
     chrono.Start();
+
+    ParGridFunction * NewSigmahat = new ParGridFunction(R_space_lvls[0]);
+
+    ParGridFunction * NewS;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        NewS = new ParGridFunction(H_space_lvls[0]);
 
     //Vector Tempx(sigma_exact_finest->Size());
     //Tempx = 0.0;
@@ -6110,16 +5776,9 @@ int main(int argc, char *argv[])
         delete BdrDofs_Funct_lvls[l][0];
         delete EssBdrDofs_Funct_lvls[l][0];
         delete EssBdrTrueDofs_Funct_lvls[l][0];
-#ifndef HCURL_COARSESOLVER
-        if (l < num_levels - 1)
-        {
-            delete EssBdrDofs_Hcurl[l];
-            delete EssBdrTrueDofs_Hcurl[l];
-        }
-#else
         delete EssBdrDofs_Hcurl[l];
         delete EssBdrTrueDofs_Hcurl[l];
-#endif
+
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
             delete BdrDofs_Funct_lvls[l][1];
@@ -6230,9 +5889,7 @@ int main(int argc, char *argv[])
     delete H_space;
 
     delete CoarsestSolver_partfinder;
-#ifdef HCURL_COARSESOLVER
     delete CoarsestSolver;
-#endif
 
     delete sigma_exact_finest;
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
@@ -6267,7 +5924,6 @@ int main(int argc, char *argv[])
     delete Sigmahat;
     delete u;
 
-#ifdef   USE_CURLMATRIX
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         delete qform;
     delete MainOp;
@@ -6282,7 +5938,7 @@ int main(int argc, char *argv[])
         delete B;
         delete BT;
     }
-#endif
+
     if(dim<=4)
     {
         if (prec_is_MG)

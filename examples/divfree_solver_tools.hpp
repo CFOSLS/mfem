@@ -2833,10 +2833,6 @@ protected:
     mutable HypreParMatrix* Divfree_hpmat;
 #endif
 
-#ifdef DEBUG_SMOOTHER
-    mutable HypreParMatrix * Constr_global;
-#endif
-
 #ifdef TIMING
     mutable StopWatch chrono;
     mutable StopWatch chrono2;

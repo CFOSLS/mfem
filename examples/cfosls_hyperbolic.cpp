@@ -836,7 +836,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 1;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     bool eliminateS = false;             // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
 
@@ -1212,12 +1212,14 @@ int main(int argc, char *argv[])
 
    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
    ess_bdrS = 0;
-   ess_bdrS[0] = 1; // t = 0
+   if (strcmp(space_for_S,"H1") == 0)
+       ess_bdrS[0] = 1; // t = 0
    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
    ess_bdrSigma = 0;
-   ess_bdrSigma[0] = 1;
-   //ess_bdrSigma = 1;
-   //ess_bdrSigma[pmesh->bdr_attributes.Max()-1] = 0;
+   if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr condition for sigma at t = 0
+   {
+       ess_bdrSigma[0] = 1;
+   }
 
    if (verbose)
    {

@@ -540,11 +540,11 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
     bool visualization = 0;
 
-    int nDimensions     = 2;
+    int nDimensions     = 3;
     int numsol          = 3;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 1;
 
     const char *formulation = "cfosls";      // "cfosls" or "fosls"
     bool with_divdiv = false;                // should be true for fosls and can be false for cfosls
