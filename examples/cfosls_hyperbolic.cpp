@@ -891,7 +891,7 @@ int main(int argc, char *argv[])
                    "Preconditioner choice (0, 1 or 2 for now).");
     args.AddOption(&formulation, "-form", "--formul",
                    "Formulation to use (cfosls or fosls).");
-    args.AddOption(&space_for_S, "-sspace", "--sspace",
+    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                    "Space for S (H1 or L2).");
     args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
                    "--no-eliminateS",
