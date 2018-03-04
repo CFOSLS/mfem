@@ -1132,7 +1132,8 @@ int main(int argc, char *argv[])
     if (strcmp(formulation,"cfosls") == 0)
         numblocks++;
 
-    std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
+    if (verbose)
+        std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
     Array<int> block_offsets(numblocks + 1); // number of variables + 1
     int tempblknum = 0;
