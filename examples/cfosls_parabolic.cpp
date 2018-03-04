@@ -1044,8 +1044,6 @@ int main(int argc, char *argv[])
 
     int maxIter(max_num_iter);
 
-    chrono.Clear();
-    chrono.Start();
     MINRESSolver solver(MPI_COMM_WORLD);
     solver.SetAbsTol(atol);
     solver.SetRelTol(rtol);
@@ -1054,6 +1052,9 @@ int main(int argc, char *argv[])
     solver.SetPreconditioner(prec);
     solver.SetPrintLevel(0);
     trueX = 0.0;
+
+    chrono.Clear();
+    chrono.Start();
     solver.Mult(trueRhs, trueX);
     chrono.Stop();
 

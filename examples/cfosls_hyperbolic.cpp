@@ -1635,6 +1635,9 @@ int main(int argc, char *argv[])
         solver.SetPreconditioner(prec);
    solver.SetPrintLevel(0);
    trueX = 0.0;
+
+   chrono.Clear();
+   chrono.Start();
    solver.Mult(trueRhs, trueX);
    chrono.Stop();
 

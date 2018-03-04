@@ -1066,9 +1066,6 @@ int main(int argc, char *argv[])
     // 12. Solve the linear system with MINRES.
     //     Check the norm of the unpreconditioned residual.
 
-
-    chrono.Clear();
-    chrono.Start();
     MINRESSolver solver(MPI_COMM_WORLD);
     solver.SetAbsTol(atol);
     solver.SetRelTol(rtol);
@@ -1093,6 +1090,8 @@ int main(int argc, char *argv[])
         gform->ParallelAssemble(trueRhs->GetBlock(2));
     }
 
+    chrono.Clear();
+    chrono.Start();
     solver.Mult(*trueRhs, *trueX);
     chrono.Stop();
 
