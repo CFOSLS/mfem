@@ -30,6 +30,9 @@
 #include"cfosls_testsuite.hpp"
 
 //#define TESTING
+//#define TESTING2
+
+#define COARSER_MULTIPLIER
 
 //#define REGULARIZE_A
 
@@ -137,6 +140,313 @@ void MyOperator::Mult(const Vector& x, Vector& y) const
     */
     middleop.Mult(tmp1, tmp2);
     leftmat.Mult(tmp2, y);
+}
+
+
+/// Integrator for (q * u, v)
+/// where q is a scalar coefficient, u and v are from vector FE space
+/// created from scalar FE collection (called improper vector FE)
+class ImproperVectorMassIntegrator : public BilinearFormIntegrator
+{
+private:
+   Coefficient *Q;
+   void Init(Coefficient *q)
+   { Q = q; }
+
+#ifndef MFEM_THREAD_SAFE
+   Vector scalar_shape;
+   DenseMatrix vector_vshape; // components are test shapes
+#endif
+
+public:
+   ImproperVectorMassIntegrator() { Init(NULL); }
+   ImproperVectorMassIntegrator(Coefficient *_q) { Init(_q); }
+   ImproperVectorMassIntegrator(Coefficient &q) { Init(&q); }
+
+   virtual void AssembleElementMatrix(const FiniteElement &el,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat);
+};
+
+void ImproperVectorMassIntegrator::AssembleElementMatrix(
+   const FiniteElement &el, ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    MFEM_ASSERT(el.GetRangeType() == FiniteElement::SCALAR,
+                "The improper vector FE should have a scalar type in the current implementation \n");
+
+    int dim  = el.GetDim();
+    int nd = el.GetDof();
+    int improper_nd = nd * dim;
+
+    double w;
+
+#ifdef MFEM_THREAD_SAFE
+    Vector scalar_shape.SetSize(nd);
+    DenseMatrix vector_vshape(improper_nd, dim);
+#else
+    scalar_shape.SetSize(nd);
+    vector_vshape.SetSize(improper_nd, dim);
+#endif
+    elmat.SetSize (improper_nd, improper_nd);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+       int order = (Trans.OrderW() + el.GetOrder() + el.GetOrder());
+       ir = &IntRules.Get(el.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+       const IntegrationPoint &ip = ir->IntPoint(i);
+
+       Trans.SetIntPoint (&ip);
+
+       el.CalcShape(ip, scalar_shape);
+       for (int d = 0; d < dim; ++d )
+           for (int l = 0; l < dim; ++l)
+               for (int k = 0; k < nd; ++k)
+               {
+                   if (l == d)
+                       vector_vshape(l*nd+k,d) = scalar_shape(k);
+                   else
+                       vector_vshape(l*nd+k,d) = 0.0;
+               }
+       // now vector_vshape is of size improper_nd x dim
+       //el.CalcVShape(Trans, vector_vshape); // would be easy but this doesn't work for improper vector L2
+
+       w = ip.weight * Trans.Weight();
+       if (Q)
+          w *= Q->Eval(Trans, ip);
+
+       AddMult_a_AAt (w, vector_vshape, elmat);
+
+    }
+}
+
+
+/// Integrator for (q * u, v)
+/// where q is a scalar coefficient, u is from vector FE space created
+/// from scalar FE collection (called improper vector FE) and v is from
+/// proper vector FE space (like RT or ND)
+class MixedVectorVectorFEMassIntegrator : public BilinearFormIntegrator
+{
+private:
+   Coefficient *Q;
+   void Init(Coefficient *q)
+   { Q = q; }
+
+#ifndef MFEM_THREAD_SAFE
+   DenseMatrix test_vshape;
+   Vector scalar_shape;
+   DenseMatrix trial_vshape; // components are test shapes
+#endif
+
+public:
+   MixedVectorVectorFEMassIntegrator() { Init(NULL); }
+   MixedVectorVectorFEMassIntegrator(Coefficient *_q) { Init(_q); }
+   MixedVectorVectorFEMassIntegrator(Coefficient &q) { Init(&q); }
+
+   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
+                                       const FiniteElement &test_fe,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat);
+};
+
+void MixedVectorVectorFEMassIntegrator::AssembleElementMatrix2(
+   const FiniteElement &trial_fe, const FiniteElement &test_fe,
+   ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    // here we assume for a moment that proper vector FE is the trial one
+    MFEM_ASSERT(test_fe.GetRangeType() == FiniteElement::SCALAR,
+                "The improper vector FE should have a scalar type in the current implementation \n");
+
+    int dim  = test_fe.GetDim();
+    int trial_dof = trial_fe.GetDof();
+    int test_dof = test_fe.GetDof();
+    int improper_testdof = dim * test_dof;
+
+    double w;
+
+#ifdef MFEM_THREAD_SAFE
+    DenseMatrix trial_vshape(trial_dof, dim);
+    DenseMatrix test_vshape(improper_testdof,dim);
+    Vector scalar_shape(test_dof);
+#else
+    trial_vshape.SetSize(trial_dof, dim);
+    test_vshape.SetSize(improper_testdof,dim);
+    scalar_shape.SetSize(test_dof);
+#endif
+
+    elmat.SetSize (improper_testdof, trial_dof);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+       int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
+       ir = &IntRules.Get(test_fe.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+       const IntegrationPoint &ip = ir->IntPoint(i);
+
+       Trans.SetIntPoint (&ip);
+
+       trial_fe.CalcVShape(Trans, trial_vshape);
+
+       test_fe.CalcShape(ip, scalar_shape);
+       for (int d = 0; d < dim; ++d )
+           for (int l = 0; l < dim; ++l)
+               for (int k = 0; k < test_dof; ++k)
+               {
+                   if (l == d)
+                       test_vshape(l*test_dof+k,d) = scalar_shape(k);
+                   else
+                       test_vshape(l*test_dof+k,d) = 0.0;
+               }
+       // now test_vshape is of size trial_dof(scalar)*dim x dim
+       //test_fe.CalcVShape(Trans, test_vshape); // would be easy but this doesn't work for improper vector L2
+
+       //std::cout << "trial_vshape \n";
+       //trial_vshape.Print();
+
+       //std::cout << "scalar_shape \n";
+       //scalar_shape.Print();
+       //std::cout << "improper test_vshape \n";
+       //test_vshape.Print();
+
+       w = ip.weight * Trans.Weight();
+       if (Q)
+          w *= Q->Eval(Trans, ip);
+
+       for (int l = 0; l < dim; ++l)
+       {
+          for (int j = 0; j < test_dof; j++)
+          {
+             for (int k = 0; k < trial_dof; k++)
+             {
+                 for (int d = 0; d < dim; d++)
+                 {
+                    elmat(l*test_dof+j, k) += w * test_vshape(l*test_dof+j, d) * trial_vshape(k, d);
+                 }
+             }
+          }
+       }
+
+       //std::cout << "elmat \n";
+       //elmat.Print();
+       //int p = 2;
+       //p++;
+
+    }
+
+}
+
+/// Integrator for (Q u, v)
+/// where Q is a vector coefficient, u is from vector FE space created
+/// from scalar FE collection and v is from scalar FE space
+class MixedVectorScalarIntegrator : public BilinearFormIntegrator
+{
+private:
+   VectorCoefficient *VQ;
+   void Init(VectorCoefficient *vq)
+   { VQ = vq; }
+
+#ifndef MFEM_THREAD_SAFE
+   Vector shape;
+   Vector D;
+   Vector test_shape;
+   Vector b;
+   Vector trial_shape;
+   DenseMatrix trial_vshape; // components are test shapes
+#endif
+
+public:
+   MixedVectorScalarIntegrator() { Init(NULL); }
+   MixedVectorScalarIntegrator(VectorCoefficient *_vq) { Init(_vq); }
+   MixedVectorScalarIntegrator(VectorCoefficient &vq) { Init(&vq); }
+
+   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
+                                       const FiniteElement &test_fe,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat);
+};
+
+void MixedVectorScalarIntegrator::AssembleElementMatrix2(
+        const FiniteElement &trial_fe, const FiniteElement &test_fe,
+        ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    // assume trial_fe is vector FE but created from scalar f.e. collection,
+    // and test_fe is scalar FE
+
+    MFEM_ASSERT(test_fe.GetRangeType() == FiniteElement::SCALAR && trial_fe.GetRangeType() == FiniteElement::SCALAR,
+                "The improper vector FE should have a scalar type in the current implementation \n");
+
+    int dim  = test_fe.GetDim();
+    //int vdim = dim;
+    int trial_dof = trial_fe.GetDof();
+    int test_dof = test_fe.GetDof();
+    double w;
+
+    if (VQ == NULL)
+        mfem_error("MixedVectorScalarIntegrator::AssembleElementMatrix2(...)\n"
+                "   is not implemented for non-vector coefficients");
+
+#ifdef MFEM_THREAD_SAFE
+    Vector trial_shape(trial_dof);
+    DenseMatrix test_vshape(test_dof,dim);
+#else
+    trial_vshape.SetSize(trial_dof*dim,dim);
+    test_shape.SetSize(test_dof);
+#endif
+    elmat.SetSize (test_dof, trial_dof * dim);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+        int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
+        ir = &IntRules.Get(test_fe.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+        const IntegrationPoint &ip = ir->IntPoint(i);
+        test_fe.CalcShape(ip, test_shape);
+
+        Trans.SetIntPoint (&ip);
+        trial_fe.CalcShape(ip, trial_shape);
+
+        //std::cout << "trial_shape \n";
+        //trial_shape.Print();
+
+        for (int d = 0; d < dim; ++d )
+            for (int l = 0; l < dim; ++l)
+                for (int k = 0; k < trial_dof; ++k)
+                {
+                    if (l == d)
+                        trial_vshape(l*trial_dof+k,d) = trial_shape(k);
+                    else
+                        trial_vshape(l*trial_dof+k,d) = 0.0;
+                }
+        // now trial_vshape is of size trial_dof(scalar)*dim x dim
+
+        //trial_fe.CalcVShape(Trans, trial_vshape); would be nice if it worked but no
+
+        w = ip.weight * Trans.Weight();
+        VQ->Eval (b, Trans, ip);
+
+        for (int l = 0; l < dim; ++l)
+            for (int j = 0; j < trial_dof; j++)
+                for (int k = 0; k < test_dof; k++)
+                    for (int d = 0; d < dim; d++ )
+                    {
+                        elmat(k, l*trial_dof + j) += w*trial_vshape(l*trial_dof + j,d)*b(d)*test_shape(k);
+                    }
+    }
 }
 
 //********* NEW STUFF FOR 4D CFOSLS
@@ -837,7 +1147,8 @@ int main(int argc, char *argv[])
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
-    bool eliminateS = false;             // in case space_for_S = "L2" defines whether we eliminate S from the system
+    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
+    bool eliminateS = false;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
 
     // solver options
@@ -893,6 +1204,8 @@ int main(int argc, char *argv[])
                    "Formulation to use (cfosls or fosls).");
     args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                    "Space for S (H1 or L2).");
+    args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
+                   "Space for sigma (Hdiv or H1).");
     args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
                    "--no-eliminateS",
                    "Turn on/off elimination of S in L2 formulation.");
@@ -918,17 +1231,17 @@ int main(int argc, char *argv[])
        args.PrintOptions(cout);
     }
 
-    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
-    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
-    MFEM_ASSERT(!(strcmp(formulation,"fosls") == 0 && !keep_divdiv), "For FOSLS formulation div-div term must be present!\n");
-    MFEM_ASSERT(!(strcmp(space_for_S,"H1") == 0 && keep_divdiv), "For S from H1 div-div term must not be present for sigma!\n");
-
     if (verbose)
     {
         if (strcmp(formulation,"cfosls") == 0)
             std::cout << "formulation: CFOSLS \n";
         else
             std::cout << "formulation: FOSLS \n";
+
+        if (strcmp(space_for_sigma,"Hdiv") == 0)
+            std::cout << "Space for sigma: Hdiv \n";
+        else
+            std::cout << "Space for sigma: H1 \n";
 
         if (strcmp(space_for_S,"H1") == 0)
             std::cout << "Space for S: H1 \n";
@@ -984,6 +1297,16 @@ int main(int argc, char *argv[])
     {
         std::cout << "use_ADS = " << use_ADS << "\n";
     }
+
+    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
+    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
+    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
+
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && use_ADS == false), "ADS cannot be used when sigma is from H1vec!\n");
+    MFEM_ASSERT(!(strcmp(formulation,"fosls") == 0 && strcmp(space_for_S,"L2") == 0 && !keep_divdiv), "For FOSLS formulation with S from L2 div-div term must be present!\n");
+    MFEM_ASSERT(!(strcmp(formulation,"cfosls") == 0 && strcmp(space_for_S,"H1") == 0 && keep_divdiv), "For CFOSLS formulation with S from H1 div-div term must not be present for sigma!\n");
+
 
 
     if (verbose)
@@ -1089,6 +1412,17 @@ int main(int argc, char *argv[])
     ParFiniteElementSpace *R_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
     ParFiniteElementSpace *H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
     ParFiniteElementSpace *W_space = new ParFiniteElementSpace(pmesh.get(), l2_coll);
+
+    ParFiniteElementSpace *H1vec_space;
+    if (strcmp(space_for_sigma,"H1") == 0)
+        H1vec_space = new ParFiniteElementSpace(pmesh.get(), h1_coll, dim, Ordering::byVDIM);
+
+    ParFiniteElementSpace * Sigma_space;
+    if (strcmp(space_for_sigma,"Hdiv") == 0)
+        Sigma_space = R_space;
+    else
+        Sigma_space = H1vec_space;
+
     ParFiniteElementSpace * S_space;
     if (strcmp(space_for_S,"H1") == 0)
         S_space = H_space;
@@ -1097,16 +1431,24 @@ int main(int argc, char *argv[])
 
     HYPRE_Int dimR = R_space->GlobalTrueVSize();
     HYPRE_Int dimH = H_space->GlobalTrueVSize();
+    HYPRE_Int dimHvec;
+    if (strcmp(space_for_sigma,"H1") == 0)
+        dimHvec = H1vec_space->GlobalTrueVSize();
     HYPRE_Int dimW = W_space->GlobalTrueVSize();
 
     if (verbose)
     {
        std::cout << "***********************************************************\n";
        std::cout << "dim H(div)_h = " << dimR << ", ";
+       if (strcmp(space_for_sigma,"H1") == 0)
+           std::cout << "dim H1vec_h = " << dimHvec << ", ";
        std::cout << "dim H1_h = " << dimH << ", ";
        std::cout << "dim L2_h = " << dimW << "\n";
        std::cout << "Spaces we use: \n";
-       std::cout << "H(div)";
+       if (strcmp(space_for_sigma,"Hdiv") == 0)
+           std::cout << "H(div)";
+       else
+           std::cout << "H1vec";
        if (strcmp(space_for_S,"H1") == 0)
            std::cout << " x H1";
        else // "L2"
@@ -1139,7 +1481,7 @@ int main(int argc, char *argv[])
     int tempblknum = 0;
     block_offsets[0] = 0;
     tempblknum++;
-    block_offsets[tempblknum] = R_space->GetVSize();
+    block_offsets[tempblknum] = Sigma_space->GetVSize();
     tempblknum++;
 
     if (strcmp(space_for_S,"H1") == 0)
@@ -1164,7 +1506,7 @@ int main(int argc, char *argv[])
     tempblknum = 0;
     block_trueOffsets[0] = 0;
     tempblknum++;
-    block_trueOffsets[tempblknum] = R_space->TrueVSize();
+    block_trueOffsets[tempblknum] = Sigma_space->TrueVSize();
     tempblknum++;
 
     if (strcmp(space_for_S,"H1") == 0)
@@ -1198,7 +1540,7 @@ int main(int argc, char *argv[])
     ParGridFunction *S_exact = new ParGridFunction(S_space);
     S_exact->ProjectCoefficient(*(Mytest.scalarS));
 
-    ParGridFunction * sigma_exact = new ParGridFunction(R_space);
+    ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
     sigma_exact->ProjectCoefficient(*(Mytest.sigma));
 
     x.GetBlock(0) = *sigma_exact;
@@ -1235,11 +1577,9 @@ int main(int argc, char *argv[])
    // 9. Define the parallel grid function and parallel linear forms, solution
    //    vector and rhs.
 
-   ParLinearForm *fform = new ParLinearForm(R_space);
+   ParLinearForm *fform = new ParLinearForm(Sigma_space);
    if (strcmp(space_for_S,"L2") == 0 && keep_divdiv) // if L2 for S and we keep div-div term
        fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(*Mytest.scalardivsigma));
-   else
-       fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zero));
 
    fform->Assemble();
 
@@ -1252,7 +1592,8 @@ int main(int argc, char *argv[])
 
    if (strcmp(space_for_S,"H1") == 0)
    {
-       qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+       //if (strcmp(space_for_sigma,"Hdiv") == 0 )
+           qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
        qform->Assemble();//qform->Print();
    }
    else // "L2"
@@ -1275,11 +1616,14 @@ int main(int argc, char *argv[])
    // 10. Assemble the finite element matrices for the CFOSLS operator  A
    //     where:
 
-   ParBilinearForm *Ablock(new ParBilinearForm(R_space));
+   ParBilinearForm *Ablock(new ParBilinearForm(Sigma_space));
    HypreParMatrix *A;
    if (strcmp(space_for_S,"H1") == 0) // S is from H1
    {
-        Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       else // sigma is from H1vec
+           Ablock->AddDomainIntegrator(new ImproperVectorMassIntegrator);
    }
    else // "L2"
    {
@@ -1310,6 +1654,14 @@ int main(int argc, char *argv[])
    Ablock->EliminateEssentialBC(ess_bdrSigma, x.GetBlock(0), *fform);
    Ablock->Finalize();
    A = Ablock->ParallelAssemble();
+
+   /*
+   if (verbose)
+       std::cout << "Checking the A matrix \n";
+
+   MPI_Finalize();
+   return 0;
+   */
 
 #ifdef EIGENVALUE_STUDY
    if (verbose)
@@ -1386,7 +1738,8 @@ int main(int argc, char *argv[])
        if (strcmp(space_for_S,"H1") == 0)
        {
            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-           Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+           if (strcmp(space_for_sigma,"Hdiv") == 0)
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
        }
        else // "L2" & !eliminateS
        {
@@ -1407,9 +1760,14 @@ int main(int argc, char *argv[])
    HypreParMatrix *BT;
    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
    {
-       Bblock = new ParMixedBilinearForm(R_space, S_space);
-       //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
-       Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+       Bblock = new ParMixedBilinearForm(Sigma_space, S_space);
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+       {
+           //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+       }
+       else // sigma is from H1
+           Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
        Bblock->Assemble();
        Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
        Bblock->EliminateTestDofs(ess_bdrS);
@@ -1424,7 +1782,7 @@ int main(int argc, char *argv[])
     Array<int> block_truetestOffsets(3); // number of variables + 1
     block_truetestOffsets[0] = 0;
     //block_truetestOffsets[1] = C_space->TrueVSize();
-    block_truetestOffsets[1] = R_space->TrueVSize();
+    block_truetestOffsets[1] = Sigma_space->TrueVSize();
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         block_truetestOffsets[2] = S_space->TrueVSize();
     block_truetestOffsets.PartialSum();
@@ -1451,6 +1809,10 @@ int main(int argc, char *argv[])
     BlockVector truetestX(block_truetestOffsets), truetestRhs(block_truetestOffsets);
     truetestX = 0.0;
     truetestRhs = 1.0;
+
+    fform->ParallelAssemble(truetestRhs.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        qform->ParallelAssemble(truetestRhs.GetBlock(1));
 
     truetestX = 0.0;
     testsolver->Mult(truetestRhs, truetestX);
@@ -1482,14 +1844,76 @@ int main(int argc, char *argv[])
 
    if (strcmp(formulation,"cfosls") == 0)
    {
-      ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space, W_space));
-      Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+      ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space, W_space));
+      if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+        Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+      else // sigma is from H1vec
+        Dblock->AddDomainIntegrator(new VectorDivergenceIntegrator);
       Dblock->Assemble();
       Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
       Dblock->Finalize();
       D = Dblock->ParallelAssemble();
       DT = D->Transpose();
    }
+
+#ifdef TESTING2
+   {
+       MFEM_ASSERT(strcmp(formulation,"cfosls") == 0, "For TESTING2 we need gform thus cfosls formulation \n");
+
+       Array<int> block_truetestOffsets(3); // number of variables + 1
+       block_truetestOffsets[0] = 0;
+       //block_truetestOffsets[1] = C_space->TrueVSize();
+       block_truetestOffsets[1] = Sigma_space->TrueVSize();
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           block_truetestOffsets[2] = W_space->TrueVSize();
+       block_truetestOffsets.PartialSum();
+
+       BlockOperator *TestOp = new BlockOperator(block_truetestOffsets);
+
+       TestOp->SetBlock(0,0, A);
+       TestOp->SetBlock(0,1, DT);
+       TestOp->SetBlock(1,0, D);
+
+       IterativeSolver * testsolver;
+       testsolver = new MINRESSolver(comm);
+       if (verbose)
+           cout << "Linear test solver: MINRES \n";
+
+       testsolver->SetAbsTol(atol);
+       testsolver->SetRelTol(rtol);
+       testsolver->SetMaxIter(max_iter);
+       testsolver->SetOperator(*TestOp);
+
+       testsolver->SetPrintLevel(1);
+
+       BlockVector truetestX(block_truetestOffsets), truetestRhs(block_truetestOffsets);
+       truetestX = 0.0;
+       truetestRhs = 0.0;
+
+       gform->ParallelAssemble(truetestRhs.GetBlock(1));
+
+       truetestX = 0.0;
+       testsolver->Mult(truetestRhs, truetestX);
+
+       chrono.Stop();
+
+       if (verbose)
+       {
+           if (testsolver->GetConverged())
+               std::cout << "Linear solver converged in " << testsolver->GetNumIterations()
+                         << " iterations with a residual norm of " << testsolver->GetFinalNorm() << ".\n";
+           else
+               std::cout << "Linear solver did not converge in " << testsolver->GetNumIterations()
+                         << " iterations. Residual norm is " << testsolver->GetFinalNorm() << ".\n";
+           std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+       }
+   }
+
+
+   MPI_Finalize();
+   return 0;
+#endif
+
 
    //=======================================================
    // Setting up the block system Matrix
@@ -1541,7 +1965,7 @@ int main(int argc, char *argv[])
        if (use_ADS)
            std::cout << "ADS(A) for H(div) \n";
        else
-            std::cout << "Diag(A) for H(div) \n";
+            std::cout << "Diag(A) for H(div) or H1vec \n";
        if (strcmp(space_for_S,"H1") == 0) // S is from H1
            std::cout << "BoomerAMG(C) for H1 \n";
        else
@@ -1571,7 +1995,7 @@ int main(int argc, char *argv[])
 
    Solver * invA;
    if (use_ADS)
-       invA = new HypreADS(*A, R_space);
+       invA = new HypreADS(*A, Sigma_space);
    else // using Diag(A);
         invA = new HypreDiagScale(*A);
 
@@ -1632,9 +2056,9 @@ int main(int argc, char *argv[])
    solver.SetRelTol(rtol);
    solver.SetMaxIter(max_iter);
    solver.SetOperator(*CFOSLSop);
-   if (prec_option > 0)
-        solver.SetPreconditioner(prec);
-   solver.SetPrintLevel(0);
+   //if (prec_option > 0)
+        //solver.SetPreconditioner(prec);
+   solver.SetPrintLevel(1);
    trueX = 0.0;
 
    chrono.Clear();
@@ -1653,7 +2077,7 @@ int main(int argc, char *argv[])
       std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
    }
 
-   ParGridFunction * sigma = new ParGridFunction(R_space);
+   ParGridFunction * sigma = new ParGridFunction(Sigma_space);
    sigma->Distribute(&(trueX.GetBlock(0)));
 
    ParGridFunction * S = new ParGridFunction(S_space);
@@ -1667,7 +2091,7 @@ int main(int argc, char *argv[])
        Cblock->Finalize();
        HypreParMatrix * C = Cblock->ParallelAssemble();
 
-       ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space, S_space));
+       ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
        Bblock->Assemble();
        Bblock->Finalize();
@@ -1698,7 +2122,7 @@ int main(int argc, char *argv[])
    if (verbose)
        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
 
-   DiscreteLinearOperator Div(R_space, W_space);
+   DiscreteLinearOperator Div(Sigma_space, W_space);
    Div.AddDomainInterpolator(new DivergenceInterpolator());
    ParGridFunction DivSigma(W_space);
    Div.Assemble();
@@ -1779,14 +2203,11 @@ int main(int argc, char *argv[])
                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
        if (verbose)
        {
-           //cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
-           //cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
-           //cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
-
            if (strcmp(space_for_S,"H1") == 0) // S is present
            {
-               cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+norm_div*norm_div << "\n";
+               cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
                cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+               cout << "Smth is wrong with the functional computation for H1 case \n";
                cout << "Relative Energy Error = " << sqrt(globalFunctional+norm_div*norm_div)/norm_div << "\n";
            }
            else // if S is from L2
@@ -1896,6 +2317,8 @@ int main(int argc, char *argv[])
         delete H_space;
    delete W_space;
    delete R_space;
+   if (strcmp(space_for_sigma,"H1") == 0) // S was from H1
+        delete H1vec_space;
    delete l2_coll;
    delete h1_coll;
    delete hdiv_coll;
