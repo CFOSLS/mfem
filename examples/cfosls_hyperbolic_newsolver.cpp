@@ -834,7 +834,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -5079,10 +5079,16 @@ int main(int argc, char *argv[])
 
     trueXtest = 0.0;
 
+    BlockVector trueRhstest_funct(blocktest_offsets);
+    trueRhstest_funct = trueRhstest;
+
     // trueRhstest = F - Funct * particular solution (= residual), on true dofs
     BlockVector truetemp(blocktest_offsets);
     BlockMattest->Mult(ParticSol, truetemp);
     trueRhstest -= truetemp;
+
+
+
 
     chrono.Stop();
     if (verbose)
@@ -5407,6 +5413,32 @@ int main(int argc, char *argv[])
             }
         }
         /////////////////////////////////////////////////////////
+
+        double localFunctional = -2.0 * (trueXtest * trueRhstest_funct); //0.0;//-2.0*(trueX.GetBlock(0)*trueRhs.GetBlock(0));
+        BlockMattest->Mult(trueXtest, trueRhstest_funct);
+        localFunctional += trueXtest * trueRhstest_funct;
+
+        double globalFunctional;
+        MPI_Reduce(&localFunctional, &globalFunctional, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (verbose)
+        {
+            //cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+            //cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+            //cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
+
+            if (strcmp(space_for_S,"H1") == 0) // S is present
+            {
+                cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+                cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+                cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
+            }
+            else // if S is from L2
+            {
+                cout << "|| sigma_h - L(S_h) ||^2 + || div_h (sigma_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+                cout << "Energy Error = " << sqrt(globalFunctional+err_div*err_div) << "\n";
+            }
+        }
     }
 
     chrono.Stop();

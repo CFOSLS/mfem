@@ -4432,6 +4432,9 @@ int main(int argc, char *argv[])
 
     trueXtest = 0.0;
 
+    BlockVector trueRhstest_funct(blocktest_offsets);
+    trueRhstest_funct = trueRhstest;
+
     // trueRhstest = F - Funct * particular solution (= residual), on true dofs
     BlockVector truetemp(blocktest_offsets);
     BlockMattest->Mult(ParticSol, truetemp);
@@ -4621,6 +4624,21 @@ int main(int argc, char *argv[])
                          err_S / norm_S << "\n";
         }
         /////////////////////////////////////////////////////////
+
+        double localFunctional = -2.0 * (trueXtest * trueRhstest_funct); //0.0;//-2.0*(trueX.GetBlock(0)*trueRhs.GetBlock(0));
+        trueRhstest_funct = 0.0;
+        BlockMattest->Mult(trueXtest, trueRhstest_funct);
+        localFunctional += trueXtest * trueRhstest_funct;
+
+        double globalFunctional;
+        MPI_Reduce(&localFunctional, &globalFunctional, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (verbose)
+        {
+            cout << "|| sigma_h - L(S_h) ||^2 + || div_h (sigma_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+            cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+            cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
+        }
     }
 
     chrono.Stop();
