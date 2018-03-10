@@ -221,7 +221,86 @@ public:
    virtual ~ParMesh();
 };
 
-}
+/// Class for parallel meshes in time-slabbing framework
+class ParMeshTSL : public ParMesh
+{
+public:
+    ParMesh & meshbase;
+    std::vector<std::pair<int,int> > bot_to_top_bels;
+
+public:
+   // ONLY PENTATOPE case for 4D mesh and TETRAHEDRON case for 3D
+
+   // Actual parallel 3D->4D/2D->3D mesh generator, version 2 (main).
+   // bnd_method: way to create boundary elements
+   // bnd_method = 0: el_to_face is not used, face_bndflags not created, but log searches are used
+   // for creating boundary elements
+   // bnd_method = 1: a little bit more memory but no log searches for creating boundary elements
+   // local_method: way to create pentatopes for space-time prisms
+   // local_method = 0: ~ SHORTWAY, qhull is used for space-time prisms
+   // local_method = 1: ~ LONGWAY, qhull is used for lateral faces of space-time prisms (then combined)
+   // local_method = 2: qhull is not used, a simple procedure for simplices is used.
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method = 1, int local_method = 2);
+
+protected:
+   // Creates ParMesh internal structure (including shared entities)
+   // after the main arrays (elements, vertices and boundary) are already defined for the
+   // future space-time mesh. Used only inside the ParMesh constructor.
+   void ParMeshSpaceTime_createShared(MPI_Comm comm, int Nsteps );
+   void CreateInternalMeshStructure (int refine);
+public:
+   // Outputs information about shared entites, applying vertex indices permutation if provided
+   void PrintSharedStructParMesh ( int * permutation = NULL );
+};
+
+/*
+class A
+{
+protected:
+    double * testA;
+public:
+    A()  {testA = new double[0];}
+};
+
+class B : public A
+{
+protected:
+    double * testB;
+public:
+    B() : A()  {testB = new double[0];}
+};
+
+class C : public B
+{
+protected:
+    B& Binstance;
+    double * testC;
+public:
+    C(B& Binst) : B(), Binstance(Binst)  {testC = new double[0];}
+protected:
+    void testfuncC () { std::cout << Binstance.testB[0];}
+};
+*/
+
+class B
+{
+protected:
+    double * testB;
+public:
+    B() {testB = new double[0];}
+
+    //friend class C;
+};
+
+class C : public B
+{
+protected:
+    B& Binstance;
+public:
+    C(B& Binst) : B(), Binstance(Binst) {std::cout << Binstance.testB[0];}
+};
+
+} // end of namespace mfem
 
 #endif // MFEM_USE_MPI
 
