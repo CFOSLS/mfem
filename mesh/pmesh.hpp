@@ -219,6 +219,10 @@ public:
    void ParPrint(std::ostream &out) const;
 
    virtual ~ParMesh();
+
+   // TODO: Remove this if clean code is needed.
+   // It's a temporary crutch because meshgen functions use protected members of ParMesh
+   friend class ParMeshTSL;
 };
 
 /// Class for parallel meshes in time-slabbing framework
@@ -229,7 +233,7 @@ public:
     std::vector<std::pair<int,int> > bot_to_top_bels;
 
 public:
-   // ONLY PENTATOPE case for 4D mesh and TETRAHEDRON case for 3D
+    // Warning: only PENTATOPE case for 4D mesh and TETRAHEDRON case for 3D are considered
 
    // Actual parallel 3D->4D/2D->3D mesh generator, version 2 (main).
    // bnd_method: way to create boundary elements
@@ -251,7 +255,61 @@ protected:
 public:
    // Outputs information about shared entites, applying vertex indices permutation if provided
    void PrintSharedStructParMesh ( int * permutation = NULL );
+
+
+   // A simple structure which is used to store temporarily the 4d mesh main arrays in
+   // parallel mesh generator, version 1.
+   struct IntermediateMesh{
+       int dim;
+       int ne;
+       int nv;
+       int nbe;
+
+       int * elements;
+       int * bdrelements;
+       double * vertices;
+       int * elattrs;
+       int * bdrattrs;
+
+       int withgindicesflag;
+       int * vert_gindices; // allocated and used only for 4d parmesh construction
+   };
+private:
+   // Creates an IntermediateMesh whihc stores main arrays of the Mesh.
+   IntermediateMesh * ExtractMeshToInterMesh ();
+   // Allocation of IntermediateMesh structure.
+   void IntermeshInit( IntermediateMesh * intermesh, int dim, int nv, int ne, int nbdr, int with_gindices_flag);
+   void IntermeshDelete( IntermediateMesh * intermesh_pt);
+   void InterMeshPrint (IntermediateMesh * local_intermesh, int suffix, const char * filename);
+   // This function only creates elements, vertices and boundary elements and
+   // stores them in the output IntermediateMesh structure. It is used in ParMesh-to-Mesh version
+   // of space-time mesh constructor.
+   // Description of bnd_method, local_method - see in the constructor which calls this function.
+   IntermediateMesh * MeshSpaceTimeCylinder_toInterMesh (double tau, int Nsteps, int bnd_method, int local_method);
+
+   // Calls InitMesh() and creates elements, vertices and boundary elements
+   // Used only as part of Mesh constructor thus private.
+   // Description of bnd_method, local_method - see in the constructor which calls this function.
+   void MeshSpaceTimeCylinder_onlyArrays (double tau, int Nsteps,
+                                          int bnd_method, int local_method);
+
+   // Reads the elements, vertices and boundary from the input IntermediatMesh.
+   // It is like Load() in MFEM but for arrays instead of an input stream.
+   // No internal mesh structures are initialized inside.
+   void LoadMeshfromArrays( int nv, double * vertices,
+                                     int ne, int * elements, int * elattris,
+                                     int nbe, int * bdrelements, int * bdrattrs, int dim );
+
+public:
+   // Computes domain and boundary volumes, and checks,
+   // that faces and boundary elements list is consistent with the actual element faces
+   int MeshCheck (bool verbose);
 };
+
+inline double dist( double * M, double * N , int d);
+int setzero(Array2D<int>* arrayint);
+void sortingPermutationNew( const std::vector<std::vector<double> >& values, int * permutation);
+int permutation_sign( int * permutation, int size);
 
 /*
 class A
@@ -282,6 +340,7 @@ protected:
 };
 */
 
+/*
 class B
 {
 protected:
@@ -299,6 +358,7 @@ protected:
 public:
     C(B& Binst) : B(), Binstance(Binst) {std::cout << Binstance.testB[0];}
 };
+*/
 
 } // end of namespace mfem
 

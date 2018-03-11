@@ -5061,7 +5061,7 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
     */
 
     // creating local parts of space-time mesh
-    MeshSpaceTimeCylinder_onlyArrays(meshbase, Tau, Nsteps, bnd_method, local_method);
+    MeshSpaceTimeCylinder_onlyArrays(Tau, Nsteps, bnd_method, local_method);
 
     MPI_Barrier(comm);
 
@@ -5659,12 +5659,9 @@ void ParMeshTSL::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
         sface_posingroupbase.SetSize(meshbase_shared_faces_size);
         for ( int row = 0; row < meshbase_group_sface_size; ++row )
         {
-            // old int * v = meshbase.group_sface.GetRow(row);
+            int * v = meshbase.group_sface.GetRow(row);
             for (int colno = 0; colno < meshbase.group_sface.RowSize(row); ++colno)
             {
-                // old sface_groupbase[v[colno]] = row;
-                // old sface_posingroupbase[v[colno]] = colno;
-                int sface =
                 sface_groupbase[v[colno]] = row;
                 sface_posingroupbase[v[colno]] = colno;
             }
@@ -6792,6 +6789,1177 @@ void ParMeshTSL::CreateInternalMeshStructure (int refine)
 
     return;
 }
+
+// from a given base mesh (3d tetrahedrons or 2D triangles) produces a space-time mesh
+// for a space-time cylinder with the given base, Nsteps * tau height in time
+// enumeration of space-time vertices: time slab after time slab
+// boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
+void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
+                                              int bnd_method, int local_method)
+{
+    int DimBase = meshbase.Dimension(), NumOfBaseElements = meshbase.GetNE(),
+            NumOfBaseBdrElements = meshbase.GetNBE(),
+            NumOfBaseVertices = meshbase.GetNV();
+    int NumOfSTElements, NumOfSTBdrElements, NumOfSTVertices;
+
+    if ( DimBase != 3 && DimBase != 2 )
+    {
+        cerr << "Wrong dimension in MeshSpaceTimeCylinder(): " << DimBase << endl << flush;
+        return;
+    }
+
+    if ( DimBase == 2 )
+    {
+        if ( local_method == 1 )
+        {
+            cerr << "This local method = " << local_method << " is not supported by case "
+                                                     "dim = " << DimBase << endl << flush;
+            return;
+        }
+    }
+
+    int Dim = DimBase + 1;
+
+    // for each base element and each time slab a space-time prism with base mesh element as a base
+    // is decomposed into (Dim) simplices (tetrahedrons in 3d and pentatops in 4d);
+    NumOfSTElements = NumOfBaseElements * Dim * Nsteps;
+    NumOfSTVertices = NumOfBaseVertices * (Nsteps + 1); // no additional vertices inbetween time slabs so far
+    // lateral 4d bdr faces (one for each 3d bdr face) + lower + upper bases
+    // of the space-time cylinder
+    NumOfSTBdrElements = NumOfBaseBdrElements * DimBase * Nsteps + 2 * NumOfBaseElements;
+
+    // assuming that the 3D mesh contains elements of the same type = tetrahedrons
+    int vert_per_base = meshbase.GetElement(0)->GetNVertices();
+    int vert_per_prism = 2 * vert_per_base;
+    int vert_per_latface = DimBase * 2;
+
+    InitMesh(Dim,Dim,NumOfSTVertices,NumOfSTElements,NumOfSTBdrElements);
+
+    Element * el;
+
+    int * simplexes;
+    if (local_method == 1 || local_method == 2)
+    {
+        simplexes = new int[Dim * (Dim + 1)]; // array for storing vertex indices for constructed simplices
+    }
+    else // local_method = 0
+    {
+        int nsliver = 5; //why 5? how many slivers can b created by qhull? maybe 0 if we don't joggle inside qhull but perturb the coordinates before?
+        simplexes = new int[(Dim + nsliver) * (Dim + 1)]; // array for storing vertex indices for constructed simplices + probably sliver pentatopes
+    }
+
+    // stores indices of space-time element face vertices produced by qhull for all lateral faces
+    // Used in local_method = 1 only.
+    int * facesimplicesAll;
+    if (local_method == 1 )
+        facesimplicesAll = new int[DimBase * (DimBase + 1) * Dim ];
+
+    Array<int> elverts_base;
+    Array<int> elverts_prism;
+
+    // temporary array for vertex indices of a pentatope face (used in local_method = 0 and 2)
+    int * tempface = new int[Dim];
+    int * temp = new int[Dim+1]; //temp array for simplex vertices in local_method = 1;
+
+    // three arrays below are used only in local_method = 1
+    Array2D<int> vert_to_vert_prism; // for a 4D prism
+    // row ~ lateral face of the 4d prism
+    // first 6 columns - indices of vertices belonging to the lateral face,
+    // last 2 columns - indices of the rest 2 vertices of the prism
+    Array2D<int> latfacets_struct;
+    // coordinates of vertices of a lateral face of 4D prism
+    double * vert_latface;
+    // coordinates of vertices of a 3D base (triangle) of a lateral face of 4D prism
+    double * vert_3Dlatface;
+    if (local_method == 1)
+    {
+        vert_latface =  new double[Dim * vert_per_latface];
+        vert_3Dlatface = new double[DimBase * vert_per_latface];
+        latfacets_struct.SetSize(Dim, vert_per_prism);
+        vert_to_vert_prism.SetSize(vert_per_prism, vert_per_prism);
+    }
+
+    // coordinates of vertices of the space-time prism
+    double * elvert_coordprism = new double[Dim * vert_per_prism];
+
+    char * qhull_flags;
+    if (local_method == 0 || local_method == 1)
+    {
+        qhull_flags = new char[250];
+        sprintf(qhull_flags, "qhull d Qbb");
+    }
+
+    int simplex_count = 0;
+    Element * NewEl;
+    Element * NewBdrEl;
+
+    double * tempvert = new double[Dim];
+
+    if (local_method < 0 && local_method > 2)
+    {
+        cout << "Local method = " << local_method << " is not supported" << endl << flush;
+        return;
+    }
+
+    if ( bnd_method != 0 && bnd_method != 1)
+    {
+        cout << "Illegal value of bnd_method = " << bnd_method << " (must be 0 or 1)"
+             << endl << flush;
+        return;
+    }
+
+    Vector vert_coord3d(DimBase * meshbase.GetNV());
+    meshbase.GetVertices(vert_coord3d);
+    //printDouble2D(vert_coord3d, 10, Dim3D);
+
+    // adding all space-time vertices to the mesh
+    for ( int tslab = 0; tslab <= Nsteps; ++tslab)
+    {
+        // adding the vertices from the slab to the output space-time mesh
+        for ( int vert = 0; vert < NumOfBaseVertices; ++vert)
+        {
+            for ( int j = 0; j < DimBase; ++j)
+            {
+                tempvert[j] = vert_coord3d[vert + j * NumOfBaseVertices];
+                tempvert[Dim-1] = tau * tslab;
+            }
+            AddVertex(tempvert);
+        }
+    }
+
+    delete [] tempvert;
+
+    int * almostjogglers = new int[Dim];
+    //int permutation[Dim];
+    //vector<double*> lcoords(Dim);
+    vector<vector<double> > lcoordsNew(Dim);
+
+    // for each (of Dim) base mesh element faces stores 1 if it is at the boundary and 0 else
+    int * facebdrmarker = new int[Dim];
+    // std::set of the base mesh boundary elements. Using set allows one to perform a search
+    // with O(log N_elem) operations
+    std::set< std::vector<int> > BdrTriSet;
+    Element * bdrel;
+
+    Array<int> face_bndflags;
+    if (bnd_method == 1)
+    {
+        if (Dim == 4)
+            face_bndflags.SetSize(meshbase.GetNFaces());
+        if (Dim == 3)
+            face_bndflags.SetSize(meshbase.GetNEdges());
+    }
+
+    Table * localel_to_face;
+    Array<int> localbe_to_face;
+
+    // if = 0, a search algorithm is used for defining whether faces of a given base mesh element
+    // are at the boundary.
+    // if = 1, instead an array face_bndflags is used, which stores 0 and 1 depending on
+    // whether the face is at the boundary, + el_to_face table which is usually already
+    // generated for the base mesh
+    //int bnd_method = 1;
+
+    if (bnd_method == 0)
+    {
+        // putting base mesh boundary elements from base mesh structure to the set BdrTriSet
+        for ( int boundelem = 0; boundelem < NumOfBaseBdrElements; ++boundelem)
+        {
+            //cout << "boundelem No. " << boundelem << endl;
+            bdrel = meshbase.GetBdrElement(boundelem);
+            int * bdrverts = bdrel->GetVertices();
+
+            std::vector<int> buff (bdrverts, bdrverts+DimBase);
+            std::sort (buff.begin(), buff.begin()+DimBase);
+
+            BdrTriSet.insert(buff);
+        }
+        /*
+        for (vector<int> temp : BdrTriSet)
+        {
+            cout << temp[0] << " " <<  temp[1] << " " << temp[2] << endl;
+        }
+        cout<<endl;
+        */
+    }
+    else // bnd_method = 1
+    {
+        if (Dim == 4)
+        {
+            if (meshbase.el_to_face == NULL)
+            {
+                cout << "Have to built el_to_face" << endl;
+                meshbase.GetElementToFaceTable(0);
+            }
+            localel_to_face = meshbase.el_to_face;
+            localbe_to_face.MakeRef(meshbase.be_to_face);
+        }
+        if (Dim == 3)
+        {
+            if (meshbase.el_to_edge == NULL)
+            {
+                cout << "Have to built el_to_edge" << endl;
+                meshbase.GetElementToEdgeTable(*(meshbase.el_to_edge), meshbase.be_to_edge);
+            }
+            localel_to_face = meshbase.el_to_edge;
+            localbe_to_face.MakeRef(meshbase.be_to_edge);
+        }
+
+        //cout << "Special print" << endl;
+        //cout << mesh3d.el_to_face(elind, facelind);
+        //cout << "be_to_face" << endl;
+        //mesh3d.be_to_face.Print();
+        //localbe_to_face.Print();
+
+
+        //cout << "nfaces = " << meshbase.GetNFaces();
+        //cout << "nbe = " << meshbase.GetNBE() << endl;
+        //cout << "boundary.size = " << mesh3d.boundary.Size() << endl;
+
+        face_bndflags = -1;
+        for ( int i = 0; i < meshbase.GetNBE(); ++i )
+            //face_bndflags[meshbase.be_to_face[i]] = 1;
+            face_bndflags[localbe_to_face[i]] = 1;
+
+        //cout << "face_bndflags" << endl;
+        //face_bndflags.Print();
+    }
+
+    int * ordering = new int [vert_per_base];
+    //int antireordering[vert_per_base]; // used if bnd_method = 0 and local_method = 2
+    Array<int> tempelverts(vert_per_base);
+
+    // main loop creates space-time elements over all time slabs over all base mesh elements
+    // loop over base mesh elements
+    for ( int elind = 0; elind < NumOfBaseElements; elind++ )
+    //for ( int elind = 0; elind < 1; ++elind )
+    {
+        //cout << "element " << elind << endl;
+
+        el = meshbase.GetElement(elind);
+
+        // 1. getting indices of base mesh element vertices and their coordinates in the prism
+        el->GetVertices(elverts_base);
+
+        //for ( int k = 0; k < elverts_base.Size(); ++k )
+          //  cout << "elverts[" << k << "] = " << elverts_base[k] << endl;
+
+        // for local_method 2 we need to reorder the local vertices of the prism to preserve
+        // the the order in some global sense  = lexicographical order of the vertex coordinates
+        if (local_method == 2)
+        {
+            // using elvert_coordprism as a temporary buffer for changing elverts_base
+            for ( int vert = 0; vert < vert_per_base; ++vert)
+            {
+                for ( int j = 0; j < DimBase; ++j)
+                {
+                    elvert_coordprism[Dim * vert + j] =
+                            vert_coord3d[elverts_base[vert] + j * NumOfBaseVertices];
+                }
+            }
+
+            /*
+             * old one
+            for (int vert = 0; vert < Dim; ++vert)
+                lcoords[vert] = elvert_coordprism + Dim * vert;
+
+            sortingPermutation(DimBase, lcoords, ordering);
+
+            cout << "ordering 1:" << endl;
+            for ( int i = 0; i < vert_per_base; ++i)
+                cout << ordering[i] << " ";
+            cout << endl;
+            */
+
+            for (int vert = 0; vert < Dim; ++vert)
+                lcoordsNew[vert].assign(elvert_coordprism + Dim * vert,
+                                        elvert_coordprism + Dim * vert + DimBase);
+
+            sortingPermutationNew(lcoordsNew, ordering);
+
+            //cout << "ordering 2:" << endl;
+            //for ( int i = 0; i < vert_per_base; ++i)
+                //cout << ordering[i] << " ";
+            //cout << endl;
+
+            // UGLY: Fix it
+            for ( int i = 0; i < vert_per_base; ++i)
+                tempelverts[i] = elverts_base[ordering[i]];
+
+            for ( int i = 0; i < vert_per_base; ++i)
+                elverts_base[i] = tempelverts[i];
+        }
+
+        // 2. understanding which of the base mesh element faces (triangles) are at the boundary
+        int local_nbdrfaces = 0;
+        set<set<int> > LocalBdrs;
+        if (bnd_method == 0) // in this case one looks in the set of base mesh boundary elements
+        {
+            vector<int> face(DimBase);
+            for (int i = 0; i < Dim; ++i )
+            {
+                // should be consistent with lateral faces ordering in latfacet structure
+                // if used with local_method = 1
+
+                for ( int j = 0; j < DimBase; ++j)
+                    face[j] = elverts_base[(i+j)%Dim];
+
+                sort(face.begin(), face.begin()+DimBase);
+                //cout << face[0] << " " <<  face[1] << " " << face[2] << endl;
+
+                if (BdrTriSet.find(face) != BdrTriSet.end() )
+                {
+                    local_nbdrfaces++;
+                    facebdrmarker[i] = 1;
+                    set<int> face_as_set;
+
+                    for ( int j = 0; j < DimBase; ++j)
+                        face_as_set.insert((i+j)%Dim);
+
+                    LocalBdrs.insert(face_as_set);
+                }
+                else
+                    facebdrmarker[i] = 0;
+            }
+
+        } //end of if bnd_method == 0
+        else // in this case one uses el_to_face and face_bndflags to check whether mesh base
+             //face is at the boundary
+        {
+            int * faceinds = localel_to_face->GetRow(elind);
+            Array<int> temp(DimBase);
+            for ( int facelind = 0; facelind < Dim; ++facelind)
+            {
+                int faceind = faceinds[facelind];
+                if (face_bndflags[faceind] == 1)
+                {
+                    meshbase.GetFaceVertices(faceind, temp);
+
+                    set<int> face_as_set;
+                    for ( int vert = 0; vert < DimBase; ++vert )
+                        face_as_set.insert(temp[vert]);
+
+                    LocalBdrs.insert(face_as_set);
+
+                    local_nbdrfaces++;
+                }
+
+            } // end of loop over element faces
+
+        }
+
+        //cout << "Welcome the facebdrmarker" << endl;
+        //printInt2D(facebdrmarker, 1, Dim);
+
+        /*
+        cout << "Welcome the LocalBdrs" << endl;
+        for ( set<int> tempset: LocalBdrs )
+        {
+            cout << "element of LocalBdrs for el = " << elind << endl;
+            for (int ind: tempset)
+                cout << ind << " ";
+            cout << endl;
+        }
+        */
+
+        // 3. loop over all space-time slabs above a given mesh base element
+        for ( int tslab = 0; tslab < Nsteps; ++tslab)
+        {
+            //cout << "tslab " << tslab << endl;
+
+            //3.1 getting vertex indices for the space-time prism
+            elverts_prism.SetSize(vert_per_prism);
+
+            for ( int i = 0; i < vert_per_base; ++i)
+            {
+                elverts_prism[i] = elverts_base[i] + tslab * NumOfBaseVertices;
+                elverts_prism[i + vert_per_base] = elverts_base[i] +
+                        (tslab + 1) * NumOfBaseVertices;
+            }
+            //cout << "New elverts_prism" << endl;
+            //elverts_prism.Print(cout, 10);
+            //return;
+
+
+            // 3.2 for the first time slab we add the base mesh elements in the lower base
+            // to the space-time bdr elements
+            if ( tslab == 0 )
+            {
+                //cout << "zero slab: adding boundary element:" << endl;
+                if (Dim == 3)
+                    NewBdrEl = new Triangle(elverts_prism);
+                if (Dim == 4)
+                    NewBdrEl = new Tetrahedron(elverts_prism);
+                NewBdrEl->SetAttribute(1);
+                AddBdrElement(NewBdrEl);
+            }
+            // 3.3 for the last time slab we add the base mesh elements in the upper base
+            // to the space-time bdr elements
+            if ( tslab == Nsteps - 1 )
+            {
+                //cout << "last slab: adding boundary element:" << endl;
+                if (Dim == 3)
+                    NewBdrEl = new Triangle(elverts_prism + vert_per_base);
+                if (Dim == 4)
+                    NewBdrEl = new Tetrahedron(elverts_prism + vert_per_base);
+                NewBdrEl->SetAttribute(3);
+                AddBdrElement(NewBdrEl);
+            }
+
+            if (local_method == 0 || local_method == 1)
+            {
+                // 3.4 setting vertex coordinates for space-time prism, lower base
+                for ( int vert = 0; vert < vert_per_base; ++vert)
+                {
+                    for ( int j = 0; j < DimBase; ++j)
+                        elvert_coordprism[Dim * vert + j] =
+                                vert_coord3d[elverts_base[vert] + j * NumOfBaseVertices];
+                    elvert_coordprism[Dim * vert + Dim-1] = tslab * tau;
+                }
+
+                //cout << "Welcome the vertex coordinates for the 4d prism base " << endl;
+                //printDouble2D(elvert_coordprism, vert_per_base, Dim);
+
+                /*
+                 * old
+                for (int vert = 0; vert < Dim; ++vert)
+                    lcoords[vert] = elvert_coordprism + Dim * vert;
+
+
+                //cout << "vector double * lcoords:" << endl;
+                //for ( int i = 0; i < Dim; ++i)
+                    //cout << "lcoords[" << i << "]: " << lcoords[i][0] << " " << lcoords[i][1] << " " << lcoords[i][2] << endl;
+
+                sortingPermutation(DimBase, lcoords, permutation);
+                */
+
+                // here we compute the permutation "ordering" which preserves the geometric order of vertices
+                // which is based on their coordinates comparison and compute jogglers for qhull
+                // from the "ordering"
+
+                for (int vert = 0; vert < Dim; ++vert)
+                    lcoordsNew[vert].assign(elvert_coordprism + Dim * vert,
+                                            elvert_coordprism + Dim * vert + DimBase);
+
+                sortingPermutationNew(lcoordsNew, ordering);
+
+
+                //cout << "Welcome the permutation:" << endl;
+                //cout << ordering[0] << " " << ordering[1] << " " <<ordering[2] << " " << ordering[3] << endl;
+
+                int joggle_coeff = 0;
+                for ( int i = 0; i < Dim; ++i)
+                    almostjogglers[ordering[i]] = joggle_coeff++;
+
+
+                // 3.5 setting vertex coordinates for space-time prism, upper layer
+                // Joggling is required for getting unique Delaunay tesselation and should be
+                // the same for vertices shared between different elements or at least produce
+                // the same Delaunay triangulation in the shared faces.
+                // So here it is not exactly the same, but if joggle(vertex A) > joggle(vertex B)
+                // on one element, then the same inequality will hold in another element which also has
+                // vertices A and B.
+                double joggle;
+                for ( int vert = 0; vert < vert_per_base; ++vert)
+                {
+                    for ( int j = 0; j < DimBase; ++j)
+                        elvert_coordprism[Dim * (vert_per_base + vert) + j] =
+                                elvert_coordprism[Dim * vert + j];
+                    joggle = 1.0e-2 * (almostjogglers[vert]);
+                    //joggle = 1.0e-2 * elverts_prism[i + vert_per_base] * 1.0 / NumOf4DVertices;
+                    //double joggle = 1.0e-2 * i;
+                    elvert_coordprism[Dim * (vert_per_base + vert) + Dim-1] =
+                            (tslab + 1) * tau * ( 1.0 + joggle );
+                }
+
+                //cout << "Welcome the vertex coordinates for the 4d prism" << endl;
+                //printDouble2D(elvert_coordprism, 2 * vert_per_base, Dim);
+
+                // 3.6 - 3.10: constructing new space-time simplices and space-time boundary elements
+                if (local_method == 0)
+                {
+#ifdef WITH_QHULL
+                    qhT qh_qh;                /* Qhull's data structure.  First argument of most calls */
+                    qhT *qh= &qh_qh;
+                    int curlong, totlong;     /* memory remaining after qh_memfreeshort */
+
+                    double volumetol = 1.0e-8;
+                    qhull_wrapper(simplexes, qh, elvert_coordprism, Dim, volumetol, qhull_flags);
+
+                    qh_freeqhull(qh, !qh_ALL);
+                    qh_memfreeshort(qh, &curlong, &totlong);
+                    if (curlong || totlong)  /* could also check previous runs */
+                    {
+                      fprintf(stderr, "qhull internal warning (user_eg, #3): did not free %d bytes"
+                                      " of long memory (%d pieces)\n", totlong, curlong);
+                    }
+#else
+                        cout << "Wrong local method, WITH_QHULL flag was not set" << endl;
+#endif
+                } // end of if local_method = 0
+
+                if (local_method == 1) // works only in 4D case. Just historically the first implementation
+                {
+                    setzero(&vert_to_vert_prism);
+
+                    // 3.6 creating vert_to_vert for the prism before Delaunay
+                    // (adding 4d prism edges)
+                    for ( int i = 0; i < el->GetNEdges(); i++)
+                    {
+                        const int * edge = el->GetEdgeVertices(i);
+                        //cout << "edge: " << edge[0] << " " << edge[1] << std::endl;
+                        vert_to_vert_prism(edge[0], edge[1]) = 1;
+                        vert_to_vert_prism(edge[1], edge[0]) = 1;
+                        vert_to_vert_prism(edge[0] + vert_per_base, edge[1] + vert_per_base) = 1;
+                        vert_to_vert_prism(edge[1] + vert_per_base, edge[0] + vert_per_base) = 1;
+                    }
+
+                    for ( int i = 0; i < vert_per_base; i++)
+                    {
+                        vert_to_vert_prism(i, i) = 1;
+                        vert_to_vert_prism(i + vert_per_base, i + vert_per_base) = 1;
+                        vert_to_vert_prism(i, i + vert_per_base) = 1;
+                        vert_to_vert_prism(i + vert_per_base, i) = 1;
+                    }
+
+                    //cout << "vert_to_vert before delaunay" << endl;
+                    //printArr2DInt (&vert_to_vert_prism);
+                    //cout << endl;
+
+                    // 3.7 creating latfacet structure (brute force), for 4D tetrahedron case
+                    // indices are local w.r.t to the 4d prism!!!
+                    latfacets_struct(0,0) = 0;
+                    latfacets_struct(0,1) = 1;
+                    latfacets_struct(0,2) = 2;
+                    latfacets_struct(0,6) = 3;
+
+                    latfacets_struct(1,0) = 1;
+                    latfacets_struct(1,1) = 2;
+                    latfacets_struct(1,2) = 3;
+                    latfacets_struct(1,6) = 0;
+
+                    latfacets_struct(2,0) = 2;
+                    latfacets_struct(2,1) = 3;
+                    latfacets_struct(2,2) = 0;
+                    latfacets_struct(2,6) = 1;
+
+                    latfacets_struct(3,0) = 3;
+                    latfacets_struct(3,1) = 0;
+                    latfacets_struct(3,2) = 1;
+                    latfacets_struct(3,6) = 2;
+
+                    for ( int i = 0; i < Dim; ++i)
+                    {
+                        latfacets_struct(i,3) = latfacets_struct(i,0) + vert_per_base;
+                        latfacets_struct(i,4) = latfacets_struct(i,1) + vert_per_base;
+                        latfacets_struct(i,5) = latfacets_struct(i,2) + vert_per_base;
+                        latfacets_struct(i,7) = latfacets_struct(i,6) + vert_per_base;
+                    }
+
+                    //cout << "latfacets_struct (vertex indices)" << endl;
+                    //printArr2DInt (&latfacets_struct);
+
+                    //(*)const int * base_face = el->GetFaceVertices(i); // not implemented in MFEM for Tetrahedron ?!
+
+                    int * tetrahedrons;
+                    int shift = 0;
+
+
+                    // 3.8 loop over lateral facets, creating Delaunay triangulations
+                    for ( int latfacind = 0; latfacind < Dim; ++latfacind)
+                    {
+                        //cout << "latface = " << latfacind << endl;
+                        for ( int vert = 0; vert < vert_per_latface ; ++vert )
+                        {
+                            //cout << "vert index = " << latfacets_struct(latfacind,vert) << endl;
+                            for ( int coord = 0; coord < Dim; ++coord)
+                            {
+                                vert_latface[vert*Dim + coord] =
+                                  elvert_coordprism[latfacets_struct(latfacind,vert) * Dim + coord];
+                            }
+
+                        }
+
+                        //cout << "Welcome the vertices of a lateral face" << endl;
+                        //printDouble2D(vert_latface, vert_per_latface, Dim);
+
+                        // creating from 3Dprism in 4D a true 3D prism in 3D by change of
+                        // coordinates = computing input argument vert_3Dlatface for qhull wrapper
+                        // we know that the first three coordinated of a lateral face is actually
+                        // a triangle, so we set the first vertex to be the origin,
+                        // the first-to-second edge to be one of the axis
+                        if ( Dim == 4 )
+                        {
+                            double x1, x2, x3, y1, y2, y3;
+                            double dist12, dist13, dist23;
+                            double area, h, p;
+
+                            dist12 = dist(vert_latface, vert_latface+Dim , Dim);
+                            dist13 = dist(vert_latface, vert_latface+2*Dim , Dim);
+                            dist23 = dist(vert_latface+Dim, vert_latface+2*Dim , Dim);
+
+                            p = 0.5 * (dist12 + dist13 + dist23);
+                            area = sqrt (p * (p - dist12) * (p - dist13) * (p - dist23));
+                            h = 2.0 * area / dist12;
+
+                            x1 = 0.0;
+                            y1 = 0.0;
+                            x2 = dist12;
+                            y2 = 0.0;
+                            if ( dist13 - h < 0.0 )
+                                if ( fabs(dist13 - h) > 1.0e-10)
+                                {
+                                    std::cout << "strange: dist13 = " << dist13 << " h = "
+                                              << h << std::endl;
+                                    return;
+                                }
+                                else
+                                    x3 = 0.0;
+                            else
+                                x3 = sqrt(dist13*dist13 - h*h);
+                            y3 = h;
+
+
+                            // the time coordinate remains the same
+                            for ( int vert = 0; vert < vert_per_latface ; ++vert )
+                                vert_3Dlatface[vert*DimBase + 2] = vert_latface[vert*Dim + 3];
+
+                            // first & fourth vertex
+                            vert_3Dlatface[0*DimBase + 0] = x1;
+                            vert_3Dlatface[0*DimBase + 1] = y1;
+                            vert_3Dlatface[3*DimBase + 0] = x1;
+                            vert_3Dlatface[3*DimBase + 1] = y1;
+
+                            // second & fifth vertex
+                            vert_3Dlatface[1*DimBase + 0] = x2;
+                            vert_3Dlatface[1*DimBase + 1] = y2;
+                            vert_3Dlatface[4*DimBase + 0] = x2;
+                            vert_3Dlatface[4*DimBase + 1] = y2;
+
+                            // third & sixth vertex
+                            vert_3Dlatface[2*DimBase + 0] = x3;
+                            vert_3Dlatface[2*DimBase + 1] = y3;
+                            vert_3Dlatface[5*DimBase + 0] = x3;
+                            vert_3Dlatface[5*DimBase + 1] = y3;
+                        } //end of creating a true 3d prism
+
+                        //cout << "Welcome the vertices of a lateral face in 3D" << endl;
+                        //printDouble2D(vert_3Dlatface, vert_per_latface, Dim3D);
+
+                        tetrahedrons = facesimplicesAll + shift;
+
+#ifdef WITH_QHULL
+                        qhT qh_qh;                /* Qhull's data structure.  First argument of most calls */
+                        qhT *qh= &qh_qh;
+                        int curlong, totlong;     /* memory remaining after qh_memfreeshort */
+
+                        double volumetol = MYZEROTOL;
+                        qhull_wrapper(tetrahedrons, qh, vert_3Dlatface, DimBase, volumetol, qhull_flags);
+
+                        qh_freeqhull(qh, !qh_ALL);
+                        qh_memfreeshort(qh, &curlong, &totlong);
+                        if (curlong || totlong)  /* could also check previous runs */
+                          cerr<< "qhull internal warning (user_eg, #3): did not free " << totlong
+                          << "bytes of long memory (" << curlong << " pieces)" << endl;
+#else
+                        cout << "Wrong local method, WITH_QHULL flag was not set" << endl;
+#endif
+                        // convert local 3D prism (lateral face) vertex indices back to the
+                        // 4D prism indices and adding boundary elements from tetrahedrins
+                        // for lateral faces of the 4d prism ...
+                        for ( int tetraind = 0; tetraind < DimBase; ++tetraind)
+                        {
+                            //cout << "tetraind = " << tetraind << endl;
+
+                            for ( int vert = 0; vert < Dim; ++vert)
+                            {
+                                int temp = tetrahedrons[tetraind*Dim + vert];
+                                tetrahedrons[tetraind*Dim + vert] = latfacets_struct(latfacind, temp);
+                            }
+
+                            if ( bnd_method == 0 )
+                            {
+                                if ( facebdrmarker[latfacind] == 1 )
+                                {
+                                    //cout << "lateral facet " << latfacind << " is at the boundary: adding bnd element" << endl;
+
+                                    tempface[0] = elverts_prism[tetrahedrons[tetraind*Dim + 0]];
+                                    tempface[1] = elverts_prism[tetrahedrons[tetraind*Dim + 1]];
+                                    tempface[2] = elverts_prism[tetrahedrons[tetraind*Dim + 2]];
+                                    tempface[3] = elverts_prism[tetrahedrons[tetraind*Dim + 3]];
+
+                                    // wrong because indices in tetrahedrons are local to 4d prism
+                                    //NewBdrTri = new Tetrahedron(tetrahedrons + tetraind*Dim);
+
+                                    NewBdrEl = new Tetrahedron(tempface);
+                                    NewBdrEl->SetAttribute(2);
+                                    AddBdrElement(NewBdrEl);
+
+                                }
+                            }
+                            else // bnd_method = 1
+                            {
+                                set<int> latface3d_set;
+                                for ( int i = 0; i < DimBase; ++i)
+                                    latface3d_set.insert(elverts_prism[latfacets_struct(latfacind,i)] % NumOfBaseVertices);
+
+                                // checking whether a face is at the boundary of 3d mesh
+                                if ( LocalBdrs.find(latface3d_set) != LocalBdrs.end())
+                                {
+                                    // converting local indices to global indices and
+                                    // adding the new boundary element
+                                    tempface[0] = elverts_prism[tetrahedrons[tetraind*Dim + 0]];
+                                    tempface[1] = elverts_prism[tetrahedrons[tetraind*Dim + 1]];
+                                    tempface[2] = elverts_prism[tetrahedrons[tetraind*Dim + 2]];
+                                    tempface[3] = elverts_prism[tetrahedrons[tetraind*Dim + 3]];
+
+                                    NewBdrEl = new Tetrahedron(tempface);
+                                    NewBdrEl->SetAttribute(2);
+                                    AddBdrElement(NewBdrEl);
+                                }
+                            }
+
+
+
+                         } //end of loop over tetrahedrons for a given lateral face
+
+                        shift += DimBase * (DimBase + 1);
+
+                        //return;
+                    } // end of loop over lateral faces
+
+                    // 3.9 adding the new edges from created tetrahedrons into the vert_to_vert
+                    for ( int k = 0; k < Dim; ++k )
+                        for (int i = 0; i < DimBase; ++i )
+                        {
+                            int vert0 = facesimplicesAll[k*DimBase*(DimBase+1) +
+                                    i*(DimBase + 1) + 0];
+                            int vert1 = facesimplicesAll[k*DimBase*(DimBase+1) +
+                                    i*(DimBase + 1) + 1];
+                            int vert2 = facesimplicesAll[k*DimBase*(DimBase+1) +
+                                    i*(DimBase + 1) + 2];
+                            int vert3 = facesimplicesAll[k*DimBase*(DimBase+1) +
+                                    i*(DimBase + 1) + 3];
+
+                            vert_to_vert_prism(vert0, vert1) = 1;
+                            vert_to_vert_prism(vert1, vert0) = 1;
+
+                            vert_to_vert_prism(vert0, vert2) = 1;
+                            vert_to_vert_prism(vert2, vert0) = 1;
+
+                            vert_to_vert_prism(vert0, vert3) = 1;
+                            vert_to_vert_prism(vert3, vert0) = 1;
+
+                            vert_to_vert_prism(vert1, vert2) = 1;
+                            vert_to_vert_prism(vert2, vert1) = 1;
+
+                            vert_to_vert_prism(vert1, vert3) = 1;
+                            vert_to_vert_prism(vert3, vert1) = 1;
+
+                            vert_to_vert_prism(vert2, vert3) = 1;
+                            vert_to_vert_prism(vert3, vert2) = 1;
+                        }
+
+                    //cout << "vert_to_vert after delaunay" << endl;
+                    //printArr2DInt (&vert_to_vert_prism);
+
+                    int count_penta = 0;
+
+                    // 3.10 creating finally 4d pentatopes:
+                    // take a tetrahedron related to a lateral face, find out which of the rest
+                    // 2 vertices of the 4d prism (one is not) is connected to all vertices of
+                    // tetrahedron, and get a pentatope from tetrahedron + this vertex
+                    // If pentatope is new, add it to the final structure
+                    // To make checking for new pentatopes easy, reoder the pentatope indices
+                    // in the default std order
+
+                    for ( int tetraind = 0; tetraind < DimBase * Dim; ++tetraind)
+                    {
+                        // creating a pentatop temp
+                        int latface_ind = tetraind / DimBase;
+                        for ( int vert = 0; vert < Dim; vert++ )
+                            temp[vert] = facesimplicesAll[tetraind * Dim + vert];
+
+                        //cout << "tetrahedron" << endl;
+                        //printInt2D(temp,1,4); // tetrahedron
+
+                        bool isconnected = true;
+                        for ( int vert = 0; vert < 4; ++vert)
+                            if (vert_to_vert_prism(temp[vert],
+                                                   latfacets_struct(latface_ind,6)) == 0)
+                                isconnected = false;
+
+                        if ( isconnected == true)
+                            temp[4] = latfacets_struct(latface_ind,6);
+                        else
+                        {
+                            bool isconnectedCheck = true;
+                            for ( int vert = 0; vert < 4; ++vert)
+                                if (vert_to_vert_prism(temp[vert],
+                                                       latfacets_struct(latface_ind,7)) == 0)
+                                    isconnectedCheck = false;
+                            if (isconnectedCheck == 0)
+                            {
+                                cout << "Error: Both vertices are disconnected" << endl;
+                                cout << "tetraind = " << tetraind << ", checking for " <<
+                                             latfacets_struct(latface_ind,6) << " and " <<
+                                             latfacets_struct(latface_ind,7) << endl;
+                                return;
+                            }
+                            else
+                                temp[4] = latfacets_struct(latface_ind,7);
+                        }
+
+                        //printInt2D(temp,1,5);
+
+                        // replacing local vertex indices w.r.t to 4d prism to global!
+                        temp[0] = elverts_prism[temp[0]];
+                        temp[1] = elverts_prism[temp[1]];
+                        temp[2] = elverts_prism[temp[2]];
+                        temp[3] = elverts_prism[temp[3]];
+                        temp[4] = elverts_prism[temp[4]];
+
+                        // sorting the vertex indices
+                        std::vector<int> buff (temp, temp+5);
+                        std::sort (buff.begin(), buff.begin()+5);
+
+                        // looking whether the current pentatop is new
+                        bool isnew = true;
+                        for ( int i = 0; i < count_penta; ++i )
+                        {
+                            std::vector<int> pentatop (simplexes+i*(Dim+1), simplexes+(i+1)*(Dim+1));
+
+                            if ( pentatop == buff )
+                                isnew = false;
+                        }
+
+                        if ( isnew == true )
+                        {
+                            for ( int i = 0; i < Dim + 1; ++i )
+                                simplexes[count_penta*(Dim+1) + i] = buff[i];
+                            //cout << "found a new pentatop from tetraind = " << tetraind << endl;
+                            //cout << "now we have " << count_penta << " pentatops" << endl;
+                            //printInt2D(pentatops + count_penta*(Dim+1), 1, Dim + 1);
+
+                            ++count_penta;
+                        }
+                        //cout << "element " << elind << endl;
+                        //printInt2D(pentatops, count_penta, Dim + 1);
+                    }
+
+                    //cout<< count_penta << " pentatops created" << endl;
+                    if ( count_penta != Dim )
+                        cout << "Error: Wrong number of simplexes constructed: got " <<
+                                count_penta << ", needed " << Dim << endl << flush;
+                    //printInt2D(pentatops, count_penta, Dim + 1);
+
+                }
+
+            } //end of if local_method = 0 or 1
+            else // local_method == 2
+            {
+                // The simplest way to generate space-time simplices.
+                // But requires to reorder the vertices at first, as done before.
+                for ( int count_simplices = 0; count_simplices < Dim; ++count_simplices)
+                {
+                    for ( int i = 0; i < Dim + 1; ++i )
+                    {
+                        simplexes[count_simplices*(Dim+1) + i] = count_simplices + i;
+                    }
+
+                }
+                //cout << "Welcome created pentatops" << endl;
+                //printInt2D(pentatops, Dim, Dim + 1);
+            }
+
+
+            // adding boundary elements in local method =  0 or 2
+            if (local_method == 0 || local_method == 2)
+            {
+                //if (local_method == 2)
+                    //for ( int i = 0; i < vert_per_base; ++i)
+                        //antireordering[ordering[i]] = i;
+
+                if (local_nbdrfaces > 0) //if there is at least one base mesh element face at
+                                         // the boundary for a given base element
+                {
+                    for ( int simplexind = 0; simplexind < Dim; ++simplexind)
+                    {
+                        //cout << "simplexind = " << simplexind << endl;
+                        //printInt2D(pentatops + pentaind*(Dim+1), 1, 5);
+
+                        for ( int faceind = 0; faceind < Dim + 1; ++faceind)
+                        {
+                            //cout << "faceind = " << faceind << endl;
+                            set<int> faceproj;
+
+                            // creating local vertex indices for a simplex face
+                            // and projecting the face onto the 3d base
+                            if (bnd_method == 0)
+                            {
+                                int cnt = 0;
+                                for ( int j = 0; j < Dim + 1; ++j)
+                                {
+                                    if ( j != faceind )
+                                    {
+                                        tempface[cnt] = simplexes[simplexind*(Dim + 1) + j];
+                                        if (tempface[cnt] > vert_per_base - 1)
+                                            faceproj.insert(tempface[cnt] - vert_per_base);
+                                        else
+                                            faceproj.insert(tempface[cnt]);
+                                        cnt++;
+                                    }
+                                }
+
+                                //cout << "tempface in local indices" << endl;
+                                //printInt2D(tempface,1,4);
+                            }
+                            else // for bnd_method = 1 we create tempface and projection
+                                 // in global indices
+                            {
+                                int cnt = 0;
+                                for ( int j = 0; j < Dim + 1; ++j)
+                                {
+                                    if ( j != faceind )
+                                    {
+                                        tempface[cnt] =
+                                                elverts_prism[simplexes[simplexind*(Dim + 1) + j]];
+                                        faceproj.insert(tempface[cnt] % NumOfBaseVertices );
+                                        cnt++;
+                                    }
+                                }
+
+                                //cout << "tempface in global indices" << endl;
+                                //printInt2D(tempface,1,4);
+                            }
+
+                            /*
+                            cout << "faceproj:" << endl;
+                            for ( int temp : faceproj)
+                                cout << temp << " ";
+                            cout << endl;
+                            */
+
+                            // checking whether the projection is at the boundary of base mesh
+                            // using the local-to-element LocalBdrs set which has at most Dim elements
+                            if ( LocalBdrs.find(faceproj) != LocalBdrs.end())
+                            {
+                                //cout << "Found a new boundary element" << endl;
+                                //cout << "With local indices: " << endl;
+                                //printInt2D(tempface, 1, Dim);
+
+                                // converting local indices to global indices and
+                                // adding the new boundary element
+                                if (bnd_method == 0)
+                                {
+                                    for ( int facevert = 0; facevert < Dim; ++facevert )
+                                        tempface[facevert] = elverts_prism[tempface[facevert]];
+                                }
+
+                                //cout << "With global indices: " << endl;
+                                //printInt2D(tempface, 1, Dim);
+
+                                if (Dim == 3)
+                                    NewBdrEl = new Triangle(tempface);
+                                if (Dim == 4)
+                                    NewBdrEl = new Tetrahedron(tempface);
+                                NewBdrEl->SetAttribute(2);
+                                AddBdrElement(NewBdrEl);
+                            }
+
+
+                        } // end of loop over space-time simplex faces
+                    } // end of loop over space-time simplices
+                } // end of if local_nbdrfaces > 0
+
+                // By this point, for the given base mesh element:
+                // space-time elements are constructed, but stored in local array
+                // boundary elements are constructed which correspond to the elements in the space-time prism
+                // converting local-to-prism indices in simplices to the global indices
+                for ( int simplexind = 0; simplexind < Dim; ++simplexind)
+                {
+                    for ( int j = 0; j < Dim + 1; j++)
+                    {
+                        simplexes[simplexind*(Dim + 1) + j] =
+                                elverts_prism[simplexes[simplexind*(Dim + 1) + j]];
+                    }
+                }
+
+            } //end of if local_method = 0 or 2
+
+            // printInt2D(pentatops, Dim, Dim + 1);
+
+
+            // 3.11 adding the constructed space-time simplices to the output mesh
+            for ( int simplex_ind = 0; simplex_ind < Dim; ++simplex_ind)
+            {
+                if (Dim == 3)
+                    NewEl = new Tetrahedron(simplexes + simplex_ind*(Dim+1));
+                if (Dim == 4)
+                    NewEl = new Pentatope(simplexes + simplex_ind*(Dim+1));
+                NewEl->SetAttribute(1);
+                AddElement(NewEl);
+                ++simplex_count;
+            }
+
+            //printArr2DInt (&vert_to_vert_prism);
+
+        } // end of loop over time slabs
+    } // end of loop over base elements
+
+    if ( NumOfSTElements != GetNE() )
+        std::cout << "Error: Wrong number of elements generated: " << GetNE() << " instead of " <<
+                        NumOfSTElements << std::endl;
+    if ( NumOfSTVertices != GetNV() )
+        std::cout << "Error: Wrong number of vertices generated: " << GetNV() << " instead of " <<
+                        NumOfSTVertices << std::endl;
+    if ( NumOfSTBdrElements!= GetNBE() )
+        std::cout << "Error: Wrong number of bdr elements generated: " << GetNBE() << " instead of " <<
+                        NumOfSTBdrElements << std::endl;
+
+    delete [] facebdrmarker;
+    delete [] ordering;
+    delete [] almostjogglers;
+    delete [] temp;
+    delete [] tempface;
+    delete [] simplexes;
+    delete [] elvert_coordprism;
+
+    if (local_method == 1)
+    {
+        delete [] vert_latface;
+        delete [] vert_3Dlatface;
+        delete [] facesimplicesAll;
+    }
+    if (local_method == 0 || local_method == 1)
+        delete [] qhull_flags;
+
+    return;
+}
+
+// simple algorithm which computes sign of a given permutatation
+// for now, this function is applied to permutations of size 3
+// so there is no sense in implementing anything more complicated
+// the sign is defined so that it is 1 for the loop of length = size
+int permutation_sign( int * permutation, int size)
+{
+    int res = 0;
+    int * temp = new int[size]; //visited or not
+    for ( int i = 0; i < size; ++i)
+        temp[i] = -1;
+
+    int pos = 0;
+    while ( pos < size )
+    {
+        if (temp[pos] == -1) // if element is unvisited
+        {
+            int cycle_len = 1;
+
+            //computing cycle length which starts with unvisited element
+            int k = pos;
+            while (permutation[k] != pos )
+            {
+                temp[permutation[k]] = 1;
+                k = permutation[k];
+                cycle_len++;
+            }
+            //cout << "pos = " << pos << endl;
+            //cout << "cycle of len " << cycle_len << " was found there" << endl;
+
+            res += (cycle_len-1)%2;
+
+            temp[pos] = 1;
+        }
+
+        pos++;
+    }
+
+    delete [] temp;
+
+    if (res % 2 == 0)
+        return 1;
+    else
+        return -1;
+}
+
+//used for comparing the d-dimensional points by their coordinates
+typedef std::pair<std::vector<double>, int> PairPoint;
+struct CmpPairPoint
+{
+    bool operator()(const PairPoint& a, const PairPoint& b)
+    {
+        unsigned int size = a.first.size();
+        if ( size != b.first.size() )
+        {
+            std::cerr << "Error: Points have different dimensions" << std::endl << std::flush;
+            return false;
+        }
+        else
+        {
+            for ( unsigned int i = 0; i < size; ++i)
+                if ( fabs(a.first[i] - b.first[i]) > 1.0e-15 )
+                    return a.first[i] < b.first[i];
+            std::cerr << "Error, points are the same!" << std::endl << std::flush;
+            std::cerr << "Point 1:" << std::endl;
+            for ( unsigned int i = 0; i < size; ++i)
+                std::cerr << a.first[i] << " ";
+            std::cerr << std::endl;
+            std::cerr << "Point 2:" << std::endl;
+            for ( unsigned int i = 0; i < size; ++i)
+                std::cerr << b.first[i] << " ";
+            std::cerr << std::endl << std::flush;
+            return false;
+        }
+
+    }
+};
+
+// takes coordinates of points and returns a permutation which makes the given vertices
+// preserve the geometrical order (based on their coordinates comparison)
+void sortingPermutationNew( const std::vector<std::vector<double> >& values, int * permutation)
+{
+    vector<PairPoint> pairs;
+    pairs.reserve(values.size());
+    for (unsigned int i = 0; i < values.size(); i++)
+    {
+        //cout << "i = " << i << endl;
+        //for (int j = 0; j < values[i].size(); ++j)
+            //cout << values[i][j] << " ";
+        //cout << endl;
+        pairs.push_back(PairPoint(values[i], i));
+    }
+
+    sort(pairs.begin(), pairs.end(), CmpPairPoint());
+
+    typedef std::vector<PairPoint>::const_iterator I;
+    int count = 0;
+    for (I p = pairs.begin(); p != pairs.end(); ++p)
+        permutation[count++] = p->second;
+
+    //cout << "inside sorting permutation is" << endl;
+    //for ( int i = 0; i < values.size(); ++i)
+        //cout << permutation[i] << " ";
+    //cout << endl;
+}
+
+// M and N are two d-dimensional points 9double * arrays with their coordinates
+inline double dist( double * M, double * N , int d)
+{
+    double res = 0.0;
+    for ( int i = 0; i < d; ++i )
+        res += (M[i] - N[i])*(M[i] - N[i]);
+    return sqrt(res);
+}
+
+
+int setzero(Array2D<int>* arrayint)
+{
+    for ( int i = 0; i < arrayint->NumRows(); ++i )
+        for ( int j = 0; j < arrayint->NumCols(); ++j)
+            (*arrayint)(i,j) = 0;
+    return 0;
+}
+
 
 
 } // end of namespace mfem

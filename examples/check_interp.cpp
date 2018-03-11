@@ -16,6 +16,8 @@
 
 #define ZEROTOL (5.0e-14)
 
+#define USE_TSL
+
 using namespace std;
 using namespace mfem;
 
@@ -40,7 +42,7 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 4;
+   int nDimensions     = 3;
 
    // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
@@ -49,12 +51,26 @@ int main(int argc, char *argv[])
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
+#ifdef USE_TSL
+   const char *meshbase_file = "../data/star.mesh";
+   int Nt = 4;
+   double tau = 1.0 / Nt;
+#endif
+
    int feorder = 0;
    bool visualization = 0;
 
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
+#ifdef USE_TSL
+   args.AddOption(&meshbase_file, "-mbase", "--meshbase",
+                  "Mesh base file to use.");
+   args.AddOption(&Nt, "-nt", "--nt",
+                  "Number of time slabs.");
+   args.AddOption(&tau, "-tau", "--tau",
+                  "Height of each time slab ~ timestep.");
+#endif
    args.AddOption(&ser_ref_levels, "-sref", "--sref",
                   "Number of serial refinements 4d mesh.");
    args.AddOption(&par_ref_levels, "-pref", "--pref",
@@ -79,6 +95,45 @@ int main(int argc, char *argv[])
       args.PrintOptions(cout);
    }
 
+#ifdef USE_TSL
+   if (verbose)
+       std::cout << "USE_TSL is active (mesh is constructed using mesh generator \n";
+   if (nDimensions == 3)
+   {
+       meshbase_file = "../data/square_2d_moderate.mesh";
+   }
+   else // 4D case
+   {
+       meshbase_file = "../data/cube_3d_moderate.mesh";
+   }
+
+   Mesh *meshbase = NULL;
+   ifstream imesh(meshbase_file);
+   if (!imesh)
+   {
+       std::cerr << "\nCan not open mesh base file: " << meshbase_file << '\n' << std::endl;
+       MPI_Finalize();
+       return -2;
+   }
+   else
+   {
+       meshbase = new Mesh(imesh, 1, 1);
+       imesh.close();
+   }
+
+   for (int l = 0; l < ser_ref_levels; l++)
+       meshbase->UniformRefinement();
+
+   ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
+   for (int l = 0; l < par_ref_levels; l++)
+       pmeshbase->UniformRefinement();
+   delete meshbase;
+
+   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
+
+#else
+   if (verbose)
+       std::cout << "USE_TSL is deactivated \n";
    if (nDimensions == 3)
    {
        mesh_file = "../data/cube_3d_moderate.mesh";
@@ -136,6 +191,8 @@ int main(int argc, char *argv[])
            pmesh->UniformRefinement();
        delete mesh;
    }
+
+#endif
 
    int dim = nDimensions;
 
