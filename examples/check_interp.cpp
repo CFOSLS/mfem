@@ -16,7 +16,7 @@
 
 #define ZEROTOL (5.0e-14)
 
-#define USE_TSL
+//#define USE_TSL
 
 using namespace std;
 using namespace mfem;
@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
    // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
    int ser_ref_levels  = 0;
-   int par_ref_levels  = 1;
+   int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
@@ -140,11 +140,14 @@ int main(int argc, char *argv[])
    ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
 
    /*
-   std::stringstream fname;
-   fname << "pmesh_tsl_1proc.mesh";
-   std::ofstream ofid(fname.str().c_str());
-   ofid.precision(8);
-   pmesh->Print(ofid);
+   if (num_procs == 1)
+   {
+       std::stringstream fname;
+       fname << "pmesh_tsl_1proc.mesh";
+       std::ofstream ofid(fname.str().c_str());
+       ofid.precision(8);
+       pmesh->Print(ofid);
+   }
    */
 
    //if (verbose)
@@ -161,7 +164,8 @@ int main(int argc, char *argv[])
    }
    else // 4D case
    {
-       mesh_file = "../data/cube4d_96.MFEM";
+       mesh_file = "../data/pmesh_tsl_1proc.mesh";
+       //mesh_file = "../data/cube4d_96.MFEM";
        //mesh_file = "../data/two_pentatops.MFEM";
        //mesh_file = "../data/two_pentatops_2.MFEM";
    }
@@ -945,6 +949,20 @@ int main(int argc, char *argv[])
 
        diag1_copy.Add(-1.0, diag2);
 
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               if (diag1_copy.MaxNorm() > ZEROTOL)
+               {
+                   std::cout << "I am " << myid << "\n";
+                   std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
+                   std::cout << std::flush;
+               }
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
        Array<int> all_bdr(pmesh_lvls[1]->bdr_attributes.Max());
        all_bdr = 1;
        Array<int> bdrtdofs;
@@ -955,18 +973,6 @@ int main(int argc, char *argv[])
        int tdof_offset = Hcurl_space_lvls[1]->GetMyTDofOffset();
 
        /*
-       for (int i = 0; i < num_procs; ++i)
-       {
-           if (myid == i)
-           {
-               std::cout << "I am " << myid << "\n";
-               std::cout << "my local number of coarse edges = " << pmesh_lvls[1]->GetNEdges() << "\n";
-               std::cout << "my number of coarse tdofs = " << Hcurl_space_lvls[1]->TrueVSize() << "\n";
-           }
-           MPI_Barrier(comm);
-       } // end fo loop over all processors, one after another
-       */
-
        std::vector<int> tdofs_to_edges_fine(Hcurl_space_lvls[0]->TrueVSize());
        std::vector<int> tdofs_to_edges_coarse(Hcurl_space_lvls[1]->TrueVSize());
 
@@ -989,11 +995,9 @@ int main(int argc, char *argv[])
                    if (edges_to_tdofs_coarse[i] > -1)
                        tdofs_to_edges_coarse[edges_to_tdofs_coarse[i]] = i;
 
-               /*
-               std::cout << "Look at my tdofs_to-edges relation for the coarse mesh: \n";
-               for (int i = 0; i < tdofs_to_edges_coarse.size(); ++i)
-                   std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_coarse[i] << "\n";
-               */
+               //std::cout << "Look at my tdofs_to-edges relation for the coarse mesh: \n";
+               //for (int i = 0; i < tdofs_to_edges_coarse.size(); ++i)
+                   //std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_coarse[i] << "\n";
 
 
                std::vector<int> edges_to_tdofs_fine(pmesh_lvls[0]->GetNEdges());
@@ -1010,18 +1014,19 @@ int main(int argc, char *argv[])
                    if (edges_to_tdofs_fine[i] > -1)
                        tdofs_to_edges_fine[edges_to_tdofs_fine[i]] = i;
 
-               /*
-               std::cout << "Look at my tdofs_to-edges relation for the fine mesh: \n";
-               for (int i = 0; i < tdofs_to_edges_fine.size(); ++i)
-                   std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_fine[i] << "\n";
-               */
+               //std::cout << "Look at my tdofs_to-edges relation for the fine mesh: \n";
+               //for (int i = 0; i < tdofs_to_edges_fine.size(); ++i)
+                   //std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_fine[i] << "\n";
 
                std::cout << "\n" << std::flush;
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
+       */
 
        // testing on a linear (or constant) function
+
+       /*
 
        SparseMatrix diag_P;
        TrueP_Hcurl[0]->GetDiag(diag_P);
@@ -1052,6 +1057,95 @@ int main(int argc, char *argv[])
        bool first_bad_row_P = true;
        std::set<int> bad_row_cols_P;
 
+       /*
+        * failed to find the bad fine edge from parallel case.
+        * the meshes are geometrically different for np = 1 and np = 2? weird
+       if (num_procs == 1 && dim == 4)
+       {
+           int frow_special = -1;
+           for (int frow = 0; frow < diag_P.Height(); ++frow)
+           {
+               int edgeind = tdofs_to_edges_fine[frow];
+
+               std::cout << "edgeind = " << edgeind << "\n";
+
+               Array<int> edgeverts;
+               pmesh_lvls[0]->GetEdgeVertices(edgeind, edgeverts);
+
+               bool find_vertex1;
+               bool find_vertex2;
+               int found = 0;
+               for (int i = 0; i < edgeverts.Size(); ++i)
+               {
+                   double * vertcoos = pmesh_lvls[0]->GetVertex(edgeverts[i]);
+
+                   find_vertex1 = ( fabs(vertcoos[0] - 0.5) < 1.0e-10 && fabs(vertcoos[1] - 0.875) < 1.0e-10
+                           && fabs(vertcoos[2] - 0.0) < 1.0e-10 && fabs(vertcoos[3] - 0.5) < 1.0e-10);
+                   find_vertex2 = ( fabs(vertcoos[0] - 0.625) < 1.0e-10 && fabs(vertcoos[1] - 0.75) < 1.0e-10
+                           && fabs(vertcoos[2] - 0.25) < 1.0e-10 && fabs(vertcoos[3] - 0.5) < 1.0e-10);
+
+                   if (find_vertex1 || find_vertex2)
+                   {
+                       std::cout << "Find something: vertex1 ? " << find_vertex1 << ", vertex2 ? " << find_vertex2 << "\n";
+                       found++;
+                   }
+               }
+
+               if (found == 2)
+               {
+                   frow_special = frow;
+                   std::cout << "found the desired edge! fine row = " << frow_special << "\n";
+               }
+           }
+
+           std::cout << "Looking at the `bad in parallel' row: " << frow_special << " in P \n";
+           std::set<int> special_row_cols_P;
+           {
+               int rowsize = diag_P.RowSize(frow_special);
+               int * cols = diag_P.GetRowColumns(frow_special);
+               double * entries = diag_P.GetRowEntries(frow_special);
+               for (int j = 0; j < rowsize; ++j)
+               {
+                   std::cout << "(" << cols[j] << ", " << entries[j] << ") for " << testv_coarse[cols[j]] << " ";
+                   special_row_cols_P.insert(cols[j]);
+               }
+           }
+           std::cout << "\n";
+
+           std::cout << "edges for `bad in parallel' row cols of P: \n";
+           std::set<int>::iterator it;
+           for ( it = special_row_cols_P.begin(); it != special_row_cols_P.end(); it++ )
+           {
+               std::cout << "special row col: " << *it << "\n";
+               int edgeind = tdofs_to_edges_coarse[*it];
+
+               std::cout << "its edge coords: ";
+               Array<int> edgeverts;
+               pmesh_lvls[1]->GetEdgeVertices(edgeind, edgeverts);
+               for (int i = 0; i < edgeverts.Size(); ++i)
+               {
+                   double * vertcoos = pmesh_lvls[1]->GetVertex(edgeverts[i]);
+                   std::cout << "(";
+                   for (int cooind = 0; cooind < pmesh_lvls[1]->Dimension(); ++cooind)
+                   {
+                       if (cooind > 0)
+                            std::cout << ", " << vertcoos[cooind];
+                       else
+                           std::cout << vertcoos[cooind];
+                   }
+                   std::cout << ") ";
+               }
+               std::cout << "\n";
+
+           }
+           std::cout << "\n";
+       }
+
+       MPI_Finalize();
+       return 0;
+       */
+
+       /*
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
@@ -1211,11 +1305,9 @@ int main(int argc, char *argv[])
            if (myid == i)
            {
                std::cout << "I am " << myid << "\n";
-               /*
-               std::cout << "bdrtdofs (with tdof_offset) \n";
-               for (int i = 0; i < bdrtdofs.Size(); ++i )
-                   std::cout << bdrtdofs[i] + tdof_offset << " ";
-               */
+               //std::cout << "bdrtdofs (with tdof_offset) \n";
+               //for (int i = 0; i < bdrtdofs.Size(); ++i )
+                   //std::cout << bdrtdofs[i] + tdof_offset << " ";
 
                std::set<int> shared_edgedofs;
 
@@ -1244,21 +1336,6 @@ int main(int argc, char *argv[])
                            //shared_edgedofs.insert(Hcurl_space_lvls[1]->GetGlobalTDofNumber(dofs[dofind]));
                            shared_edgedofs.insert(Hcurl_space_lvls[1]->GetGlobalTDofNumber(dofs2[dofind]));
                        }
-
-                       /*
-                       pmesh_lvls[1]->GetEdgeVertices(l_edge, edge_verts);
-                       std::cout << "shared edge No. " << edgeind << " vertices: \n";
-                       for (int vind = 0; vind < 2; ++vind)
-                       {
-                           double * vert = pmesh_lvls[1]->GetVertex(edge_verts[vind]);
-
-                           std::cout << "(";
-                           for (int cooind = 0; cooind < pmesh_lvls[1]->Dimension(); ++cooind)
-                               std::cout << vert[cooind] << ", ";
-                           std::cout << ") ";
-                       }
-                       std::cout << "\n";
-                       */
 
                    }
                }
@@ -1292,7 +1369,7 @@ int main(int argc, char *argv[])
 
                            if (first_bad_row)
                                std::cout << "row: " << row << " has nonzero values! \n";
-                           /*
+#if 0
                            std::cout << "row of diag1 \n";
                            int * cols1 = diag1.GetRowColumns(row);
                            double * entries1 = diag1.GetRowEntries(row);
@@ -1310,7 +1387,7 @@ int main(int argc, char *argv[])
                                if (fabs(entries2[j]) > 1.0e-15)
                                     std::cout << "(" << cols2[j] << ", " << entries2[j] << ") ";
                            std::cout << "\n\n";
-                           */
+#endif
 
                            if (first_bad_row)
                                std::cout << "row of diag1 - diag2 \n";
@@ -1418,7 +1495,7 @@ int main(int argc, char *argv[])
                    if (fabs(testvec_c[i]) > 1.0e-14)
                    {
                        std::cout << "nonzero: (" << i << ", " << testvec_c[i] << ")\n";
-                       /*
+#if 0
                        std::cout << "its edge coords: ";
                        Array<int> edgeverts;
                        pmesh_lvls[1]->GetEdgeVertices(tdofs_to_edges_coarse[i], edgeverts);
@@ -1433,14 +1510,14 @@ int main(int argc, char *argv[])
                            std::cout << ") ";
                        }
                        std::cout << "\n";
-                       */
+#endif
                    }
                std::cout << "Look at my testvec_f \n";
                for (int i = 0; i < testvec_f.Size(); ++i)
                    if (fabs(testvec_f[i]) > 1.0e-14)
                    {
                        std::cout << "nonzero: (" << i << ", " << testvec_f[i] << ")\n";
-                       /*
+#if 0
                        std::cout << "its edge coords: ";
                        Array<int> edgeverts;
                        pmesh_lvls[0]->GetEdgeVertices(tdofs_to_edges_fine[i], edgeverts);
@@ -1455,7 +1532,7 @@ int main(int argc, char *argv[])
                            std::cout << ") ";
                        }
                        std::cout << "\n";
-                       */
+#endif
                    }
            }
            MPI_Barrier(comm);
@@ -1464,6 +1541,7 @@ int main(int argc, char *argv[])
 
        MPI_Finalize();
        return 0;
+       */
 
 
        SparseMatrix offd1;
