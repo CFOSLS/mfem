@@ -10,7 +10,7 @@
 
 #define WITH_HCURL
 
-#define WITH_HDIVSKEW
+//#define WITH_HDIVSKEW
 
 #define VERBOSE_OFFD
 
@@ -21,11 +21,13 @@
 using namespace std;
 using namespace mfem;
 
+void testVectorFun(const Vector& xt, Vector& res);
+
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2);
 
-// IDEA: Probably there is a bad orientation of boundary elements, there is not case dim = 4 in CheckBdrElementOrientation, no GetPentaOrientation
+// IDEA: Probably there is a bad orientation of boundary elements, there is no case dim = 4 in CheckBdrElementOrientation, no GetPentaOrientation
 // Just try a mesh with two tets with sref = 4, pref = 1 in 3D, and see that there is a message about two boudnary element orientations being fixed
 // In 4D there is no one to complain about it
 
@@ -42,19 +44,19 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 3;
+   int nDimensions     = 4;
 
    // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
-   int ser_ref_levels  = 1;
-   int par_ref_levels  = 0;
+   int ser_ref_levels  = 0;
+   int par_ref_levels  = 1;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
    const char *meshbase_file = "../data/star.mesh";
-   int Nt = 4;
-   double tau = 1.0 / Nt;
+   int Nt = 1;
+   double tau = 1.0;
 #endif
 
    int feorder = 0;
@@ -105,6 +107,7 @@ int main(int argc, char *argv[])
    else // 4D case
    {
        meshbase_file = "../data/cube_3d_moderate.mesh";
+       //meshbase_file = "../data/cube_3d_small.mesh";
    }
 
    Mesh *meshbase = NULL;
@@ -127,9 +130,26 @@ int main(int argc, char *argv[])
    ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
    for (int l = 0; l < par_ref_levels; l++)
        pmeshbase->UniformRefinement();
+
+   //if (verbose)
+       //std::cout << "pmeshbase shared structure \n";
+   //pmeshbase->PrintSharedStructParMesh();
+
    delete meshbase;
 
    ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
+
+   /*
+   std::stringstream fname;
+   fname << "pmesh_tsl_1proc.mesh";
+   std::ofstream ofid(fname.str().c_str());
+   ofid.precision(8);
+   pmesh->Print(ofid);
+   */
+
+   //if (verbose)
+       //std::cout << "pmesh shared structure \n";
+   //pmesh->PrintSharedStructParMesh();
 
 #else
    if (verbose)
@@ -925,20 +945,525 @@ int main(int argc, char *argv[])
 
        diag1_copy.Add(-1.0, diag2);
 
+       Array<int> all_bdr(pmesh_lvls[1]->bdr_attributes.Max());
+       all_bdr = 1;
+       Array<int> bdrtdofs;
+       Hcurl_space_lvls[1]->GetEssentialTrueDofs(all_bdr, bdrtdofs);
+
+       int ngroups = pmesh_lvls[1]->GetNGroups();
+
+       int tdof_offset = Hcurl_space_lvls[1]->GetMyTDofOffset();
+
+       /*
        for (int i = 0; i < num_procs; ++i)
        {
            if (myid == i)
            {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "my local number of coarse edges = " << pmesh_lvls[1]->GetNEdges() << "\n";
+               std::cout << "my number of coarse tdofs = " << Hcurl_space_lvls[1]->TrueVSize() << "\n";
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+       */
+
+       std::vector<int> tdofs_to_edges_fine(Hcurl_space_lvls[0]->TrueVSize());
+       std::vector<int> tdofs_to_edges_coarse(Hcurl_space_lvls[1]->TrueVSize());
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::vector<int> edges_to_tdofs_coarse(pmesh_lvls[1]->GetNEdges());
+               Array<int> dofs;
+               for (int i = 0; i < pmesh_lvls[1]->GetNEdges(); ++i)
+               {
+                   Hcurl_space_lvls[1]->GetEdgeDofs(i, dofs);
+                   if (dofs.Size() != 1)
+                       std::cout << "error: dofs size must be 1 but equals " << dofs.Size() << "\n";
+                   //std::cout << "edge:" << i << " its dofs: " << dofs[0] << "\n";
+                   edges_to_tdofs_coarse[i] = Hcurl_space_lvls[1]->GetLocalTDofNumber(dofs[0]);
+               }
+               for (int i = 0; i < pmesh_lvls[1]->GetNEdges(); ++i)
+                   if (edges_to_tdofs_coarse[i] > -1)
+                       tdofs_to_edges_coarse[edges_to_tdofs_coarse[i]] = i;
+
+               /*
+               std::cout << "Look at my tdofs_to-edges relation for the coarse mesh: \n";
+               for (int i = 0; i < tdofs_to_edges_coarse.size(); ++i)
+                   std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_coarse[i] << "\n";
+               */
+
+
+               std::vector<int> edges_to_tdofs_fine(pmesh_lvls[0]->GetNEdges());
+               //Array<int> dofs;
+               for (int i = 0; i < pmesh_lvls[0]->GetNEdges(); ++i)
+               {
+                   Hcurl_space_lvls[0]->GetEdgeDofs(i, dofs);
+                   if (dofs.Size() != 1)
+                       std::cout << "error: dofs size must be 1 but equals " << dofs.Size() << "\n";
+                   //std::cout << "edge:" << i << " its dofs: " << dofs[0] << "\n";
+                   edges_to_tdofs_fine[i] = Hcurl_space_lvls[0]->GetLocalTDofNumber(dofs[0]);
+               }
+               for (int i = 0; i < pmesh_lvls[0]->GetNEdges(); ++i)
+                   if (edges_to_tdofs_fine[i] > -1)
+                       tdofs_to_edges_fine[edges_to_tdofs_fine[i]] = i;
+
+               /*
+               std::cout << "Look at my tdofs_to-edges relation for the fine mesh: \n";
+               for (int i = 0; i < tdofs_to_edges_fine.size(); ++i)
+                   std::cout << "tdof: " << i << " edge: " << tdofs_to_edges_fine[i] << "\n";
+               */
+
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
+       // testing on a linear (or constant) function
+
+       SparseMatrix diag_P;
+       TrueP_Hcurl[0]->GetDiag(diag_P);
+
+       SparseMatrix offd_P;
+       int * cmap_P;
+       TrueP_Hcurl[0]->GetOffd(offd_P, cmap_P);
+
+       VectorFunctionCoefficient vecfun_coeff(dim, testVectorFun);
+       ParGridFunction * testgrfun_coarse = new ParGridFunction(Hcurl_space_lvls[1]);
+       testgrfun_coarse->ProjectCoefficient(vecfun_coeff);
+       Vector testv_coarse(Hcurl_space_lvls[1]->TrueVSize());
+       testgrfun_coarse->ParallelProject(testv_coarse);
+
+       ParGridFunction * testgrfun_fine = new ParGridFunction(Hcurl_space_lvls[0]);
+       testgrfun_fine->ProjectCoefficient(vecfun_coeff);
+       Vector testv_fine(Hcurl_space_lvls[0]->TrueVSize());
+       testgrfun_fine->ParallelProject(testv_fine);
+
+       Vector testv_proj(Hcurl_space_lvls[0]->TrueVSize());
+       TrueP_Hcurl[0]->Mult(testv_coarse, testv_proj);
+
+       Vector testv_diff(Hcurl_space_lvls[0]->TrueVSize());
+       testv_diff = testv_proj;
+       testv_diff -= testv_fine;
+
+       std::set<int> bad_rows_P;
+       bool first_bad_row_P = true;
+       std::set<int> bad_row_cols_P;
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "testv_diff norm = " << testv_diff.Norml2() << "\n";
+               //testv_diff.Print();
+
+               //std::cout << "testv_fine \n";
+               //testv_fine.Print();
+
+               //std::cout << "testv_proj \n";
+               //testv_proj.Print();
+
+               if (testv_diff.Norml2() > 1.0e-15)
+               {
+                   for (int i = 0; i < testv_diff.Size(); ++i)
+                   {
+                       if (fabs(testv_diff[i]) > 1.0e-15)
+                       {
+                           bad_rows_P.insert(i);
+                           std::cout << "row: " << i << " of P has wrong entries! \n";
+                           std::cout << "correct from fine projection = " << testv_fine[i] << ", interpolated = " << testv_proj[i] << "\n";
+                           //break;
+                       }
+                   }
+
+                   std::cout << "bad rows of P: ";
+                   std::set<int>::iterator it;
+                   for ( it = bad_rows_P.begin(); it != bad_rows_P.end(); it++ )
+                   {
+                       std::cout << *it << " ";
+                   }
+                   std::cout << "\n";
+
+                   int count = 0;
+                   for ( it = bad_rows_P.begin(); it != bad_rows_P.end(); it++ )
+                   {
+                       int brow = *it;
+                       //int brow = 100;
+
+                       std::cout << "Looking at the bad row: " << brow << " in P \n";
+                       std::cout << "its fine grid edge: \n";
+                       {
+                           int edgeind = tdofs_to_edges_fine[brow];
+
+                           std::cout << "its edge coords: ";
+                           Array<int> edgeverts;
+                           pmesh_lvls[0]->GetEdgeVertices(edgeind, edgeverts);
+                           for (int i = 0; i < edgeverts.Size(); ++i)
+                           {
+                               double * vertcoos = pmesh_lvls[0]->GetVertex(edgeverts[i]);
+                               std::cout << "(";
+                               for (int cooind = 0; cooind < pmesh_lvls[0]->Dimension(); ++cooind)
+                               {
+                                   if (cooind > 0)
+                                        std::cout << ", " << vertcoos[cooind];
+                                   else
+                                       std::cout << vertcoos[cooind];
+                               }
+                               std::cout << ") ";
+                           }
+                           std::cout << "\n";
+                       }
+
+                       // for diag part of P
+                       {
+                           int rowsize = diag_P.RowSize(brow);
+                           int * cols = diag_P.GetRowColumns(brow);
+                           double * entries = diag_P.GetRowEntries(brow);
+                           for (int j = 0; j < rowsize; ++j)
+                           {
+                               std::cout << "(" << cols[j] << ", " << entries[j] << ") for " << testv_coarse[cols[j]] << " ";
+                               if (first_bad_row_P)
+                                  bad_row_cols_P.insert(cols[j]);
+                           }
+                       }
+                       std::cout << "\n";
+                       // for offd part of P
+                       {
+                           int rowsize = offd_P.RowSize(brow);
+                           int * cols = offd_P.GetRowColumns(brow);
+                           double * entries = offd_P.GetRowEntries(brow);
+                           for (int j = 0; j < rowsize; ++j)
+                           {
+                               std::cout << "(" << cols[j] << "=(true)" << cmap_P[cols[j]] << ", " << entries[j] << ") for "
+                                         << testv_coarse[cmap_P[cols[j]]] << " ";
+                               if (first_bad_row_P)
+                                  bad_row_cols_P.insert(cmap_P[cols[j]]);
+                           }
+                       }
+                       std::cout << "\n";
+
+                       if (first_bad_row_P)
+                          first_bad_row_P = false;
+
+
+                       std::cout << "bad row cols of P: ";
+                       std::set<int>::iterator it;
+                       for ( it = bad_row_cols_P.begin(); it != bad_row_cols_P.end(); it++ )
+                       {
+                           std::cout << *it << " ";
+                       }
+                       std::cout << "\n";
+
+
+                       std::cout << "edges for bad row cols of P: \n";
+                       for ( it = bad_row_cols_P.begin(); it != bad_row_cols_P.end(); it++ )
+                       {
+                           std::cout << "bad row col: " << *it << "\n";
+                           int edgeind = tdofs_to_edges_coarse[*it];
+
+                           std::cout << "its edge coords: ";
+                           Array<int> edgeverts;
+                           pmesh_lvls[1]->GetEdgeVertices(edgeind, edgeverts);
+                           for (int i = 0; i < edgeverts.Size(); ++i)
+                           {
+                               double * vertcoos = pmesh_lvls[1]->GetVertex(edgeverts[i]);
+                               std::cout << "(";
+                               for (int cooind = 0; cooind < pmesh_lvls[1]->Dimension(); ++cooind)
+                               {
+                                   if (cooind > 0)
+                                        std::cout << ", " << vertcoos[cooind];
+                                   else
+                                       std::cout << vertcoos[cooind];
+                               }
+                               std::cout << ") ";
+                           }
+                           std::cout << "\n";
+
+                       }
+                       std::cout << "\n";
+
+                       ++count;
+
+                       if (count == 1)
+                           break;
+
+                   }
+
+
+               }
+               //std::cout << "Look at my testv_diff \n";
+               //testv_diff.Print();
+           }
+           std::cout << std::flush;
+           MPI_Barrier(comm);
+       }
+
+       int bad_row = 0;
+       bool first_bad_row = true;
+       int bad_col = 0;
+       bool first_bad_col = true;
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               /*
+               std::cout << "bdrtdofs (with tdof_offset) \n";
+               for (int i = 0; i < bdrtdofs.Size(); ++i )
+                   std::cout << bdrtdofs[i] + tdof_offset << " ";
+               */
+
+               std::set<int> shared_edgedofs;
+
+               for (int grind = 0; grind < ngroups; ++grind)
+               {
+                   int ngroupedges = pmesh_lvls[1]->GroupNEdges(grind);
+                   std::cout << "ngroupedges = " << ngroupedges << "\n";
+                   Array<int> dofs;
+                   Array<int> dofs2;
+                   Array<int> edge_verts;
+                   for (int edgeind = 0; edgeind < ngroupedges; ++edgeind)
+                   {
+                       //std::cout << "edgeind = " << edgeind << "\n";
+
+                       int l_edge, ori;
+                       pmesh_lvls[1]->GroupEdge(grind, edgeind, l_edge, ori);
+
+                       Hcurl_space_lvls[1]->GetEdgeDofs(l_edge, dofs2);
+                       //dofs2.Print();
+
+                       Hcurl_space_lvls[1]->GetSharedEdgeDofs(grind, edgeind, dofs);
+                       //dofs.Print();
+                       for (int dofind = 0; dofind < dofs.Size(); ++dofind)
+                       {
+                           //std::cout << "dofs[dofind] = " << dofs[dofind] << "\n";
+                           //shared_edgedofs.insert(Hcurl_space_lvls[1]->GetGlobalTDofNumber(dofs[dofind]));
+                           shared_edgedofs.insert(Hcurl_space_lvls[1]->GetGlobalTDofNumber(dofs2[dofind]));
+                       }
+
+                       /*
+                       pmesh_lvls[1]->GetEdgeVertices(l_edge, edge_verts);
+                       std::cout << "shared edge No. " << edgeind << " vertices: \n";
+                       for (int vind = 0; vind < 2; ++vind)
+                       {
+                           double * vert = pmesh_lvls[1]->GetVertex(edge_verts[vind]);
+
+                           std::cout << "(";
+                           for (int cooind = 0; cooind < pmesh_lvls[1]->Dimension(); ++cooind)
+                               std::cout << vert[cooind] << ", ";
+                           std::cout << ") ";
+                       }
+                       std::cout << "\n";
+                       */
+
+                   }
+               }
+
+
+               std::cout << "shared edge tdofs \n";
+               std::set<int>::iterator it;
+               for ( it = shared_edgedofs.begin(); it != shared_edgedofs.end(); it++ )
+               {
+                   std::cout << *it << " ";
+               }
+
+               std::cout << "my tdof offset = " << tdof_offset << "\n";
+
+               std::cout << "\n" << std::flush;
+
                if (diag1_copy.MaxNorm() > ZEROTOL)
                {
                    std::cout << "I am " << myid << "\n";
                    std::cout << "For Hcurl diagonal blocks are not equal, max norm = " << diag1_copy.MaxNorm() << "! \n";
+
+                   std::set<int> bad_cols;
+                   std::set<int> bad_rows;
+
+                   //int row_count = 0;
+                   for (int row = 0; row < diag1_copy.Height(); ++row)
+                   {
+                       if (diag1_copy.GetRowNorml1(row) > 1.0e-15)
+                       {
+                           bad_rows.insert(row);
+
+                           if (first_bad_row)
+                               std::cout << "row: " << row << " has nonzero values! \n";
+                           /*
+                           std::cout << "row of diag1 \n";
+                           int * cols1 = diag1.GetRowColumns(row);
+                           double * entries1 = diag1.GetRowEntries(row);
+                           int rowsize1 = diag1.RowSize(row);
+                           for (int j = 0; j < rowsize1; ++j)
+                               if (fabs(entries1[j]) > 1.0e-15)
+                                    std::cout << "(" << cols1[j] << ", " << entries1[j] << ") ";
+                           std::cout << "\n\n";
+
+                           std::cout << "row of diag2 \n";
+                           int * cols2 = diag2.GetRowColumns(row);
+                           double * entries2 = diag2.GetRowEntries(row);
+                           int rowsize2 = diag2.RowSize(row);
+                           for (int j = 0; j < rowsize2; ++j)
+                               if (fabs(entries2[j]) > 1.0e-15)
+                                    std::cout << "(" << cols2[j] << ", " << entries2[j] << ") ";
+                           std::cout << "\n\n";
+                           */
+
+                           if (first_bad_row)
+                               std::cout << "row of diag1 - diag2 \n";
+                           int * cols = diag1_copy.GetRowColumns(row);
+                           double * entries = diag1_copy.GetRowEntries(row);
+                           int rowsize = diag1_copy.RowSize(row);
+                           for (int j = 0; j < rowsize; ++j)
+                               if (fabs(entries[j]) > 1.0e-15)
+                               {
+                                   bad_cols.insert(cols[j]);
+
+                                   if (first_bad_col == true)
+                                   {
+                                       bad_col = cols[j];
+                                       first_bad_col = false;
+                                   }
+                                   if (first_bad_row)
+                                       std::cout << "(" << cols[j] << ", " << entries[j] << ") ";
+                               }
+                           if (first_bad_row)
+                               std::cout << "\n";
+
+
+                           //++row_count;
+
+                           if (first_bad_row)
+                           {
+                               bad_row = row;
+                               if (row == 210)
+                                first_bad_row = false;
+                           }
+
+                           //if (row_count == 1)
+                               //bad_row = row;
+                           //if (row_count == 10)
+                               //break;
+
+                       }
+                   }
+                   //diag1_copy.Print();
+
+                   std::set<int>::iterator it;
+                   std::cout << "bad rows: \n";
+                   for ( it = bad_rows.begin(); it != bad_rows.end(); it++ )
+                       std::cout << *it << " ";
+                   std::cout << "\n";
+
+                   std::cout << "bad cols: \n";
+                   for ( it = bad_cols.begin(); it != bad_cols.end(); it++ )
+                       std::cout << *it << " ";
+                   std::cout << "\n";
+
+                   std::set<int> bdr_cols;
+                   for (int i = 0; i < bdrtdofs.Size(); ++i )
+                       bdr_cols.insert(bdrtdofs[i]);
+
+                   std::cout << "bdr cols: \n";
+                   for ( it = bdr_cols.begin(); it != bdr_cols.end(); it++ )
+                       std::cout << *it << " ";
+
                    std::cout << "\n" << std::flush;
                }
 
            }
            MPI_Barrier(comm);
        } // end fo loop over all processors, one after another
+
+       // testing on a particular vector
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               if (bad_row >= 0)
+               {
+                   std::cout << "bad row = " << bad_row << ", bad col = " << bad_col << "\n";
+
+               }
+               std::cout << "\n" << std::flush;
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
+#ifndef USE_TSL
+       bad_row = 7;
+#endif
+
+       bad_row = 210;
+
+       Vector testvec_c(PMP_Hcurl->Width());
+       testvec_c = 0.0;
+       if (myid == 0)
+           testvec_c[bad_row] = 1.0;
+
+       Vector testvec_f(TrueP_Hcurl[0]->Height());
+       TrueP_Hcurl[0]->Mult(testvec_c, testvec_f);
+
+       for (int i = 0; i < num_procs; ++i)
+       {
+           if (myid == i)
+           {
+               std::cout << "I am " << myid << "\n";
+               std::cout << "Look at my testvec_c \n";
+               for (int i = 0; i < testvec_c.Size(); ++i)
+                   if (fabs(testvec_c[i]) > 1.0e-14)
+                   {
+                       std::cout << "nonzero: (" << i << ", " << testvec_c[i] << ")\n";
+                       /*
+                       std::cout << "its edge coords: ";
+                       Array<int> edgeverts;
+                       pmesh_lvls[1]->GetEdgeVertices(tdofs_to_edges_coarse[i], edgeverts);
+                       for (int i = 0; i < edgeverts.Size(); ++i)
+                       {
+                           double * vertcoos = pmesh_lvls[1]->GetVertex(edgeverts[i]);
+                           std::cout << "(";
+                           for (int cooind = 0; cooind < pmesh_lvls[1]->Dimension(); ++cooind)
+                           {
+                               std::cout << vertcoos[cooind] << ", ";
+                           }
+                           std::cout << ") ";
+                       }
+                       std::cout << "\n";
+                       */
+                   }
+               std::cout << "Look at my testvec_f \n";
+               for (int i = 0; i < testvec_f.Size(); ++i)
+                   if (fabs(testvec_f[i]) > 1.0e-14)
+                   {
+                       std::cout << "nonzero: (" << i << ", " << testvec_f[i] << ")\n";
+                       /*
+                       std::cout << "its edge coords: ";
+                       Array<int> edgeverts;
+                       pmesh_lvls[0]->GetEdgeVertices(tdofs_to_edges_fine[i], edgeverts);
+                       for (int i = 0; i < edgeverts.Size(); ++i)
+                       {
+                           double * vertcoos = pmesh_lvls[0]->GetVertex(edgeverts[i]);
+                           std::cout << "(";
+                           for (int cooind = 0; cooind < pmesh_lvls[0]->Dimension(); ++cooind)
+                           {
+                               std::cout << vertcoos[cooind] << ", ";
+                           }
+                           std::cout << ") ";
+                       }
+                       std::cout << "\n";
+                       */
+                   }
+           }
+           MPI_Barrier(comm);
+       } // end fo loop over all processors, one after another
+
+
+       MPI_Finalize();
+       return 0;
 
 
        SparseMatrix offd1;
@@ -959,12 +1484,14 @@ int main(int argc, char *argv[])
            {
                if (offd1_copy.MaxNorm() > ZEROTOL)
                {
-                   //std::cout << "I am " << myid << "\n";
+                   std::cout << "I am " << myid << "\n";
                    //std::cout << "For Hcurl off-diagonal blocks are not equal, max norm = " << offd1_copy.MaxNorm() << "! \n";
 #ifdef VERBOSE_OFFD
                    Compare_Offd_detailed(offd1, cmap1, offd2, cmap2);
 #endif
-                   //std::cout << "\n" << std::flush;
+                   std::cout << "If you see complains between this line and line starting with I am,"
+                                " then something is wrong for the off-diagonal blocks of Hcurl as well \n";
+                   std::cout << "\n" << std::flush;
                }
 
            }
@@ -1324,3 +1851,17 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
     //offd2.Print();
 
 }
+
+void testVectorFun(const Vector& xt, Vector& res)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() > 3)
+        z = xt(2);
+    double t = xt(xt.Size() - 1);
+
+    res.SetSize(xt.Size());
+    res = 1.0;
+}
+

@@ -5289,7 +5289,7 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
     return;
 }
 
-void ParMeshTSL::PrintSharedStructParMesh ( int* permutation )
+void ParMesh::PrintSharedStructParMesh ( int* permutation )
 {
     int num_procs, myid;
     MPI_Comm comm = GetComm();

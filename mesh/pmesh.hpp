@@ -220,6 +220,9 @@ public:
 
    virtual ~ParMesh();
 
+   // Outputs information about shared entites, applying vertex indices permutation if provided
+   void PrintSharedStructParMesh ( int * permutation = NULL );
+
    // TODO: Remove this if clean code is needed.
    // It's a temporary crutch because meshgen functions use protected members of ParMesh
    friend class ParMeshTSL;
@@ -253,9 +256,6 @@ protected:
    void ParMeshSpaceTime_createShared(MPI_Comm comm, int Nsteps );
    void CreateInternalMeshStructure (int refine);
 public:
-   // Outputs information about shared entites, applying vertex indices permutation if provided
-   void PrintSharedStructParMesh ( int * permutation = NULL );
-
 
    // A simple structure which is used to store temporarily the 4d mesh main arrays in
    // parallel mesh generator, version 1.

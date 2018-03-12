@@ -4039,7 +4039,6 @@ int Mesh::GetTetOrientation (const int * base, const int * test)
    return orient + 0;
 }
 
-
 int Mesh::GetHexOrientation(const int * base, const int * test)
 {
    if (test[0] == base[0] && test[1] == base[1] && test[2] == base[2] &&
@@ -4139,6 +4138,51 @@ int Mesh::CheckBdrElementOrientation(bool fix_it)
          }
       }
    }
+
+   if (Dim == 4)
+   {
+      int el, *bv, *ev;
+
+      for (i = 0; i < NumOfBdrElements; i++)
+      {
+         if (faces_info[be_to_face[i]].Elem2No < 0)
+         {
+            // boundary face
+            bv = boundary[i]->GetVertices();
+            el = faces_info[be_to_face[i]].Elem1No;
+            ev = elements[el]->GetVertices();
+            switch (GetElementType(el))
+            {
+               case Element::PENTATOPE:
+               {
+                  int *fv = faces[be_to_face[i]]->GetVertices();
+                  int orientation; // orientation of the bdr. elem. w.r.t. the
+                  // corresponding face element (that's the base)
+                  orientation = GetTetOrientation(fv, bv);
+                  if (orientation % 2)
+                  {
+                     // wrong orientation -- swap vertices 0 and 1 so that
+                     /*
+                     //  we don't change the marked edge:  (0,1,2) -> (1,0,2)
+                     if (fix_it)
+                     {
+                        mfem::Swap<int>(bv[0], bv[1]);
+                        if (bel_to_edge)
+                        {
+                           int *be = bel_to_edge->GetRow(i);
+                           mfem::Swap<int>(be[1], be[2]);
+                        }
+                     }
+                     */
+                     wo++;
+                  }
+               }
+               break;
+            }
+         }
+      }
+   }
+
    // #if (!defined(MFEM_USE_MPI) || defined(MFEM_DEBUG))
 #ifdef MFEM_DEBUG
    if (wo > 0)
