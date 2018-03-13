@@ -27,12 +27,10 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2);
 
-std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels);
+std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
 
-// IDEA: Probably there is a bad orientation of boundary elements, there is no case dim = 4 in CheckBdrElementOrientation, no GetPentaOrientation
-// Just try a mesh with two tets with sref = 4, pref = 1 in 3D, and see that there is a message about two boudnary element orientations being fixed
-// In 4D there is no one to complain about it
+double testH1fun(Vector& xt);
 
 int main(int argc, char *argv[])
 {
@@ -47,7 +45,7 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 4;
+   int nDimensions     = 3;
 
    // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
    // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
@@ -380,8 +378,110 @@ int main(int argc, char *argv[])
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
 
-   std::vector<std::pair<int,int> > * dofs_link =
-           CreateBotToTopDofsLink(*Hcurl_space,pmesh->bot_to_top_bels);
+   std::set<std::pair<int,int> > * tdofs_link_H1 = new std::set<std::pair<int,int> >;
+   for (int i = 0; i < num_procs; ++i)
+   {
+       if (myid == i)
+       {
+           std::set<std::pair<int,int> > * dofs_link_H1 =
+                   CreateBotToTopDofsLink("linearH1",*H1_space, pmesh->bot_to_top_bels);
+           std::cout << std::flush;
+
+           std::cout << "dof pairs for H1: \n";
+           std::set<std::pair<int,int> >::iterator it;
+           for ( it = dofs_link_H1->begin(); it != dofs_link_H1->end(); it++ )
+           {
+               std::cout << "<" << it->first << ", " << it->second << "> \n";
+               int tdof1 = H1_space->GetGlobalTDofNumber(it->first);
+               int tdof2 = H1_space->GetGlobalTDofNumber(it->second);
+               std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+               tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+           }
+       }
+       MPI_Barrier(comm);
+   } // end fo loop over all processors, one after another
+
+   if (verbose)
+        std::cout << "Drawing in H1 case \n";
+
+   ParGridFunction * testfullH1 = new ParGridFunction(H1_space);
+   FunctionCoefficient testH1_coeff(testH1fun);
+   testfullH1->ProjectCoefficient(testH1_coeff);
+   Vector testfullH1_tdofs(H1_space->TrueVSize());
+   testfullH1->ParallelProject(testfullH1_tdofs);
+
+   Vector testH1_bot_tdofs(H1_space->TrueVSize());
+   testH1_bot_tdofs = 0.0;
+
+   std::set<std::pair<int,int> >::iterator it;
+   for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+   {
+       testH1_bot_tdofs[it->first] = testfullH1_tdofs[it->first];
+   }
+
+   ParGridFunction * testH1_bot = new ParGridFunction(H1_space);
+   testH1_bot->Distribute(&testH1_bot_tdofs);
+
+   Vector testH1_top_tdofs(H1_space->TrueVSize());
+   testH1_top_tdofs = 0.0;
+
+   //std::set<std::pair<int,int> >::iterator it;
+   for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+   {
+       testH1_top_tdofs[it->second] = testfullH1_tdofs[it->second];
+   }
+
+   ParGridFunction * testH1_top = new ParGridFunction(H1_space);
+   testH1_top->Distribute(&testH1_top_tdofs);
+
+   if (verbose)
+        std::cout << "Sending to GLVis in H1 case \n";
+
+   MPI_Finalize();
+   return 0;
+
+   char vishost[] = "localhost";
+   int  visport   = 19916;
+   socketstream u_sock(vishost, visport);
+   u_sock << "parallel " << num_procs << " " << myid << "\n";
+   u_sock.precision(8);
+   u_sock << "solution\n" << *pmesh << *testfullH1 << "window_title 'testfullH1'"
+          << endl;
+
+   socketstream ubot_sock(vishost, visport);
+   ubot_sock << "parallel " << num_procs << " " << myid << "\n";
+   ubot_sock.precision(8);
+   ubot_sock << "solution\n" << *pmesh << *testH1_bot << "window_title 'testH1bot'"
+          << endl;
+
+   socketstream utop_sock(vishost, visport);
+   utop_sock << "parallel " << num_procs << " " << myid << "\n";
+   utop_sock.precision(8);
+   utop_sock << "solution\n" << *pmesh << *testH1_top << "window_title 'testH1top'"
+          << endl;
+
+
+   MPI_Finalize();
+   return 0;
+
+   std::set<std::pair<int,int> > * dofs_link_RT0;
+   for (int i = 0; i < num_procs; ++i)
+   {
+       if (myid == i)
+       {
+           dofs_link_RT0 =
+                      CreateBotToTopDofsLink("RT0",*Hdiv_space, pmesh->bot_to_top_bels);
+           std::cout << std::flush;
+
+           std::cout << "dof pairs for Hdiv: \n";
+           std::set<std::pair<int,int> >::iterator it;
+           for ( it = dofs_link_RT0->begin(); it != dofs_link_RT0->end(); it++ )
+           {
+               std::cout << "<" << it->first << ", " << it->second << "> \n";
+           }
+       }
+       MPI_Barrier(comm);
+   } // end fo loop over all processors, one after another
 
    MPI_Finalize();
    return 0;
@@ -1945,116 +2045,256 @@ void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2
 
 void testVectorFun(const Vector& xt, Vector& res)
 {
+    /*
     double x = xt(0);
     double y = xt(1);
     double z;
     if (xt.Size() > 3)
         z = xt(2);
     double t = xt(xt.Size() - 1);
+    */
 
     res.SetSize(xt.Size());
     res = 1.0;
 }
 
-std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels)
+// eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
+// the fespace must correspond to the eltype provided
+// bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
+// which can be taken out of ParMeshTSL
+
+std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)
 {
+    if (strcmp(eltype, "linearH1") != 0 && strcmp(eltype, "RT0") != 0)
+        MFEM_ABORT ("Provided eltype is not supported in CreateBotToTopDofsLink: must be linearH1 or RT0 strictly! \n");
+
     int nbelpairs = bot_to_top_bels.size();
     // estimating the maximal memory size required
     Array<int> dofs;
     fespace.GetBdrElementDofs(0, dofs);
     int ndofpairs_max = nbelpairs * dofs.Size();
 
-    std::cout << "nbelpairs = " << nbelpairs << ", estimated ndofpairs_max = " << ndofpairs_max << "\n";
+    if (verbose)
+        std::cout << "nbelpairs = " << nbelpairs << ", estimated ndofpairs_max = " << ndofpairs_max << "\n";
 
-    std::vector<std::pair<int,int> > * res = new std::vector<std::pair<int,int> >;
-    res->reserve(ndofpairs_max);
+    std::set<std::pair<int,int> > * res = new std::set<std::pair<int,int> >;
+    //res->reserve(ndofpairs_max);
 
     Mesh * mesh = fespace.GetMesh();
 
     for (int i = 0; i < nbelpairs; ++i)
     {
-        std::cout << "pair " << i << ": \n";
+        if (verbose)
+            std::cout << "pair " << i << ": \n";
 
-        int belind_first = bot_to_top_bels[i].first;
-        Array<int> bel_dofs;
-        fespace.GetBdrElementDofs(belind_first, bel_dofs);
-
-        std::cout << "bel_dofs: \n";
-        bel_dofs.Print();
-
-        Array<int> P, Po;
-        fespace.GetMesh()->GetBdrElementPlanars(i, P, Po);
-
-        std::cout << "P: \n";
-        P.Print();
-        std::cout << "Po: \n";
-        Po.Print();
-
-        Array<int> belverts_first;
-        mesh->GetBdrElementVertices(belind_first, belverts_first);
-
-        int nverts = mesh->GetBdrElement(belind_first)->GetNVertices();
-
-        std::vector<std::vector<double> > vertscoos_first(nverts);
-        std::cout << "verts of first bdr el \n";
-        for (int vert = 0; vert < nverts; ++vert)
+        if (strcmp(eltype, "RT0") == 0)
         {
-            vertscoos_first[vert].resize(mesh->Dimension());
-            double * vertcoos = mesh->GetVertex(belverts_first[vert]);
-            std::cout << "vert = " << vert << ": ";
-            for (int j = 0; j < mesh->Dimension(); ++j)
+            int belind_first = bot_to_top_bels[i].first;
+            Array<int> bel_dofs_first;
+            fespace.GetBdrElementDofs(belind_first, bel_dofs_first);
+
+            int belind_second = bot_to_top_bels[i].second;
+            Array<int> bel_dofs_second;
+            fespace.GetBdrElementDofs(belind_second, bel_dofs_second);
+
+            if (verbose)
             {
-                vertscoos_first[vert][j] = vertcoos[j];
-                std::cout << vertcoos[j] << " ";
+                std::cout << "bel_dofs_first \n";
+                bel_dofs_first.Print();
+                std::cout << "bel_dofs_second \n";
+                bel_dofs_second.Print();
             }
-            std::cout << "\n";
+
+
+            if (bel_dofs_first.Size() != 1 || bel_dofs_second.Size() != 1)
+            {
+                MFEM_ABORT("For RT0 exactly one dof must correspond to each boundary element \n");
+            }
+
+            res->insert(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+
         }
 
-        int * verts_permutation_first = new int[nverts];
-        sortingPermutationNew(vertscoos_first, verts_permutation_first);
-
-        std::cout << "permutation first: ";
-        for (int i = 0; i < mesh->Dimension(); ++i)
-            std::cout << verts_permutation_first[i] << " ";
-        std::cout << "\n";
-
-        int sign_first = permutation_sign(verts_permutation_first, nverts);
-        std::cout << "sign_first = " << sign_first << "\n";
-
-        int belind_second = bot_to_top_bels[i].second;
-        Array<int> belverts_second;
-        mesh->GetBdrElementVertices(belind_second, belverts_second);
-
-        std::vector<std::vector<double> > vertscoos_second(nverts);
-        std::cout << "verts of second bdr el \n";
-        for (int vert = 0; vert < nverts; ++vert)
+        if (strcmp(eltype, "linearH1") == 0)
         {
-            vertscoos_second[vert].resize(mesh->Dimension());
-            double * vertcoos = mesh->GetVertex(belverts_second[vert]);
-            std::cout << "vert = " << vert << ": ";
-            for (int j = 0; j < mesh->Dimension(); ++j)
+            int belind_first = bot_to_top_bels[i].first;
+            Array<int> bel_dofs_first;
+            fespace.GetBdrElementDofs(belind_first, bel_dofs_first);
+
+            Array<int> belverts_first;
+            mesh->GetBdrElementVertices(belind_first, belverts_first);
+
+            int nverts = mesh->GetBdrElement(belind_first)->GetNVertices();
+
+            int belind_second = bot_to_top_bels[i].second;
+            Array<int> bel_dofs_second;
+            fespace.GetBdrElementDofs(belind_second, bel_dofs_second);
+
+            if (verbose)
             {
-                vertscoos_second[vert][j] = vertcoos[j];
-                std::cout << vertcoos[j] << " ";
+                std::cout << "bel_dofs first: \n";
+                bel_dofs_first.Print();
+
+                std::cout << "bel_dofs second: \n";
+                bel_dofs_second.Print();
             }
-            std::cout << "\n";
+
+            Array<int> belverts_second;
+            mesh->GetBdrElementVertices(belind_second, belverts_second);
+
+
+            if (bel_dofs_first.Size() != nverts || bel_dofs_second.Size() != nverts)
+            {
+                MFEM_ABORT("For linearH1 exactly #bel.vertices of dofs must correspond to each boundary element \n");
+            }
+
+            /*
+            Array<int> P, Po;
+            fespace.GetMesh()->GetBdrElementPlanars(i, P, Po);
+
+            std::cout << "P: \n";
+            P.Print();
+            std::cout << "Po: \n";
+            Po.Print();
+
+            Array<int> belverts_first;
+            mesh->GetBdrElementVertices(belind_first, belverts_first);
+            */
+
+            std::vector<std::vector<double> > vertscoos_first(nverts);
+            if (verbose)
+                std::cout << "verts of first bdr el \n";
+            for (int vert = 0; vert < nverts; ++vert)
+            {
+                vertscoos_first[vert].resize(mesh->Dimension());
+                double * vertcoos = mesh->GetVertex(belverts_first[vert]);
+                if (verbose)
+                    std::cout << "vert = " << vert << ": ";
+                for (int j = 0; j < mesh->Dimension(); ++j)
+                {
+                    vertscoos_first[vert][j] = vertcoos[j];
+                    if (verbose)
+                        std::cout << vertcoos[j] << " ";
+                }
+                if (verbose)
+                    std::cout << "\n";
+            }
+
+            int * verts_permutation_first = new int[nverts];
+            sortingPermutationNew(vertscoos_first, verts_permutation_first);
+
+            if (verbose)
+            {
+                std::cout << "permutation first: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_permutation_first[i] << " ";
+                std::cout << "\n";
+            }
+
+            std::vector<std::vector<double> > vertscoos_second(nverts);
+            if (verbose)
+                std::cout << "verts of second bdr el \n";
+            for (int vert = 0; vert < nverts; ++vert)
+            {
+                vertscoos_second[vert].resize(mesh->Dimension());
+                double * vertcoos = mesh->GetVertex(belverts_second[vert]);
+                if (verbose)
+                    std::cout << "vert = " << vert << ": ";
+                for (int j = 0; j < mesh->Dimension(); ++j)
+                {
+                    vertscoos_second[vert][j] = vertcoos[j];
+                    if (verbose)
+                        std::cout << vertcoos[j] << " ";
+                }
+                if (verbose)
+                    std::cout << "\n";
+            }
+
+            int * verts_permutation_second = new int[nverts];
+            sortingPermutationNew(vertscoos_second, verts_permutation_second);
+
+            if (verbose)
+            {
+                std::cout << "permutation second: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_permutation_second[i] << " ";
+                std::cout << "\n";
+            }
+
+            /*
+            int * verts_perm_second_inverse = new int[nverts];
+            invert_permutation(verts_permutation_second, nverts, verts_perm_second_inverse);
+
+            if (verbose)
+            {
+                std::cout << "inverted permutation second: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_perm_second_inverse[i] << " ";
+                std::cout << "\n";
+            }
+            */
+
+            int * verts_perm_first_inverse = new int[nverts];
+            invert_permutation(verts_permutation_first, nverts, verts_perm_first_inverse);
+
+            if (verbose)
+            {
+                std::cout << "inverted permutation first: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_perm_first_inverse[i] << " ";
+                std::cout << "\n";
+            }
+
+
+            for (int dofno = 0; dofno < bel_dofs_first.Size(); ++dofno)
+            {
+                //int dofno_second = verts_perm_second_inverse[verts_permutation_first[dofno]];
+                int dofno_second = verts_permutation_second[verts_perm_first_inverse[dofno]];
+                res->insert(std::pair<int,int>(bel_dofs_first[dofno],
+                                                  bel_dofs_second[dofno_second]));
+
+                if (verbose)
+                    std::cout << "matching dofs pair: <" << bel_dofs_first[dofno] << ","
+                          << bel_dofs_second[dofno_second] << "> \n";
+            }
+
+            if (verbose)
+               std::cout << "\n";
         }
 
-        int * verts_permutation_second = new int[nverts];
-        sortingPermutationNew(vertscoos_second, verts_permutation_second);
-
-        std::cout << "permutation second: ";
-        for (int i = 0; i < mesh->Dimension(); ++i)
-            std::cout << verts_permutation_second[i] << " ";
-        std::cout << "\n";
-
-        int sign_second = permutation_sign(verts_permutation_second, nverts);
-        std::cout << "sign_second = " << sign_second << "\n";
-
-
-        std::cout << "\n";
     } // end of loop over all pairs of boundary elements
+
+    if (verbose)
+    {
+        if (strcmp(eltype,"RT0") == 0)
+            std::cout << "dof pairs for Hdiv: \n";
+        if (strcmp(eltype,"linearH1") == 0)
+            std::cout << "dof pairs for H1: \n";
+        std::set<std::pair<int,int> >::iterator it;
+        for ( it = res->begin(); it != res->end(); it++ )
+        {
+            std::cout << "<" << it->first << ", " << it->second << "> \n";
+        }
+    }
+
 
     return res;
 }
+
+double testH1fun(Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size() - 1);
+
+    if (xt.Size() == 3)
+        return (x*x + y*y + 1.0);
+    if (xt.Size() == 4)
+        return (x*x + y*y + z*z + 1.0);
+    return 0.0;
+}
+

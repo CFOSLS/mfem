@@ -7942,6 +7942,15 @@ int permutation_sign( int * permutation, int size)
         return -1;
 }
 
+// zero-based indexing for perm_in and perm_out
+void invert_permutation(int *perm_in, int size, int * perm_out)
+{
+  // Inserting position at their
+  // respective element in second array
+  for (int i = 0; i < size; i++)
+    perm_out[perm_in[i]] = i;
+}
+
 //used for comparing the d-dimensional points by their coordinates
 typedef std::pair<std::vector<double>, int> PairPoint;
 struct CmpPairPoint
