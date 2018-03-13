@@ -5043,22 +5043,11 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
         return;
     }
 
+    bot_to_top_bels.resize(meshbase.GetNBE());
+
     // ****************************************************************************
     // step 1 of 4: creating local space-time part of the mesh from local part of base mesh
     // ****************************************************************************
-
-    /*
-    for ( int proc = 0; proc < num_procs; ++proc )
-    {
-        if ( proc == myid )
-        {
-            cout << "I am " << proc << ", parmesh myrank = " << mesh3d.MyRank << endl;
-            cout << "Creating local part of 4d mesh" << endl;
-        }
-        cout << flush;
-        MPI_Barrier(comm);
-    }
-    */
 
     // creating local parts of space-time mesh
     MeshSpaceTimeCylinder_onlyArrays(Tau, Nsteps, bnd_method, local_method);
@@ -5125,7 +5114,6 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
 
     InitTables();
 
-
     CheckElementOrientation(true);
     if ( dim == 3)
     {
@@ -5148,7 +5136,6 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
         }
         //MarkForRefinement(); -- was working in mfem 3.2
     }
-
 
     if (dim > 1)
     {
@@ -5183,7 +5170,6 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
        GeneratePlanars();
     }
 
-
     if (NumOfBdrElements == 0 && Dim > 2)
     {
        // in 3D, generate boundary elements before we 'MarkForRefinement'
@@ -5195,7 +5181,6 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
        GenerateFaces();
        GenerateBoundaryElements();
     }
-
 
     int curved = 0;
     int generate_edges = 1;
@@ -7192,6 +7177,7 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
                     NewBdrEl = new Tetrahedron(elverts_prism);
                 NewBdrEl->SetAttribute(1);
                 AddBdrElement(NewBdrEl);
+                bot_to_top_bels[elind].first = NumOfBdrElements - 1;
             }
             // 3.3 for the last time slab we add the base mesh elements in the upper base
             // to the space-time bdr elements
@@ -7204,6 +7190,7 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
                     NewBdrEl = new Tetrahedron(elverts_prism + vert_per_base);
                 NewBdrEl->SetAttribute(3);
                 AddBdrElement(NewBdrEl);
+                bot_to_top_bels[elind].second = NumOfBdrElements - 1;
             }
 
             if (local_method == 0 || local_method == 1)
@@ -7807,6 +7794,70 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
         } // end of loop over time slabs
     } // end of loop over base elements
 
+    // checking the correspondence bot_to_top_bels created in the loop above
+    /*
+    MPI_Comm_size(meshbase.GetComm(), &num_procs);
+    MPI_Comm_rank(meshbase.GetComm(), &myid);
+
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            PrintBotToTopBels();
+
+            // checking bot_to_top_bels
+            for (int i = 0; i < meshbase.GetNBE(); ++i)
+            {
+                 std::cout << "pair " << i << ": \n";
+                 int belind_first = bot_to_top_bels[i].first;
+                 Element * bel_first = GetBdrElement(belind_first);
+                 Array<int> verts_first;
+                 bel_first->GetVertices(verts_first);
+
+                 std::cout << "first boundary element: \n";
+                 for (int vno = 0; vno < verts_first.Size(); ++vno)
+                 {
+                     double * vcoos = GetVertex(verts_first[vno]);
+                     std::cout << "(";
+                     for (int coind = 0; coind < Dimension(); ++coind)
+                     {
+                         if (coind < Dimension() - 1)
+                             std::cout << vcoos[coind] << ", ";
+                         else
+                             std::cout << vcoos[coind] << ")";
+                     }
+                 }
+                 std::cout << "\n";
+
+                 int belind_second = bot_to_top_bels[i].second;
+                 Element * bel_second = GetBdrElement(belind_second);
+                 Array<int> verts_second;
+                 bel_second->GetVertices(verts_second);
+
+                 std::cout << "second boundary element: \n";
+                 for (int vno = 0; vno < verts_second.Size(); ++vno)
+                 {
+                     double * vcoos = GetVertex(verts_second[vno]);
+                     std::cout << "(";
+                     for (int coind = 0; coind < Dimension(); ++coind)
+                     {
+                         if (coind < Dimension() - 1)
+                             std::cout << vcoos[coind] << ", ";
+                         else
+                             std::cout << vcoos[coind] << ")";
+                     }
+                 }
+                 std::cout << "\n";
+                 std::cout << "\n";
+            }
+            std::cout << std::flush;
+        }
+        MPI_Barrier(meshbase.GetComm());
+    }
+    */
+
+
     if ( NumOfSTElements != GetNE() )
         std::cout << "Error: Wrong number of elements generated: " << GetNE() << " instead of " <<
                         NumOfSTElements << std::endl;
@@ -7835,6 +7886,15 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
         delete [] qhull_flags;
 
     return;
+}
+
+
+void ParMeshTSL::PrintBotToTopBels() const
+{
+    for (int i = 0; i < bot_to_top_bels.size(); ++i)
+    {
+        std::cout << "i = " << i  << ": (" << bot_to_top_bels[i].first << ", " << bot_to_top_bels[i].second << ") \n";
+    }
 }
 
 // simple algorithm which computes sign of a given permutatation

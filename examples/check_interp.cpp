@@ -16,7 +16,7 @@
 
 #define ZEROTOL (5.0e-14)
 
-//#define USE_TSL
+#define USE_TSL
 
 using namespace std;
 using namespace mfem;
@@ -26,6 +26,9 @@ void testVectorFun(const Vector& xt, Vector& res);
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2);
+
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels);
 
 // IDEA: Probably there is a bad orientation of boundary elements, there is no case dim = 4 in CheckBdrElementOrientation, no GetPentaOrientation
 // Just try a mesh with two tets with sref = 4, pref = 1 in 3D, and see that there is a message about two boudnary element orientations being fixed
@@ -55,8 +58,8 @@ int main(int argc, char *argv[])
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
    const char *meshbase_file = "../data/star.mesh";
-   int Nt = 1;
-   double tau = 1.0;
+   int Nt = 2;
+   double tau = 0.5;
 #endif
 
    int feorder = 0;
@@ -138,6 +141,9 @@ int main(int argc, char *argv[])
    delete meshbase;
 
    ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
+
+   //MPI_Finalize();
+   //return 0;
 
    /*
    if (num_procs == 1)
@@ -372,6 +378,13 @@ int main(int argc, char *argv[])
            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
    }
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
+
+
+   std::vector<std::pair<int,int> > * dofs_link =
+           CreateBotToTopDofsLink(*Hcurl_space,pmesh->bot_to_top_bels);
+
+   MPI_Finalize();
+   return 0;
 
    Array<HypreParMatrix*> TrueP_Hdiv(num_levels - 1);
    Array<HypreParMatrix*> TrueP_L2(num_levels - 1);
@@ -1943,3 +1956,105 @@ void testVectorFun(const Vector& xt, Vector& res)
     res = 1.0;
 }
 
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels)
+{
+    int nbelpairs = bot_to_top_bels.size();
+    // estimating the maximal memory size required
+    Array<int> dofs;
+    fespace.GetBdrElementDofs(0, dofs);
+    int ndofpairs_max = nbelpairs * dofs.Size();
+
+    std::cout << "nbelpairs = " << nbelpairs << ", estimated ndofpairs_max = " << ndofpairs_max << "\n";
+
+    std::vector<std::pair<int,int> > * res = new std::vector<std::pair<int,int> >;
+    res->reserve(ndofpairs_max);
+
+    Mesh * mesh = fespace.GetMesh();
+
+    for (int i = 0; i < nbelpairs; ++i)
+    {
+        std::cout << "pair " << i << ": \n";
+
+        int belind_first = bot_to_top_bels[i].first;
+        Array<int> bel_dofs;
+        fespace.GetBdrElementDofs(belind_first, bel_dofs);
+
+        std::cout << "bel_dofs: \n";
+        bel_dofs.Print();
+
+        Array<int> P, Po;
+        fespace.GetMesh()->GetBdrElementPlanars(i, P, Po);
+
+        std::cout << "P: \n";
+        P.Print();
+        std::cout << "Po: \n";
+        Po.Print();
+
+        Array<int> belverts_first;
+        mesh->GetBdrElementVertices(belind_first, belverts_first);
+
+        int nverts = mesh->GetBdrElement(belind_first)->GetNVertices();
+
+        std::vector<std::vector<double> > vertscoos_first(nverts);
+        std::cout << "verts of first bdr el \n";
+        for (int vert = 0; vert < nverts; ++vert)
+        {
+            vertscoos_first[vert].resize(mesh->Dimension());
+            double * vertcoos = mesh->GetVertex(belverts_first[vert]);
+            std::cout << "vert = " << vert << ": ";
+            for (int j = 0; j < mesh->Dimension(); ++j)
+            {
+                vertscoos_first[vert][j] = vertcoos[j];
+                std::cout << vertcoos[j] << " ";
+            }
+            std::cout << "\n";
+        }
+
+        int * verts_permutation_first = new int[nverts];
+        sortingPermutationNew(vertscoos_first, verts_permutation_first);
+
+        std::cout << "permutation first: ";
+        for (int i = 0; i < mesh->Dimension(); ++i)
+            std::cout << verts_permutation_first[i] << " ";
+        std::cout << "\n";
+
+        int sign_first = permutation_sign(verts_permutation_first, nverts);
+        std::cout << "sign_first = " << sign_first << "\n";
+
+        int belind_second = bot_to_top_bels[i].second;
+        Array<int> belverts_second;
+        mesh->GetBdrElementVertices(belind_second, belverts_second);
+
+        std::vector<std::vector<double> > vertscoos_second(nverts);
+        std::cout << "verts of second bdr el \n";
+        for (int vert = 0; vert < nverts; ++vert)
+        {
+            vertscoos_second[vert].resize(mesh->Dimension());
+            double * vertcoos = mesh->GetVertex(belverts_second[vert]);
+            std::cout << "vert = " << vert << ": ";
+            for (int j = 0; j < mesh->Dimension(); ++j)
+            {
+                vertscoos_second[vert][j] = vertcoos[j];
+                std::cout << vertcoos[j] << " ";
+            }
+            std::cout << "\n";
+        }
+
+        int * verts_permutation_second = new int[nverts];
+        sortingPermutationNew(vertscoos_second, verts_permutation_second);
+
+        std::cout << "permutation second: ";
+        for (int i = 0; i < mesh->Dimension(); ++i)
+            std::cout << verts_permutation_second[i] << " ";
+        std::cout << "\n";
+
+        int sign_second = permutation_sign(verts_permutation_second, nverts);
+        std::cout << "sign_second = " << sign_second << "\n";
+
+
+        std::cout << "\n";
+    } // end of loop over all pairs of boundary elements
+
+    return res;
+}

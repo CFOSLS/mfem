@@ -304,6 +304,9 @@ public:
    // Computes domain and boundary volumes, and checks,
    // that faces and boundary elements list is consistent with the actual element faces
    int MeshCheck (bool verbose);
+
+   void PrintBotToTopBels() const;
+   ParMesh* GetBaseParMesh() {return &meshbase;}
 };
 
 inline double dist( double * M, double * N , int d);
