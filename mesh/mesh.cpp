@@ -4139,6 +4139,7 @@ int Mesh::CheckBdrElementOrientation(bool fix_it)
       }
    }
 
+   // TODO: Check this case
    if (Dim == 4)
    {
       int el, *bv, *ev;

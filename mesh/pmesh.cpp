@@ -6915,8 +6915,6 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
     delete [] tempvert;
 
     int * almostjogglers = new int[Dim];
-    std::cout << "almost jogglers after init = " << almostjogglers << "\n";
-
     //int permutation[Dim];
     //vector<double*> lcoords(Dim);
     vector<vector<double> > lcoordsNew(Dim);
@@ -7788,6 +7786,35 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
                     NewEl = new Pentatope(simplexes + simplex_ind*(Dim+1));
                 NewEl->SetAttribute(1);
                 AddElement(NewEl);
+
+                /*
+                 * unneeded, because CheckElementOrientation is still called afterwards
+                 * in the ParMeshTSL constructor
+                // TODO: Probably there is a pattern of which space-time elements got the wrong orientation
+                // fixing element orientation
+                int j, k, *vi = 0;
+                double *v[Dim + 1];
+
+                vi = elements[NumOfElements - 1]->GetVertices();
+                DenseMatrix J(Dim, Dim);
+                for (j = 0; j < Dim + 1; j++)
+                {
+                   v[j] = vertices[vi[j]]();
+                }
+                for (j = 0; j < Dim; j++)
+                   for (k = 0; k < Dim; k++)
+                   {
+                      J(j, k) = v[j+1][k] - v[0][k];
+                   }
+                if (J.Det() < 0.0)
+                {
+                    std::cout << "elind = " << elind << ", tslab = " << tslab << ", simplex_ind = " << simplex_ind << "\n";
+                    std::cout << "element with bad orientation: ";
+                    mfem::Swap(vi[0], vi[1]);
+                    std::cout << "was fixed! \n";
+                }
+                */
+
                 ++simplex_count;
             }
 
@@ -7872,7 +7899,6 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
 
     delete [] facebdrmarker;
     delete [] ordering;
-    std::cout << "almost jogglers = " << almostjogglers << "\n";
     delete [] almostjogglers;
     delete [] temp;
     delete [] tempface;

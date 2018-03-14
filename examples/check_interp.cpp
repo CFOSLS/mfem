@@ -51,15 +51,15 @@ int main(int argc, char *argv[])
 
    int nDimensions     = 3;
 
-   int ser_ref_levels  = 1;
+   int ser_ref_levels  = 3;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
    const char *meshbase_file = "../data/star.mesh";
-   int Nt = 2;
-   double tau = 0.5;
+   int Nt = 4;
+   double tau = 0.25;
 #endif
 
    int feorder = 0;
