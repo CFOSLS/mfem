@@ -31,6 +31,7 @@ std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Finit
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
 
 double testH1fun(Vector& xt);
+void testHdivfun(const Vector& xt, Vector& res);
 
 int main(int argc, char *argv[])
 {
@@ -47,9 +48,7 @@ int main(int argc, char *argv[])
 
    int nDimensions     = 3;
 
-   // sref = 3, pref = 0, mesh = two_penta crushes the check for Hdiv in 4D! (np = 2 > 1)
-   // sref = 1, pref = 0, mesh = cube_96 crushes the check for Hdivskew and Hcurl in 4D! (np = 2 > 1)
-   int ser_ref_levels  = 0;
+   int ser_ref_levels  = 1;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -100,7 +99,7 @@ int main(int argc, char *argv[])
 
 #ifdef USE_TSL
    if (verbose)
-       std::cout << "USE_TSL is active (mesh is constructed using mesh generator \n";
+       std::cout << "USE_TSL is active (mesh is constructed using mesh generator) \n";
    if (nDimensions == 3)
    {
        meshbase_file = "../data/square_2d_moderate.mesh";
@@ -377,6 +376,9 @@ int main(int argc, char *argv[])
    }
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
+   std::set<std::pair<int,int> >::iterator it;
+
+   /*
 
    std::set<std::pair<int,int> > * tdofs_link_H1 = new std::set<std::pair<int,int> >;
    for (int i = 0; i < num_procs; ++i)
@@ -419,7 +421,6 @@ int main(int argc, char *argv[])
    Vector testH1_bot_tdofs(H1_space->TrueVSize());
    testH1_bot_tdofs = 0.0;
 
-   std::set<std::pair<int,int> >::iterator it;
    for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
    {
        testH1_bot_tdofs[it->first] = testfullH1_tdofs[it->first];
@@ -445,37 +446,36 @@ int main(int argc, char *argv[])
 
    //MPI_Finalize();
    //return 0;
+   {
+       char vishost[] = "localhost";
+       int  visport   = 19916;
+       socketstream u_sock(vishost, visport);
+       u_sock << "parallel " << num_procs << " " << myid << "\n";
+       u_sock.precision(8);
+       u_sock << "solution\n" << *pmesh << *testfullH1 << "window_title 'testfullH1'"
+              << endl;
 
-   char vishost[] = "localhost";
-   int  visport   = 19916;
-   socketstream u_sock(vishost, visport);
-   u_sock << "parallel " << num_procs << " " << myid << "\n";
-   u_sock.precision(8);
-   u_sock << "solution\n" << *pmesh << *testfullH1 << "window_title 'testfullH1'"
-          << endl;
+       socketstream ubot_sock(vishost, visport);
+       ubot_sock << "parallel " << num_procs << " " << myid << "\n";
+       ubot_sock.precision(8);
+       ubot_sock << "solution\n" << *pmesh << *testH1_bot << "window_title 'testH1bot'"
+              << endl;
 
-   socketstream ubot_sock(vishost, visport);
-   ubot_sock << "parallel " << num_procs << " " << myid << "\n";
-   ubot_sock.precision(8);
-   ubot_sock << "solution\n" << *pmesh << *testH1_bot << "window_title 'testH1bot'"
-          << endl;
+       socketstream utop_sock(vishost, visport);
+       utop_sock << "parallel " << num_procs << " " << myid << "\n";
+       utop_sock.precision(8);
+       utop_sock << "solution\n" << *pmesh << *testH1_top << "window_title 'testH1top'"
+              << endl;
+   }
 
-   socketstream utop_sock(vishost, visport);
-   utop_sock << "parallel " << num_procs << " " << myid << "\n";
-   utop_sock.precision(8);
-   utop_sock << "solution\n" << *pmesh << *testH1_top << "window_title 'testH1top'"
-          << endl;
+   */
 
-
-   MPI_Finalize();
-   return 0;
-
-   std::set<std::pair<int,int> > * dofs_link_RT0;
+   std::set<std::pair<int,int> > * tdofs_link_Hdiv = new std::set<std::pair<int,int> >;
    for (int i = 0; i < num_procs; ++i)
    {
        if (myid == i)
        {
-           dofs_link_RT0 =
+           std::set<std::pair<int,int> > * dofs_link_RT0 =
                       CreateBotToTopDofsLink("RT0",*Hdiv_space, pmesh->bot_to_top_bels);
            std::cout << std::flush;
 
@@ -484,10 +484,80 @@ int main(int argc, char *argv[])
            for ( it = dofs_link_RT0->begin(); it != dofs_link_RT0->end(); it++ )
            {
                std::cout << "<" << it->first << ", " << it->second << "> \n";
+               int tdof1 = Hdiv_space->GetLocalTDofNumber(it->first);
+               int tdof2 = Hdiv_space->GetLocalTDofNumber(it->second);
+               std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+               if (tdof1 * tdof2 < 0)
+                   MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+               if (tdof1 > -1)
+                   tdofs_link_Hdiv->insert(std::pair<int,int>(tdof1, tdof2));
+               else
+                   std::cout << "Ignored a dofs pair which are not own tdofs \n";
            }
        }
        MPI_Barrier(comm);
    } // end fo loop over all processors, one after another
+
+   if (verbose)
+        std::cout << "Drawing in Hdiv case \n";
+
+   ParGridFunction * testfullHdiv = new ParGridFunction(Hdiv_space);
+   VectorFunctionCoefficient testHdiv_coeff(dim, testHdivfun);
+   testfullHdiv->ProjectCoefficient(testHdiv_coeff);
+   Vector testfullHdiv_tdofs(Hdiv_space->TrueVSize());
+   testfullHdiv->ParallelProject(testfullHdiv_tdofs);
+
+   Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
+   testHdiv_bot_tdofs = 0.0;
+
+   for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+   {
+       testHdiv_bot_tdofs[it->first] = testfullHdiv_tdofs[it->first];
+   }
+
+   ParGridFunction * testHdiv_bot = new ParGridFunction(Hdiv_space);
+   testHdiv_bot->Distribute(&testHdiv_bot_tdofs);
+
+   Vector testHdiv_top_tdofs(Hdiv_space->TrueVSize());
+   testHdiv_top_tdofs = 0.0;
+
+   for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+   {
+       testHdiv_top_tdofs[it->second] = testfullHdiv_tdofs[it->second];
+   }
+
+   ParGridFunction * testHdiv_top = new ParGridFunction(Hdiv_space);
+   testHdiv_top->Distribute(&testHdiv_top_tdofs);
+
+   if (verbose)
+        std::cout << "Sending to GLVis in Hdiv case \n";
+
+   //MPI_Finalize();
+   //return 0;
+
+   {
+       char vishost[] = "localhost";
+       int  visport   = 19916;
+       socketstream u_sock(vishost, visport);
+       u_sock << "parallel " << num_procs << " " << myid << "\n";
+       u_sock.precision(8);
+       u_sock << "solution\n" << *pmesh << *testfullHdiv << "window_title 'testfullHdiv'"
+              << endl;
+
+       socketstream ubot_sock(vishost, visport);
+       ubot_sock << "parallel " << num_procs << " " << myid << "\n";
+       ubot_sock.precision(8);
+       ubot_sock << "solution\n" << *pmesh << *testHdiv_bot << "window_title 'testHdivbot'"
+              << endl;
+
+       socketstream utop_sock(vishost, visport);
+       utop_sock << "parallel " << num_procs << " " << myid << "\n";
+       utop_sock.precision(8);
+       utop_sock << "solution\n" << *pmesh << *testHdiv_top << "window_title 'testHdivtop'"
+              << endl;
+   }
+
 
    MPI_Finalize();
    return 0;
@@ -2304,3 +2374,26 @@ double testH1fun(Vector& xt)
     return 0.0;
 }
 
+
+void testHdivfun(const Vector& xt, Vector &res)
+{
+    res.SetSize(xt.Size());
+
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size() - 1);
+
+    res = 0.0;
+
+    if (xt.Size() == 3)
+    {
+        res(2) = (x*x + y*y + 1.0);
+    }
+    if (xt.Size() == 4)
+    {
+        res(3) = (x*x + y*y + z*z + 1.0);
+    }
+}
