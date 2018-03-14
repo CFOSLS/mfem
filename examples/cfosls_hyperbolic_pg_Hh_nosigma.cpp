@@ -44,7 +44,7 @@
 //#define M_cond
 //#define BhAinvBhT_spectral
 
-//#define TIME_STEPPING // not ready yet, problems with interpolation
+//#define DIAGPREC_FOR_SCHUR
 
 #define MYZEROTOL (1.0e-13)
 
@@ -614,7 +614,7 @@ int main(int argc, char *argv[])
     //double st = 0.0;
 
     int ser_ref_levels  = 0;
-    int par_ref_levels  = 3;
+    int par_ref_levels  = 4;
 
     const char *formulation = "cfosls";
     bool regularization = false;     // turned out to be a bad idea, since BBT turned out to be non-singular
@@ -636,7 +636,7 @@ int main(int argc, char *argv[])
     double identity_scale;
 
     // level gap between coarse an fine grid (T_H and T_h)
-    int level_gap = 2;
+    int level_gap = 3;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
 
@@ -1526,9 +1526,20 @@ int main(int argc, char *argv[])
            if (regularization)
                *Schur += *W11;
 
+#ifdef DIAGPREC_FOR_SCHUR
+           if (verbose)
+               std::cout << "Constructing diagonal preconditioner for Schur \n";
+           invLam = new HypreDiagScale(*Schur);
+           ((HypreBoomerAMG *)invLam)->iterative_mode = false;
+#else
+           if (verbose)
+               std::cout << "Constructing BoomerAMG for Schur \n";
+
            invLam = new HypreBoomerAMG(*Schur);
            ((HypreBoomerAMG *)invLam)->SetPrintLevel(0);
            ((HypreBoomerAMG *)invLam)->iterative_mode = false;
+#endif
+
        }
        else
        {
