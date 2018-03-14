@@ -392,10 +392,16 @@ int main(int argc, char *argv[])
            for ( it = dofs_link_H1->begin(); it != dofs_link_H1->end(); it++ )
            {
                std::cout << "<" << it->first << ", " << it->second << "> \n";
-               int tdof1 = H1_space->GetGlobalTDofNumber(it->first);
-               int tdof2 = H1_space->GetGlobalTDofNumber(it->second);
+               int tdof1 = H1_space->GetLocalTDofNumber(it->first);
+               int tdof2 = H1_space->GetLocalTDofNumber(it->second);
                std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
-               tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+               if (tdof1 * tdof2 < 0)
+                   MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+               if (tdof1 > -1)
+                   tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+               else
+                   std::cout << "Ignored dofs pair which are not own tdofs \n";
            }
        }
        MPI_Barrier(comm);
@@ -437,8 +443,8 @@ int main(int argc, char *argv[])
    if (verbose)
         std::cout << "Sending to GLVis in H1 case \n";
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
    char vishost[] = "localhost";
    int  visport   = 19916;
