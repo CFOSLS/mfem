@@ -5015,7 +5015,7 @@ ParMesh::~ParMesh()
 //void ParMesh3DtoParMesh4D (MPI_Comm comm, ParMesh& mesh3d,
 //                     ParMesh& mesh4d, double tau, int Nsteps, int bnd_method, int local_method)
 ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method, int local_method)
-    : meshbase(Meshbase)
+    : meshbase(Meshbase), bot_to_top_bels(Meshbase.GetNE())
 {
     int num_procs, myid;
     MPI_Comm_size(comm, &num_procs);
@@ -5043,7 +5043,7 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
         return;
     }
 
-    bot_to_top_bels.resize(meshbase.GetNBE());
+    //bot_to_top_bels.resize(meshbase.GetNBE());
 
     // ****************************************************************************
     // step 1 of 4: creating local space-time part of the mesh from local part of base mesh
@@ -6915,6 +6915,8 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
     delete [] tempvert;
 
     int * almostjogglers = new int[Dim];
+    std::cout << "almost jogglers after init = " << almostjogglers << "\n";
+
     //int permutation[Dim];
     //vector<double*> lcoords(Dim);
     vector<vector<double> > lcoordsNew(Dim);
@@ -7870,6 +7872,7 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
 
     delete [] facebdrmarker;
     delete [] ordering;
+    std::cout << "almost jogglers = " << almostjogglers << "\n";
     delete [] almostjogglers;
     delete [] temp;
     delete [] tempface;

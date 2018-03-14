@@ -18,6 +18,9 @@
 
 #define USE_TSL
 
+// TODO: Fix element and bdr element orientation in the mesh generator
+// TODO: Find why ParMeshTSL with bot_to_top link leads to a memory-related failure.
+
 using namespace std;
 using namespace mfem;
 
@@ -132,12 +135,18 @@ int main(int argc, char *argv[])
    meshbase->Print(ofid);
    */
 
+   meshbase->CheckElementOrientation(true);
+
    for (int l = 0; l < ser_ref_levels; l++)
        meshbase->UniformRefinement();
+
+   meshbase->CheckElementOrientation(true);
 
    ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
    for (int l = 0; l < par_ref_levels; l++)
        pmeshbase->UniformRefinement();
+
+   pmeshbase->CheckElementOrientation(true);
 
    //if (verbose)
        //std::cout << "pmeshbase shared structure \n";
@@ -147,6 +156,8 @@ int main(int argc, char *argv[])
 
    ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
 
+   //delete pmeshbase;
+   //delete pmesh;
    //MPI_Finalize();
    //return 0;
 
