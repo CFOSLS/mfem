@@ -124,6 +124,14 @@ int main(int argc, char *argv[])
        imesh.close();
    }
 
+   /*
+   std::stringstream fname;
+   fname << "square_2d_moderate_corrected.mesh";
+   std::ofstream ofid(fname.str().c_str());
+   ofid.precision(8);
+   meshbase->Print(ofid);
+   */
+
    for (int l = 0; l < ser_ref_levels; l++)
        meshbase->UniformRefinement();
 
