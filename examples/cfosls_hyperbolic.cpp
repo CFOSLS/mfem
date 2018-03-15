@@ -1148,7 +1148,7 @@ int main(int argc, char *argv[])
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-    bool eliminateS = false;            // in case space_for_S = "L2" defines whether we eliminate S from the system
+    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
 
     // solver options
@@ -2056,8 +2056,8 @@ int main(int argc, char *argv[])
    solver.SetRelTol(rtol);
    solver.SetMaxIter(max_iter);
    solver.SetOperator(*CFOSLSop);
-   //if (prec_option > 0)
-        //solver.SetPreconditioner(prec);
+   if (prec_option > 0)
+        solver.SetPreconditioner(prec);
    solver.SetPrintLevel(1);
    trueX = 0.0;
 
