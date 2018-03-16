@@ -678,7 +678,7 @@ void ImproperVectorMassIntegrator::AssembleElementMatrix(
 
 void testVectorFun(const Vector& xt, Vector& res);
 
-std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
 
 double testH1fun(Vector& xt);

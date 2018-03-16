@@ -88,8 +88,11 @@ protected:
     BlockDiagonalPreconditioner * prec;
     MINRESSolver * solver;
 
-    std::set<std::pair<int,int> > * tdofs_link_H1;
-    std::set<std::pair<int,int> > * tdofs_link_Hdiv;
+    //std::set<std::pair<int,int> > * tdofs_link_H1;
+    //std::set<std::pair<int,int> > * tdofs_link_Hdiv;
+
+    std::vector<std::pair<int,int> > tdofs_link_H1;
+    std::vector<std::pair<int,int> > tdofs_link_Hdiv;
 
     bool verbose;
 
@@ -304,21 +307,19 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
     // ...
 
     {
-        std::set<std::pair<int,int> >::iterator it;
-
-        for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+        for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
         {
-            int tdof_bot = it->first;
-            int tdof_top = it->second;
+            int tdof_bot = tdofs_link_Hdiv[i].first;
+            int tdof_top = tdofs_link_Hdiv[i].second;
             trueOut.GetBlock(0)[tdof_bot] = trueX.GetBlock(0)[tdof_top];
         }
 
         if (strcmp(space_for_S,"H1") == 0) // S is present
         {
-            for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+            for ( unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
             {
-                int tdof_bot = it->first;
-                int tdof_top = it->second;
+                int tdof_bot = tdofs_link_H1[i].first;
+                int tdof_top = tdofs_link_H1[i].second;
                 trueOut.GetBlock(1)[tdof_bot] = trueX.GetBlock(1)[tdof_top];
             }
         }
@@ -703,30 +704,33 @@ void TimeSlabHyper::InitProblem()
     }
     H1_space = new ParFiniteElementSpace(pmeshtsl, h1_coll);
 
-    std::set<std::pair<int,int> >::iterator it;
-
-    tdofs_link_H1 = new std::set<std::pair<int,int> >;
     for (int i = 0; i < num_procs; ++i)
     {
         if (myid == i)
         {
-            std::set<std::pair<int,int> > * dofs_link_H1 =
+            std::vector<std::pair<int,int> > * dofs_link_H1 =
                     CreateBotToTopDofsLink("linearH1",*H1_space, pmeshtsl->bot_to_top_bels);
             std::cout << std::flush;
 
-            //std::cout << "dof pairs for H1: \n";
-            std::set<std::pair<int,int> >::iterator it;
-            for ( it = dofs_link_H1->begin(); it != dofs_link_H1->end(); it++ )
+            tdofs_link_H1.reserve(dofs_link_H1->size());
+
+            int count = 0;
+            for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
             {
                 //std::cout << "<" << it->first << ", " << it->second << "> \n";
-                int tdof1 = H1_space->GetLocalTDofNumber(it->first);
-                int tdof2 = H1_space->GetLocalTDofNumber(it->second);
+                int dof1 = (*dofs_link_H1)[i].first;
+                int dof2 = (*dofs_link_H1)[i].second;
+                int tdof1 = H1_space->GetLocalTDofNumber(dof1);
+                int tdof2 = H1_space->GetLocalTDofNumber(dof2);
                 //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                 if (tdof1 * tdof2 < 0)
                     MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
 
                 if (tdof1 > -1)
-                    tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+                {
+                    tdofs_link_H1.push_back(std::pair<int,int>(tdof1, tdof2));
+                    ++count;
+                }
                 else
                     std::cout << "Ignored dofs pair which are not own tdofs \n";
             }
@@ -746,9 +750,10 @@ void TimeSlabHyper::InitProblem()
     Vector testH1_bot_tdofs(H1_space->TrueVSize());
     testH1_bot_tdofs = 0.0;
 
-    for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+    for ( unsigned int i = 0; i < tdofs_link_H1.size(); ++i )
     {
-        testH1_bot_tdofs[it->first] = testfullH1_tdofs[it->first];
+        int tdof_bot = tdofs_link_H1[i].first;
+        testH1_bot_tdofs[tdof_bot] = testfullH1_tdofs[tdof_bot];
     }
 
     ParGridFunction * testH1_bot = new ParGridFunction(H1_space);
@@ -757,10 +762,10 @@ void TimeSlabHyper::InitProblem()
     Vector testH1_top_tdofs(H1_space->TrueVSize());
     testH1_top_tdofs = 0.0;
 
-    //std::set<std::pair<int,int> >::iterator it;
-    for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+    for ( unsigned int i = 0; i < tdofs_link_H1.size(); ++i )
     {
-        testH1_top_tdofs[it->second] = testfullH1_tdofs[it->second];
+        int tdof_top = tdofs_link_H1[i].second;
+        testH1_top_tdofs[tdof_top] = testfullH1_tdofs[tdof_top];
     }
 
     ParGridFunction * testH1_top = new ParGridFunction(H1_space);
@@ -792,23 +797,25 @@ void TimeSlabHyper::InitProblem()
                << endl;
     }
 
-
-    tdofs_link_Hdiv = new std::set<std::pair<int,int> >;
     for (int i = 0; i < num_procs; ++i)
     {
         if (myid == i)
         {
-            std::set<std::pair<int,int> > * dofs_link_RT0 =
+            std::vector<std::pair<int,int> > * dofs_link_RT0 =
                        CreateBotToTopDofsLink("RT0",*Hdiv_space, pmeshtsl->bot_to_top_bels);
             std::cout << std::flush;
 
+            tdofs_link_Hdiv.reserve(dofs_link_RT0->size());
+
+            int count = 0;
             //std::cout << "dof pairs for Hdiv: \n";
-            std::set<std::pair<int,int> >::iterator it;
-            for ( it = dofs_link_RT0->begin(); it != dofs_link_RT0->end(); it++ )
+            for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
             {
+                int dof1 = (*dofs_link_RT0)[i].first;
+                int dof2 = (*dofs_link_RT0)[i].second;
                 //std::cout << "<" << it->first << ", " << it->second << "> \n";
-                int tdof1 = Hdiv_space->GetLocalTDofNumber(it->first);
-                int tdof2 = Hdiv_space->GetLocalTDofNumber(it->second);
+                int tdof1 = Hdiv_space->GetLocalTDofNumber(dof1);
+                int tdof2 = Hdiv_space->GetLocalTDofNumber(dof2);
                 //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                 if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
                 {
@@ -817,7 +824,10 @@ void TimeSlabHyper::InitProblem()
                 }
 
                 if (tdof1 > -1)
-                    tdofs_link_Hdiv->insert(std::pair<int,int>(tdof1, tdof2));
+                {
+                    tdofs_link_Hdiv.push_back(std::pair<int,int>(tdof1, tdof2));
+                    ++count;
+                }
                 else
                     std::cout << "Ignored a dofs pair which are not own tdofs \n";
             }
@@ -837,9 +847,10 @@ void TimeSlabHyper::InitProblem()
     Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
     testHdiv_bot_tdofs = 0.0;
 
-    for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+    for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
     {
-        testHdiv_bot_tdofs[it->first] = testfullHdiv_tdofs[it->first];
+        int tdof_bot = tdofs_link_Hdiv[i].first;
+        testHdiv_bot_tdofs[tdof_bot] = testfullHdiv_tdofs[tdof_bot];
     }
 
     ParGridFunction * testHdiv_bot = new ParGridFunction(Hdiv_space);
@@ -848,9 +859,10 @@ void TimeSlabHyper::InitProblem()
     Vector testHdiv_top_tdofs(Hdiv_space->TrueVSize());
     testHdiv_top_tdofs = 0.0;
 
-    for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+    for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
     {
-        testHdiv_top_tdofs[it->second] = testfullHdiv_tdofs[it->second];
+        int tdof_top = tdofs_link_Hdiv[i].second;
+        testHdiv_top_tdofs[tdof_top] = testfullHdiv_tdofs[tdof_top];
     }
 
     ParGridFunction * testHdiv_top = new ParGridFunction(Hdiv_space);
@@ -1923,30 +1935,31 @@ int main(int argc, char *argv[])
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
 #ifdef USE_TSL
-   std::set<std::pair<int,int> >::iterator it;
-
-   std::set<std::pair<int,int> > * tdofs_link_H1 = new std::set<std::pair<int,int> >;
+   std::vector<std::pair<int,int> > * tdofs_link_H1 = new std::vector<std::pair<int,int> >;
    for (int i = 0; i < num_procs; ++i)
    {
        if (myid == i)
        {
-           std::set<std::pair<int,int> > * dofs_link_H1 =
+           std::vector<std::pair<int,int> > * dofs_link_H1 =
                    CreateBotToTopDofsLink("linearH1",*H1_space, pmesh->bot_to_top_bels);
            std::cout << std::flush;
 
+           tdofs_link_H1->reserve(dofs_link_H1->size());
+
            std::cout << "dof pairs for H1: \n";
-           std::set<std::pair<int,int> >::iterator it;
-           for ( it = dofs_link_H1->begin(); it != dofs_link_H1->end(); it++ )
+           for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
            {
-               std::cout << "<" << it->first << ", " << it->second << "> \n";
-               int tdof1 = H1_space->GetLocalTDofNumber(it->first);
-               int tdof2 = H1_space->GetLocalTDofNumber(it->second);
+               int dof1 = (*dofs_link_H1)[i].first;
+               int dof2 = (*dofs_link_H1)[i].second;
+               std::cout << "<" << dof1 << ", " << dof2 << "> \n";
+               int tdof1 = H1_space->GetLocalTDofNumber(dof1);
+               int tdof2 = H1_space->GetLocalTDofNumber(dof2);
                std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                if (tdof1 * tdof2 < 0)
                    MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
 
                if (tdof1 > -1)
-                   tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+                   tdofs_link_H1->push_back(std::pair<int,int>(tdof1, tdof2));
                else
                    std::cout << "Ignored dofs pair which are not own tdofs \n";
            }
@@ -1966,9 +1979,10 @@ int main(int argc, char *argv[])
    Vector testH1_bot_tdofs(H1_space->TrueVSize());
    testH1_bot_tdofs = 0.0;
 
-   for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+   for ( unsigned int i = 0; i < tdofs_link_H1->size(); ++i )
    {
-       testH1_bot_tdofs[it->first] = testfullH1_tdofs[it->first];
+       int tdof_bot = (*tdofs_link_H1)[i].first;
+       testH1_bot_tdofs[tdof_bot] = testfullH1_tdofs[tdof_bot];
    }
 
    ParGridFunction * testH1_bot = new ParGridFunction(H1_space);
@@ -1978,9 +1992,10 @@ int main(int argc, char *argv[])
    testH1_top_tdofs = 0.0;
 
    //std::set<std::pair<int,int> >::iterator it;
-   for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+   for ( unsigned int i = 0; i < tdofs_link_H1->size(); ++i )
    {
-       testH1_top_tdofs[it->second] = testfullH1_tdofs[it->second];
+       int tdof_top = (*tdofs_link_H1)[i].second;
+       testH1_top_tdofs[tdof_top] = testfullH1_tdofs[tdof_top];
    }
 
    ParGridFunction * testH1_top = new ParGridFunction(H1_space);
@@ -2013,22 +2028,25 @@ int main(int argc, char *argv[])
    }
 
 
-   std::set<std::pair<int,int> > * tdofs_link_Hdiv = new std::set<std::pair<int,int> >;
+   std::vector<std::pair<int,int> > * tdofs_link_Hdiv = new std::vector<std::pair<int,int> >;
    for (int i = 0; i < num_procs; ++i)
    {
        if (myid == i)
        {
-           std::set<std::pair<int,int> > * dofs_link_RT0 =
+           std::vector<std::pair<int,int> > * dofs_link_RT0 =
                       CreateBotToTopDofsLink("RT0",*Hdiv_space, pmesh->bot_to_top_bels);
            std::cout << std::flush;
+           tdofs_link_Hdiv->reserve(dofs_link_RT0->size());
 
            std::cout << "dof pairs for Hdiv: \n";
            std::set<std::pair<int,int> >::iterator it;
-           for ( it = dofs_link_RT0->begin(); it != dofs_link_RT0->end(); it++ )
+           for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
            {
-               std::cout << "<" << it->first << ", " << it->second << "> \n";
-               int tdof1 = Hdiv_space->GetLocalTDofNumber(it->first);
-               int tdof2 = Hdiv_space->GetLocalTDofNumber(it->second);
+               int dof1 = (*dofs_link_RT0)[i].first;
+               int dof2 = (*dofs_link_RT0)[i].second;
+               std::cout << "<" << dof1 << ", " << dof2 << "> \n";
+               int tdof1 = Hdiv_space->GetLocalTDofNumber(dof1);
+               int tdof2 = Hdiv_space->GetLocalTDofNumber(dof2);
                std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
                {
@@ -2037,7 +2055,7 @@ int main(int argc, char *argv[])
                }
 
                if (tdof1 > -1)
-                   tdofs_link_Hdiv->insert(std::pair<int,int>(tdof1, tdof2));
+                   tdofs_link_Hdiv->push_back(std::pair<int,int>(tdof1, tdof2));
                else
                    std::cout << "Ignored a dofs pair which are not own tdofs \n";
            }
@@ -2057,9 +2075,10 @@ int main(int argc, char *argv[])
    Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
    testHdiv_bot_tdofs = 0.0;
 
-   for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+   for ( unsigned int i = 0; i < tdofs_link_Hdiv->size(); ++i)
    {
-       testHdiv_bot_tdofs[it->first] = testfullHdiv_tdofs[it->first];
+       int tdof_bot = (*tdofs_link_Hdiv)[i].first;
+       testHdiv_bot_tdofs[tdof_bot] = testfullHdiv_tdofs[tdof_bot];
    }
 
    ParGridFunction * testHdiv_bot = new ParGridFunction(Hdiv_space);
@@ -2068,9 +2087,10 @@ int main(int argc, char *argv[])
    Vector testHdiv_top_tdofs(Hdiv_space->TrueVSize());
    testHdiv_top_tdofs = 0.0;
 
-   for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+   for ( unsigned int i = 0; i < tdofs_link_Hdiv->size(); ++i)
    {
-       testHdiv_top_tdofs[it->second] = testfullHdiv_tdofs[it->second];
+       int tdof_top = (*tdofs_link_Hdiv)[i].second;
+       testHdiv_top_tdofs[tdof_top] = testfullHdiv_tdofs[tdof_top];
    }
 
    ParGridFunction * testHdiv_top = new ParGridFunction(Hdiv_space);
@@ -3397,7 +3417,7 @@ void testVectorFun(const Vector& xt, Vector& res)
 // bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
 // which can be taken out of ParMeshTSL
 
-std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)
 {
     if (strcmp(eltype, "linearH1") != 0 && strcmp(eltype, "RT0") != 0)
@@ -3412,8 +3432,10 @@ std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Finit
     if (verbose)
         std::cout << "nbelpairs = " << nbelpairs << ", estimated ndofpairs_max = " << ndofpairs_max << "\n";
 
-    std::set<std::pair<int,int> > * res = new std::set<std::pair<int,int> >;
-    //res->reserve(ndofpairs_max);
+    std::vector<std::pair<int,int> > * res = new std::vector<std::pair<int,int> >;
+    res->reserve(ndofpairs_max);
+
+    std::set<std::pair<int,int> > res_set;
 
     Mesh * mesh = fespace.GetMesh();
 
@@ -3446,7 +3468,11 @@ std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Finit
                 MFEM_ABORT("For RT0 exactly one dof must correspond to each boundary element \n");
             }
 
-            res->insert(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+            if (res_set.find(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0])) == res_set.end())
+            {
+                res_set.insert(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+                res->push_back(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+            }
 
         }
 
@@ -3585,8 +3611,14 @@ std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Finit
             {
                 //int dofno_second = verts_perm_second_inverse[verts_permutation_first[dofno]];
                 int dofno_second = verts_permutation_second[verts_perm_first_inverse[dofno]];
-                res->insert(std::pair<int,int>(bel_dofs_first[dofno],
-                                                  bel_dofs_second[dofno_second]));
+
+                if (res_set.find(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second])) == res_set.end())
+                {
+                    res_set.insert(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
+                    res->push_back(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
+                }
+                //res_set.insert(std::pair<int,int>(bel_dofs_first[dofno],
+                                                  //bel_dofs_second[dofno_second]));
 
                 if (verbose)
                     std::cout << "matching dofs pair: <" << bel_dofs_first[dofno] << ","
@@ -3606,9 +3638,9 @@ std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Finit
         if (strcmp(eltype,"linearH1") == 0)
             std::cout << "dof pairs for H1: \n";
         std::set<std::pair<int,int> >::iterator it;
-        for ( it = res->begin(); it != res->end(); it++ )
+        for ( unsigned int i = 0; i < res->size(); ++i )
         {
-            std::cout << "<" << it->first << ", " << it->second << "> \n";
+            std::cout << "<" << (*res)[i].first << ", " << (*res)[i].second << "> \n";
         }
     }
 
