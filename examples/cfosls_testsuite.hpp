@@ -13,6 +13,16 @@ void uFunTest_ex_gradx(const Vector& xt, Vector& grad);
 void uFunTest_ex_gradxt(const Vector& xt, Vector& gradxt);
 void uFunTest_ex_dtgradx(const Vector& xt, Vector& gradx );
 
+double uFunTestNh_ex(const Vector& x); // Exact Solution
+double uFunTestNh_ex_dt(const Vector& xt);
+double uFunTestNh_ex_dt2(const Vector & xt);
+double uFunTestNh_ex_laplace(const Vector & xt);
+double uFunTestNh_ex_dtlaplace(const Vector & xt);
+void uFunTestNh_ex_gradx(const Vector& xt, Vector& grad);
+void uFunTestNh_ex_gradxt(const Vector& xt, Vector& gradxt);
+void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx );
+
+
 void bFunRect2D_ex(const Vector& xt, Vector& b );
 double  bFunRect2Ddiv_ex(const Vector& xt);
 
@@ -802,6 +812,10 @@ bool Transport_test::CheckTestConfig()
             return true;
         if (numsol == -4 && dim == 4)
             return true;
+        if (numsol == -33 && dim == 3)
+            return true;
+        if (numsol == -44 && dim == 4)
+            return true;
         return false;
     }
     else
@@ -822,9 +836,17 @@ Transport_test::Transport_test (int Dim, int NumSol)
         {
             SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
         }
+        if (numsol == -33) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
+        }
         if (numsol == -4) // 4D test for the paper
         {
             SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
+        }
+        if (numsol == -44) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
         }
     } // end of setting test coefficients in correct case
 }
@@ -954,3 +976,158 @@ template<double (*S)(const Vector & xt) > double SnonhomoTemplate(const Vector& 
     return S(xt0);
 }
 
+
+double uFunTestNh_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double res = exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        res *= sin (2.0 * M_PI * y);
+    if (xt.Size() == 4)
+        res *= sin (M_PI * z);
+
+    return res;
+}
+
+double uFunTestNh_ex_dt(const Vector& xt)
+{
+    return uFunTestNh_ex(xt);
+}
+
+double uFunTestNh_ex_dt2(const Vector& xt)
+{
+    return uFunTestNh_ex(xt);
+}
+
+double uFunTestNh_ex_laplace(const Vector& xt)
+{
+    double x = xt(0);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double res = sin (3.0 * M_PI * x) * M_PI * M_PI;
+    if (xt.Size() == 2)
+        res *= (3.0 * 3.0);
+    else
+    {
+        if (xt.Size() == 3)
+        {
+            res *= sin (2.0 * M_PI * y);
+            res *= (2.0 * 2.0 + 3.0 * 3.0);
+        }
+        else // 4D
+        {
+            res *= sin (2.0 * M_PI * y) * sin (M_PI * z);
+            res *= (2.0 * 2.0 + 3.0 * 3.0 + 1.0  * 1.0);
+        }
+    }
+    res *= (-1) * exp(t);
+
+    return res;
+}
+
+double uFunTestNh_ex_dtlaplace(const Vector& xt)
+{
+    return uFunTestNh_ex_laplace(xt);
+}
+
+void uFunTestNh_ex_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+    {
+        gradx(0) *= sin (2.0 * M_PI * y);
+        gradx(1) = exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        gradx(0) *= sin (M_PI * z);
+        gradx(1) *= sin (M_PI * z);
+        gradx(2) = exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
+    }
+}
+
+void uFunTestNh_ex_gradxt(const Vector& xt, Vector& gradxt)
+{
+    double x = xt(0);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    gradxt.SetSize(xt.Size());
+
+    gradxt(0) = exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+    {
+        gradxt(0) *= sin (2.0 * M_PI * y);
+        gradxt(1) = exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        gradxt(0) *= sin (M_PI * z);
+        gradxt(1) *= sin (M_PI * z);
+        gradxt(2) = exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
+    }
+
+    gradxt(xt.Size()-1) = exp(t) * sin (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+        gradxt(xt.Size()-1) *= sin (2.0 * M_PI * y);
+    if (xt.Size() == 4)
+        gradxt(xt.Size()-1) *= sin (M_PI * z);
+}
+
+void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y;
+    if (xt.Size() >= 3)
+        y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(t) * 3.0 * M_PI * cos (3.0 * M_PI * x);
+    if (xt.Size() >= 3)
+    {
+        gradx(0) *= sin (2.0 * M_PI * y);
+        gradx(1) = exp(t) * sin (3.0 * M_PI * x) * 2.0 * M_PI * cos ( 2.0 * M_PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        gradx(0) *= sin (M_PI * z);
+        gradx(1) *= sin (M_PI * z);
+        gradx(2) = exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
+    }
+
+}

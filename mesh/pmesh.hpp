@@ -247,7 +247,11 @@ public:
    // local_method = 0: ~ SHORTWAY, qhull is used for space-time prisms
    // local_method = 1: ~ LONGWAY, qhull is used for lateral faces of space-time prisms (then combined)
    // local_method = 2: qhull is not used, a simple procedure for simplices is used.
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method = 1, int local_method = 2);
+   //ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method = 1, int local_method = 2);
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method);
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps)
+       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2) {}
+
 
 protected:
    // Creates ParMesh internal structure (including shared entities)
@@ -290,7 +294,7 @@ private:
    // Calls InitMesh() and creates elements, vertices and boundary elements
    // Used only as part of Mesh constructor thus private.
    // Description of bnd_method, local_method - see in the constructor which calls this function.
-   void MeshSpaceTimeCylinder_onlyArrays (double tau, int Nsteps,
+   void MeshSpaceTimeCylinder_onlyArrays (double tinit, double tau, int Nsteps,
                                           int bnd_method, int local_method);
 
    // Reads the elements, vertices and boundary from the input IntermediatMesh.
@@ -307,6 +311,7 @@ public:
 
    void PrintBotToTopBels() const;
    ParMesh* GetBaseParMesh() {return &meshbase;}
+   void TimeShift(double shift);
 };
 
 inline double dist( double * M, double * N , int d);

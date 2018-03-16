@@ -10,12 +10,1561 @@
 
 #include "cfosls_testsuite.hpp"
 
-#define ZEROTOL (5.0e-14)
+#define ZEROTOL (1.0e-13)
+
+#define NONHOMO_TEST
 
 #define USE_TSL
 
 using namespace std;
 using namespace mfem;
+
+// TODO: There is a warning:
+/*
+ * Figure out and fix it!
+/home/kvoronin/Codes/mfem/examples/cfosls_hyperbolic_timestepping.cpp:3208:
+warning: deleting object of polymorphic class type ‘TimeSlabHyper’ which has non-virtual
+ destructor might cause undefined behavior [-Wdelete-non-virtual-dtor]
+   delete timeslab_test;
+          ^~~~~~~~~~~~~
+*/
+
+// abstract base class for time-slabbing
+class TimeSlab
+{
+protected:
+    ParMeshTSL * pmeshtsl;
+    double t_init;
+    double tau;
+    int nt;
+    bool own_pmeshtsl;
+public:
+    ~TimeSlab();
+    TimeSlab (ParMesh& Pmeshbase, double T_init, double Tau, int Nt);
+    TimeSlab (ParMeshTSL& Pmeshtsl) : pmeshtsl(&Pmeshtsl), own_pmeshtsl(false) {}
+
+    // interpretation of the input and output vectors depend on the implementation of Solve
+    // but they are related to the boundary conditions at the input and at he output
+    virtual void Solve(const Vector& vec_in, Vector& vec_out) const = 0;
+};
+
+TimeSlab::~TimeSlab()
+{
+    if (own_pmeshtsl)
+        delete pmeshtsl;
+}
+
+TimeSlab::TimeSlab(ParMesh& Pmeshbase, double T_init, double Tau, int Nt)
+    : t_init(T_init), tau(Tau), nt(Nt), own_pmeshtsl(true)
+{
+    pmeshtsl = new ParMeshTSL(Pmeshbase.GetComm(), Pmeshbase, t_init, tau, nt);
+}
+
+// specific class for time-slabbing in hyperbolic problems
+class TimeSlabHyper : public TimeSlab
+{
+private:
+    MPI_Comm comm;
+
+protected:
+    const char *formulation;
+    const char *space_for_S;
+    const char *space_for_sigma;
+    int feorder;
+    int dim;
+    int numsol;
+
+    std::vector<int> ess_bdrat_S;
+    std::vector<int> ess_bdrat_sigma;
+    //std::vector<int> block_trueoffsets;
+
+    Array<int> block_trueOffsets;
+
+    ParFiniteElementSpace * Sigma_space;
+    ParFiniteElementSpace * S_space;
+    ParFiniteElementSpace * L2_space;
+    BlockOperator *CFOSLSop;
+    BlockOperator *CFOSLSop_nobnd;
+    BlockDiagonalPreconditioner * prec;
+    MINRESSolver * solver;
+
+    std::set<std::pair<int,int> > * tdofs_link_H1;
+    std::set<std::pair<int,int> > * tdofs_link_Hdiv;
+
+    bool verbose;
+
+protected:
+    void InitProblem();
+
+
+public:
+    ~TimeSlabHyper();
+    TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt,
+                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
+    TimeSlabHyper (ParMeshTSL& Pmeshtsl,
+                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
+
+    virtual void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const override;
+};
+
+TimeSlabHyper::~TimeSlabHyper()
+{
+    delete Sigma_space;
+    delete S_space;
+    if (strcmp(space_for_S,"H1") == 0)
+        delete L2_space;
+    delete CFOSLSop;
+    delete CFOSLSop_nobnd;
+    delete prec;
+    delete solver;
+}
+
+TimeSlabHyper::TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt,
+                              const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
+    : TimeSlab(Pmeshbase, T_init, Tau, Nt),
+      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
+{
+    InitProblem();
+}
+
+TimeSlabHyper::TimeSlabHyper (ParMeshTSL& Pmeshtsl,
+                              const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
+    : TimeSlab(Pmeshtsl),
+      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
+{
+    InitProblem();
+}
+
+void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
+{
+    int input_size = CFOSLSop->Height();
+    if (bnd_tdofs_bot.Size() != input_size || bnd_tdofs_top.Size() != input_size)
+    {
+        std::cerr << "Error: sizes mismatch, input vector's size = " <<  bnd_tdofs_bot.Size()
+                  << ", output's size = " << bnd_tdofs_top << ", expected: " << input_size << "\n";
+        MFEM_ABORT("Wrong size of the input and output vectors");
+    }
+
+    int numblocks = CFOSLSop->NumRowBlocks();
+    //Array<int> block_trueOffsets(numblocks + 1);
+    //for (int i = 0; i < block_trueOffsets.Size(); ++i)
+        //block_trueOffsets[i] = block_trueoffsets[i];
+    //block_trueOffsets.Print();
+    BlockVector trueX(block_trueOffsets);
+    BlockVector trueRhs(block_trueOffsets);
+    trueX = 0.0;
+
+    Transport_test Mytest(dim, numsol);
+
+    ParGridFunction *S_exact = new ParGridFunction(S_space);
+    S_exact->ProjectCoefficient(*(Mytest.scalarS));
+
+    ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
+    Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+        ess_bdrS[i] = ess_bdrat_S[i];
+
+    Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+        ess_bdrSigma[i] = ess_bdrat_sigma[i];
+
+
+    // using an alternative way of imposing boundary conditions on the right hand side
+
+    BlockVector viewer(bnd_tdofs_bot.GetData(), block_trueOffsets);
+    BlockVector trueBnd(block_trueOffsets);
+    trueBnd = 0.0;
+    {
+        Array<int> EssBnd_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+        for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_sigma[i];
+            trueBnd.GetBlock(0)[tdof] = viewer.GetBlock(0)[tdof];
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            Array<int> EssBnd_tdofs_S;
+            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_S[i];
+                trueBnd.GetBlock(1)[tdof] = viewer.GetBlock(1)[tdof];
+            }
+        }
+    }
+
+    BlockVector trueBndCor(block_trueOffsets);
+    trueBndCor = 0.0;
+    CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
+
+    ParLinearForm *fform_nobnd = new ParLinearForm(Sigma_space);
+    fform_nobnd->Assemble();
+
+    ParLinearForm *qform_nobnd;
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        qform_nobnd = new ParLinearForm(S_space);
+    }
+
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        //if (strcmp(space_for_sigma,"Hdiv") == 0 )
+            qform_nobnd->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+        qform_nobnd->Assemble();//qform->Print();
+    }
+
+    ParLinearForm *gform_nobnd;
+    if (strcmp(formulation,"cfosls") == 0)
+    {
+        gform_nobnd = new ParLinearForm(L2_space);
+        gform_nobnd->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform_nobnd->Assemble();
+    }
+
+    BlockVector trueRhs_nobnd(block_trueOffsets);
+    trueRhs_nobnd = 0.0;
+
+    if (strcmp(space_for_S,"H1") == 0)
+        qform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(1));
+    gform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(numblocks - 1));
+
+    BlockVector trueRhs2(block_trueOffsets);
+    trueRhs2 = trueRhs_nobnd;
+    trueRhs2 -= trueBndCor;
+
+    // TODO: this is just for faster integration.
+    // TODO: After checks this can be everywhere replaced by trueRhs2
+    trueRhs = trueRhs2;
+
+    {
+        Array<int> EssBnd_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+        for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_sigma[i];
+            trueRhs2.GetBlock(0)[tdof] = trueBnd.GetBlock(0)[tdof];
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            Array<int> EssBnd_tdofs_S;
+            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_S[i];
+                trueRhs2.GetBlock(1)[tdof] = trueBnd.GetBlock(1)[tdof];
+            }
+        }
+    }
+
+
+    trueX = 0.0;
+
+    StopWatch chrono;
+    chrono.Clear();
+    chrono.Start();
+    solver->Mult(trueRhs2, trueX);
+    chrono.Stop();
+
+    BlockVector trueOut(bnd_tdofs_top.GetData(), block_trueOffsets);
+    trueOut = 0.0;
+    {
+        Array<int> EssBnd_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+        for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_sigma[i];
+            trueOut.GetBlock(0)[tdof] = trueX.GetBlock(0)[tdof];
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            Array<int> EssBnd_tdofs_S;
+            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_S[i];
+                trueOut.GetBlock(1)[tdof] = trueX.GetBlock(1)[tdof];
+            }
+        }
+    }
+
+    // TODO: here you should take link between top and bottom for tdofs
+    // TODO: and transfer the top tdofs in trueX into bottom tdofs for trueOut
+    // ...
+
+    {
+        std::set<std::pair<int,int> >::iterator it;
+
+        for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+        {
+            int tdof_bot = it->first;
+            int tdof_top = it->second;
+            trueOut.GetBlock(0)[tdof_bot] = trueX.GetBlock(0)[tdof_top];
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+            {
+                int tdof_bot = it->first;
+                int tdof_top = it->second;
+                trueOut.GetBlock(1)[tdof_bot] = trueX.GetBlock(1)[tdof_top];
+            }
+        }
+
+    }
+
+    if (verbose)
+    {
+       if (solver->GetConverged())
+          std::cout << "MINRES converged in " << solver->GetNumIterations()
+                    << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
+       else
+          std::cout << "MINRES did not converge in " << solver->GetNumIterations()
+                    << " iterations. Residual norm is " << solver->GetFinalNorm() << ".\n";
+       std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
+    }
+
+
+    // checking boundary conditions
+    Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+    sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+    Array<int> EssBnd_tdofs_sigma;
+    Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+    for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+    {
+        int tdof = EssBnd_tdofs_sigma[i];
+        double value_ex = sigma_exact_truedofs[tdof];
+        double value_com = trueX.GetBlock(0)[tdof];
+
+        if (fabs(value_ex - value_com) > ZEROTOL)
+        {
+            std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                      << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+            std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(0)[tdof] << "\n";
+        }
+    }
+
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+    {
+        Vector S_exact_truedofs(S_space->TrueVSize());
+        S_exact->ParallelProject(S_exact_truedofs);
+
+        Array<int> EssBnd_tdofs_S;
+        S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+        for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_S[i];
+            double value_ex = S_exact_truedofs[tdof];
+            double value_com = trueX.GetBlock(1)[tdof];
+
+            if (fabs(value_ex - value_com) > ZEROTOL)
+            {
+                std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
+                          << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(1)[tdof] << "\n";
+            }
+        }
+    }
+
+
+    ParGridFunction * sigma = new ParGridFunction(Sigma_space);
+    sigma->Distribute(&(trueX.GetBlock(0)));
+
+    ParGridFunction * S = new ParGridFunction(S_space);
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+        S->Distribute(&(trueX.GetBlock(1)));
+    else // no S in the formulation
+    {
+        ParBilinearForm *Cblock(new ParBilinearForm(S_space));
+        Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+        Cblock->Assemble();
+        Cblock->Finalize();
+        HypreParMatrix * C = Cblock->ParallelAssemble();
+
+        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
+        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+        Bblock->Assemble();
+        Bblock->Finalize();
+        HypreParMatrix * B = Bblock->ParallelAssemble();
+        Vector bTsigma(C->Height());
+        B->Mult(trueX.GetBlock(0),bTsigma);
+
+        Vector trueS(C->Height());
+
+        CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+        S->Distribute(trueS);
+    }
+
+    // 13. Extract the parallel grid function corresponding to the finite element
+    //     approximation X. This is the local solution on each processor. Compute
+    //     L2 error norms.
+
+    int order_quad = max(2, 2*feorder+1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i=0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+
+    double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
+    double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmeshtsl, irs);
+    if (verbose)
+        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
+
+    DiscreteLinearOperator Div(Sigma_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(*sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmeshtsl, irs);
+
+    if (verbose)
+    {
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+    }
+
+    if (verbose)
+    {
+        cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
+        cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
+                  << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
+    }
+
+    // Computing error for S
+
+    double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
+    double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmeshtsl, irs);
+    if (verbose)
+    {
+        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                     err_S / norm_S << "\n";
+    }
+
+    if (strcmp(space_for_S,"H1") == 0) // S is from H1
+    {
+        FiniteElementCollection * hcurl_coll;
+        if(dim==4)
+            hcurl_coll = new ND1_4DFECollection;
+        else
+            hcurl_coll = new ND_FECollection(feorder+1, dim);
+        ParFiniteElementSpace* N_space = new ParFiniteElementSpace(pmeshtsl, hcurl_coll);
+
+        DiscreteLinearOperator Grad(S_space, N_space);
+        Grad.AddDomainInterpolator(new GradientInterpolator());
+        ParGridFunction GradS(N_space);
+        Grad.Assemble();
+        Grad.Mult(*S, GradS);
+
+        if (numsol != -34 && verbose)
+            std::cout << "For this norm we are grad S for S from numsol = -34 \n";
+        VectorFunctionCoefficient GradS_coeff(dim, uFunTest_ex_gradxt);
+        double err_GradS = GradS.ComputeL2Error(GradS_coeff, irs);
+        double norm_GradS = ComputeGlobalLpNorm(2, GradS_coeff, *pmeshtsl, irs);
+        if (verbose)
+        {
+            std::cout << "|| Grad_h (S_h - S_ex) || / || Grad S_ex || = " <<
+                         err_GradS / norm_GradS << "\n";
+            std::cout << "|| S_h - S_ex ||_H^1 / || S_ex ||_H^1 = " <<
+                         sqrt(err_S*err_S + err_GradS*err_GradS) / sqrt(norm_S*norm_S + norm_GradS*norm_GradS) << "\n";
+        }
+
+        delete hcurl_coll;
+        delete N_space;
+    }
+
+    // Check value of functional and mass conservation
+    if (strcmp(formulation,"cfosls") == 0) // if CFOSLS, otherwise code requires some changes
+    {
+        Array<int> EssBnd_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+        Array<int> EssBnd_tdofs_S;
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+        BlockVector trueX_nobnd(block_trueOffsets);
+        trueX_nobnd = trueX;
+        BlockVector trueRhs_nobnd(block_trueOffsets);
+        trueRhs_nobnd = trueRhs;
+
+        for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_sigma[i];
+
+            trueX_nobnd.GetBlock(0)[tdof] = 0.0;
+            trueRhs_nobnd.GetBlock(0)[tdof] = 0.0;
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_S[i];
+                trueX_nobnd.GetBlock(1)[tdof] = 0.0;
+                trueRhs_nobnd.GetBlock(1)[tdof] = 0.0;
+            }
+        }
+
+        double localFunctional = 0.0;//-2.0*(trueX.GetBlock(0)*trueRhs.GetBlock(0));
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+             localFunctional += -2.0*(trueX_nobnd.GetBlock(1)*trueRhs_nobnd.GetBlock(1));
+             double f_norm = sqrt(trueRhs_nobnd.GetBlock(numblocks - 1)*trueRhs_nobnd.GetBlock(numblocks - 1));
+             localFunctional += f_norm * f_norm;;
+        }
+
+        //////////////////////////////////////
+        /*
+        ParBilinearForm *Cblock1, *Cblock2;
+        HypreParMatrix *C1, *C2;
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            Cblock1 = new ParBilinearForm(S_space);
+            Cblock1->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+            Cblock1->Assemble();
+            Cblock1->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+            Cblock1->Finalize();
+            C1 = Cblock1->ParallelAssemble();
+
+            Cblock2 = new ParBilinearForm(S_space);
+            if (strcmp(space_for_sigma,"Hdiv") == 0)
+                 Cblock2->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+            Cblock2->Assemble();
+            Cblock2->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+            Cblock2->Finalize();
+            C2 = Cblock2->ParallelAssemble();
+        }
+
+        Vector C2S(S_space->TrueVSize());
+        C2->Mult(trueX.GetBlock(1), C2S);
+
+        double local_piece2 = C2S * trueX.GetBlock(1);
+        */
+        //////////////////////////////////////
+
+
+        trueX.GetBlock(numblocks - 1) = 0.0;
+        trueRhs_nobnd = 0.0;;
+        CFOSLSop->Mult(trueX_nobnd, trueRhs_nobnd);
+        localFunctional += trueX_nobnd*(trueRhs_nobnd);
+
+        double globalFunctional;
+        MPI_Reduce(&localFunctional, &globalFunctional, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (verbose)
+        {
+            if (strcmp(space_for_S,"H1") == 0) // S is present
+            {
+                cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+                cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+                cout << "Smth is wrong with the functional computation for H1 case \n";
+                cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
+            }
+            else // if S is from L2
+            {
+                cout << "|| sigma_h - L(S_h) ||^2 + || div_h (sigma_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
+                cout << "Energy Error = " << sqrt(globalFunctional+err_div*err_div) << "\n";
+            }
+        }
+
+        ParLinearForm massform(L2_space);
+        massform.AddDomainIntegrator(new DomainLFIntegrator(*(Mytest.scalardivsigma)));
+        massform.Assemble();
+
+        double mass_loc = massform.Norml1();
+        double mass;
+        MPI_Reduce(&mass_loc, &mass, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (verbose)
+            cout << "Sum of local mass = " << mass<< "\n";
+
+        trueRhs.GetBlock(numblocks - 1) -= massform;
+        double mass_loss_loc = trueRhs.GetBlock(numblocks - 1).Norml1();
+        double mass_loss;
+        MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (verbose)
+            cout << "Sum of local mass loss = " << mass_loss << "\n";
+    }
+
+    if (verbose)
+        cout << "Computing projection errors \n";
+
+    double projection_error_sigma = sigma_exact->ComputeL2Error(*(Mytest.sigma), irs);
+
+    if(verbose)
+    {
+        cout << "|| sigma_ex - Pi_h sigma_ex || / || sigma_ex || = "
+                        << projection_error_sigma / norm_sigma << endl;
+    }
+
+    double projection_error_S = S_exact->ComputeL2Error(*(Mytest.scalarS), irs);
+
+    if(verbose)
+        cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
+                        << projection_error_S / norm_S << endl;
+}
+
+void TimeSlabHyper::InitProblem()
+{
+    dim = pmeshtsl->Dimension();
+    comm = pmeshtsl->GetComm();
+
+    // 1. Initialize MPI.
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
+
+    feorder = 0;
+
+#ifdef NONHOMO_TEST
+   if (dim == 3)
+       numsol = -33;
+   else // 4D case
+       numsol = -44;
+#else
+   if (dim == 3)
+       numsol = -3;
+   else // 4D case
+       numsol = -4;
+#endif
+
+    int prec_option = 1; //defines whether to use preconditioner or not, and which one
+    bool use_ADS;
+
+    switch (prec_option)
+    {
+    case 1: // smth simple like AMS
+        use_ADS = false;
+        break;
+    case 2: // MG
+        use_ADS = true;
+        break;
+    default: // no preconditioner
+        break;
+    }
+
+    int max_iter = 150000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
+
+    verbose = (myid == 0);
+
+    bool visualization = 0;
+
+    FiniteElementCollection *hdiv_coll;
+    ParFiniteElementSpace *Hdiv_space;
+    FiniteElementCollection *l2_coll;
+
+    if (dim == 4)
+        hdiv_coll = new RT0_4DFECollection;
+    else
+        hdiv_coll = new RT_FECollection(feorder, dim);
+
+    Hdiv_space = new ParFiniteElementSpace(pmeshtsl, hdiv_coll);
+
+    l2_coll = new L2_FECollection(feorder, dim);
+    L2_space = new ParFiniteElementSpace(pmeshtsl, l2_coll);
+
+    FiniteElementCollection *h1_coll;
+    ParFiniteElementSpace *H1_space;
+    if (dim == 3)
+        h1_coll = new H1_FECollection(feorder + 1, dim);
+    else
+    {
+        if (feorder + 1 == 1)
+            h1_coll = new LinearFECollection;
+        else if (feorder + 1 == 2)
+        {
+            if (verbose)
+                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
+            h1_coll = new QuadraticFECollection;
+        }
+        else
+            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
+    }
+    H1_space = new ParFiniteElementSpace(pmeshtsl, h1_coll);
+
+    std::set<std::pair<int,int> >::iterator it;
+
+    tdofs_link_H1 = new std::set<std::pair<int,int> >;
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::set<std::pair<int,int> > * dofs_link_H1 =
+                    CreateBotToTopDofsLink("linearH1",*H1_space, pmeshtsl->bot_to_top_bels);
+            std::cout << std::flush;
+
+            //std::cout << "dof pairs for H1: \n";
+            std::set<std::pair<int,int> >::iterator it;
+            for ( it = dofs_link_H1->begin(); it != dofs_link_H1->end(); it++ )
+            {
+                //std::cout << "<" << it->first << ", " << it->second << "> \n";
+                int tdof1 = H1_space->GetLocalTDofNumber(it->first);
+                int tdof2 = H1_space->GetLocalTDofNumber(it->second);
+                //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                if (tdof1 * tdof2 < 0)
+                    MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+                if (tdof1 > -1)
+                    tdofs_link_H1->insert(std::pair<int,int>(tdof1, tdof2));
+                else
+                    std::cout << "Ignored dofs pair which are not own tdofs \n";
+            }
+        }
+        MPI_Barrier(comm);
+    } // end fo loop over all processors, one after another
+
+    if (verbose)
+         std::cout << "Drawing in H1 case \n";
+
+    ParGridFunction * testfullH1 = new ParGridFunction(H1_space);
+    FunctionCoefficient testH1_coeff(testH1fun);
+    testfullH1->ProjectCoefficient(testH1_coeff);
+    Vector testfullH1_tdofs(H1_space->TrueVSize());
+    testfullH1->ParallelProject(testfullH1_tdofs);
+
+    Vector testH1_bot_tdofs(H1_space->TrueVSize());
+    testH1_bot_tdofs = 0.0;
+
+    for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+    {
+        testH1_bot_tdofs[it->first] = testfullH1_tdofs[it->first];
+    }
+
+    ParGridFunction * testH1_bot = new ParGridFunction(H1_space);
+    testH1_bot->Distribute(&testH1_bot_tdofs);
+
+    Vector testH1_top_tdofs(H1_space->TrueVSize());
+    testH1_top_tdofs = 0.0;
+
+    //std::set<std::pair<int,int> >::iterator it;
+    for ( it = tdofs_link_H1->begin(); it != tdofs_link_H1->end(); it++ )
+    {
+        testH1_top_tdofs[it->second] = testfullH1_tdofs[it->second];
+    }
+
+    ParGridFunction * testH1_top = new ParGridFunction(H1_space);
+    testH1_top->Distribute(&testH1_top_tdofs);
+
+    if (visualization && dim < 4)
+    {
+        if (verbose)
+             std::cout << "Sending to GLVis in H1 case \n";
+
+        char vishost[] = "localhost";
+        int  visport   = 19916;
+        socketstream u_sock(vishost, visport);
+        u_sock << "parallel " << num_procs << " " << myid << "\n";
+        u_sock.precision(8);
+        u_sock << "solution\n" << *pmeshtsl << *testfullH1 << "window_title 'testfullH1'"
+               << endl;
+
+        socketstream ubot_sock(vishost, visport);
+        ubot_sock << "parallel " << num_procs << " " << myid << "\n";
+        ubot_sock.precision(8);
+        ubot_sock << "solution\n" << *pmeshtsl << *testH1_bot << "window_title 'testH1bot'"
+               << endl;
+
+        socketstream utop_sock(vishost, visport);
+        utop_sock << "parallel " << num_procs << " " << myid << "\n";
+        utop_sock.precision(8);
+        utop_sock << "solution\n" << *pmeshtsl << *testH1_top << "window_title 'testH1top'"
+               << endl;
+    }
+
+
+    tdofs_link_Hdiv = new std::set<std::pair<int,int> >;
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::set<std::pair<int,int> > * dofs_link_RT0 =
+                       CreateBotToTopDofsLink("RT0",*Hdiv_space, pmeshtsl->bot_to_top_bels);
+            std::cout << std::flush;
+
+            //std::cout << "dof pairs for Hdiv: \n";
+            std::set<std::pair<int,int> >::iterator it;
+            for ( it = dofs_link_RT0->begin(); it != dofs_link_RT0->end(); it++ )
+            {
+                //std::cout << "<" << it->first << ", " << it->second << "> \n";
+                int tdof1 = Hdiv_space->GetLocalTDofNumber(it->first);
+                int tdof2 = Hdiv_space->GetLocalTDofNumber(it->second);
+                //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
+                {
+                    //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
+                    MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+                }
+
+                if (tdof1 > -1)
+                    tdofs_link_Hdiv->insert(std::pair<int,int>(tdof1, tdof2));
+                else
+                    std::cout << "Ignored a dofs pair which are not own tdofs \n";
+            }
+        }
+        MPI_Barrier(comm);
+    } // end fo loop over all processors, one after another
+
+    if (verbose)
+         std::cout << "Drawing in Hdiv case \n";
+
+    ParGridFunction * testfullHdiv = new ParGridFunction(Hdiv_space);
+    VectorFunctionCoefficient testHdiv_coeff(dim, testHdivfun);
+    testfullHdiv->ProjectCoefficient(testHdiv_coeff);
+    Vector testfullHdiv_tdofs(Hdiv_space->TrueVSize());
+    testfullHdiv->ParallelProject(testfullHdiv_tdofs);
+
+    Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
+    testHdiv_bot_tdofs = 0.0;
+
+    for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+    {
+        testHdiv_bot_tdofs[it->first] = testfullHdiv_tdofs[it->first];
+    }
+
+    ParGridFunction * testHdiv_bot = new ParGridFunction(Hdiv_space);
+    testHdiv_bot->Distribute(&testHdiv_bot_tdofs);
+
+    Vector testHdiv_top_tdofs(Hdiv_space->TrueVSize());
+    testHdiv_top_tdofs = 0.0;
+
+    for ( it = tdofs_link_Hdiv->begin(); it != tdofs_link_Hdiv->end(); it++ )
+    {
+        testHdiv_top_tdofs[it->second] = testfullHdiv_tdofs[it->second];
+    }
+
+    ParGridFunction * testHdiv_top = new ParGridFunction(Hdiv_space);
+    testHdiv_top->Distribute(&testHdiv_top_tdofs);
+
+    if (visualization && dim < 4)
+    {
+        if (verbose)
+             std::cout << "Sending to GLVis in Hdiv case \n";
+
+        char vishost[] = "localhost";
+        int  visport   = 19916;
+        socketstream u_sock(vishost, visport);
+        u_sock << "parallel " << num_procs << " " << myid << "\n";
+        u_sock.precision(8);
+        u_sock << "solution\n" << *pmeshtsl << *testfullHdiv << "window_title 'testfullHdiv'"
+               << endl;
+
+        socketstream ubot_sock(vishost, visport);
+        ubot_sock << "parallel " << num_procs << " " << myid << "\n";
+        ubot_sock.precision(8);
+        ubot_sock << "solution\n" << *pmeshtsl << *testHdiv_bot << "window_title 'testHdivbot'"
+               << endl;
+
+        socketstream utop_sock(vishost, visport);
+        utop_sock << "parallel " << num_procs << " " << myid << "\n";
+        utop_sock.precision(8);
+        utop_sock << "solution\n" << *pmeshtsl << *testHdiv_top << "window_title 'testHdivtop'"
+               << endl;
+    }
+
+    ParFiniteElementSpace *H1vec_space;
+    if (strcmp(space_for_sigma,"H1") == 0)
+        H1vec_space = new ParFiniteElementSpace(pmeshtsl, h1_coll, dim, Ordering::byVDIM);
+
+    if (strcmp(space_for_sigma,"Hdiv") == 0)
+        Sigma_space = Hdiv_space;
+    else
+        Sigma_space = H1vec_space;
+
+    if (strcmp(space_for_S,"H1") == 0)
+        S_space = H1_space;
+    else // "L2"
+        S_space = L2_space;
+
+    HYPRE_Int dimR = Hdiv_space->GlobalTrueVSize();
+    HYPRE_Int dimH = H1_space->GlobalTrueVSize();
+    HYPRE_Int dimHvec;
+    if (strcmp(space_for_sigma,"H1") == 0)
+        dimHvec = H1vec_space->GlobalTrueVSize();
+    HYPRE_Int dimW = L2_space->GlobalTrueVSize();
+
+    if (verbose)
+    {
+       std::cout << "***********************************************************\n";
+       std::cout << "dim H(div)_h = " << dimR << ", ";
+       if (strcmp(space_for_sigma,"H1") == 0)
+           std::cout << "dim H1vec_h = " << dimHvec << ", ";
+       std::cout << "dim H1_h = " << dimH << ", ";
+       std::cout << "dim L2_h = " << dimW << "\n";
+       std::cout << "Spaces we use: \n";
+       if (strcmp(space_for_sigma,"Hdiv") == 0)
+           std::cout << "H(div)";
+       else
+           std::cout << "H1vec";
+       if (strcmp(space_for_S,"H1") == 0)
+           std::cout << " x H1";
+       if (strcmp(formulation,"cfosls") == 0)
+           std::cout << " x L2 \n";
+       std::cout << "***********************************************************\n";
+    }
+
+    // 7. Define the two BlockStructure of the problem.  block_offsets is used
+    //    for Vector based on dof (like ParGridFunction or ParLinearForm),
+    //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
+    //    for the rhs and solution of the linear system).  The offsets computed
+    //    here are local to the processor.
+    int numblocks = 1;
+
+    if (strcmp(space_for_S,"H1") == 0)
+        numblocks++;
+    if (strcmp(formulation,"cfosls") == 0)
+        numblocks++;
+
+    if (verbose)
+        std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
+
+    Array<int> block_offsets(numblocks + 1); // number of variables + 1
+    int tempblknum = 0;
+    block_offsets[0] = 0;
+    tempblknum++;
+    block_offsets[tempblknum] = Sigma_space->GetVSize();
+    tempblknum++;
+
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        block_offsets[tempblknum] = H1_space->GetVSize();
+        tempblknum++;
+    }
+    if (strcmp(formulation,"cfosls") == 0)
+    {
+        block_offsets[tempblknum] = L2_space->GetVSize();
+        tempblknum++;
+    }
+    block_offsets.PartialSum();
+
+    //Array<int> block_trueOffsets(numblocks + 1); // number of variables + 1
+    block_trueOffsets.SetSize(numblocks + 1); // number of variables + 1
+    tempblknum = 0;
+    block_trueOffsets[0] = 0;
+    tempblknum++;
+    block_trueOffsets[tempblknum] = Sigma_space->TrueVSize();
+    tempblknum++;
+
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        block_trueOffsets[tempblknum] = H1_space->TrueVSize();
+        tempblknum++;
+    }
+    if (strcmp(formulation,"cfosls") == 0)
+    {
+        block_trueOffsets[tempblknum] = L2_space->TrueVSize();
+        tempblknum++;
+    }
+    block_trueOffsets.PartialSum();
+
+    //block_trueoffsets.resize(numblocks + 1);
+    //for (int i = 0; i < block_trueOffsets.Size(); ++i)
+        //block_trueoffsets[i] = block_trueOffsets[i];
+
+    BlockVector x(block_offsets), rhs(block_offsets);
+    BlockVector trueX(block_trueOffsets);
+    BlockVector trueRhs(block_trueOffsets);
+    x = 0.0;
+    rhs = 0.0;
+    trueX = 0.0;
+    trueRhs = 0.0;
+
+    Transport_test Mytest(dim, numsol);
+
+    ParGridFunction *S_exact = new ParGridFunction(S_space);
+    S_exact->ProjectCoefficient(*(Mytest.scalarS));
+
+    ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
+    x.GetBlock(0) = *sigma_exact;
+    x.GetBlock(1) = *S_exact;
+
+   // 8. Define the coefficients, analytical solution, and rhs of the PDE.
+   ConstantCoefficient zero(.0);
+
+   //----------------------------------------------------------
+   // Setting boundary conditions.
+   //----------------------------------------------------------
+
+   ess_bdrat_S.resize(pmeshtsl->bdr_attributes.Max());
+   for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+       ess_bdrat_S[i] = 0;
+   if (strcmp(space_for_S,"H1") == 0)
+       ess_bdrat_S[0] = 1; // t = 0
+
+   ess_bdrat_sigma.resize(pmeshtsl->bdr_attributes.Max());
+   for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+       ess_bdrat_sigma[i] = 0;
+   if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
+       ess_bdrat_sigma[0] = 1;
+
+   Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
+   for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+       ess_bdrS[i] = ess_bdrat_S[i];
+
+   /*
+   ess_bdrS = 0;
+   if (strcmp(space_for_S,"H1") == 0)
+       ess_bdrS[0] = 1; // t = 0
+   */
+   Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+   for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+       ess_bdrSigma[i] = ess_bdrat_sigma[i];
+   /*
+   ess_bdrSigma = 0;
+   if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
+   {
+       ess_bdrSigma[0] = 1;
+   }
+   */
+
+   if (verbose)
+   {
+       std::cout << "Boundary conditions: \n";
+       std::cout << "ess bdr Sigma: \n";
+       ess_bdrSigma.Print(std::cout, pmeshtsl->bdr_attributes.Max());
+       std::cout << "ess bdr S: \n";
+       ess_bdrS.Print(std::cout, pmeshtsl->bdr_attributes.Max());
+   }
+   //-----------------------
+
+   // 9. Define the parallel grid function and parallel linear forms, solution
+   //    vector and rhs.
+
+   ParLinearForm *fform = new ParLinearForm(Sigma_space);
+
+   fform->Assemble();
+
+   ParLinearForm *qform;
+   if (strcmp(space_for_S,"H1") == 0)
+   {
+       qform = new ParLinearForm(S_space);
+       qform->Update(S_space, rhs.GetBlock(1), 0);
+   }
+
+   if (strcmp(space_for_S,"H1") == 0)
+   {
+       //if (strcmp(space_for_sigma,"Hdiv") == 0 )
+           qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+       qform->Assemble();//qform->Print();
+   }
+
+   ParLinearForm *gform;
+   if (strcmp(formulation,"cfosls") == 0)
+   {
+       gform = new ParLinearForm(L2_space);
+       gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+       gform->Assemble();
+   }
+
+   // 10. Assemble the finite element matrices for the CFOSLS operator  A
+   //     where:
+
+   ParBilinearForm *Ablock(new ParBilinearForm(Sigma_space));
+   HypreParMatrix *A;
+   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   {
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       else // sigma is from H1vec
+           Ablock->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+   }
+   else // "L2"
+   {
+       Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+ #ifdef REGULARIZE_A
+       if (verbose)
+           std::cout << "regularization is ON \n";
+       double h_min, h_max, kappa_min, kappa_max;
+       pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+       if (verbose)
+           std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+       double reg_param;
+       reg_param = 0.1 * h_min * h_min;
+       if (verbose)
+           std::cout << "regularization parameter: " << reg_param << "\n";
+       ConstantCoefficient reg_coeff(reg_param);
+       Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+       //Ablock->AddDomainIntegrator(new DivDivIntegrator(reg_coeff)); // doesn't change much in the iteration count
+ #endif
+   }
+   Ablock->Assemble();
+   Ablock->EliminateEssentialBC(ess_bdrSigma, x.GetBlock(0), *fform);
+   Ablock->Finalize();
+   A = Ablock->ParallelAssemble();
+
+   ParBilinearForm *Ablock_nobnd(new ParBilinearForm(Sigma_space));
+   HypreParMatrix *A_nobnd;
+   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   {
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator);
+       else // sigma is from H1vec
+           Ablock_nobnd->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+   }
+   else // "L2"
+   {
+       Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+ #ifdef REGULARIZE_A
+       if (verbose)
+           std::cout << "regularization is ON \n";
+       double h_min, h_max, kappa_min, kappa_max;
+       pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+       if (verbose)
+           std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+       double reg_param;
+       reg_param = 0.1 * h_min * h_min;
+       if (verbose)
+           std::cout << "regularization parameter: " << reg_param << "\n";
+       ConstantCoefficient reg_coeff(reg_param);
+       Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+ #endif
+   }
+   Ablock_nobnd->Assemble();
+   Ablock_nobnd->Finalize();
+   A_nobnd = Ablock_nobnd->ParallelAssemble();
+
+
+   /*
+   if (verbose)
+       std::cout << "Checking the A matrix \n";
+
+   MPI_Finalize();
+   return 0;
+   */
+
+   //---------------
+   //  C Block:
+   //---------------
+
+   ParBilinearForm *Cblock;
+   HypreParMatrix *C;
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       Cblock = new ParBilinearForm(S_space);
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+           if (strcmp(space_for_sigma,"Hdiv") == 0)
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+       }
+       else // "L2" & !eliminateS
+       {
+           Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+       }
+       Cblock->Assemble();
+       Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+       Cblock->Finalize();
+       C = Cblock->ParallelAssemble();
+   }
+
+   ParBilinearForm *Cblock_nobnd;
+   HypreParMatrix *C_nobnd;
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       Cblock_nobnd = new ParBilinearForm(S_space);
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+           if (strcmp(space_for_sigma,"Hdiv") == 0)
+                Cblock_nobnd->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+       }
+       else // "L2" & !eliminateS
+       {
+           Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+       }
+       Cblock_nobnd->Assemble();
+       Cblock_nobnd->Finalize();
+       C_nobnd = Cblock_nobnd->ParallelAssemble();
+   }
+
+   //---------------
+   //  B Block:
+   //---------------
+
+   ParMixedBilinearForm *Bblock;
+   HypreParMatrix *B;
+   HypreParMatrix *BT;
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       Bblock = new ParMixedBilinearForm(Sigma_space, S_space);
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+       {
+           //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+       }
+       else // sigma is from H1
+           Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+       Bblock->Assemble();
+       Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
+       Bblock->EliminateTestDofs(ess_bdrS);
+       Bblock->Finalize();
+
+       B = Bblock->ParallelAssemble();
+       //*B *= -1.;
+       BT = B->Transpose();
+   }
+
+   ParMixedBilinearForm *Bblock_nobnd;
+   HypreParMatrix *B_nobnd;
+   HypreParMatrix *BT_nobnd;
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       Bblock_nobnd = new ParMixedBilinearForm(Sigma_space, S_space);
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+       {
+           //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+           Bblock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+       }
+       else // sigma is from H1
+           Bblock_nobnd->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+       Bblock_nobnd->Assemble();
+       Bblock_nobnd->Finalize();
+
+       B_nobnd = Bblock_nobnd->ParallelAssemble();
+       //*B *= -1.;
+       BT_nobnd = B_nobnd->Transpose();
+   }
+
+   //----------------
+   //  D Block:
+   //-----------------
+
+   HypreParMatrix *D;
+   HypreParMatrix *DT;
+
+   if (strcmp(formulation,"cfosls") == 0)
+   {
+      ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space, L2_space));
+      if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+        Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+      else // sigma is from H1vec
+        Dblock->AddDomainIntegrator(new VectorDivergenceIntegrator);
+      Dblock->Assemble();
+      Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
+      Dblock->Finalize();
+      D = Dblock->ParallelAssemble();
+      DT = D->Transpose();
+   }
+
+   HypreParMatrix *D_nobnd;
+   HypreParMatrix *DT_nobnd;
+
+   if (strcmp(formulation,"cfosls") == 0)
+   {
+      ParMixedBilinearForm *Dblock_nobnd(new ParMixedBilinearForm(Sigma_space, L2_space));
+      if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+        Dblock_nobnd->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+      else // sigma is from H1vec
+        Dblock_nobnd->AddDomainIntegrator(new VectorDivergenceIntegrator);
+      Dblock_nobnd->Assemble();
+      Dblock_nobnd->Finalize();
+      D_nobnd = Dblock_nobnd->ParallelAssemble();
+      DT_nobnd = D_nobnd->Transpose();
+   }
+
+   //=======================================================
+   // Setting up the block system Matrix
+   //-------------------------------------------------------
+
+  tempblknum = 0;
+  fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+  tempblknum++;
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+    qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+    tempblknum++;
+  }
+  if (strcmp(formulation,"cfosls") == 0)
+     gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+
+  CFOSLSop = new BlockOperator(block_trueOffsets);
+
+  //block_trueOffsets.Print();
+
+  CFOSLSop->SetBlock(0,0, A);
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+      CFOSLSop->SetBlock(0,1, BT);
+      CFOSLSop->SetBlock(1,0, B);
+      CFOSLSop->SetBlock(1,1, C);
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+        CFOSLSop->SetBlock(0,2, DT);
+        CFOSLSop->SetBlock(2,0, D);
+      }
+  }
+  else // no S
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+        CFOSLSop->SetBlock(0,1, DT);
+        CFOSLSop->SetBlock(1,0, D);
+      }
+
+  CFOSLSop_nobnd = new BlockOperator(block_trueOffsets);
+  CFOSLSop_nobnd->SetBlock(0,0, A_nobnd);
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+      CFOSLSop_nobnd->SetBlock(0,1, BT_nobnd);
+      CFOSLSop_nobnd->SetBlock(1,0, B_nobnd);
+      CFOSLSop_nobnd->SetBlock(1,1, C_nobnd);
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+        CFOSLSop_nobnd->SetBlock(0,2, DT_nobnd);
+        CFOSLSop_nobnd->SetBlock(2,0, D_nobnd);
+      }
+  }
+  else // no S
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+        CFOSLSop_nobnd->SetBlock(0,1, DT_nobnd);
+        CFOSLSop_nobnd->SetBlock(1,0, D_nobnd);
+      }
+   if (verbose)
+       cout << "Final saddle point matrix assembled \n";
+   MPI_Barrier(MPI_COMM_WORLD);
+
+
+   // checking an alternative way of inposing boundary conditions on the right hand side
+   BlockVector trueBnd(block_trueOffsets);
+   trueBnd = 0.0;
+   {
+       Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+       sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+       Array<int> EssBnd_tdofs_sigma;
+       Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+       for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+       {
+           int tdof = EssBnd_tdofs_sigma[i];
+           trueBnd.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+       }
+
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Array<int> EssBnd_tdofs_S;
+           Vector S_exact_truedofs(S_space->TrueVSize());
+           S_exact->ParallelProject(S_exact_truedofs);
+           S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+           for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+           {
+               int tdof = EssBnd_tdofs_S[i];
+               trueBnd.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+           }
+       }
+   }
+   BlockVector trueBndCor(block_trueOffsets);
+   trueBndCor = 0.0;
+   CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
+   /* works only for H1
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       BT_nobnd->Mult(trueBnd.GetBlock(1), trueBndCor.GetBlock(0));
+       C_nobnd->Mult(trueBnd.GetBlock(1), trueBndCor.GetBlock(1));
+   }
+   */
+
+   ParLinearForm *fform_nobnd = new ParLinearForm(Sigma_space);
+   fform_nobnd->Assemble();
+
+   ParLinearForm *qform_nobnd;
+   if (strcmp(space_for_S,"H1") == 0)
+   {
+       qform_nobnd = new ParLinearForm(S_space);
+   }
+
+   if (strcmp(space_for_S,"H1") == 0)
+   {
+       //if (strcmp(space_for_sigma,"Hdiv") == 0 )
+           qform_nobnd->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+       qform_nobnd->Assemble();//qform->Print();
+   }
+
+   ParLinearForm *gform_nobnd;
+   if (strcmp(formulation,"cfosls") == 0)
+   {
+       gform_nobnd = new ParLinearForm(L2_space);
+       gform_nobnd->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+       gform_nobnd->Assemble();
+   }
+
+   BlockVector trueRhs_nobnd(block_trueOffsets);
+   trueRhs_nobnd = 0.0;
+
+   if (strcmp(space_for_S,"H1") == 0)
+       qform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(1));
+   gform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(numblocks - 1));
+
+   BlockVector trueRhs2(block_trueOffsets);
+   trueRhs2 = trueRhs_nobnd;
+   trueRhs2 -= trueBndCor;
+
+   {
+       Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+       sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+       Array<int> EssBnd_tdofs_sigma;
+       Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+       for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+       {
+           int tdof = EssBnd_tdofs_sigma[i];
+           trueRhs2.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+       }
+
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Array<int> EssBnd_tdofs_S;
+           Vector S_exact_truedofs(S_space->TrueVSize());
+           S_exact->ParallelProject(S_exact_truedofs);
+           S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+           for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+           {
+               int tdof = EssBnd_tdofs_S[i];
+               trueRhs2.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+           }
+       }
+   }
+
+   BlockVector trueRhs_diff(block_trueOffsets);
+   trueRhs_diff = trueRhs;
+   trueRhs_diff -= trueRhs2;
+
+   //std::cout << "trueRhs block 0 \n";
+   //trueRhs_diff.GetBlock(0).Print();
+   std::cout << "|| trueRhs - trueRhs2 || block 0 = " << trueRhs_diff.GetBlock(0).Norml2() /
+                sqrt (trueRhs_diff.GetBlock(0).Size()) << "\n";
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+   {
+       //std::cout << "trueRhs block 1 \n";
+       //trueRhs_diff.GetBlock(1).Print();
+       std::cout << "|| trueRhs - trueRhs2 || block 1 = " << trueRhs_diff.GetBlock(1).Norml2() /
+                    sqrt (trueRhs_diff.GetBlock(1).Size()) << "\n";
+   }
+   //std::cout << "trueRhs block 2 \n";
+   //trueRhs_diff.GetBlock(numblocks - 1).Print();
+   std::cout << "|| trueRhs - trueRhs2 || block " << numblocks - 1 << " = " <<
+                trueRhs_diff.GetBlock(numblocks - 1).Norml2() /
+                sqrt (trueRhs_diff.GetBlock(numblocks - 1).Size()) << "\n";
+
+   std::cout << "|| trueRhs - trueRhs2 || full = " << trueRhs_diff.Norml2() / sqrt (trueRhs_diff.Size()) << "\n";
+
+   //MPI_Finalize();
+   //return 0;
+
+
+   //=======================================================
+   // Setting up the preconditioner
+   //-------------------------------------------------------
+
+   // Construct the operators for preconditioner
+   if (verbose)
+   {
+       std::cout << "Block diagonal preconditioner: \n";
+       if (use_ADS)
+           std::cout << "ADS(A) for H(div) \n";
+       else
+            std::cout << "Diag(A) for H(div) or H1vec \n";
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+           std::cout << "BoomerAMG(C) for H1 \n";
+       if (strcmp(formulation,"cfosls") == 0 )
+       {
+           std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+       }
+       std::cout << "\n";
+   }
+
+   HypreParMatrix *Schur;
+   if (strcmp(formulation,"cfosls") == 0 )
+   {
+      HypreParMatrix *AinvDt = D->Transpose();
+      HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(),
+                                           A->GetRowStarts());
+      A->GetDiag(*Ad);
+      AinvDt->InvScaleRows(*Ad);
+      Schur = ParMult(D, AinvDt);
+   }
+
+   Solver * invA;
+   if (use_ADS)
+       invA = new HypreADS(*A, Sigma_space);
+   else // using Diag(A);
+        invA = new HypreDiagScale(*A);
+
+   invA->iterative_mode = false;
+
+   Solver * invC;
+   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   {
+       invC = new HypreBoomerAMG(*C);
+       ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+       ((HypreBoomerAMG*)invC)->iterative_mode = false;
+   }
+
+   Solver * invS;
+   if (strcmp(formulation,"cfosls") == 0 )
+   {
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+   }
+
+   prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+   if (prec_option > 0)
+   {
+       tempblknum = 0;
+       prec->SetDiagonalBlock(tempblknum, invA);
+       tempblknum++;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           prec->SetDiagonalBlock(tempblknum, invC);
+           tempblknum++;
+       }
+       if (strcmp(formulation,"cfosls") == 0)
+            prec->SetDiagonalBlock(tempblknum, invS);
+   }
+   else
+       if (verbose)
+           cout << "No preconditioner is used. \n";
+
+   // 12. Solve the linear system with MINRES.
+   //     Check the norm of the unpreconditioned residual.
+
+   solver = new MINRESSolver(MPI_COMM_WORLD);
+   solver->SetAbsTol(atol);
+   solver->SetRelTol(rtol);
+   solver->SetMaxIter(max_iter);
+   solver->SetOperator(*CFOSLSop);
+   if (prec_option > 0)
+        solver->SetPreconditioner(*prec);
+   solver->SetPrintLevel(0);
+}
 
 int main(int argc, char *argv[])
 {
@@ -33,7 +1582,7 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
    int numsol          = 0;
 
-   int ser_ref_levels  = 2;
+   int ser_ref_levels  = 3;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -45,7 +1594,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "H1";     // "H1" or "L2"
+   const char *space_for_S = "L2";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -161,10 +1710,17 @@ int main(int argc, char *argv[])
    double rtol = 1e-12;//1e-7;//1e-9;
    double atol = 1e-14;//1e-9;//1e-12;
 
+#ifdef NONHOMO_TEST
+   if (nDimensions == 3)
+       numsol = -33;
+   else // 4D case
+       numsol = -44;
+#else
    if (nDimensions == 3)
        numsol = -3;
    else // 4D case
        numsol = -4;
+#endif
 
 #ifdef USE_TSL
    if (verbose)
@@ -222,7 +1778,7 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
+   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt);
 
    //delete pmeshbase;
    //delete pmesh;
@@ -366,6 +1922,7 @@ int main(int argc, char *argv[])
    }
    H1_space = new ParFiniteElementSpace(pmesh, h1_coll);
 
+#ifdef USE_TSL
    std::set<std::pair<int,int> >::iterator it;
 
    std::set<std::pair<int,int> > * tdofs_link_H1 = new std::set<std::pair<int,int> >;
@@ -544,6 +2101,7 @@ int main(int argc, char *argv[])
        utop_sock << "solution\n" << *pmesh << *testHdiv_top << "window_title 'testHdivtop'"
               << endl;
    }
+#endif
 
    ParFiniteElementSpace *H1vec_space;
    if (strcmp(space_for_sigma,"H1") == 0)
@@ -691,7 +2249,7 @@ int main(int argc, char *argv[])
       ess_bdrS[0] = 1; // t = 0
   Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
   ess_bdrSigma = 0;
-  if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr condition for sigma at t = 0
+  if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
   {
       ess_bdrSigma[0] = 1;
   }
@@ -783,6 +2341,42 @@ int main(int argc, char *argv[])
   Ablock->Finalize();
   A = Ablock->ParallelAssemble();
 
+  ParBilinearForm *Ablock_nobnd(new ParBilinearForm(Sigma_space));
+  HypreParMatrix *A_nobnd;
+  if (strcmp(space_for_S,"H1") == 0) // S is from H1
+  {
+      if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+          Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator);
+      else // sigma is from H1vec
+          Ablock_nobnd->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+  }
+  else // "L2"
+  {
+      if (eliminateS) // S is eliminated
+          Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+      else // S is present
+          Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator);
+#ifdef REGULARIZE_A
+      if (verbose)
+          std::cout << "regularization is ON \n";
+      double h_min, h_max, kappa_min, kappa_max;
+      pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+      if (verbose)
+          std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+      double reg_param;
+      reg_param = 0.1 * h_min * h_min;
+      if (verbose)
+          std::cout << "regularization parameter: " << reg_param << "\n";
+      ConstantCoefficient reg_coeff(reg_param);
+      Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+#endif
+  }
+  Ablock_nobnd->Assemble();
+  Ablock_nobnd->Finalize();
+  A_nobnd = Ablock_nobnd->ParallelAssemble();
+
+
   /*
   if (verbose)
       std::cout << "Checking the A matrix \n";
@@ -816,6 +2410,26 @@ int main(int argc, char *argv[])
       C = Cblock->ParallelAssemble();
   }
 
+  ParBilinearForm *Cblock_nobnd;
+  HypreParMatrix *C_nobnd;
+  if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+  {
+      Cblock_nobnd = new ParBilinearForm(S_space);
+      if (strcmp(space_for_S,"H1") == 0)
+      {
+          Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+          if (strcmp(space_for_sigma,"Hdiv") == 0)
+               Cblock_nobnd->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+      }
+      else // "L2" & !eliminateS
+      {
+          Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+      }
+      Cblock_nobnd->Assemble();
+      Cblock_nobnd->Finalize();
+      C_nobnd = Cblock_nobnd->ParallelAssemble();
+  }
+
   //---------------
   //  B Block:
   //---------------
@@ -841,6 +2455,27 @@ int main(int argc, char *argv[])
       B = Bblock->ParallelAssemble();
       //*B *= -1.;
       BT = B->Transpose();
+  }
+
+  ParMixedBilinearForm *Bblock_nobnd;
+  HypreParMatrix *B_nobnd;
+  HypreParMatrix *BT_nobnd;
+  if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+  {
+      Bblock_nobnd = new ParMixedBilinearForm(Sigma_space, S_space);
+      if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+      {
+          //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+          Bblock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+      }
+      else // sigma is from H1
+          Bblock_nobnd->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+      Bblock_nobnd->Assemble();
+      Bblock_nobnd->Finalize();
+
+      B_nobnd = Bblock_nobnd->ParallelAssemble();
+      //*B *= -1.;
+      BT_nobnd = B_nobnd->Transpose();
   }
 
 #ifdef TESTING
@@ -921,6 +2556,21 @@ int main(int argc, char *argv[])
      DT = D->Transpose();
   }
 
+  HypreParMatrix *D_nobnd;
+  HypreParMatrix *DT_nobnd;
+
+  if (strcmp(formulation,"cfosls") == 0)
+  {
+     ParMixedBilinearForm *Dblock_nobnd(new ParMixedBilinearForm(Sigma_space, L2_space));
+     if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+       Dblock_nobnd->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+     else // sigma is from H1vec
+       Dblock_nobnd->AddDomainIntegrator(new VectorDivergenceIntegrator);
+     Dblock_nobnd->Assemble();
+     Dblock_nobnd->Finalize();
+     D_nobnd = Dblock_nobnd->ParallelAssemble();
+     DT_nobnd = D_nobnd->Transpose();
+  }
 #ifdef TESTING2
   {
       MFEM_ASSERT(strcmp(formulation,"cfosls") == 0, "For TESTING2 we need gform thus cfosls formulation \n");
@@ -1015,9 +2665,168 @@ int main(int argc, char *argv[])
        CFOSLSop->SetBlock(1,0, D);
      }
 
+ BlockOperator *CFOSLSop_nobnd = new BlockOperator(block_trueOffsets);
+ CFOSLSop_nobnd->SetBlock(0,0, A_nobnd);
+ if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+ {
+     CFOSLSop_nobnd->SetBlock(0,1, BT_nobnd);
+     CFOSLSop_nobnd->SetBlock(1,0, B_nobnd);
+     CFOSLSop_nobnd->SetBlock(1,1, C_nobnd);
+     if (strcmp(formulation,"cfosls") == 0)
+     {
+       CFOSLSop_nobnd->SetBlock(0,2, DT_nobnd);
+       CFOSLSop_nobnd->SetBlock(2,0, D_nobnd);
+     }
+ }
+ else // no S
+     if (strcmp(formulation,"cfosls") == 0)
+     {
+       CFOSLSop_nobnd->SetBlock(0,1, DT_nobnd);
+       CFOSLSop_nobnd->SetBlock(1,0, D_nobnd);
+     }
   if (verbose)
       cout << "Final saddle point matrix assembled \n";
   MPI_Barrier(MPI_COMM_WORLD);
+
+
+  // checking an alternative way of inposing boundary conditions on the right hand side
+  BlockVector trueBnd(block_trueOffsets);
+  trueBnd = 0.0;
+  {
+      Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+      sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+      Array<int> EssBnd_tdofs_sigma;
+      Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+      for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+      {
+          int tdof = EssBnd_tdofs_sigma[i];
+          trueBnd.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+      }
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          Array<int> EssBnd_tdofs_S;
+          Vector S_exact_truedofs(S_space->TrueVSize());
+          S_exact->ParallelProject(S_exact_truedofs);
+          S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+          for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+          {
+              int tdof = EssBnd_tdofs_S[i];
+              trueBnd.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+          }
+      }
+  }
+  BlockVector trueBndCor(block_trueOffsets);
+  trueBndCor = 0.0;
+  CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
+  /* works only for H1
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+      BT_nobnd->Mult(trueBnd.GetBlock(1), trueBndCor.GetBlock(0));
+      C_nobnd->Mult(trueBnd.GetBlock(1), trueBndCor.GetBlock(1));
+  }
+  */
+
+  ParLinearForm *fform_nobnd = new ParLinearForm(Sigma_space);
+  fform_nobnd->Assemble();
+
+  ParLinearForm *qform_nobnd;
+  if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+  {
+      qform_nobnd = new ParLinearForm(S_space);
+  }
+
+  if (strcmp(space_for_S,"H1") == 0)
+  {
+      //if (strcmp(space_for_sigma,"Hdiv") == 0 )
+          qform_nobnd->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+      qform_nobnd->Assemble();//qform->Print();
+  }
+  else // "L2"
+  {
+      if (!eliminateS)
+      {
+          qform_nobnd->AddDomainIntegrator(new DomainLFIntegrator(zero));
+          qform_nobnd->Assemble();
+      }
+  }
+
+  ParLinearForm *gform_nobnd;
+  if (strcmp(formulation,"cfosls") == 0)
+  {
+      gform_nobnd = new ParLinearForm(L2_space);
+      gform_nobnd->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+      gform_nobnd->Assemble();
+  }
+
+  BlockVector trueRhs_nobnd(block_trueOffsets);
+  trueRhs_nobnd = 0.0;
+
+  if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+      qform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(1));
+  gform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(numblocks - 1));
+
+  BlockVector trueRhs2(block_trueOffsets);
+  trueRhs2 = trueRhs_nobnd;
+  trueRhs2 -= trueBndCor;
+
+  {
+      Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+      sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+      Array<int> EssBnd_tdofs_sigma;
+      Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+      for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+      {
+          int tdof = EssBnd_tdofs_sigma[i];
+          trueRhs2.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+      }
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          Array<int> EssBnd_tdofs_S;
+          Vector S_exact_truedofs(S_space->TrueVSize());
+          S_exact->ParallelProject(S_exact_truedofs);
+          S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+          for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+          {
+              int tdof = EssBnd_tdofs_S[i];
+              trueRhs2.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+          }
+      }
+  }
+
+  BlockVector trueRhs_diff(block_trueOffsets);
+  trueRhs_diff = trueRhs;
+  trueRhs_diff -= trueRhs2;
+
+  //std::cout << "trueRhs block 0 \n";
+  //trueRhs_diff.GetBlock(0).Print();
+  std::cout << "|| trueRhs - trueRhs2 || block 0 = " << trueRhs_diff.GetBlock(0).Norml2() /
+               sqrt (trueRhs_diff.GetBlock(0).Size()) << "\n";
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+      //std::cout << "trueRhs block 1 \n";
+      //trueRhs_diff.GetBlock(1).Print();
+      std::cout << "|| trueRhs - trueRhs2 || block 1 = " << trueRhs_diff.GetBlock(1).Norml2() /
+                   sqrt (trueRhs_diff.GetBlock(1).Size()) << "\n";
+  }
+  //std::cout << "trueRhs block 2 \n";
+  //trueRhs_diff.GetBlock(numblocks - 1).Print();
+  std::cout << "|| trueRhs - trueRhs2 || block " << numblocks - 1 << " = " <<
+               trueRhs_diff.GetBlock(numblocks - 1).Norml2() /
+               sqrt (trueRhs_diff.GetBlock(numblocks - 1).Size()) << "\n";
+
+  std::cout << "|| trueRhs - trueRhs2 || full = " << trueRhs_diff.Norml2() / sqrt (trueRhs_diff.Size()) << "\n";
+
+  //MPI_Finalize();
+  //return 0;
+
 
   //=======================================================
   // Setting up the preconditioner
@@ -1128,6 +2937,13 @@ int main(int argc, char *argv[])
 
   chrono.Clear();
   chrono.Start();
+  /*
+#ifdef NONHOMO_TEST
+  solver.Mult(trueRhs2, trueX);
+#else
+  solver.Mult(trueRhs, trueX);
+#endif
+  */
   solver.Mult(trueRhs, trueX);
   chrono.Stop();
 
@@ -1141,6 +2957,90 @@ int main(int argc, char *argv[])
                   << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
      std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
   }
+
+
+  // checking boundary conditions
+  Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+  sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+  Array<int> EssBnd_tdofs_sigma;
+  Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+  for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+  {
+      SparseMatrix A_diag;
+      A->GetDiag(A_diag);
+
+      SparseMatrix DT_diag;
+      DT->GetDiag(DT_diag);
+
+      int tdof = EssBnd_tdofs_sigma[i];
+      double value_ex = sigma_exact_truedofs[tdof];
+      double value_com = trueX.GetBlock(0)[tdof];
+
+      if (fabs(value_ex - value_com) > ZEROTOL)
+      {
+          std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                    << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+          std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(0)[tdof] << "\n";
+          std::cout << "row entries of A matrix: \n";
+          int * A_rowcols = A_diag.GetRowColumns(tdof);
+          double * A_rowentries = A_diag.GetRowEntries(tdof);
+          for (int j = 0; j < A_diag.RowSize(tdof); ++j)
+              std::cout << "(" << A_rowcols[j] << "," << A_rowentries[j] << ") ";
+          std::cout << "\n";
+
+          std::cout << "row entries of DT matrix: \n";
+          int * DT_rowcols = DT_diag.GetRowColumns(tdof);
+          double * DT_rowentries = DT_diag.GetRowEntries(tdof);
+          for (int j = 0; j < DT_diag.RowSize(tdof); ++j)
+              std::cout << "(" << DT_rowcols[j] << "," << DT_rowentries[j] << ") ";
+          std::cout << "\n";
+      }
+  }
+
+  if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+  {
+      SparseMatrix C_diag;
+      C->GetDiag(C_diag);
+
+      SparseMatrix B_diag;
+      B->GetDiag(B_diag);
+
+      Vector S_exact_truedofs(S_space->TrueVSize());
+      S_exact->ParallelProject(S_exact_truedofs);
+
+      Array<int> EssBnd_tdofs_S;
+      S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+      for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+      {
+          int tdof = EssBnd_tdofs_S[i];
+          double value_ex = S_exact_truedofs[tdof];
+          double value_com = trueX.GetBlock(1)[tdof];
+
+          if (fabs(value_ex - value_com) > ZEROTOL)
+          {
+              std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
+                        << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+              std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(1)[tdof] << "\n";
+              std::cout << "row entries of C matrix: \n";
+              int * C_rowcols = C_diag.GetRowColumns(tdof);
+              double * C_rowentries = C_diag.GetRowEntries(tdof);
+              for (int j = 0; j < C_diag.RowSize(tdof); ++j)
+                  std::cout << "(" << C_rowcols[j] << "," << C_rowentries[j] << ") ";
+              std::cout << "\n";
+              std::cout << "row entries of B matrix: \n";
+              int * B_rowcols = B_diag.GetRowColumns(tdof);
+              double * B_rowentries = B_diag.GetRowEntries(tdof);
+              for (int j = 0; j < B_diag.RowSize(tdof); ++j)
+                  std::cout << "(" << B_rowcols[j] << "," << B_rowentries[j] << ") ";
+              std::cout << "\n";
+
+          }
+      }
+  }
+
 
   ParGridFunction * sigma = new ParGridFunction(Sigma_space);
   sigma->Distribute(&(trueX.GetBlock(0)));
@@ -1254,14 +3154,77 @@ int main(int argc, char *argv[])
   // Check value of functional and mass conservation
   if (strcmp(formulation,"cfosls") == 0) // if CFOSLS, otherwise code requires some changes
   {
+      Array<int> EssBnd_tdofs_sigma;
+      Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+      Array<int> EssBnd_tdofs_S;
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+          S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+      BlockVector trueX_nobnd(block_trueOffsets);
+      trueX_nobnd = trueX;
+      BlockVector trueRhs_nobnd(block_trueOffsets);
+      trueRhs_nobnd = trueRhs;
+
+      for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+      {
+          int tdof = EssBnd_tdofs_sigma[i];
+
+          trueX_nobnd.GetBlock(0)[tdof] = 0.0;
+          trueRhs_nobnd.GetBlock(0)[tdof] = 0.0;
+      }
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+          {
+              int tdof = EssBnd_tdofs_S[i];
+              trueX_nobnd.GetBlock(1)[tdof] = 0.0;
+              trueRhs_nobnd.GetBlock(1)[tdof] = 0.0;
+          }
+      }
+
       double localFunctional = 0.0;//-2.0*(trueX.GetBlock(0)*trueRhs.GetBlock(0));
       if (strcmp(space_for_S,"H1") == 0) // S is present
-           localFunctional += -2.0*(trueX.GetBlock(1)*trueRhs.GetBlock(1));
+      {
+           localFunctional += -2.0*(trueX_nobnd.GetBlock(1)*trueRhs_nobnd.GetBlock(1));
+           double f_norm = sqrt(trueRhs_nobnd.GetBlock(numblocks - 1)*trueRhs_nobnd.GetBlock(numblocks - 1));
+           localFunctional += f_norm * f_norm;;
+      }
+
+      //////////////////////////////////////
+      /*
+      ParBilinearForm *Cblock1, *Cblock2;
+      HypreParMatrix *C1, *C2;
+      if (strcmp(space_for_S,"H1") == 0)
+      {
+          Cblock1 = new ParBilinearForm(S_space);
+          Cblock1->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+          Cblock1->Assemble();
+          Cblock1->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+          Cblock1->Finalize();
+          C1 = Cblock1->ParallelAssemble();
+
+          Cblock2 = new ParBilinearForm(S_space);
+          if (strcmp(space_for_sigma,"Hdiv") == 0)
+               Cblock2->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+          Cblock2->Assemble();
+          Cblock2->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+          Cblock2->Finalize();
+          C2 = Cblock2->ParallelAssemble();
+      }
+
+      Vector C2S(S_space->TrueVSize());
+      C2->Mult(trueX.GetBlock(1), C2S);
+
+      double local_piece2 = C2S * trueX.GetBlock(1);
+      */
+      //////////////////////////////////////
+
 
       trueX.GetBlock(numblocks - 1) = 0.0;
-      trueRhs = 0.0;;
-      CFOSLSop->Mult(trueX, trueRhs);
-      localFunctional += trueX*(trueRhs);
+      trueRhs_nobnd = 0.0;;
+      CFOSLSop->Mult(trueX_nobnd, trueRhs_nobnd);
+      localFunctional += trueX_nobnd*(trueRhs_nobnd);
 
       double globalFunctional;
       MPI_Reduce(&localFunctional, &globalFunctional, 1,
@@ -1273,7 +3236,7 @@ int main(int argc, char *argv[])
               cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
               cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
               cout << "Smth is wrong with the functional computation for H1 case \n";
-              cout << "Relative Energy Error = " << sqrt(globalFunctional+norm_div*norm_div)/norm_div << "\n";
+              cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div << "\n";
           }
           else // if S is from L2
           {
@@ -1318,6 +3281,26 @@ int main(int argc, char *argv[])
   if(verbose)
       cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                       << projection_error_S / norm_S << endl;
+
+
+  //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
+  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, formulation, space_for_S, space_for_sigma);
+
+  BlockVector Xinit(block_trueOffsets);
+  Xinit.GetBlock(0) = sigma_exact_truedofs;
+  if (strcmp(space_for_S,"H1") == 0) // S is present
+  {
+      Vector S_exact_truedofs(S_space->TrueVSize());
+      S_exact->ParallelProject(S_exact_truedofs);
+      Xinit.GetBlock(1) = S_exact_truedofs;
+  }
+
+  BlockVector Xout(block_trueOffsets);
+  Xout = 0.0;
+
+  timeslab_test->Solve(Xinit, Xout);
+
+  delete timeslab_test;
 
 
   if (visualization && nDimensions < 4)
@@ -1665,11 +3648,11 @@ void testHdivfun(const Vector& xt, Vector &res)
 
     if (xt.Size() == 3)
     {
-        res(2) = (x*x + y*y + 1.0);
+        res(2) = 1.0;//(x*x + y*y + 1.0);
     }
     if (xt.Size() == 4)
     {
-        res(3) = (x*x + y*y + z*z + 1.0);
+        res(3) = 1.0;//(x*x + y*y + z*z + 1.0);
     }
 }
 

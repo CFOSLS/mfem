@@ -5014,7 +5014,7 @@ ParMesh::~ParMesh()
 // boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
 //void ParMesh3DtoParMesh4D (MPI_Comm comm, ParMesh& mesh3d,
 //                     ParMesh& mesh4d, double tau, int Nsteps, int bnd_method, int local_method)
-ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method, int local_method)
+ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method)
     : meshbase(Meshbase), bot_to_top_bels(Meshbase.GetNE())
 {
     int num_procs, myid;
@@ -5050,7 +5050,7 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps,
     // ****************************************************************************
 
     // creating local parts of space-time mesh
-    MeshSpaceTimeCylinder_onlyArrays(Tau, Nsteps, bnd_method, local_method);
+    MeshSpaceTimeCylinder_onlyArrays(Tinit, Tau, Nsteps, bnd_method, local_method);
 
     MPI_Barrier(comm);
 
@@ -6779,7 +6779,7 @@ void ParMeshTSL::CreateInternalMeshStructure (int refine)
 // for a space-time cylinder with the given base, Nsteps * tau height in time
 // enumeration of space-time vertices: time slab after time slab
 // boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
-void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
+void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, int Nsteps,
                                               int bnd_method, int local_method)
 {
     int DimBase = meshbase.Dimension(), NumOfBaseElements = meshbase.GetNE(),
@@ -6906,7 +6906,7 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
             for ( int j = 0; j < DimBase; ++j)
             {
                 tempvert[j] = vert_coord3d[vert + j * NumOfBaseVertices];
-                tempvert[Dim-1] = tau * tslab;
+                tempvert[Dim-1] = tinit + tau * tslab;
             }
             AddVertex(tempvert);
         }
@@ -7915,6 +7915,14 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tau, int Nsteps,
         delete [] qhull_flags;
 
     return;
+}
+
+
+void ParMeshTSL::TimeShift(double shift)
+{
+    int nv = vertices.Size();
+    for (int i = 0; i < nv; i++)
+        vertices[i](spaceDim - 1) += shift;
 }
 
 
