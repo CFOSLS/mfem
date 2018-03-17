@@ -19,15 +19,10 @@
 using namespace std;
 using namespace mfem;
 
-// TODO: There is a warning:
-/*
- * Figure out and fix it!
-/home/kvoronin/Codes/mfem/examples/cfosls_hyperbolic_timestepping.cpp:3208:
-warning: deleting object of polymorphic class type ‘TimeSlabHyper’ which has non-virtual
- destructor might cause undefined behavior [-Wdelete-non-virtual-dtor]
-   delete timeslab_test;
-          ^~~~~~~~~~~~~
-*/
+// TODO: Instead of specifying tdofs_link_H1 and _Hdiv and manually choosing by if-clauses,
+// which to use for the Solve() int TimeSlab, it would be better to implement it as a block case
+// with arbitrary number of blocks. Then input and output would be BlockVectors and there will be
+// less switches
 
 // abstract base class for time-slabbing
 class TimeSlab
@@ -39,7 +34,7 @@ protected:
     int nt;
     bool own_pmeshtsl;
 public:
-    ~TimeSlab();
+    virtual ~TimeSlab();
     TimeSlab (ParMesh& Pmeshbase, double T_init, double Tau, int Nt);
     TimeSlab (ParMeshTSL& Pmeshtsl) : pmeshtsl(&Pmeshtsl), own_pmeshtsl(false) {}
 
@@ -91,6 +86,7 @@ protected:
     //std::set<std::pair<int,int> > * tdofs_link_H1;
     //std::set<std::pair<int,int> > * tdofs_link_Hdiv;
 
+    int init_cond_size;
     std::vector<std::pair<int,int> > tdofs_link_H1;
     std::vector<std::pair<int,int> > tdofs_link_Hdiv;
 
@@ -108,6 +104,14 @@ public:
                    const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
 
     virtual void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const override;
+    int GetInitCondSize() {return init_cond_size;}
+    std::vector<std::pair<int,int> > * GetTdofsLink()
+    {
+        if (strcmp(space_for_S,"H1") == 0)
+            return &tdofs_link_H1;
+        else
+            return &tdofs_link_Hdiv;
+    }
 };
 
 TimeSlabHyper::~TimeSlabHyper()
@@ -140,11 +144,18 @@ TimeSlabHyper::TimeSlabHyper (ParMeshTSL& Pmeshtsl,
 
 void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
 {
-    int input_size = CFOSLSop->Height();
-    if (bnd_tdofs_bot.Size() != input_size || bnd_tdofs_top.Size() != input_size)
+    Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+        ess_bdrS[i] = ess_bdrat_S[i];
+
+    Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+        ess_bdrSigma[i] = ess_bdrat_sigma[i];
+
+    if (bnd_tdofs_bot.Size() != init_cond_size || bnd_tdofs_top.Size() != init_cond_size)
     {
         std::cerr << "Error: sizes mismatch, input vector's size = " <<  bnd_tdofs_bot.Size()
-                  << ", output's size = " << bnd_tdofs_top << ", expected: " << input_size << "\n";
+                  << ", output's size = " << bnd_tdofs_top.Size() << ", expected: " << init_cond_size << "\n";
         MFEM_ABORT("Wrong size of the input and output vectors");
     }
 
@@ -154,7 +165,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
         //block_trueOffsets[i] = block_trueoffsets[i];
     //block_trueOffsets.Print();
     BlockVector trueX(block_trueOffsets);
-    BlockVector trueRhs(block_trueOffsets);
+    //BlockVector trueRhs(block_trueOffsets);
     trueX = 0.0;
 
     Transport_test Mytest(dim, numsol);
@@ -165,17 +176,29 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
     ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
     sigma_exact->ProjectCoefficient(*(Mytest.sigma));
 
-    Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
-    for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
-        ess_bdrS[i] = ess_bdrat_S[i];
-
-    Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
-    for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
-        ess_bdrSigma[i] = ess_bdrat_sigma[i];
-
-
     // using an alternative way of imposing boundary conditions on the right hand side
+    BlockVector trueBnd(block_trueOffsets);
+    trueBnd = 0.0;
 
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        for (unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
+        {
+            int tdof_bot = tdofs_link_H1[i].first;
+            trueBnd.GetBlock(1)[tdof_bot] = bnd_tdofs_bot[i];
+        }
+    }
+    else // S is from l2
+    {
+        for (unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
+        {
+            int tdof_bot = tdofs_link_Hdiv[i].first;
+            trueBnd.GetBlock(0)[tdof_bot] = bnd_tdofs_bot[i];
+        }
+    }
+
+
+    /*
     BlockVector viewer(bnd_tdofs_bot.GetData(), block_trueOffsets);
     BlockVector trueBnd(block_trueOffsets);
     trueBnd = 0.0;
@@ -201,6 +224,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
             }
         }
     }
+    */
 
     BlockVector trueBndCor(block_trueOffsets);
     trueBndCor = 0.0;
@@ -243,7 +267,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
 
     // TODO: this is just for faster integration.
     // TODO: After checks this can be everywhere replaced by trueRhs2
-    trueRhs = trueRhs2;
+    //trueRhs = trueRhs2;
 
     {
         Array<int> EssBnd_tdofs_sigma;
@@ -277,6 +301,24 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
     solver->Mult(trueRhs2, trueX);
     chrono.Stop();
 
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        for (unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
+        {
+            int tdof_top = tdofs_link_H1[i].second;
+            bnd_tdofs_top[i] = trueX.GetBlock(1)[tdof_top];
+        }
+    }
+    else // S is from l2
+    {
+        for (unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
+        {
+            int tdof_top = tdofs_link_Hdiv[i].second;
+            bnd_tdofs_top[i] = trueX.GetBlock(0)[tdof_top];
+        }
+    }
+
+    /*
     BlockVector trueOut(bnd_tdofs_top.GetData(), block_trueOffsets);
     trueOut = 0.0;
     {
@@ -301,11 +343,9 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
             }
         }
     }
+    */
 
-    // TODO: here you should take link between top and bottom for tdofs
-    // TODO: and transfer the top tdofs in trueX into bottom tdofs for trueOut
-    // ...
-
+    /*
     {
         for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
         {
@@ -325,6 +365,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
         }
 
     }
+    */
 
     if (verbose)
     {
@@ -355,7 +396,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
         {
             std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
                       << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
-            std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(0)[tdof] << "\n";
+            std::cout << "rhs side at this tdof = " << trueRhs2.GetBlock(0)[tdof] << "\n";
         }
     }
 
@@ -377,7 +418,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
             {
                 std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
                           << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
-                std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(1)[tdof] << "\n";
+                std::cout << "rhs side at this tdof = " << trueRhs2.GetBlock(1)[tdof] << "\n";
             }
         }
     }
@@ -504,7 +545,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
         BlockVector trueX_nobnd(block_trueOffsets);
         trueX_nobnd = trueX;
         BlockVector trueRhs_nobnd(block_trueOffsets);
-        trueRhs_nobnd = trueRhs;
+        trueRhs_nobnd = trueRhs2;
 
         for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
         {
@@ -597,8 +638,8 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
         if (verbose)
             cout << "Sum of local mass = " << mass<< "\n";
 
-        trueRhs.GetBlock(numblocks - 1) -= massform;
-        double mass_loss_loc = trueRhs.GetBlock(numblocks - 1).Norml1();
+        trueRhs2.GetBlock(numblocks - 1) -= massform;
+        double mass_loss_loc = trueRhs2.GetBlock(numblocks - 1).Norml1();
         double mass_loss;
         MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                    MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -893,6 +934,16 @@ void TimeSlabHyper::InitProblem()
         utop_sock << "solution\n" << *pmeshtsl << *testHdiv_top << "window_title 'testHdivtop'"
                << endl;
     }
+
+    // critical for the considered problem
+    if (strcmp(space_for_sigma,"H1") == 0)
+        MFEM_ABORT ("Not supported case sigma from vector H1, think of the boundary conditions there");
+
+    if (strcmp(space_for_S, "H1") == 0)
+        init_cond_size = tdofs_link_H1.size();
+    else // L2
+        init_cond_size = tdofs_link_Hdiv.size();
+
 
     ParFiniteElementSpace *H1vec_space;
     if (strcmp(space_for_sigma,"H1") == 0)
@@ -1606,7 +1657,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "L2";     // "H1" or "L2"
+   const char *space_for_S = "H1";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -2957,14 +3008,12 @@ int main(int argc, char *argv[])
 
   chrono.Clear();
   chrono.Start();
-  /*
 #ifdef NONHOMO_TEST
   solver.Mult(trueRhs2, trueX);
 #else
   solver.Mult(trueRhs, trueX);
 #endif
-  */
-  solver.Mult(trueRhs, trueX);
+  //solver.Mult(trueRhs, trueX);
   chrono.Stop();
 
   if (verbose)
@@ -3306,17 +3355,30 @@ int main(int argc, char *argv[])
   //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
   TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, formulation, space_for_S, space_for_sigma);
 
-  BlockVector Xinit(block_trueOffsets);
-  Xinit.GetBlock(0) = sigma_exact_truedofs;
+  int init_cond_size = timeslab_test->GetInitCondSize();
+  std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink();
+  Vector Xinit(init_cond_size);
   if (strcmp(space_for_S,"H1") == 0) // S is present
   {
       Vector S_exact_truedofs(S_space->TrueVSize());
       S_exact->ParallelProject(S_exact_truedofs);
-      Xinit.GetBlock(1) = S_exact_truedofs;
+
+      for (int i = 0; i < init_cond_size; ++i)
+      {
+          int tdof_bot = (*tdofs_link)[i].first;
+          Xinit[i] = S_exact_truedofs[tdof_bot];
+      }
+  }
+  else
+  {
+      for (int i = 0; i < init_cond_size; ++i)
+      {
+          int tdof_bot = (*tdofs_link)[i].first;
+          Xinit[i] = sigma_exact_truedofs[tdof_bot];
+      }
   }
 
-  BlockVector Xout(block_trueOffsets);
-  Xout = 0.0;
+  Vector Xout(init_cond_size);
 
   timeslab_test->Solve(Xinit, Xout);
 
