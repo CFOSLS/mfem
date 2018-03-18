@@ -19,6 +19,9 @@
 using namespace std;
 using namespace mfem;
 
+// FIXME: In parallel, for shared essential tdofs matrices would have (for H1) not 1.0 at the diagonal but #procs which shared that vertex (=dof).
+// Thus, boundary conditions are imposed incorrectly in this case. Fix that.
+
 // TODO: Instead of specifying tdofs_link_H1 and _Hdiv and manually choosing by if-clauses,
 // which to use for the Solve() int TimeSlab, it would be better to implement it as a block case
 // with arbitrary number of blocks. Then input and output would be BlockVectors and there will be
@@ -381,7 +384,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
 
     // checking boundary conditions
     Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-    sigma_exact->ParallelProject(sigma_exact_truedofs);
+    sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
     Array<int> EssBnd_tdofs_sigma;
     Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
@@ -403,7 +406,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
     if (strcmp(space_for_S,"H1") == 0) // S is present
     {
         Vector S_exact_truedofs(S_space->TrueVSize());
-        S_exact->ParallelProject(S_exact_truedofs);
+        S_exact->ParallelAssemble(S_exact_truedofs);
 
         Array<int> EssBnd_tdofs_S;
         S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
@@ -786,7 +789,7 @@ void TimeSlabHyper::InitProblem()
     FunctionCoefficient testH1_coeff(testH1fun);
     testfullH1->ProjectCoefficient(testH1_coeff);
     Vector testfullH1_tdofs(H1_space->TrueVSize());
-    testfullH1->ParallelProject(testfullH1_tdofs);
+    testfullH1->ParallelAssemble(testfullH1_tdofs);
 
     Vector testH1_bot_tdofs(H1_space->TrueVSize());
     testH1_bot_tdofs = 0.0;
@@ -883,7 +886,7 @@ void TimeSlabHyper::InitProblem()
     VectorFunctionCoefficient testHdiv_coeff(dim, testHdivfun);
     testfullHdiv->ProjectCoefficient(testHdiv_coeff);
     Vector testfullHdiv_tdofs(Hdiv_space->TrueVSize());
-    testfullHdiv->ParallelProject(testfullHdiv_tdofs);
+    testfullHdiv->ParallelAssemble(testfullHdiv_tdofs);
 
     Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
     testHdiv_bot_tdofs = 0.0;
@@ -1416,7 +1419,7 @@ void TimeSlabHyper::InitProblem()
    trueBnd = 0.0;
    {
        Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-       sigma_exact->ParallelProject(sigma_exact_truedofs);
+       sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
        Array<int> EssBnd_tdofs_sigma;
        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
@@ -1431,7 +1434,7 @@ void TimeSlabHyper::InitProblem()
        {
            Array<int> EssBnd_tdofs_S;
            Vector S_exact_truedofs(S_space->TrueVSize());
-           S_exact->ParallelProject(S_exact_truedofs);
+           S_exact->ParallelAssemble(S_exact_truedofs);
            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
 
            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
@@ -1489,7 +1492,7 @@ void TimeSlabHyper::InitProblem()
 
    {
        Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-       sigma_exact->ParallelProject(sigma_exact_truedofs);
+       sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
        Array<int> EssBnd_tdofs_sigma;
        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
@@ -1498,19 +1501,23 @@ void TimeSlabHyper::InitProblem()
        {
            int tdof = EssBnd_tdofs_sigma[i];
            trueRhs2.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+           //std::cout << "tdof = " << tdof << "truerhs2.block0 = " << trueRhs2.GetBlock(0)[tdof]
+                        //<< ", truerhs.block0 = " << trueRhs.GetBlock(0)[tdof] << "\n";
        }
 
        if (strcmp(space_for_S,"H1") == 0) // S is present
        {
            Array<int> EssBnd_tdofs_S;
            Vector S_exact_truedofs(S_space->TrueVSize());
-           S_exact->ParallelProject(S_exact_truedofs);
+           S_exact->ParallelAssemble(S_exact_truedofs);
            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
 
            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
            {
                int tdof = EssBnd_tdofs_S[i];
                trueRhs2.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+               //std::cout << "tdof = " << tdof << "truerhs2.block1 = " << trueRhs2.GetBlock(1)[tdof]
+                            //<< ", truerhs.block1 = " << trueRhs.GetBlock(1)[tdof] << "\n";
            }
        }
    }
@@ -1645,7 +1652,7 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
    int numsol          = 0;
 
-   int ser_ref_levels  = 3;
+   int ser_ref_levels  = 2;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -1997,15 +2004,15 @@ int main(int argc, char *argv[])
 
            tdofs_link_H1->reserve(dofs_link_H1->size());
 
-           std::cout << "dof pairs for H1: \n";
+           //std::cout << "dof pairs for H1: \n";
            for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
            {
                int dof1 = (*dofs_link_H1)[i].first;
                int dof2 = (*dofs_link_H1)[i].second;
-               std::cout << "<" << dof1 << ", " << dof2 << "> \n";
+               //std::cout << "<" << dof1 << ", " << dof2 << "> \n";
                int tdof1 = H1_space->GetLocalTDofNumber(dof1);
                int tdof2 = H1_space->GetLocalTDofNumber(dof2);
-               std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+               //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                if (tdof1 * tdof2 < 0)
                    MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
 
@@ -2025,7 +2032,7 @@ int main(int argc, char *argv[])
    FunctionCoefficient testH1_coeff(testH1fun);
    testfullH1->ProjectCoefficient(testH1_coeff);
    Vector testfullH1_tdofs(H1_space->TrueVSize());
-   testfullH1->ParallelProject(testfullH1_tdofs);
+   testfullH1->ParallelAssemble(testfullH1_tdofs);
 
    Vector testH1_bot_tdofs(H1_space->TrueVSize());
    testH1_bot_tdofs = 0.0;
@@ -2089,16 +2096,16 @@ int main(int argc, char *argv[])
            std::cout << std::flush;
            tdofs_link_Hdiv->reserve(dofs_link_RT0->size());
 
-           std::cout << "dof pairs for Hdiv: \n";
+           //std::cout << "dof pairs for Hdiv: \n";
            std::set<std::pair<int,int> >::iterator it;
            for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
            {
                int dof1 = (*dofs_link_RT0)[i].first;
                int dof2 = (*dofs_link_RT0)[i].second;
-               std::cout << "<" << dof1 << ", " << dof2 << "> \n";
+               //std::cout << "<" << dof1 << ", " << dof2 << "> \n";
                int tdof1 = Hdiv_space->GetLocalTDofNumber(dof1);
                int tdof2 = Hdiv_space->GetLocalTDofNumber(dof2);
-               std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+               //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
                {
                    //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
@@ -2121,7 +2128,7 @@ int main(int argc, char *argv[])
    VectorFunctionCoefficient testHdiv_coeff(dim, testHdivfun);
    testfullHdiv->ProjectCoefficient(testHdiv_coeff);
    Vector testfullHdiv_tdofs(Hdiv_space->TrueVSize());
-   testfullHdiv->ParallelProject(testfullHdiv_tdofs);
+   testfullHdiv->ParallelAssemble(testfullHdiv_tdofs);
 
    Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
    testHdiv_bot_tdofs = 0.0;
@@ -2765,7 +2772,7 @@ int main(int argc, char *argv[])
   trueBnd = 0.0;
   {
       Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-      sigma_exact->ParallelProject(sigma_exact_truedofs);
+      sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
       Array<int> EssBnd_tdofs_sigma;
       Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
@@ -2774,22 +2781,33 @@ int main(int argc, char *argv[])
       {
           int tdof = EssBnd_tdofs_sigma[i];
           trueBnd.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+          //std::cout << "tdof = " << tdof << "truebnd.block0 = " << trueBnd.GetBlock(0)[tdof]
+                       //<< ", truerhs.block0 = " << trueRhs.GetBlock(0)[tdof] << "\n";
       }
 
       if (strcmp(space_for_S,"H1") == 0) // S is present
       {
           Array<int> EssBnd_tdofs_S;
           Vector S_exact_truedofs(S_space->TrueVSize());
-          S_exact->ParallelProject(S_exact_truedofs);
+          S_exact->ParallelAssemble(S_exact_truedofs);
           S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
 
           for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
           {
               int tdof = EssBnd_tdofs_S[i];
               trueBnd.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+              //std::cout << "tdof = " << tdof << "truebnd.block1 = " << trueBnd.GetBlock(1)[tdof]
+                           //<< ", truerhs.block1 = " << trueRhs.GetBlock(1)[tdof] << "\n";
           }
       }
   }
+
+  //MPI_Finalize();
+  //return 0;
+
+
+
+
   BlockVector trueBndCor(block_trueOffsets);
   trueBndCor = 0.0;
   CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
@@ -2845,29 +2863,24 @@ int main(int argc, char *argv[])
   trueRhs2 -= trueBndCor;
 
   {
-      Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-      sigma_exact->ParallelProject(sigma_exact_truedofs);
-
       Array<int> EssBnd_tdofs_sigma;
       Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
 
       for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
       {
           int tdof = EssBnd_tdofs_sigma[i];
-          trueRhs2.GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+          trueRhs2.GetBlock(0)[tdof] = trueBnd.GetBlock(0)[tdof];
       }
 
       if (strcmp(space_for_S,"H1") == 0) // S is present
       {
           Array<int> EssBnd_tdofs_S;
-          Vector S_exact_truedofs(S_space->TrueVSize());
-          S_exact->ParallelProject(S_exact_truedofs);
           S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
 
           for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
           {
               int tdof = EssBnd_tdofs_S[i];
-              trueRhs2.GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+              trueRhs2.GetBlock(1)[tdof] = trueBnd.GetBlock(1)[tdof];
           }
       }
   }
@@ -3027,10 +3040,48 @@ int main(int argc, char *argv[])
      std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
   }
 
-
   // checking boundary conditions
+
+  /*
+  int ngroups = pmesh->GetNGroups();
+
+  for (int i = 0; i < num_procs; ++i)
+  {
+      if (myid == i)
+      {
+          std::cout << "I am " << myid << "\n";
+          std::set<int> shared_vertdofs;
+
+          for (int grind = 0; grind < ngroups; ++grind)
+          {
+              int ngroupverts = pmesh->GroupNVertices(grind);
+              std::cout << "ngroupverts = " << ngroupverts << "\n";
+              Array<int> dofs;
+              for (int faceind = 0; faceind < ngroupverts; ++faceind)
+              {
+                  H1_space->GetSharedFaceDofs(grind, faceind, dofs);
+                  for (int dofind = 0; dofind < dofs.Size(); ++dofind)
+                  {
+                      shared_vertdofs.insert(H1_space->GetGlobalTDofNumber(dofs[dofind]));
+                  }
+              }
+          }
+
+          std::cout << "shared vertices tdofs \n";
+          std::set<int>::iterator it;
+          for ( it = shared_vertdofs.begin(); it != shared_vertdofs.end(); it++ )
+          {
+              std::cout << *it << " ";
+          }
+
+          std::cout << "\n" << std::flush;
+      }
+      MPI_Barrier(comm);
+  } // end fo loop over all processors, one after another
+  */
+
   Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
-  sigma_exact->ParallelProject(sigma_exact_truedofs);
+  sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
   Array<int> EssBnd_tdofs_sigma;
   Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
@@ -3052,6 +3103,8 @@ int main(int argc, char *argv[])
           std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
                     << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
           std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(0)[tdof] << "\n";
+          std::cout << "rhs side2 at this tdof = " << trueRhs2.GetBlock(0)[tdof] << "\n";
+          std::cout << "bnd at this tdof = " << trueBnd.GetBlock(0)[tdof] << "\n";
           std::cout << "row entries of A matrix: \n";
           int * A_rowcols = A_diag.GetRowColumns(tdof);
           double * A_rowentries = A_diag.GetRowEntries(tdof);
@@ -3077,7 +3130,7 @@ int main(int argc, char *argv[])
       B->GetDiag(B_diag);
 
       Vector S_exact_truedofs(S_space->TrueVSize());
-      S_exact->ParallelProject(S_exact_truedofs);
+      S_exact->ParallelAssemble(S_exact_truedofs);
 
       Array<int> EssBnd_tdofs_S;
       S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
@@ -3093,6 +3146,8 @@ int main(int argc, char *argv[])
               std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
                         << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
               std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(1)[tdof] << "\n";
+              std::cout << "rhs side2 at this tdof = " << trueRhs2.GetBlock(1)[tdof] << "\n";
+              std::cout << "bnd at this tdof = " << trueBnd.GetBlock(1)[tdof] << "\n";
               std::cout << "row entries of C matrix: \n";
               int * C_rowcols = C_diag.GetRowColumns(tdof);
               double * C_rowentries = C_diag.GetRowEntries(tdof);
@@ -3350,6 +3405,10 @@ int main(int argc, char *argv[])
   if(verbose)
       cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                       << projection_error_S / norm_S << endl;
+
+
+  MPI_Finalize();
+  return 0;
 
 
   //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
