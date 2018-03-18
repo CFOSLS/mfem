@@ -1245,6 +1245,16 @@ void TimeSlabHyper::InitProblem()
        Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
        Cblock->Finalize();
        C = Cblock->ParallelAssemble();
+
+       SparseMatrix C_diag;
+       C->GetDiag(C_diag);
+       Array<int> EssBnd_tdofs_S;
+       S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+       for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+       {
+           int tdof = EssBnd_tdofs_S[i];
+           C_diag.EliminateRow(tdof,1.0);
+       }
    }
 
    ParBilinearForm *Cblock_nobnd;
@@ -1664,7 +1674,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "H1";     // "H1" or "L2"
+   const char *space_for_S = "L2";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -2486,6 +2496,17 @@ int main(int argc, char *argv[])
       Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
       Cblock->Finalize();
       C = Cblock->ParallelAssemble();
+
+      SparseMatrix C_diag;
+      C->GetDiag(C_diag);
+      Array<int> EssBnd_tdofs_S;
+      S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+      for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+      {
+          int tdof = EssBnd_tdofs_S[i];
+          C_diag.EliminateRow(tdof,1.0);
+      }
+
   }
 
   ParBilinearForm *Cblock_nobnd;
@@ -3407,8 +3428,8 @@ int main(int argc, char *argv[])
                       << projection_error_S / norm_S << endl;
 
 
-  MPI_Finalize();
-  return 0;
+  //MPI_Finalize();
+  //return 0;
 
 
   //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
@@ -3420,7 +3441,7 @@ int main(int argc, char *argv[])
   if (strcmp(space_for_S,"H1") == 0) // S is present
   {
       Vector S_exact_truedofs(S_space->TrueVSize());
-      S_exact->ParallelProject(S_exact_truedofs);
+      S_exact->ParallelAssemble(S_exact_truedofs);
 
       for (int i = 0; i < init_cond_size; ++i)
       {
