@@ -1860,12 +1860,20 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt);
+   int nslabs = 3;
+   Array<int> slabs_widths(nslabs);
+   slabs_widths[0] = Nt / 2;
+   slabs_widths[1] = Nt / 2 - 1;
+   slabs_widths[2] = 1;
+
+   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt, nslabs, &slabs_widths);
+
+   pmesh->PrintSlabsStruct();
 
    //delete pmeshbase;
    //delete pmesh;
-   //MPI_Finalize();
-   //return 0;
+   MPI_Finalize();
+   return 0;
 
    /*
    if (num_procs == 1)
@@ -3436,7 +3444,8 @@ int main(int argc, char *argv[])
 
   //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
   int pref_lvls_tslab = 0;
-  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab, formulation, space_for_S, space_for_sigma);
+  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
+                                                     formulation, space_for_S, space_for_sigma);
 
   int init_cond_size = timeslab_test->GetInitCondSize();
   std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink();

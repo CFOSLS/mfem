@@ -5014,8 +5014,9 @@ ParMesh::~ParMesh()
 // boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
 //void ParMesh3DtoParMesh4D (MPI_Comm comm, ParMesh& mesh3d,
 //                     ParMesh& mesh4d, double tau, int Nsteps, int bnd_method, int local_method)
-ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method)
-    : meshbase(Meshbase), bot_to_top_bels(Meshbase.GetNE())
+ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps,
+                       int bnd_method, int local_method, int Nslabs, Array<int>* Slabs_widths)
+    : meshbase(Meshbase), bot_to_top_bels(Meshbase.GetNE()), slabs_struct(NULL), have_slabs_structure(false)
 {
     int num_procs, myid;
     MPI_Comm_size(comm, &num_procs);
@@ -5043,11 +5044,20 @@ ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         return;
     }
 
+    if (Slabs_widths)
+        have_slabs_structure = true;
+
     //bot_to_top_bels.resize(meshbase.GetNBE());
 
     // ****************************************************************************
     // step 1 of 4: creating local space-time part of the mesh from local part of base mesh
     // ****************************************************************************
+
+    if (Nslabs > 1)
+    {
+        slabs_struct = new Slabs_Structure(Nslabs, Nsteps, Slabs_widths);
+        have_slabs_structure = true;
+    }
 
     // creating local parts of space-time mesh
     MeshSpaceTimeCylinder_onlyArrays(Tinit, Tau, Nsteps, bnd_method, local_method);
@@ -6775,6 +6785,24 @@ void ParMeshTSL::CreateInternalMeshStructure (int refine)
     return;
 }
 
+void ParMeshTSL::PrintSlabsStruct()
+{
+    if (!have_slabs_structure)
+        std::cout << "No slabs structure available \n";
+    else
+    {
+        std::cout << "nslabs: " << slabs_struct->nslabs << "\n";
+        std::cout << "slabs_offsets: \n";
+        slabs_struct->slabs_offsets.Print();
+        std::cout << "element markers: \n";
+        slabs_struct->el_slabs_markers.Print();
+        std::cout << "boundary element markers: \n";
+        slabs_struct->bdrel_slabs_markers.Print();
+        std::cout << "\n";
+    }
+}
+
+
 // from a given base mesh (3d tetrahedrons or 2D triangles) produces a space-time mesh
 // for a space-time cylinder with the given base, Nsteps * tau height in time
 // enumeration of space-time vertices: time slab after time slab
@@ -6812,6 +6840,12 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
     // lateral 4d bdr faces (one for each 3d bdr face) + lower + upper bases
     // of the space-time cylinder
     NumOfSTBdrElements = NumOfBaseBdrElements * DimBase * Nsteps + 2 * NumOfBaseElements;
+
+    if (slabs_struct)
+    {
+        slabs_struct->el_slabs_markers.SetSize(NumOfSTElements);
+        slabs_struct->bdrel_slabs_markers.SetSize(NumOfSTBdrElements);
+    }
 
     // assuming that the 3D mesh contains elements of the same type = tetrahedrons
     int vert_per_base = meshbase.GetElement(0)->GetNVertices();
@@ -7148,8 +7182,14 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
         */
 
         // 3. loop over all space-time slabs above a given mesh base element
+        int current_timeslab_index = 0;
         for ( int tslab = 0; tslab < Nsteps; ++tslab)
         {
+            if (slabs_struct)
+            {
+                if (tslab == slabs_struct->slabs_offsets[current_timeslab_index + 1])
+                    ++current_timeslab_index;
+            }
             //cout << "tslab " << tslab << endl;
 
             //3.1 getting vertex indices for the space-time prism
@@ -7177,6 +7217,8 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                     NewBdrEl = new Tetrahedron(elverts_prism);
                 NewBdrEl->SetAttribute(1);
                 AddBdrElement(NewBdrEl);
+                if (slabs_struct)
+                    slabs_struct->bdrel_slabs_markers[NumOfBdrElements - 1] = current_timeslab_index;
                 bot_to_top_bels[elind].first = NumOfBdrElements - 1;
             }
             // 3.3 for the last time slab we add the base mesh elements in the upper base
@@ -7190,6 +7232,8 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                     NewBdrEl = new Tetrahedron(elverts_prism + vert_per_base);
                 NewBdrEl->SetAttribute(3);
                 AddBdrElement(NewBdrEl);
+                if (slabs_struct)
+                    slabs_struct->bdrel_slabs_markers[NumOfBdrElements - 1] = current_timeslab_index;
                 bot_to_top_bels[elind].second = NumOfBdrElements - 1;
             }
 
@@ -7752,6 +7796,8 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                                     NewBdrEl = new Tetrahedron(tempface);
                                 NewBdrEl->SetAttribute(2);
                                 AddBdrElement(NewBdrEl);
+                                if (slabs_struct)
+                                    slabs_struct->bdrel_slabs_markers[NumOfBdrElements - 1] = current_timeslab_index;
                             }
 
 
@@ -7786,6 +7832,11 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                     NewEl = new Pentatope(simplexes + simplex_ind*(Dim+1));
                 NewEl->SetAttribute(1);
                 AddElement(NewEl);
+
+                if (slabs_struct)
+                {
+                    slabs_struct->el_slabs_markers[NumOfElements - 1] = current_timeslab_index;
+                }
 
                 /*
                  * unneeded, because CheckElementOrientation is still called afterwards
@@ -7917,6 +7968,48 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
     return;
 }
 
+/*
+// FIXME: probably redundant
+ParMesh * ParMeshTSL::ExtractTimeSlab(int slab_index)
+{
+    if (!have_slabs_structure)
+    {
+        MFEM_ABORT("For current implementation of ExtractTimeSlab, ParMeshTSL must have a slab structure \n");
+    }
+
+    MFEM_ASSERT( slab_index >= 0 && slab_index < slabs_struct->nslabs, "Invalid slab_index.");
+
+    return new ParMeshTSL(*this, slab_index);
+}
+
+// Extraction constructor
+ParMeshTSL::ParMeshTSL(ParMeshTSL& gmesh, int slab_index)
+{
+    if (gmesh.have_slabs_structure == false)
+    {
+        MFEM_ABORT("For extraction constructor, input ParMeshTSL must have a slab structure \n");
+    }
+
+    comm = gmesh.GetComm();
+
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
+
+    int dim = gmesh.Dimension() + 1;
+
+    have_slabs_structure = false;
+
+    // ****************************************************************************
+    // step 1 of 4: creating local space-time part of the mesh from the global mesh
+    // ****************************************************************************
+
+    // creating local parts of space-time mesh
+    ExtractTimeSlab_onlyArrays(slab_index);
+
+    MPI_Barrier(comm);
+}
+*/
 
 void ParMeshTSL::TimeShift(double shift)
 {
@@ -7936,12 +8029,7 @@ void ParMeshTSL::PrintBotToTopBels() const
 
 void ParMeshTSL::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
 {
-    std::vector<std::pair<int,int> > new_bot_to_top_bels;
-    for (unsigned int i = 0; i < bot_to_top_bels.size(); ++i)
-    {
-        int belind1 = bot_to_top_bels[i].first;
-    }
-
+    MFEM_ABORT("UpdateBotToTopLink() was not implemented \n");
 }
 
 // Creates be_to_e relation between marked(!) boundary elements

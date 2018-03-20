@@ -235,6 +235,36 @@ public:
     ParMesh & meshbase;
     std::vector<std::pair<int,int> > bot_to_top_bels;
 
+    // additional structures created in the constructor which is used for time slab extraction if needed
+    struct Slabs_Structure
+    {
+        int nslabs;
+        Array<int> el_slabs_markers;
+        Array<int> bdrel_slabs_markers;
+        Array<int> slabs_offsets; // im time steps
+
+        Slabs_Structure(int Nslabs, int Nlayers, Array<int>* Slabs_widths) : nslabs(Nslabs)
+        {
+            slabs_offsets.SetSize(nslabs + 1);
+            slabs_offsets[0] = 0;
+            MFEM_ASSERT(nslabs > 0, "Number of time slabs must be positive!");
+            if (nslabs > 1)
+            {
+                MFEM_ASSERT(Slabs_widths, "For nslabs > 1, slabs widths must be provided \n");
+                MFEM_ASSERT(Slabs_widths->Size() == nslabs, "Slabs widths (Array) size mismatch number of time slabs \n");
+                for (int i = 0; i < nslabs; ++i)
+                    slabs_offsets[i + 1] = (*Slabs_widths)[i];
+                slabs_offsets.PartialSum();
+                MFEM_ASSERT(slabs_offsets[nslabs] == Nlayers, "Total number of time steps mismatch"
+                                                        " provided time slabs widths \n");
+            }
+            else
+                slabs_offsets[1] = Nlayers;
+        }
+    } * slabs_struct;
+
+    bool have_slabs_structure;
+
 public:
     // Warning: only PENTATOPE case for 4D mesh and TETRAHEDRON case for 3D are considered
 
@@ -247,11 +277,17 @@ public:
    // local_method = 0: ~ SHORTWAY, qhull is used for space-time prisms
    // local_method = 1: ~ LONGWAY, qhull is used for lateral faces of space-time prisms (then combined)
    // local_method = 2: qhull is not used, a simple procedure for simplices is used.
-   //ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tau, int Nsteps, int bnd_method = 1, int local_method = 2);
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method);
+
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method,
+              int Nslabs, Array<int>* Slabs_widths);
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int Nslabs, Array<int>* Slabs_widths)
+       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2, Nslabs, Slabs_widths) {}
+   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method)
+       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, bnd_method, local_method, 1, NULL) {}
    ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps)
        : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2) {}
 
+   void PrintSlabsStruct();
 
 protected:
    // Creates ParMesh internal structure (including shared entities)
@@ -262,7 +298,8 @@ protected:
 
    SparseMatrix *Create_be_to_e(const char *full_or_marked);
 public:
-   void Refine(int par_ref_levels);
+   void Refine(int par_ref_levels); // remove this
+   //ParMesh *ExtractTimeSlab(int slab_index);
 
 public:
 
