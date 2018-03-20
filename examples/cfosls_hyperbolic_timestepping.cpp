@@ -65,6 +65,7 @@ private:
     MPI_Comm comm;
 
 protected:
+    int ref_lvls;
     const char *formulation;
     const char *space_for_S;
     const char *space_for_sigma;
@@ -98,12 +99,11 @@ protected:
 protected:
     void InitProblem();
 
-
 public:
     ~TimeSlabHyper();
-    TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt,
+    TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
                    const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
-    TimeSlabHyper (ParMeshTSL& Pmeshtsl,
+    TimeSlabHyper (ParMeshTSL& Pmeshtsl, int Ref_Lvls,
                    const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
 
     virtual void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const override;
@@ -129,17 +129,17 @@ TimeSlabHyper::~TimeSlabHyper()
     delete solver;
 }
 
-TimeSlabHyper::TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt,
+TimeSlabHyper::TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
                               const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
-    : TimeSlab(Pmeshbase, T_init, Tau, Nt),
+    : TimeSlab(Pmeshbase, T_init, Tau, Nt), ref_lvls(Ref_lvls),
       formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
 {
     InitProblem();
 }
 
-TimeSlabHyper::TimeSlabHyper (ParMeshTSL& Pmeshtsl,
+TimeSlabHyper::TimeSlabHyper (ParMeshTSL& Pmeshtsl, int Ref_Lvls,
                               const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
-    : TimeSlab(Pmeshtsl),
+    : TimeSlab(Pmeshtsl), ref_lvls(Ref_Lvls),
       formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
 {
     InitProblem();
@@ -714,6 +714,8 @@ void TimeSlabHyper::InitProblem()
     verbose = (myid == 0);
 
     bool visualization = 0;
+
+    pmeshtsl->Refine(ref_lvls);
 
     FiniteElementCollection *hdiv_coll;
     ParFiniteElementSpace *Hdiv_space;
@@ -3433,7 +3435,8 @@ int main(int argc, char *argv[])
 
 
   //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
-  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, formulation, space_for_S, space_for_sigma);
+  int pref_lvls_tslab = 0;
+  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab, formulation, space_for_S, space_for_sigma);
 
   int init_cond_size = timeslab_test->GetInitCondSize();
   std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink();

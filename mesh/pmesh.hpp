@@ -259,6 +259,11 @@ protected:
    // future space-time mesh. Used only inside the ParMesh constructor.
    void ParMeshSpaceTime_createShared(MPI_Comm comm, int Nsteps );
    void CreateInternalMeshStructure (int refine);
+
+   SparseMatrix *Create_be_to_e(const char *full_or_marked);
+public:
+   void Refine(int par_ref_levels);
+
 public:
 
    // A simple structure which is used to store temporarily the 4d mesh main arrays in
@@ -312,6 +317,11 @@ public:
    void PrintBotToTopBels() const;
    ParMesh* GetBaseParMesh() {return &meshbase;}
    void TimeShift(double shift);
+protected:
+   // takes the BE_be relation between marked BE's and be's which belong to the same AE
+   // and creates a new bot_to_top link between boundary elements.
+   // Used in Refine().
+   void UpdateBotToTopLink(SparseMatrix& BE_AE_be);
 };
 
 inline double dist( double * M, double * N , int d);

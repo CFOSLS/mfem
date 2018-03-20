@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, tau, Nt);
+   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt);
 
    //delete pmeshbase;
    //delete pmesh;

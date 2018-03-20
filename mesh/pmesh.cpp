@@ -7934,6 +7934,145 @@ void ParMeshTSL::PrintBotToTopBels() const
     }
 }
 
+void ParMeshTSL::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
+{
+    std::vector<std::pair<int,int> > new_bot_to_top_bels;
+    for (unsigned int i = 0; i < bot_to_top_bels.size(); ++i)
+    {
+        int belind1 = bot_to_top_bels[i].first;
+    }
+
+}
+
+// Creates be_to_e relation between marked(!) boundary elements
+// (those which are used in bot_to_top relation) and elements
+SparseMatrix * ParMeshTSL::Create_be_to_e( const char * full_or_marked)
+{
+    if (strcmp(full_or_marked,"marked") != 0 && strcmp(full_or_marked, "full") != 0)
+    {
+        MFEM_ABORT("Input argument in Create_be_to_e must be 'marked' or 'full' \n");
+    }
+
+    int m;
+    int npairs;
+    if (strcmp(full_or_marked,"marked") == 0)
+    {
+        npairs = bot_to_top_bels.size();
+        m = 2 * npairs;
+    }
+    else // "full" case
+        m = GetNBE();
+    int n = GetNE();
+
+    // each boundary element belongs to one and only one element
+    int * ia = new int[m + 1];
+    ia[0] = 0;
+    for (int i = 0; i < m; ++i)
+        ia[i + 1] = ia[i] + 1;
+
+    int * ja = new int [ia[m]];
+    double * data = new double [ia[m]];
+
+    int count = 0;
+    int f, o, el1, el2;
+
+    // going over marked or all boundary elements
+    for (int i = 0; i < m; ++i)
+    {
+        int bdrel;
+        if (strcmp(full_or_marked,"marked") == 0)
+        {
+            if (i < npairs) // first going over marked bdr elements at the bottom
+                bdrel = bot_to_top_bels[i].first;
+            else // then at the top
+                bdrel = bot_to_top_bels[i - npairs].second;
+        }
+        else // "full" case
+            bdrel = i;
+
+        GetBdrElementFace(bdrel, &f, &o); // f is the bdrel index as a face
+
+        GetFaceElements(f, &el1, &el2);
+
+        //std::cout << "el1 = " << el1 << ", el2 = " << el2 << "\n";
+        MFEM_ASSERT(el2 == -1, "Boundary element should have el2 = -1 "
+                               "(and belong to the element indexed by el1 \n");
+
+        ja[count] = el1;
+        data[count] = 1.0;
+
+        ++count;
+    }
+
+    return new SparseMatrix(ia, ja, data, m, n);
+}
+
+// refines the space-time mesh while updating bot_to_top relation
+void ParMeshTSL::Refine(int par_ref_levels)
+{
+    if (par_ref_levels != 0)
+    {
+        MFEM_ABORT("ParMeshTSL::Refine() implementation was not finished \n");
+    }
+    else
+        return;
+
+    FiniteElementCollection * l2_coll_tmp = new L2_FECollection(0, Dimension());
+    ParFiniteElementSpace * L2_space_tmp = new ParFiniteElementSpace(this, l2_coll_tmp);
+
+    SparseMatrix * BE_E;
+    for (int l = 0; l < par_ref_levels; ++l)
+    {
+        // create BE_E relation for the mesh before the refinement
+        // only for the marked boundary elements
+        BE_E = Create_be_to_e("marked");
+
+        // refine the mesh
+        UniformRefinement();
+
+        // get the E_e as interpolation matrix in L2_h
+        L2_space_tmp->Update();
+        SparseMatrix * P_W_l = (SparseMatrix *)L2_space_tmp->GetUpdateOperator();
+        SparseMatrix * E_e = Transpose(*P_W_l);
+
+        // create e_be relation for the refined mesh
+        SparseMatrix * be_e = Create_be_to_e("full");
+
+        // compute BE_be relation
+        // BE_be = BE_E * E_e * e _be
+        SparseMatrix * tmp1 = Transpose(*BE_E);
+        SparseMatrix * tmp2 = Transpose(*be_e);
+
+        // now BE_be is relation for BE and be which belong to the same AE
+        // thus, row of BE contains not only be indices which are exactly
+        // children of BE after refinement, but also some neighbors
+        // The additional be's are taken care of below.
+        SparseMatrix * BE_AE_be = RAP(*tmp1, *E_e, *tmp2);
+
+        //E_e->Print();
+
+        //delete P_W_l;
+        delete E_e;
+        delete tmp1;
+        delete tmp2;
+
+        delete BE_E;
+        delete be_e;
+
+        //BE_be->Print();
+
+        // update the bot_to_top relation using BE_be
+        // ...
+        UpdateBotToTopLink(*BE_AE_be);
+
+        delete BE_AE_be;
+    }
+
+    delete L2_space_tmp;
+    delete l2_coll_tmp;
+}
+
+
 // simple algorithm which computes sign of a given permutatation
 // for now, this function is applied to permutations of size 3
 // so there is no sense in implementing anything more complicated
