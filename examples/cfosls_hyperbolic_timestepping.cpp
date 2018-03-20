@@ -28,6 +28,7 @@ using namespace mfem;
 // less switches
 
 // abstract base class for time-slabbing
+// TODO: Reanme this and its children. This is not a time slab but a time cylinder
 class TimeSlab
 {
 protected:
@@ -95,6 +96,7 @@ protected:
     std::vector<std::pair<int,int> > tdofs_link_Hdiv;
 
     bool verbose;
+    bool visualization;
 
 protected:
     void InitProblem();
@@ -115,6 +117,9 @@ public:
         else
             return &tdofs_link_Hdiv;
     }
+
+    ParFiniteElementSpace * Get_S_space() {return S_space;}
+    ParFiniteElementSpace * Get_Sigma_space() {return Sigma_space;}
 };
 
 TimeSlabHyper::~TimeSlabHyper()
@@ -383,6 +388,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
 
 
     // checking boundary conditions
+    /*
     Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
     sigma_exact->ParallelAssemble(sigma_exact_truedofs);
 
@@ -425,6 +431,7 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
             }
         }
     }
+    */
 
 
     ParGridFunction * sigma = new ParGridFunction(Sigma_space);
@@ -666,6 +673,64 @@ void TimeSlabHyper::Solve(const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) co
     if(verbose)
         cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                         << projection_error_S / norm_S << endl;
+
+    if (visualization && dim < 4)
+    {
+        int num_procs, myid;
+        MPI_Comm_size(comm, &num_procs);
+        MPI_Comm_rank(comm, &myid);
+
+
+       char vishost[] = "localhost";
+       int  visport   = 19916;
+       socketstream u_sock(vishost, visport);
+       u_sock << "parallel " << num_procs << " " << myid << "\n";
+       u_sock.precision(8);
+       u_sock << "solution\n" << *pmeshtsl << *sigma_exact << "window_title 'sigma_exact'"
+              << endl;
+       // Make sure all ranks have sent their 'u' solution before initiating
+       // another set of GLVis connections (one from each rank):
+
+
+       socketstream uu_sock(vishost, visport);
+       uu_sock << "parallel " << num_procs << " " << myid << "\n";
+       uu_sock.precision(8);
+       uu_sock << "solution\n" << *pmeshtsl << *sigma << "window_title 'sigma'"
+              << endl;
+
+       *sigma_exact -= *sigma;
+
+       socketstream uuu_sock(vishost, visport);
+       uuu_sock << "parallel " << num_procs << " " << myid << "\n";
+       uuu_sock.precision(8);
+       uuu_sock << "solution\n" << *pmeshtsl << *sigma_exact << "window_title 'difference for sigma'"
+              << endl;
+
+       socketstream s_sock(vishost, visport);
+       s_sock << "parallel " << num_procs << " " << myid << "\n";
+       s_sock.precision(8);
+       MPI_Barrier(comm);
+       s_sock << "solution\n" << *pmeshtsl << *S_exact << "window_title 'S_exact'"
+               << endl;
+
+       socketstream ss_sock(vishost, visport);
+       ss_sock << "parallel " << num_procs << " " << myid << "\n";
+       ss_sock.precision(8);
+       MPI_Barrier(comm);
+       ss_sock << "solution\n" << *pmeshtsl << *S << "window_title 'S'"
+               << endl;
+
+       *S_exact -= *S;
+       socketstream sss_sock(vishost, visport);
+       sss_sock << "parallel " << num_procs << " " << myid << "\n";
+       sss_sock.precision(8);
+       MPI_Barrier(comm);
+       sss_sock << "solution\n" << *pmeshtsl << *S_exact
+                << "window_title 'difference for S'" << endl;
+
+       MPI_Barrier(comm);
+    }
+
 }
 
 void TimeSlabHyper::InitProblem()
@@ -713,7 +778,7 @@ void TimeSlabHyper::InitProblem()
 
     verbose = (myid == 0);
 
-    bool visualization = 0;
+    visualization = 1;
 
     pmeshtsl->Refine(ref_lvls);
 
@@ -784,6 +849,7 @@ void TimeSlabHyper::InitProblem()
         MPI_Barrier(comm);
     } // end fo loop over all processors, one after another
 
+    /*
     if (verbose)
          std::cout << "Drawing in H1 case \n";
 
@@ -842,6 +908,7 @@ void TimeSlabHyper::InitProblem()
         utop_sock << "solution\n" << *pmeshtsl << *testH1_top << "window_title 'testH1top'"
                << endl;
     }
+    */
 
     for (int i = 0; i < num_procs; ++i)
     {
@@ -881,6 +948,7 @@ void TimeSlabHyper::InitProblem()
         MPI_Barrier(comm);
     } // end fo loop over all processors, one after another
 
+    /*
     if (verbose)
          std::cout << "Drawing in Hdiv case \n";
 
@@ -939,6 +1007,7 @@ void TimeSlabHyper::InitProblem()
         utop_sock << "solution\n" << *pmeshtsl << *testHdiv_top << "window_title 'testHdivtop'"
                << endl;
     }
+    */
 
     // critical for the considered problem
     if (strcmp(space_for_sigma,"H1") == 0)
@@ -3444,41 +3513,229 @@ int main(int argc, char *argv[])
   //MPI_Finalize();
   //return 0;
 
+  if (verbose)
+    std::cout << "Checking a single solve from a one TimeSlabHyper instance "
+                 "created for the entire domain \n";
 
-  //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
-  int pref_lvls_tslab = 0;
-  TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
-                                                     formulation, space_for_S, space_for_sigma);
-
-  int init_cond_size = timeslab_test->GetInitCondSize();
-  std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink();
-  Vector Xinit(init_cond_size);
-  if (strcmp(space_for_S,"H1") == 0) // S is present
   {
-      Vector S_exact_truedofs(S_space->TrueVSize());
-      S_exact->ParallelAssemble(S_exact_truedofs);
+      //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
+      int pref_lvls_tslab = 0; // doesn't work with other values
+      TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
+                                                         formulation, space_for_S, space_for_sigma);
 
-      for (int i = 0; i < init_cond_size; ++i)
+      int init_cond_size = timeslab_test->GetInitCondSize();
+      std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink();
+      Vector Xinit(init_cond_size);
+      if (strcmp(space_for_S,"H1") == 0) // S is present
       {
-          int tdof_bot = (*tdofs_link)[i].first;
-          Xinit[i] = S_exact_truedofs[tdof_bot];
+          ParGridFunction * S_exact = new ParGridFunction(timeslab_test->Get_S_space());
+          S_exact->ProjectCoefficient(*Mytest.scalarS);
+          Vector S_exact_truedofs(timeslab_test->Get_S_space()->TrueVSize());
+          S_exact->ParallelAssemble(S_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_bot = (*tdofs_link)[i].first;
+              Xinit[i] = S_exact_truedofs[tdof_bot];
+          }
+      }
+      else
+      {
+          ParGridFunction * sigma_exact = new ParGridFunction(timeslab_test->Get_Sigma_space());
+          sigma_exact->ProjectCoefficient(*Mytest.sigma);
+          Vector sigma_exact_truedofs(timeslab_test->Get_Sigma_space()->TrueVSize());
+          sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_bot = (*tdofs_link)[i].first;
+              Xinit[i] = sigma_exact_truedofs[tdof_bot];
+          }
+      }
+      //Xinit.Print();
+
+      Vector Xout(init_cond_size);
+
+      timeslab_test->Solve(Xinit, Xout);
+
+      Vector Xout_exact(init_cond_size);
+
+      // checking the error at the top boundary
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          ParGridFunction * S_exact = new ParGridFunction(timeslab_test->Get_S_space());
+          S_exact->ProjectCoefficient(*Mytest.scalarS);
+          Vector S_exact_truedofs(timeslab_test->Get_S_space()->TrueVSize());
+          S_exact->ParallelAssemble(S_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_top = (*tdofs_link)[i].second;
+              Xout_exact[i] = S_exact_truedofs[tdof_top];
+          }
+      }
+      else
+      {
+          ParGridFunction * sigma_exact = new ParGridFunction(timeslab_test->Get_Sigma_space());
+          sigma_exact->ProjectCoefficient(*Mytest.sigma);
+          Vector sigma_exact_truedofs(timeslab_test->Get_Sigma_space()->TrueVSize());
+          sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_top = (*tdofs_link)[i].second;
+              Xout_exact[i] = sigma_exact_truedofs[tdof_top];
+          }
+      }
+
+      Vector Xout_error(init_cond_size);
+      Xout_error = Xout;
+      Xout_error -= Xout_exact;
+      if (verbose)
+      {
+          std::cout << "|| Xout  - Xout_exact || = " << Xout_error.Norml2() / sqrt (Xout_error.Size()) << "\n";
+          std::cout << "|| Xout  - Xout_exact || / || Xout_exact || = " << (Xout_error.Norml2() / sqrt (Xout_error.Size())) /
+                       (Xout_exact.Norml2() / sqrt (Xout_exact.Size()))<< "\n";
+      }
+
+      delete timeslab_test;
+  }
+
+  if (verbose)
+    std::cout << "Checking a sequential solve within several TimeSlabHyper instances \n";
+
+  {
+      int nslabs = 2;
+      std::vector<TimeSlabHyper*> timeslabs(nslabs);
+      //pmeshbase->UniformRefinement();
+      double slab_tau = 0.25;
+      int slab_width = 2; // in time steps (as time intervals) withing a single time slab
+      double tinit_tslab = 0.0;
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          timeslabs[tslab] = new TimeSlabHyper (*pmeshbase, tinit_tslab, slab_tau, slab_width, 0,
+                                                formulation, space_for_S, space_for_sigma);
+          tinit_tslab += slab_tau * slab_width;
+      }
+
+      MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                    "[0,1] but the upper bound doesn't match \n");
+
+      Vector Xinit;
+      // initializing the input boundary condition for the first vector
+      int init_cond_size = timeslabs[0]->GetInitCondSize();
+      std::vector<std::pair<int,int> > * tdofs_link = timeslabs[0]->GetTdofsLink();
+      Xinit.SetSize(init_cond_size);
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          ParGridFunction * S_exact = new ParGridFunction(timeslabs[0]->Get_S_space());
+          S_exact->ProjectCoefficient(*Mytest.scalarS);
+          Vector S_exact_truedofs(timeslabs[0]->Get_S_space()->TrueVSize());
+          S_exact->ParallelAssemble(S_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_bot = (*tdofs_link)[i].first;
+              Xinit[i] = S_exact_truedofs[tdof_bot];
+          }
+      }
+      else
+      {
+          ParGridFunction * sigma_exact = new ParGridFunction(timeslabs[0]->Get_Sigma_space());
+          sigma_exact->ProjectCoefficient(*Mytest.sigma);
+          Vector sigma_exact_truedofs(timeslabs[0]->Get_Sigma_space()->TrueVSize());
+          sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_bot = (*tdofs_link)[i].first;
+              Xinit[i] = sigma_exact_truedofs[tdof_bot];
+          }
+      }
+
+      Vector Xout(init_cond_size);
+
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          /*
+           * only for debugging
+          if (tslab > 0)
+          {
+              if (strcmp(space_for_S,"H1") == 0) // S is present
+              {
+                  ParGridFunction * S_exact = new ParGridFunction(timeslabs[tslab]->Get_S_space());
+                  S_exact->ProjectCoefficient(*Mytest.scalarS);
+                  Vector S_exact_truedofs(timeslabs[tslab]->Get_S_space()->TrueVSize());
+                  S_exact->ParallelAssemble(S_exact_truedofs);
+
+                  for (int i = 0; i < init_cond_size; ++i)
+                  {
+                      int tdof_bot = (*tdofs_link)[i].first;
+                      Xinit[i] = S_exact_truedofs[tdof_bot];
+                  }
+              }
+              else
+              {
+                  ParGridFunction * sigma_exact = new ParGridFunction(timeslabs[tslab]->Get_Sigma_space());
+                  sigma_exact->ProjectCoefficient(*Mytest.sigma);
+                  Vector sigma_exact_truedofs(timeslabs[tslab]->Get_Sigma_space()->TrueVSize());
+                  sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+                  for (int i = 0; i < init_cond_size; ++i)
+                  {
+                      int tdof_bot = (*tdofs_link)[i].first;
+                      Xinit[i] = sigma_exact_truedofs[tdof_bot];
+                  }
+              }
+          }
+          */
+          //Xinit.Print();
+          timeslabs[tslab]->Solve(Xinit, Xout);
+          Xinit = Xout;
+
+          Vector Xout_exact(init_cond_size);
+
+          // checking the error at the top boundary
+          if (strcmp(space_for_S,"H1") == 0) // S is present
+          {
+              ParGridFunction * S_exact = new ParGridFunction(timeslabs[tslab]->Get_S_space());
+              S_exact->ProjectCoefficient(*Mytest.scalarS);
+              Vector S_exact_truedofs(timeslabs[tslab]->Get_S_space()->TrueVSize());
+              S_exact->ParallelAssemble(S_exact_truedofs);
+
+              for (int i = 0; i < init_cond_size; ++i)
+              {
+                  int tdof_top = (*tdofs_link)[i].second;
+                  Xout_exact[i] = S_exact_truedofs[tdof_top];
+              }
+          }
+          else
+          {
+              ParGridFunction * sigma_exact = new ParGridFunction(timeslabs[tslab]->Get_Sigma_space());
+              sigma_exact->ProjectCoefficient(*Mytest.sigma);
+              Vector sigma_exact_truedofs(timeslabs[tslab]->Get_Sigma_space()->TrueVSize());
+              sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+              for (int i = 0; i < init_cond_size; ++i)
+              {
+                  int tdof_top = (*tdofs_link)[i].second;
+                  Xout_exact[i] = sigma_exact_truedofs[tdof_top];
+              }
+          }
+
+          Vector Xout_error(init_cond_size);
+          Xout_error = Xout;
+          Xout_error -= Xout_exact;
+          if (verbose)
+          {
+              std::cout << "|| Xout  - Xout_exact || = " << Xout_error.Norml2() / sqrt (Xout_error.Size()) << "\n";
+              std::cout << "|| Xout  - Xout_exact || / || Xout_exact || = " << (Xout_error.Norml2() / sqrt (Xout_error.Size())) /
+                           (Xout_exact.Norml2() / sqrt (Xout_exact.Size()))<< "\n";
+          }
+
       }
   }
-  else
-  {
-      for (int i = 0; i < init_cond_size; ++i)
-      {
-          int tdof_bot = (*tdofs_link)[i].first;
-          Xinit[i] = sigma_exact_truedofs[tdof_bot];
-      }
-  }
-
-  Vector Xout(init_cond_size);
-
-  timeslab_test->Solve(Xinit, Xout);
-
-  delete timeslab_test;
-
 
   if (visualization && nDimensions < 4)
   {
