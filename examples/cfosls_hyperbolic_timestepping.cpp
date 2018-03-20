@@ -3608,8 +3608,8 @@ int main(int argc, char *argv[])
       int nslabs = 2;
       std::vector<TimeSlabHyper*> timeslabs(nslabs);
       //pmeshbase->UniformRefinement();
-      double slab_tau = 0.25;
-      int slab_width = 2; // in time steps (as time intervals) withing a single time slab
+      double slab_tau = 0.125;
+      int slab_width = 4; // in time steps (as time intervals) withing a single time slab
       double tinit_tslab = 0.0;
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
@@ -3693,6 +3693,8 @@ int main(int argc, char *argv[])
           //Xinit.Print();
           timeslabs[tslab]->Solve(Xinit, Xout);
           Xinit = Xout;
+          if (strcmp(space_for_S,"L2") == 0)
+              Xinit *= -1.0;
 
           Vector Xout_exact(init_cond_size);
 
