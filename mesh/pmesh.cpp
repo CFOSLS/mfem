@@ -5014,7 +5014,7 @@ ParMesh::~ParMesh()
 // boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
 //void ParMesh3DtoParMesh4D (MPI_Comm comm, ParMesh& mesh3d,
 //                     ParMesh& mesh4d, double tau, int Nsteps, int bnd_method, int local_method)
-ParMeshTSL::ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps,
+ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps,
                        int bnd_method, int local_method, int Nslabs, Array<int>* Slabs_widths)
     : meshbase(Meshbase), bot_to_top_bels(Meshbase.GetNE()), slabs_struct(NULL), have_slabs_structure(false)
 {
@@ -5579,10 +5579,10 @@ void ParMesh::PrintSharedStructParMesh ( int* permutation )
     return;
 }
 
-// Creates ParMeshTSL internal structure (including shared entities)
+// Creates ParMeshCyl internal structure (including shared entities)
 // after the main arrays (elements, vertices and boundary) are already defined for the
-// future space-time mesh. Used only inside the ParMeshTSL constructor.
-void ParMeshTSL::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
+// future space-time mesh. Used only inside the ParMeshCyl constructor.
+void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
 {
     int num_procs, myid;
     MPI_Comm_size(comm, &num_procs);
@@ -6619,7 +6619,7 @@ void ParMeshTSL::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
 // should be called before creating structures for shared entities which goes
 // before the call to CreateInternal...()
 // Probably for parallel mesh generator some tables are generated twice // FIX IT
-void ParMeshTSL::CreateInternalMeshStructure (int refine)
+void ParMeshCyl::CreateInternalMeshStructure (int refine)
 {
     int j, curved = 0;
     //int refine = 1;
@@ -6785,7 +6785,7 @@ void ParMeshTSL::CreateInternalMeshStructure (int refine)
     return;
 }
 
-void ParMeshTSL::PrintSlabsStruct()
+void ParMeshCyl::PrintSlabsStruct()
 {
     if (!have_slabs_structure)
         std::cout << "No slabs structure available \n";
@@ -6807,7 +6807,7 @@ void ParMeshTSL::PrintSlabsStruct()
 // for a space-time cylinder with the given base, Nsteps * tau height in time
 // enumeration of space-time vertices: time slab after time slab
 // boundary attributes: 1 for t=0, 2 for lateral boundaries, 3 for t = tau*Nsteps
-void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, int Nsteps,
+void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, int Nsteps,
                                               int bnd_method, int local_method)
 {
     int DimBase = meshbase.Dimension(), NumOfBaseElements = meshbase.GetNE(),
@@ -7840,7 +7840,7 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
 
                 /*
                  * unneeded, because CheckElementOrientation is still called afterwards
-                 * in the ParMeshTSL constructor
+                 * in the ParMeshCyl constructor
                 // TODO: Probably there is a pattern of which space-time elements got the wrong orientation
                 // fixing element orientation
                 int j, k, *vi = 0;
@@ -7970,24 +7970,24 @@ void ParMeshTSL::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
 
 /*
 // FIXME: probably redundant
-ParMesh * ParMeshTSL::ExtractTimeSlab(int slab_index)
+ParMesh * ParMeshCyl::ExtractTimeSlab(int slab_index)
 {
     if (!have_slabs_structure)
     {
-        MFEM_ABORT("For current implementation of ExtractTimeSlab, ParMeshTSL must have a slab structure \n");
+        MFEM_ABORT("For current implementation of ExtractTimeSlab, ParMeshCyl must have a slab structure \n");
     }
 
     MFEM_ASSERT( slab_index >= 0 && slab_index < slabs_struct->nslabs, "Invalid slab_index.");
 
-    return new ParMeshTSL(*this, slab_index);
+    return new ParMeshCyl(*this, slab_index);
 }
 
 // Extraction constructor
-ParMeshTSL::ParMeshTSL(ParMeshTSL& gmesh, int slab_index)
+ParMeshCyl::ParMeshCyl(ParMeshCyl& gmesh, int slab_index)
 {
     if (gmesh.have_slabs_structure == false)
     {
-        MFEM_ABORT("For extraction constructor, input ParMeshTSL must have a slab structure \n");
+        MFEM_ABORT("For extraction constructor, input ParMeshCyl must have a slab structure \n");
     }
 
     comm = gmesh.GetComm();
@@ -8011,7 +8011,7 @@ ParMeshTSL::ParMeshTSL(ParMeshTSL& gmesh, int slab_index)
 }
 */
 
-void ParMeshTSL::TimeShift(double shift)
+void ParMeshCyl::TimeShift(double shift)
 {
     int nv = vertices.Size();
     for (int i = 0; i < nv; i++)
@@ -8019,7 +8019,7 @@ void ParMeshTSL::TimeShift(double shift)
 }
 
 
-void ParMeshTSL::PrintBotToTopBels() const
+void ParMeshCyl::PrintBotToTopBels() const
 {
     for (int i = 0; i < bot_to_top_bels.size(); ++i)
     {
@@ -8027,14 +8027,14 @@ void ParMeshTSL::PrintBotToTopBels() const
     }
 }
 
-void ParMeshTSL::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
+void ParMeshCyl::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
 {
     MFEM_ABORT("UpdateBotToTopLink() was not implemented \n");
 }
 
 // Creates be_to_e relation between marked(!) boundary elements
 // (those which are used in bot_to_top relation) and elements
-SparseMatrix * ParMeshTSL::Create_be_to_e( const char * full_or_marked)
+SparseMatrix * ParMeshCyl::Create_be_to_e( const char * full_or_marked)
 {
     if (strcmp(full_or_marked,"marked") != 0 && strcmp(full_or_marked, "full") != 0)
     {
@@ -8096,11 +8096,11 @@ SparseMatrix * ParMeshTSL::Create_be_to_e( const char * full_or_marked)
 }
 
 // refines the space-time mesh while updating bot_to_top relation
-void ParMeshTSL::Refine(int par_ref_levels)
+void ParMeshCyl::Refine(int par_ref_levels)
 {
     if (par_ref_levels != 0)
     {
-        MFEM_ABORT("ParMeshTSL::Refine() implementation was not finished \n");
+        MFEM_ABORT("ParMeshCyl::Refine() implementation was not finished \n");
     }
     else
         return;

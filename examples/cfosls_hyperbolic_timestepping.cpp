@@ -31,7 +31,7 @@ using namespace mfem;
 class TimeSlab
 {
 protected:
-    ParMeshTSL * pmeshtsl;
+    ParMeshCyl * pmeshtsl;
     double t_init;
     double tau;
     int nt;
@@ -39,7 +39,7 @@ protected:
 public:
     virtual ~TimeSlab();
     TimeSlab (ParMesh& Pmeshbase, double T_init, double Tau, int Nt);
-    TimeSlab (ParMeshTSL& Pmeshtsl) : pmeshtsl(&Pmeshtsl), own_pmeshtsl(false) {}
+    TimeSlab (ParMeshCyl& Pmeshtsl) : pmeshtsl(&Pmeshtsl), own_pmeshtsl(false) {}
 
     // interpretation of the input and output vectors depend on the implementation of Solve
     // but they are related to the boundary conditions at the input and at he output
@@ -55,7 +55,7 @@ TimeSlab::~TimeSlab()
 TimeSlab::TimeSlab(ParMesh& Pmeshbase, double T_init, double Tau, int Nt)
     : t_init(T_init), tau(Tau), nt(Nt), own_pmeshtsl(true)
 {
-    pmeshtsl = new ParMeshTSL(Pmeshbase.GetComm(), Pmeshbase, t_init, tau, nt);
+    pmeshtsl = new ParMeshCyl(Pmeshbase.GetComm(), Pmeshbase, t_init, tau, nt);
 }
 
 // specific class for time-slabbing in hyperbolic problems
@@ -103,7 +103,7 @@ public:
     ~TimeSlabHyper();
     TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
                    const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
-    TimeSlabHyper (ParMeshTSL& Pmeshtsl, int Ref_Lvls,
+    TimeSlabHyper (ParMeshCyl& Pmeshtsl, int Ref_Lvls,
                    const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
 
     virtual void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const override;
@@ -137,7 +137,7 @@ TimeSlabHyper::TimeSlabHyper (ParMesh& Pmeshbase, double T_init, double Tau, int
     InitProblem();
 }
 
-TimeSlabHyper::TimeSlabHyper (ParMeshTSL& Pmeshtsl, int Ref_Lvls,
+TimeSlabHyper::TimeSlabHyper (ParMeshCyl& Pmeshtsl, int Ref_Lvls,
                               const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
     : TimeSlab(Pmeshtsl), ref_lvls(Ref_Lvls),
       formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
@@ -1860,20 +1860,23 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
+   /*
    int nslabs = 3;
    Array<int> slabs_widths(nslabs);
    slabs_widths[0] = Nt / 2;
    slabs_widths[1] = Nt / 2 - 1;
    slabs_widths[2] = 1;
+   ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt, nslabs, &slabs_widths);
+   */
 
-   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt, nslabs, &slabs_widths);
+   ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
 
-   pmesh->PrintSlabsStruct();
+   //pmesh->PrintSlabsStruct();
 
    //delete pmeshbase;
    //delete pmesh;
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
    /*
    if (num_procs == 1)
@@ -3569,7 +3572,7 @@ void testVectorFun(const Vector& xt, Vector& res)
 // eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
 // the fespace must correspond to the eltype provided
 // bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
-// which can be taken out of ParMeshTSL
+// which can be taken out of ParMeshCyl
 
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)

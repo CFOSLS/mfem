@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   ParMeshTSL * pmesh = new ParMeshTSL(comm, *pmeshbase, 0.0, tau, Nt);
+   ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
 
    //delete pmeshbase;
    //delete pmesh;
@@ -1960,7 +1960,7 @@ void testVectorFun(const Vector& xt, Vector& res)
 // eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
 // the fespace must correspond to the eltype provided
 // bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
-// which can be taken out of ParMeshTSL
+// which can be taken out of ParMeshCyl
 
 std::set<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)

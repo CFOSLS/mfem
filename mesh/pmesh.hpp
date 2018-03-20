@@ -225,11 +225,31 @@ public:
 
    // TODO: Remove this if clean code is needed.
    // It's a temporary crutch because meshgen functions use protected members of ParMesh
-   friend class ParMeshTSL;
+   friend class ParMeshCyl;
 };
 
-/// Class for parallel meshes in time-slabbing framework
+/*
+/// Class for a single time slab mesh
 class ParMeshTSL : public ParMesh
+{
+protected:
+    std::vector<int> bottom_brdel_indices;
+    std::vector<int> top_brdel_indices;
+    bool was_extracted;
+    // link between element indices in the time slab and element indices in the parent global mesh
+    std::vector<std::pair<int,int> > el_link;
+    // links between bottom and top boundary element in the time slab and faces in the parent global mesh
+    std::vector<std::pair<int,int> > bot_brdel_link;
+    std::vector<std::pair<int,int> > top_brdel_link;
+public:
+    ParMeshTSL();
+
+    friend class ParMeshParareal;
+};
+*/
+
+/// Class for parallel meshes in time-slabbing framework (old choice, before considering parareal)
+class ParMeshCyl : public ParMesh
 {
 public:
     ParMesh & meshbase;
@@ -278,14 +298,14 @@ public:
    // local_method = 1: ~ LONGWAY, qhull is used for lateral faces of space-time prisms (then combined)
    // local_method = 2: qhull is not used, a simple procedure for simplices is used.
 
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method,
+   ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method,
               int Nslabs, Array<int>* Slabs_widths);
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int Nslabs, Array<int>* Slabs_widths)
-       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2, Nslabs, Slabs_widths) {}
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method)
-       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, bnd_method, local_method, 1, NULL) {}
-   ParMeshTSL(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps)
-       : ParMeshTSL(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2) {}
+   ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int Nslabs, Array<int>* Slabs_widths)
+       : ParMeshCyl(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2, Nslabs, Slabs_widths) {}
+   ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps, int bnd_method, int local_method)
+       : ParMeshCyl(comm, Meshbase, Tinit, Tau, Nsteps, bnd_method, local_method, 1, NULL) {}
+   ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps)
+       : ParMeshCyl(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2) {}
 
    void PrintSlabsStruct();
 
@@ -360,6 +380,21 @@ protected:
    // Used in Refine().
    void UpdateBotToTopLink(SparseMatrix& BE_AE_be);
 };
+
+/*
+/// Class for a global domain mesh in parareal setup
+class ParMeshParareal : public ParMeshCyl
+{
+protected:
+    std::vector<ParMeshTSL*> extracted_tslabs;
+    std::vector<std::vector<std::pair<int,int> > > extracted_el_links;
+    std::vector<std::vector<std::pair<int,int> > > extracted_bot_brdel_links;
+    std::vector<std::vector<std::pair<int,int> > > extracted_top_brdel_links;
+public:
+    ParMeshParareal();
+    ParMeshTSL * ExtractTimeSlab(int tslab);
+};
+*/
 
 inline double dist( double * M, double * N , int d);
 int setzero(Array2D<int>* arrayint);
