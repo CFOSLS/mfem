@@ -1745,7 +1745,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "L2";     // "H1" or "L2"
+   const char *space_for_S = "H1";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -3519,7 +3519,7 @@ int main(int argc, char *argv[])
 
   {
       //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
-      int pref_lvls_tslab = 0; // doesn't work with other values
+      int pref_lvls_tslab = 1; // doesn't work with other values
       TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          formulation, space_for_S, space_for_sigma);
 
@@ -3600,6 +3600,9 @@ int main(int argc, char *argv[])
 
       delete timeslab_test;
   }
+
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeSlabHyper instances \n";

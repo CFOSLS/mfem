@@ -8029,7 +8029,163 @@ void ParMeshCyl::PrintBotToTopBels() const
 
 void ParMeshCyl::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
 {
-    MFEM_ABORT("UpdateBotToTopLink() was not implemented \n");
+    //MFEM_ABORT("UpdateBotToTopLink() was not implemented \n");
+    std::vector<std::pair<int,int> > new_bot_to_top_link;
+    new_bot_to_top_link.reserve(ipow(2, Dimension() - 1) * bot_to_top_bels.size());
+    for (int BE = 0; BE < BE_AE_be.Height() / 2; ++BE)
+    {
+        int BE_bot = BE;
+        int BE_top = BE + BE_AE_be.Height() / 2;
+
+        // for the bottom BE and its be's
+        std::vector<std::vector<double> > all_verts_coordinates;
+        std::set<int> all_vert_indices;
+        std::vector<int> verts_pushed;
+        std::vector<std::pair<int,int> > verts_newverts_link;
+        int * cols = BE_AE_be.GetRowColumns(BE_bot);
+        double * entries = BE_AE_be.GetRowEntries(BE_bot);
+
+        // to each be in BE we assign a sorted array of vertex indices
+        // where vertices are ordered by a geometrical coordinate ordering
+
+        // first we collect the vertex coordinates for all be vertices
+        int be_count = 0;
+        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
+        {
+            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+            {
+                int be = cols[j];
+                int nverts = GetBdrElement(be)->GetNVertices();
+                int * be_verts = GetBdrElement(be)->GetVertices();
+
+                be_count++;
+
+                for ( int i = 0; i < nverts; ++i)
+                {
+                    if (all_vert_indices.find(be_verts[i]) == all_vert_indices.end())
+                    {
+                        all_vert_indices.insert(be_verts[i]);
+                        double * vcoords = GetVertex(be_verts[i]);
+                        all_verts_coordinates.push_back(std::vector<double>(vcoords, vcoords + Dimension() - 1));
+                        verts_pushed.push_back(be_verts[i]);
+                    }
+                }
+            }
+        }
+
+        std::cout << "all_verts_coordinates: \n";
+        for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
+        {
+            std::cout << "vertex: " << i << "\n";
+            for (int unsigned j = 0; j < all_verts_coordinates[i].size(); ++j)
+                std::cout << all_verts_coordinates[i][j] << " ";
+            std::cout << "\n";
+        }
+        std::cout << "\n";
+
+
+        std::cout << "verts_pushed: \n";
+        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+            std::cout << verts_pushed[i] << " ";
+        std::cout << "\n";
+
+        // now permutation defines the geometrical order of vertices
+        int * permutation = new int[all_verts_coordinates.size()];
+        sortingPermutationNew(all_verts_coordinates, permutation);
+
+        std::cout << "permutation: \n";
+        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+            std::cout << permutation[i] << " ";
+        std::cout << "\n";
+
+        int * inv_permutation = new int[all_verts_coordinates.size()];
+        invert_permutation(permutation, all_verts_coordinates.size(), inv_permutation);
+
+        std::cout << "inverse permutation: \n";
+        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+            std::cout << inv_permutation[i] << " ";
+        std::cout << "\n";
+
+        for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
+        {
+            verts_newverts_link.push_back(std::pair<int,int>(verts_pushed[i],inv_permutation[i]));
+        }
+
+        std::cout << "verts_newverts_link: \n";
+        for (unsigned int i = 0; i < verts_newverts_link.size(); ++i)
+            std::cout << "<" << verts_newverts_link[i].first << "," << verts_newverts_link[i].second << "> ";
+        std::cout << "\n";
+
+
+        // to each be we assign now a vector of the new vertex indices
+        // corresponding to vertices geometrical ordering
+        std::vector<std::set<int> > bels_newverts(be_count);
+        int count = 0;
+        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
+        {
+            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+            {
+                int be = cols[j];
+                int nverts = GetBdrElement(be)->GetNVertices();
+                int * be_verts = GetBdrElement(be)->GetVertices();
+
+                for ( int i = 0; i < nverts; ++i)
+                {
+                    int rel_vert_index = -1;
+                    for (unsigned int k = 0; k < verts_pushed.size(); ++k)
+                        if (verts_pushed[k] == be_verts[i])
+                            rel_vert_index = k;
+
+                    MFEM_ASSERT(rel_vert_index != -1, "Error: be vertex was not found among "
+                                                      "verts_pushed entries \n");
+                    bels_newverts[count].insert(verts_newverts_link[rel_vert_index].second);
+                }
+
+                count++;
+            }
+        }
+
+        count = 0;
+        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
+        {
+            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+            {
+                int be = cols[j];
+                int nverts = GetBdrElement(be)->GetNVertices();
+
+                int * be_verts = GetBdrElement(be)->GetVertices();
+
+                std::cout << "be: " << be << " has following vertices \n";
+                for ( int i = 0; i < nverts; ++i)
+                {
+                    double * vcoords = GetVertex(be_verts[i]);
+                    for (int k = 0; k < Dimension(); ++k)
+                        std::cout << vcoords[k] << " ";
+                    std::cout << "\n";
+                }
+
+
+                std::cout << "be: " << be << " has new relative verts indices \n";
+                std::set<int>::iterator it;
+                for (it = bels_newverts[count].begin(); it != bels_newverts[count].end(); ++it)
+                    std::cout << *it << " ";
+                std::cout << "\n";
+
+            }
+            ++count;
+        }
+
+        // then we sort the arrays for be's
+        // the sorting gives an ordering for be's which will
+        // be the same for the top boundary
+        // ...
+
+        // do the same two steps for the top boundary
+
+        // now by matching the ordered be indices we can create the desired new pairs
+        // ...
+
+    }
 }
 
 // Creates be_to_e relation between marked(!) boundary elements
@@ -8098,12 +8254,14 @@ SparseMatrix * ParMeshCyl::Create_be_to_e( const char * full_or_marked)
 // refines the space-time mesh while updating bot_to_top relation
 void ParMeshCyl::Refine(int par_ref_levels)
 {
+    /*
     if (par_ref_levels != 0)
     {
         MFEM_ABORT("ParMeshCyl::Refine() implementation was not finished \n");
     }
     else
         return;
+    */
 
     FiniteElementCollection * l2_coll_tmp = new L2_FECollection(0, Dimension());
     ParFiniteElementSpace * L2_space_tmp = new ParFiniteElementSpace(this, l2_coll_tmp);
@@ -8137,6 +8295,40 @@ void ParMeshCyl::Refine(int par_ref_levels)
         // The additional be's are taken care of below.
         SparseMatrix * BE_AE_be = RAP(*tmp1, *E_e, *tmp2);
 
+        /*
+        std::cout << "bdr attributes for be at the fine mesh \n";
+        for (int be = 0; be < GetNBE(); ++be)
+            std::cout << GetBdrAttribute(be) << " ";
+        std::cout << "\n";
+        */
+
+        for (int row = 0; row < BE_AE_be->Height(); ++row)
+        {
+            //std::cout << "row: " << row << "\n";
+            int BE_bdrattr;
+            if (row < BE_AE_be->Height() / 2)
+                BE_bdrattr = 1;
+            else
+                BE_bdrattr = 3;
+            //std::cout << "BE_bdrattr: " << BE_bdrattr << "\n";
+
+            int ncols = BE_AE_be->RowSize(row);
+            //std::cout << "ncols: " << ncols << "\n";
+
+            int * cols = BE_AE_be->GetRowColumns(row);
+            double * entries = BE_AE_be->GetRowEntries(row);
+            for (int j = 0; j < ncols; ++j)
+            {
+                int col = cols[j];
+                //std::cout << "col = " << col << "\n";
+                // if be doesn't belong to the bottom or bot boundary
+                //std::cout << "its bdr attr = " << GetBdrAttribute(col) << "\n";
+
+                if (GetBdrAttribute(col) != BE_bdrattr)
+                    entries[j] = 0.0;
+            }
+        }
+
         //E_e->Print();
 
         //delete P_W_l;
@@ -8147,7 +8339,12 @@ void ParMeshCyl::Refine(int par_ref_levels)
         delete BE_E;
         delete be_e;
 
-        //BE_be->Print();
+        //BE_AE_be->Print();
+
+        // checking row sums after we get rid of the be's from the wrong boundary parts
+        //Vector row_sums(BE_AE_be->Height());
+        //BE_AE_be->GetRowSums(row_sums);
+        //row_sums.Print();
 
         // update the bot_to_top relation using BE_be
         // ...
@@ -8291,6 +8488,20 @@ int setzero(Array2D<int>* arrayint)
         for ( int j = 0; j < arrayint->NumCols(); ++j)
             (*arrayint)(i,j) = 0;
     return 0;
+}
+
+int ipow(int base, int exp)
+{
+    int result = 1;
+    while (exp)
+    {
+        if (exp & 1)
+            result *= base;
+        exp >>= 1;
+        base *= base;
+    }
+
+    return result;
 }
 
 
