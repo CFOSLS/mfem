@@ -5006,6 +5006,19 @@ ParMesh::~ParMesh()
    // The Mesh destructor is called automatically
 }
 
+// a copy constructor
+ParMeshCyl::ParMeshCyl(ParMeshCyl& pmeshcyl)
+    : ParMesh(pmeshcyl), meshbase(pmeshcyl.meshbase), have_slabs_structure(false)
+{
+    bot_to_top_bels = pmeshcyl.bot_to_top_bels;
+
+    if (pmeshcyl.have_slabs_structure)
+    {
+        slabs_struct = new Slabs_Structure(*pmeshcyl.slabs_struct);
+        have_slabs_structure = true;
+    }
+}
+
 
 // parallel version 2
 // from a given base mesh (tetrahedral or triangular) produces a space-time mesh for a cylinder
@@ -8239,14 +8252,6 @@ void ParMeshCyl::UpdateBotToTopLink(SparseMatrix& BE_AE_be, bool verbose)
             std::cout << be_indices_bot[k] << " ";
         std::cout << "\n";
         */
-        /*
-        std::vector<int> inv_ordering_bot;
-        invert_permutation(ordering_bot, inv_ordering_bot);
-        std::cout << "inv_ordering_bot \n";
-        for (unsigned int k = 0; k < inv_ordering_bot.size(); ++k)
-            std::cout << inv_ordering_bot[k] << " ";
-        std::cout << "\n";
-        */
 
         // do the same at the top boundary
         std::vector<int> be_indices_top;
@@ -8262,22 +8267,10 @@ void ParMeshCyl::UpdateBotToTopLink(SparseMatrix& BE_AE_be, bool verbose)
             std::cout << be_indices_top[k] << " ";
         std::cout << "\n";
         */
-        /*
-        std::vector<int> inv_ordering_top;
-        invert_permutation(ordering_top, inv_ordering_top);
-        std::cout << "inv_ordering_top \n";
-        for (unsigned int k = 0; k < inv_ordering_top.size(); ++k)
-            std::cout << inv_ordering_top[k] << " ";
-        std::cout << "\n";
-        */
 
         // now by matching the ordered be indices we can create the desired new pairs
         for (unsigned int i = 0; i < be_indices_bot.size(); ++i)
         {
-            //std::cout << "inv ordering bot = " << inv_ordering_bot[i] << "\n";
-            //std::cout << "inv ordering top = " << inv_ordering_top[i] << "\n";
-            //int be1 = be_indices_bot[inv_ordering_bot[i]];
-            //int be2 = be_indices_top[inv_ordering_top[i]];
             int be1 = be_indices_bot[ordering_bot[i]];
             int be2 = be_indices_top[ordering_top[i]];
             //std::cout << "<" << be1 << "," << be2 << "> \n";

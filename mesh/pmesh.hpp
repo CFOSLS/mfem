@@ -281,6 +281,14 @@ public:
             else
                 slabs_offsets[1] = Nlayers;
         }
+
+        Slabs_Structure(Slabs_Structure& slabs_structure)
+        {
+            nslabs = slabs_structure.nslabs;
+            slabs_offsets.SetSize(nslabs + 1);
+            for (int i = 0; i < slabs_offsets.Size(); ++i)
+                slabs_offsets[i] = slabs_structure.slabs_offsets[i];
+        }
     } * slabs_struct;
 
     bool have_slabs_structure;
@@ -306,6 +314,8 @@ public:
        : ParMeshCyl(comm, Meshbase, Tinit, Tau, Nsteps, bnd_method, local_method, 1, NULL) {}
    ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Tau, int Nsteps)
        : ParMeshCyl(comm, Meshbase, Tinit, Tau, Nsteps, 1, 2) {}
+
+   ParMeshCyl(ParMeshCyl& pmeshcyl);
 
    void PrintSlabsStruct();
 

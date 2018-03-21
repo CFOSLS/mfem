@@ -95,6 +95,9 @@ protected:
     std::vector<std::pair<int,int> > tdofs_link_H1;
     std::vector<std::pair<int,int> > tdofs_link_Hdiv;
 
+    std::vector<HypreParMatrix*> P_H1_lvls;
+    std::vector<HypreParMatrix*> P_Hdiv_lvls;
+
     bool verbose;
     bool visualization;
 
@@ -120,6 +123,18 @@ public:
 
     ParFiniteElementSpace * Get_S_space() {return S_space;}
     ParFiniteElementSpace * Get_Sigma_space() {return Sigma_space;}
+    HypreParMatrix * Get_P_H1(int lvl)
+    {
+        if (lvl >= 0 && lvl < ref_lvls)
+            if (P_H1_lvls[lvl])
+                return P_H1_lvls[lvl];
+    }
+    HypreParMatrix * Get_P_Hdiv(int lvl)
+    {
+        if (lvl >= 0 && lvl < ref_lvls)
+            if (P_Hdiv_lvls[lvl])
+                return P_Hdiv_lvls[lvl];
+    }
 };
 
 TimeSlabHyper::~TimeSlabHyper()
