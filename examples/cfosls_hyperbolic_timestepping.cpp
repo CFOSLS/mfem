@@ -819,6 +819,8 @@ void TimeSlabHyper::InitProblem()
     {
         if (myid == i)
         {
+            std::cout << "I am " << myid << "\n";
+
             std::vector<std::pair<int,int> > * dofs_link_H1 =
                     CreateBotToTopDofsLink("linearH1",*H1_space, pmeshtsl->bot_to_top_bels);
             std::cout << std::flush;
@@ -833,7 +835,8 @@ void TimeSlabHyper::InitProblem()
                 int dof2 = (*dofs_link_H1)[i].second;
                 int tdof1 = H1_space->GetLocalTDofNumber(dof1);
                 int tdof2 = H1_space->GetLocalTDofNumber(dof2);
-                //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                std::cout << "corr. dof pair: <" << dof1 << "," << dof2 << ">\n";
+                std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
                 if (tdof1 * tdof2 < 0)
                     MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
 
@@ -3875,9 +3878,9 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
 
             if (verbose)
             {
-                std::cout << "bel_dofs_first \n";
+                std::cout << "belind1: " << belind_first << ", bel_dofs_first: \n";
                 bel_dofs_first.Print();
-                std::cout << "bel_dofs_second \n";
+                std::cout << "belind2: " << belind_second << ", bel_dofs_second: \n";
                 bel_dofs_second.Print();
             }
 
@@ -3912,10 +3915,9 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
 
             if (verbose)
             {
-                std::cout << "bel_dofs first: \n";
+                std::cout << "belind1: " << belind_first << ", bel_dofs_first: \n";
                 bel_dofs_first.Print();
-
-                std::cout << "bel_dofs second: \n";
+                std::cout << "belind2: " << belind_second << ", bel_dofs_second: \n";
                 bel_dofs_second.Print();
             }
 

@@ -321,7 +321,8 @@ public:
    void Refine(int par_ref_levels); // remove this
    //ParMesh *ExtractTimeSlab(int slab_index);
 private:
-   void Find_be_ordering(SparseMatrix& BE_AE_be, int BE_index, std::vector<int> *be_indices, std::vector<int> *ordering);
+   void Find_be_ordering(SparseMatrix& BE_AE_be, int BE_index, std::vector<int> *be_indices,
+                         std::vector<int> *ordering, bool verbose = false);
 
 public:
 
@@ -380,7 +381,7 @@ protected:
    // takes the BE_be relation between marked BE's and be's which belong to the same AE
    // and creates a new bot_to_top link between boundary elements.
    // Used in Refine().
-   void UpdateBotToTopLink(SparseMatrix& BE_AE_be);
+   void UpdateBotToTopLink(SparseMatrix& BE_AE_be, bool verbose = false);
 };
 
 /*
