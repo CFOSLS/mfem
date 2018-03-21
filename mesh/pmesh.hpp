@@ -320,6 +320,8 @@ protected:
 public:
    void Refine(int par_ref_levels); // remove this
    //ParMesh *ExtractTimeSlab(int slab_index);
+private:
+   void Find_be_ordering(SparseMatrix& BE_AE_be, int BE_index, std::vector<int> *be_indices, std::vector<int> *ordering);
 
 public:
 
@@ -401,6 +403,7 @@ int setzero(Array2D<int>* arrayint);
 void sortingPermutationNew( const std::vector<std::vector<double> >& values, int * permutation);
 int permutation_sign( int * permutation, int size);
 void invert_permutation(int *perm_in, int size, int * perm_out);
+void invert_permutation(std::vector<int> perm_in, std::vector<int> &perm_out);
 int ipow(int base, int exp);
 
 

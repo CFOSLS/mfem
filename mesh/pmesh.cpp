@@ -8027,163 +8027,273 @@ void ParMeshCyl::PrintBotToTopBels() const
     }
 }
 
+void ParMeshCyl::Find_be_ordering(SparseMatrix& BE_AE_be, int BE_index, std::vector<int> *be_indices, std::vector<int> *ordering)
+{
+    // for the bottom BE and its be's
+    std::vector<std::vector<double> > all_verts_coordinates;
+    std::set<int> all_vert_indices;
+    std::vector<int> verts_pushed;
+    std::vector<std::pair<int,int> > verts_newverts_link;
+    int * cols = BE_AE_be.GetRowColumns(BE_index);
+    double * entries = BE_AE_be.GetRowEntries(BE_index);
+
+    // to each be in BE we assign a sorted array of vertex indices
+    // where vertices are ordered by a geometrical coordinate ordering
+
+    // first we collect the vertex coordinates for all be vertices
+    int be_count = 0;
+    for (int j = 0; j < BE_AE_be.RowSize(BE_index); ++j)
+    {
+        if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+        {
+            int be = cols[j];
+            int nverts = GetBdrElement(be)->GetNVertices();
+            int * be_verts = GetBdrElement(be)->GetVertices();
+
+            be_indices->push_back(be);
+
+            be_count++;
+
+            for ( int i = 0; i < nverts; ++i)
+            {
+                if (all_vert_indices.find(be_verts[i]) == all_vert_indices.end())
+                {
+                    all_vert_indices.insert(be_verts[i]);
+                    double * vcoords = GetVertex(be_verts[i]);
+                    all_verts_coordinates.push_back(std::vector<double>(vcoords, vcoords + Dimension() - 1));
+                    verts_pushed.push_back(be_verts[i]);
+                }
+            }
+        }
+    }
+
+    /*
+    std::cout << "all_verts_coordinates: \n";
+    for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
+    {
+        std::cout << "vertex: " << i << "\n";
+        for (int unsigned j = 0; j < all_verts_coordinates[i].size(); ++j)
+            std::cout << all_verts_coordinates[i][j] << " ";
+        std::cout << "\n";
+    }
+    std::cout << "\n";
+    */
+
+    /*
+    std::cout << "verts_pushed: \n";
+    for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+        std::cout << verts_pushed[i] << " ";
+    std::cout << "\n";
+    */
+
+    // now permutation defines the geometrical order of vertices
+    int * permutation = new int[all_verts_coordinates.size()];
+    sortingPermutationNew(all_verts_coordinates, permutation);
+
+    /*
+    std::cout << "permutation: \n";
+    for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+        std::cout << permutation[i] << " ";
+    std::cout << "\n";
+    */
+
+    int * inv_permutation = new int[all_verts_coordinates.size()];
+    invert_permutation(permutation, all_verts_coordinates.size(), inv_permutation);
+
+    /*
+    std::cout << "inverse permutation: \n";
+    for (unsigned int i = 0; i < verts_pushed.size(); ++i)
+        std::cout << inv_permutation[i] << " ";
+    std::cout << "\n";
+    */
+
+    for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
+    {
+        verts_newverts_link.push_back(std::pair<int,int>(verts_pushed[i],inv_permutation[i]));
+    }
+
+    /*
+    std::cout << "verts_newverts_link: \n";
+    for (unsigned int i = 0; i < verts_newverts_link.size(); ++i)
+        std::cout << "<" << verts_newverts_link[i].first << "," << verts_newverts_link[i].second << "> ";
+    std::cout << "\n";
+    */
+
+
+    // to each be we assign now a vector of the new vertex indices
+    // corresponding to vertices geometrical ordering
+    std::vector<std::set<int> > bels_newverts(be_count);
+    int count = 0;
+    for (int j = 0; j < BE_AE_be.RowSize(BE_index); ++j)
+    {
+        if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+        {
+            int be = cols[j];
+            int nverts = GetBdrElement(be)->GetNVertices();
+            int * be_verts = GetBdrElement(be)->GetVertices();
+
+            for ( int i = 0; i < nverts; ++i)
+            {
+                int rel_vert_index = -1;
+                for (unsigned int k = 0; k < verts_pushed.size(); ++k)
+                    if (verts_pushed[k] == be_verts[i])
+                        rel_vert_index = k;
+
+                MFEM_ASSERT(rel_vert_index != -1, "Error: be vertex was not found among "
+                                                  "verts_pushed entries \n");
+                bels_newverts[count].insert(verts_newverts_link[rel_vert_index].second);
+            }
+
+            count++;
+        }
+    }
+
+    /*
+    count = 0;
+    for (int j = 0; j < BE_AE_be.RowSize(BE_index); ++j)
+    {
+        if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
+        {
+            int be = cols[j];
+            int nverts = GetBdrElement(be)->GetNVertices();
+
+            int * be_verts = GetBdrElement(be)->GetVertices();
+
+            std::cout << "be: " << be << " has following vertices \n";
+            for ( int i = 0; i < nverts; ++i)
+            {
+                double * vcoords = GetVertex(be_verts[i]);
+                for (int k = 0; k < Dimension(); ++k)
+                    std::cout << vcoords[k] << " ";
+                std::cout << "\n";
+            }
+
+
+            std::cout << "be: " << be << " has new relative verts indices \n";
+            std::set<int>::iterator it;
+            for (it = bels_newverts[count].begin(); it != bels_newverts[count].end(); ++it)
+                std::cout << *it << " ";
+            std::cout << "\n";
+
+            ++count;
+        }
+    }
+    */
+
+    // then we sort the arrays for be's
+    // the sorting gives an ordering for be's which will
+    // be the same for the top boundary
+
+    std::vector<int> index(bels_newverts.size(), 0);
+    for (int i = 0 ; i != index.size() ; i++)
+        index[i] = i;
+
+    std::sort(index.begin(), index.end(),
+        [&](const int& a, const int& b) {
+            return (bels_newverts[a] < bels_newverts[b]);
+        }
+    );
+    /*
+    std::cout << "ordering of the bels: \n";
+    for (int i = 0 ; i != index.size() ; i++) {
+        std::cout << index[i] << endl;
+    }
+    */
+
+    for (int i = 0 ; i != index.size() ; i++)
+        ordering->push_back(index[i]);
+
+    //std::cout << "breakpoint \n";
+}
+
 void ParMeshCyl::UpdateBotToTopLink(SparseMatrix& BE_AE_be)
 {
     //MFEM_ABORT("UpdateBotToTopLink() was not implemented \n");
     std::vector<std::pair<int,int> > new_bot_to_top_link;
     new_bot_to_top_link.reserve(ipow(2, Dimension() - 1) * bot_to_top_bels.size());
-    for (int BE = 0; BE < BE_AE_be.Height() / 2; ++BE)
+    for (int BE_bot = 0; BE_bot < BE_AE_be.Height() / 2; ++BE_bot)
     {
-        int BE_bot = BE;
-        int BE_top = BE + BE_AE_be.Height() / 2;
+        std::cout << "be at the bottom No. " << BE_bot << "\n";
+        int BE_top = BE_bot + BE_AE_be.Height() / 2;
 
-        // for the bottom BE and its be's
-        std::vector<std::vector<double> > all_verts_coordinates;
-        std::set<int> all_vert_indices;
-        std::vector<int> verts_pushed;
-        std::vector<std::pair<int,int> > verts_newverts_link;
-        int * cols = BE_AE_be.GetRowColumns(BE_bot);
-        double * entries = BE_AE_be.GetRowEntries(BE_bot);
-
-        // to each be in BE we assign a sorted array of vertex indices
-        // where vertices are ordered by a geometrical coordinate ordering
-
-        // first we collect the vertex coordinates for all be vertices
-        int be_count = 0;
-        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
-        {
-            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
-            {
-                int be = cols[j];
-                int nverts = GetBdrElement(be)->GetNVertices();
-                int * be_verts = GetBdrElement(be)->GetVertices();
-
-                be_count++;
-
-                for ( int i = 0; i < nverts; ++i)
-                {
-                    if (all_vert_indices.find(be_verts[i]) == all_vert_indices.end())
-                    {
-                        all_vert_indices.insert(be_verts[i]);
-                        double * vcoords = GetVertex(be_verts[i]);
-                        all_verts_coordinates.push_back(std::vector<double>(vcoords, vcoords + Dimension() - 1));
-                        verts_pushed.push_back(be_verts[i]);
-                    }
-                }
-            }
-        }
-
-        std::cout << "all_verts_coordinates: \n";
-        for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
-        {
-            std::cout << "vertex: " << i << "\n";
-            for (int unsigned j = 0; j < all_verts_coordinates[i].size(); ++j)
-                std::cout << all_verts_coordinates[i][j] << " ";
-            std::cout << "\n";
-        }
+        std::vector<int> be_indices_bot;
+        std::vector<int> ordering_bot;
+        Find_be_ordering(BE_AE_be, BE_bot, &be_indices_bot, &ordering_bot);
+        /*
+        std::cout << "ordering_bot \n";
+        for (unsigned int k = 0; k < ordering_bot.size(); ++k)
+            std::cout << ordering_bot[k] << " ";
         std::cout << "\n";
-
-
-        std::cout << "verts_pushed: \n";
-        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
-            std::cout << verts_pushed[i] << " ";
+        std::cout << "be indices bot \n";
+        for (unsigned int k = 0; k < be_indices_bot.size(); ++k)
+            std::cout << be_indices_bot[k] << " ";
         std::cout << "\n";
-
-        // now permutation defines the geometrical order of vertices
-        int * permutation = new int[all_verts_coordinates.size()];
-        sortingPermutationNew(all_verts_coordinates, permutation);
-
-        std::cout << "permutation: \n";
-        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
-            std::cout << permutation[i] << " ";
+        */
+        /*
+        std::vector<int> inv_ordering_bot;
+        invert_permutation(ordering_bot, inv_ordering_bot);
+        std::cout << "inv_ordering_bot \n";
+        for (unsigned int k = 0; k < inv_ordering_bot.size(); ++k)
+            std::cout << inv_ordering_bot[k] << " ";
         std::cout << "\n";
+        */
 
-        int * inv_permutation = new int[all_verts_coordinates.size()];
-        invert_permutation(permutation, all_verts_coordinates.size(), inv_permutation);
-
-        std::cout << "inverse permutation: \n";
-        for (unsigned int i = 0; i < verts_pushed.size(); ++i)
-            std::cout << inv_permutation[i] << " ";
+        // do the same at the top boundary
+        std::vector<int> be_indices_top;
+        std::vector<int> ordering_top;
+        Find_be_ordering(BE_AE_be, BE_top, &be_indices_top, &ordering_top);
+        /*
+        std::cout << "ordering_top \n";
+        for (unsigned int k = 0; k < ordering_top.size(); ++k)
+            std::cout << ordering_top[k] << " ";
         std::cout << "\n";
-
-        for (unsigned int i = 0; i < all_verts_coordinates.size(); ++i)
-        {
-            verts_newverts_link.push_back(std::pair<int,int>(verts_pushed[i],inv_permutation[i]));
-        }
-
-        std::cout << "verts_newverts_link: \n";
-        for (unsigned int i = 0; i < verts_newverts_link.size(); ++i)
-            std::cout << "<" << verts_newverts_link[i].first << "," << verts_newverts_link[i].second << "> ";
+        std::cout << "be indices top \n";
+        for (unsigned int k = 0; k < be_indices_top.size(); ++k)
+            std::cout << be_indices_top[k] << " ";
         std::cout << "\n";
-
-
-        // to each be we assign now a vector of the new vertex indices
-        // corresponding to vertices geometrical ordering
-        std::vector<std::set<int> > bels_newverts(be_count);
-        int count = 0;
-        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
-        {
-            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
-            {
-                int be = cols[j];
-                int nverts = GetBdrElement(be)->GetNVertices();
-                int * be_verts = GetBdrElement(be)->GetVertices();
-
-                for ( int i = 0; i < nverts; ++i)
-                {
-                    int rel_vert_index = -1;
-                    for (unsigned int k = 0; k < verts_pushed.size(); ++k)
-                        if (verts_pushed[k] == be_verts[i])
-                            rel_vert_index = k;
-
-                    MFEM_ASSERT(rel_vert_index != -1, "Error: be vertex was not found among "
-                                                      "verts_pushed entries \n");
-                    bels_newverts[count].insert(verts_newverts_link[rel_vert_index].second);
-                }
-
-                count++;
-            }
-        }
-
-        count = 0;
-        for (int j = 0; j < BE_AE_be.RowSize(BE_bot); ++j)
-        {
-            if (fabs(entries[j]) > 1.0e-10) // in general should be 0 or 1
-            {
-                int be = cols[j];
-                int nverts = GetBdrElement(be)->GetNVertices();
-
-                int * be_verts = GetBdrElement(be)->GetVertices();
-
-                std::cout << "be: " << be << " has following vertices \n";
-                for ( int i = 0; i < nverts; ++i)
-                {
-                    double * vcoords = GetVertex(be_verts[i]);
-                    for (int k = 0; k < Dimension(); ++k)
-                        std::cout << vcoords[k] << " ";
-                    std::cout << "\n";
-                }
-
-
-                std::cout << "be: " << be << " has new relative verts indices \n";
-                std::set<int>::iterator it;
-                for (it = bels_newverts[count].begin(); it != bels_newverts[count].end(); ++it)
-                    std::cout << *it << " ";
-                std::cout << "\n";
-
-            }
-            ++count;
-        }
-
-        // then we sort the arrays for be's
-        // the sorting gives an ordering for be's which will
-        // be the same for the top boundary
-        // ...
-
-        // do the same two steps for the top boundary
+        */
+        /*
+        std::vector<int> inv_ordering_top;
+        invert_permutation(ordering_top, inv_ordering_top);
+        std::cout << "inv_ordering_top \n";
+        for (unsigned int k = 0; k < inv_ordering_top.size(); ++k)
+            std::cout << inv_ordering_top[k] << " ";
+        std::cout << "\n";
+        */
 
         // now by matching the ordered be indices we can create the desired new pairs
-        // ...
+        for (unsigned int i = 0; i < be_indices_bot.size(); ++i)
+        {
+            //std::cout << "inv ordering bot = " << inv_ordering_bot[i] << "\n";
+            //std::cout << "inv ordering top = " << inv_ordering_top[i] << "\n";
+            //int be1 = be_indices_bot[inv_ordering_bot[i]];
+            //int be2 = be_indices_top[inv_ordering_top[i]];
+            int be1 = be_indices_bot[ordering_bot[i]];
+            int be2 = be_indices_top[ordering_top[i]];
+            std::cout << "<" << be1 << "," << be2 << "> \n";
+            new_bot_to_top_link.push_back(std::pair<int,int>(be1, be2));
+
+            // checking the coordinates of the matched elements
+            int nverts = GetBdrElement(be1)->GetNVertices();
+            int * be_verts1 = GetBdrElement(be1)->GetVertices();
+            std::cout << "be1: " << be1 << " has following vertices \n";
+            for ( int i = 0; i < nverts; ++i)
+            {
+                double * vcoords = GetVertex(be_verts1[i]);
+                for (int k = 0; k < Dimension(); ++k)
+                    std::cout << vcoords[k] << " ";
+                std::cout << "\n";
+            }
+            int * be_verts2 = GetBdrElement(be2)->GetVertices();
+            std::cout << "be2: " << be2 << " has following vertices \n";
+            for ( int i = 0; i < nverts; ++i)
+            {
+                double * vcoords = GetVertex(be_verts2[i]);
+                for (int k = 0; k < Dimension(); ++k)
+                    std::cout << vcoords[k] << " ";
+                std::cout << "\n";
+            }
+        }
 
     }
 }
@@ -8406,6 +8516,17 @@ int permutation_sign( int * permutation, int size)
 // zero-based indexing for perm_in and perm_out
 void invert_permutation(int *perm_in, int size, int * perm_out)
 {
+  // Inserting position at their
+  // respective element in second array
+  for (int i = 0; i < size; i++)
+    perm_out[perm_in[i]] = i;
+}
+
+// zero-based indexing for perm_in and perm_out
+void invert_permutation(std::vector<int> perm_in, std::vector<int>& perm_out)
+{
+  int size = perm_in.size();
+  perm_out.resize(size);
   // Inserting position at their
   // respective element in second array
   for (int i = 0; i < size; i++)
