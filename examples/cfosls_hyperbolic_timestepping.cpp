@@ -874,35 +874,37 @@ void TimeSlabHyper::InitProblem()
     H1_space = new ParFiniteElementSpace(pmeshtsl, h1_coll);
 
     /////////////////////////////////////////////////////////////////
-    pmeshtsl_lvls.resize(ref_lvls);
-    Hdiv_space_lvls.resize(ref_lvls);
-    H1_space_lvls.resize(ref_lvls);
-    L2_space_lvls.resize(ref_lvls);
-    Sigma_space_lvls.resize(ref_lvls);
-    S_space_lvls.resize(ref_lvls);
+    int num_lvls = ref_lvls + 1;
 
-    block_trueOffsets_lvls.resize(ref_lvls);
-    CFOSLSop_lvls.resize(ref_lvls);
-    CFOSLSop_nobnd_lvls.resize(ref_lvls);
-    prec_lvls.resize(ref_lvls);
-    solver_lvls.resize(ref_lvls);
+    pmeshtsl_lvls.resize(num_lvls);
+    Hdiv_space_lvls.resize(num_lvls);
+    H1_space_lvls.resize(num_lvls);
+    L2_space_lvls.resize(num_lvls);
+    Sigma_space_lvls.resize(num_lvls);
+    S_space_lvls.resize(num_lvls);
 
-    TrueP_H1_lvls.resize(ref_lvls - 1);
-    TrueP_Hdiv_lvls.resize(ref_lvls - 1);
-    P_H1_lvls.resize(ref_lvls - 1);
-    P_Hdiv_lvls.resize(ref_lvls - 1);
+    block_trueOffsets_lvls.resize(num_lvls);
+    CFOSLSop_lvls.resize(num_lvls);
+    CFOSLSop_nobnd_lvls.resize(num_lvls);
+    prec_lvls.resize(num_lvls);
+    solver_lvls.resize(num_lvls);
 
-    init_cond_size_lvls.resize(ref_lvls);
-    tdofs_link_H1_lvls.resize(ref_lvls);
-    tdofs_link_Hdiv_lvls.resize(ref_lvls);
+    TrueP_H1_lvls.resize(num_lvls - 1);
+    TrueP_Hdiv_lvls.resize(num_lvls - 1);
+    P_H1_lvls.resize(num_lvls - 1);
+    P_Hdiv_lvls.resize(num_lvls - 1);
+
+    init_cond_size_lvls.resize(num_lvls);
+    tdofs_link_H1_lvls.resize(num_lvls);
+    tdofs_link_Hdiv_lvls.resize(num_lvls);
 
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
 
-    for (int l = ref_lvls - 1; l >= 0; --l)
+    for (int l = num_lvls - 1; l >= 0; --l)
     {
         // creating pmesh for level l
-        if (l == ref_lvls - 1)
+        if (l == num_lvls - 1)
         {
             pmeshtsl_lvls[l] = new ParMeshCyl(*pmeshtsl);
         }
@@ -921,7 +923,7 @@ void TimeSlabHyper::InitProblem()
 
         // for all but one levels we create projection matrices between levels
         // and projectors assembled on true dofs if MG preconditioner is used
-        if (l < ref_lvls - 1)
+        if (l < num_lvls - 1)
         {
             Hdiv_space->Update();
             H1_space->Update();
@@ -933,10 +935,10 @@ void TimeSlabHyper::InitProblem()
 
             auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
-            TrueP_Hdiv_lvls[ref_lvls - 2 - l] = d_td_coarse_Hdiv->LeftDiagMult(
+            TrueP_Hdiv_lvls[num_lvls - 2 - l] = d_td_coarse_Hdiv->LeftDiagMult(
                         *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_Hdiv_lvls[ref_lvls - 2 - l]->CopyColStarts();
-            TrueP_Hdiv_lvls[ref_lvls - 2 - l]->CopyRowStarts();
+            TrueP_Hdiv_lvls[num_lvls - 2 - l]->CopyColStarts();
+            TrueP_Hdiv_lvls[num_lvls - 2 - l]->CopyRowStarts();
 
             delete RP_Hdiv_local;
 
@@ -946,10 +948,10 @@ void TimeSlabHyper::InitProblem()
 
             auto d_td_coarse_H1 = H1_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[l]->GetRestrictionMatrix(), *P_H1_lvls[l]);
-            TrueP_H1_lvls[ref_lvls - 2 - l] = d_td_coarse_H1->LeftDiagMult(
+            TrueP_H1_lvls[num_lvls - 2 - l] = d_td_coarse_H1->LeftDiagMult(
                         *RP_H1_local, H1_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_H1_lvls[ref_lvls - 2 - l]->CopyColStarts();
-            TrueP_H1_lvls[ref_lvls - 2 - l]->CopyRowStarts();
+            TrueP_H1_lvls[num_lvls - 2 - l]->CopyColStarts();
+            TrueP_H1_lvls[num_lvls - 2 - l]->CopyRowStarts();
 
             delete RP_H1_local;
 
@@ -3504,19 +3506,20 @@ int main(int argc, char *argv[])
                  "created for the entire domain \n";
 
   {
-      //TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmesh, formulation, space_for_S, space_for_sigma);
-      int pref_lvls_tslab = 1; // doesn't work with other values
+      int pref_lvls_tslab = 1;
+      int solve_at_lvl = 0;
       TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          formulation, space_for_S, space_for_sigma);
 
-      int init_cond_size = timeslab_test->GetInitCondSize(0);
-      std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink(0);
+      int init_cond_size = timeslab_test->GetInitCondSize(solve_at_lvl);
+      std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink(solve_at_lvl);
       Vector Xinit(init_cond_size);
       if (strcmp(space_for_S,"H1") == 0) // S is present
       {
-          ParGridFunction * S_exact = new ParGridFunction(timeslab_test->Get_S_space());
+          ParFiniteElementSpace * testfespace = timeslab_test->Get_S_space(solve_at_lvl);
+          ParGridFunction * S_exact = new ParGridFunction(testfespace);
           S_exact->ProjectCoefficient(*Mytest.scalarS);
-          Vector S_exact_truedofs(timeslab_test->Get_S_space()->TrueVSize());
+          Vector S_exact_truedofs(testfespace->TrueVSize());
           S_exact->ParallelProject(S_exact_truedofs);
 
           for (int i = 0; i < init_cond_size; ++i)
@@ -3527,9 +3530,10 @@ int main(int argc, char *argv[])
       }
       else
       {
-          ParGridFunction * sigma_exact = new ParGridFunction(timeslab_test->Get_Sigma_space());
+          ParFiniteElementSpace * testfespace = timeslab_test->Get_Sigma_space(solve_at_lvl);
+          ParGridFunction * sigma_exact = new ParGridFunction(testfespace);
           sigma_exact->ProjectCoefficient(*Mytest.sigma);
-          Vector sigma_exact_truedofs(timeslab_test->Get_Sigma_space()->TrueVSize());
+          Vector sigma_exact_truedofs(testfespace->TrueVSize());
           sigma_exact->ParallelProject(sigma_exact_truedofs);
 
           for (int i = 0; i < init_cond_size; ++i)
@@ -3542,16 +3546,16 @@ int main(int argc, char *argv[])
 
       Vector Xout(init_cond_size);
 
-      timeslab_test->Solve(Xinit, Xout);
+      timeslab_test->Solve(solve_at_lvl,Xinit, Xout);
 
       Vector Xout_exact(init_cond_size);
 
       // checking the error at the top boundary
       if (strcmp(space_for_S,"H1") == 0) // S is present
       {
-          ParGridFunction * S_exact = new ParGridFunction(timeslab_test->Get_S_space());
+          ParGridFunction * S_exact = new ParGridFunction(timeslab_test->Get_S_space(solve_at_lvl));
           S_exact->ProjectCoefficient(*Mytest.scalarS);
-          Vector S_exact_truedofs(timeslab_test->Get_S_space()->TrueVSize());
+          Vector S_exact_truedofs(timeslab_test->Get_S_space(solve_at_lvl)->TrueVSize());
           S_exact->ParallelProject(S_exact_truedofs);
 
           for (int i = 0; i < init_cond_size; ++i)
@@ -3562,9 +3566,9 @@ int main(int argc, char *argv[])
       }
       else
       {
-          ParGridFunction * sigma_exact = new ParGridFunction(timeslab_test->Get_Sigma_space());
+          ParGridFunction * sigma_exact = new ParGridFunction(timeslab_test->Get_Sigma_space(solve_at_lvl));
           sigma_exact->ProjectCoefficient(*Mytest.sigma);
-          Vector sigma_exact_truedofs(timeslab_test->Get_Sigma_space()->TrueVSize());
+          Vector sigma_exact_truedofs(timeslab_test->Get_Sigma_space(solve_at_lvl)->TrueVSize());
           sigma_exact->ParallelProject(sigma_exact_truedofs);
 
           for (int i = 0; i < init_cond_size; ++i)
