@@ -156,6 +156,13 @@ public:
                 return TrueP_Hdiv_lvls[lvl];
     }
 
+    ParMeshCyl * Get_ParMeshCyl(int lvl)
+    {
+        if (lvl >= 0 && lvl <= ref_lvls)
+            if (pmeshtsl_lvls[lvl])
+                return pmeshtsl_lvls[lvl];
+    }
+
     void Interpolate(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
 };
 
@@ -896,7 +903,7 @@ void TimeSlabHyper::InitProblem()
 
     verbose = (myid == 0);
 
-    visualization = 1;
+    visualization = 0;
 
     FiniteElementCollection *hdiv_coll;
     FiniteElementCollection *l2_coll;
@@ -969,6 +976,8 @@ void TimeSlabHyper::InitProblem()
 
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
+
+    // 0 will correspond to the finest level for all items in the hierarchy
 
     for (int l = num_lvls - 1; l >= 0; --l)
     {
@@ -1049,10 +1058,10 @@ void TimeSlabHyper::InitProblem()
 
             auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
-            TrueP_Hdiv_lvls[num_lvls - 2 - l] = d_td_coarse_Hdiv->LeftDiagMult(
+            TrueP_Hdiv_lvls[l] = d_td_coarse_Hdiv->LeftDiagMult(
                         *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_Hdiv_lvls[num_lvls - 2 - l]->CopyColStarts();
-            TrueP_Hdiv_lvls[num_lvls - 2 - l]->CopyRowStarts();
+            TrueP_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_Hdiv_lvls[l]->CopyRowStarts();
 
             delete RP_Hdiv_local;
 
@@ -1062,16 +1071,28 @@ void TimeSlabHyper::InitProblem()
 
             auto d_td_coarse_H1 = H1_space_lvls[l + 1]->Dof_TrueDof_Matrix();
             SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[l]->GetRestrictionMatrix(), *P_H1_lvls[l]);
-            TrueP_H1_lvls[num_lvls - 2 - l] = d_td_coarse_H1->LeftDiagMult(
+            TrueP_H1_lvls[l] = d_td_coarse_H1->LeftDiagMult(
                         *RP_H1_local, H1_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_H1_lvls[num_lvls - 2 - l]->CopyColStarts();
-            TrueP_H1_lvls[num_lvls - 2 - l]->CopyRowStarts();
+            TrueP_H1_lvls[l]->CopyColStarts();
+            TrueP_H1_lvls[l]->CopyRowStarts();
 
             delete RP_H1_local;
 
-            TrueP_bndbot_H1_lvls[num_lvls - 2 - l] = RAP(Restrict_bot_H1_lvls[l + 1], TrueP_H1_lvls[num_lvls - 2 - l], Restrict_bot_H1_lvls[l]);
-            TrueP_bndbot_H1_lvls[num_lvls - 2 - l]->CopyColStarts();
-            TrueP_bndbot_H1_lvls[num_lvls - 2 - l]->CopyRowStarts();
+            TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
+            TrueP_bndbot_H1_lvls[l]->CopyColStarts();
+            TrueP_bndbot_H1_lvls[l]->CopyRowStarts();
+
+            TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l], TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
+            TrueP_bndtop_H1_lvls[l]->CopyColStarts();
+            TrueP_bndtop_H1_lvls[l]->CopyRowStarts();
+
+            TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
+            TrueP_bndbot_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_bndbot_Hdiv_lvls[l]->CopyRowStarts();
+
+            TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
+            TrueP_bndtop_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_bndtop_Hdiv_lvls[l]->CopyRowStarts();
         }
 
         /*
@@ -3593,7 +3614,7 @@ int main(int argc, char *argv[])
 
   {
       int pref_lvls_tslab = 1;
-      int solve_at_lvl = 0;
+      int solve_at_lvl = 1;
       TimeSlabHyper * timeslab_test = new TimeSlabHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          formulation, space_for_S, space_for_sigma);
 
@@ -3648,18 +3669,69 @@ int main(int argc, char *argv[])
                        (Xout_exact.Norml2() / sqrt (Xout_exact.Size()))<< "\n";
       }
 
+      // testing Interpolate()
+      if (solve_at_lvl == 1)
+      {
+          Vector Xout_fine(timeslab_test->GetInitCondSize(0));
+          timeslab_test->Interpolate("top", 0, Xout, Xout_fine);
+
+          Vector Xout_truedofs(timeslab_test->Get_S_space(solve_at_lvl)->TrueVSize());
+          Xout_truedofs = 0.0;
+          for (unsigned int i = 0; i < tdofs_link->size(); ++i)
+          {
+              Xout_truedofs[(*tdofs_link)[i].second] = Xout[i];
+          }
+          ParGridFunction * Xout_dofs = new ParGridFunction(timeslab_test->Get_S_space(solve_at_lvl));
+          Xout_dofs->Distribute(&Xout_truedofs);
+
+          std::vector<std::pair<int,int> > * tdofs_fine_link = timeslab_test->GetTdofsLink(0);
+          Vector Xout_fine_truedofs(timeslab_test->Get_S_space(0)->TrueVSize());
+          Xout_fine_truedofs = 0.0;
+          for (unsigned int i = 0; i < tdofs_fine_link->size(); ++i)
+          {
+              Xout_fine_truedofs[(*tdofs_fine_link)[i].second] = Xout_fine[i];
+          }
+          ParGridFunction * Xout_fine_dofs = new ParGridFunction(timeslab_test->Get_S_space(0));
+          Xout_fine_dofs->Distribute(&Xout_fine_truedofs);
+
+          ParMeshCyl * pmeshcyl_coarse = timeslab_test->Get_ParMeshCyl(solve_at_lvl);
+
+          std::cout << "pmeshcyl_coarse ne = " << pmeshcyl_coarse->GetNE() << "\n";
+          ParMeshCyl * pmeshcyl_fine = timeslab_test->Get_ParMeshCyl(0);
+
+          char vishost[] = "localhost";
+          int  visport   = 19916;
+
+          socketstream uuu_sock(vishost, visport);
+          uuu_sock << "parallel " << num_procs << " " << myid << "\n";
+          uuu_sock.precision(8);
+          uuu_sock << "solution\n" << *pmeshcyl_coarse <<
+                      *Xout_dofs << "window_title 'Xout coarse'"
+                 << endl;
+
+          socketstream s_sock(vishost, visport);
+          s_sock << "parallel " << num_procs << " " << myid << "\n";
+          s_sock.precision(8);
+          MPI_Barrier(comm);
+          s_sock << "solution\n" << *pmeshcyl_fine <<
+                    *Xout_fine_dofs << "window_title 'Xout fine'"
+                  << endl;
+
+      }
+
+
       delete timeslab_test;
   }
 
-  //MPI_Finalize();
-  //return 0;
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeSlabHyper instances \n";
 
   {
       int pref_lvls_tslab = 1;
-      int solve_at_lvl = 1;
+      int solve_at_lvl = 0;
 
       int nslabs = 2;
       std::vector<TimeSlabHyper*> timeslabs(nslabs);
@@ -3805,7 +3877,7 @@ int main(int argc, char *argv[])
           std::cout << "Sequential coarse solve: \n";
 
       std::vector<Vector*> Xouts_coarse(nslabs + 1);
-      int solve_at_lvl = 0;
+      int solve_at_lvl = 1;
 
       Vector Xinit;
       // initializing the input boundary condition for the first vector
@@ -3845,40 +3917,6 @@ int main(int argc, char *argv[])
 
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
-          /*
-           * only for debugging: exact initialization for all time slabs!
-          if (tslab > 0)
-          {
-              if (strcmp(space_for_S,"H1") == 0) // S is present
-              {
-                  ParGridFunction * S_exact = new ParGridFunction(timeslabs[tslab]->Get_S_space());
-                  S_exact->ProjectCoefficient(*Mytest.scalarS);
-                  Vector S_exact_truedofs(timeslabs[tslab]->Get_S_space()->TrueVSize());
-                  S_exact->ParallelAssemble(S_exact_truedofs);
-
-                  for (int i = 0; i < init_cond_size; ++i)
-                  {
-                      int tdof_bot = (*tdofs_link)[i].first;
-                      Xinit[i] = S_exact_truedofs[tdof_bot];
-                  }
-              }
-              else
-              {
-                  ParGridFunction * sigma_exact = new ParGridFunction(timeslabs[tslab]->Get_Sigma_space());
-                  sigma_exact->ProjectCoefficient(*Mytest.sigma);
-                  Vector sigma_exact_truedofs(timeslabs[tslab]->Get_Sigma_space()->TrueVSize());
-                  sigma_exact->ParallelAssemble(sigma_exact_truedofs);
-
-                  for (int i = 0; i < init_cond_size; ++i)
-                  {
-                      int tdof_bot = (*tdofs_link)[i].first;
-                      Xinit[i] = sigma_exact_truedofs[tdof_bot];
-                  }
-              }
-          }
-          */
-
-          //Xinit.Print();
           timeslabs[tslab]->Solve(solve_at_lvl, Xinit, Xout);
           Xinit = Xout;
           if (strcmp(space_for_S,"L2") == 0)
@@ -3930,7 +3968,7 @@ int main(int argc, char *argv[])
 
       if (verbose)
           std::cout << "Creating initial data for fine grid solves \n";
-      solve_at_lvl = 1;
+      solve_at_lvl = 0;
 
       std::vector<Vector*> Xinits_fine(nslabs + 1);
       std::vector<Vector*> Xouts_fine(nslabs + 1);
@@ -3956,7 +3994,7 @@ int main(int argc, char *argv[])
           std::cout << "Solving fine grid problems \n";
 
       // can be done in parallel, instead of for loop since the fine grid problems are independent
-      solve_at_lvl = 1;
+      solve_at_lvl = 0;
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
           timeslabs[tslab]->Solve(solve_at_lvl, *Xinits_fine[tslab], *Xouts_fine[tslab]);
@@ -4143,7 +4181,11 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     // FIXME:
     // MFEM_ABORT("Don't know how to create row_starts and col_starts \n");
 
-    HypreParMatrix * res = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
+    HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
+
+    HypreParMatrix * res = resT->Transpose();
+    res->CopyRowStarts();
+    res->CopyColStarts();
 
     return res;
 }
