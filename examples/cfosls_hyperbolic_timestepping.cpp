@@ -1003,7 +1003,7 @@ void TimeSlabHyper::InitProblem()
         {
             if (myid == i)
             {
-                std::cout << "I am " << myid << "\n";
+                std::cout << "I am " << myid << ", creating my tdof link \n";
 
                 std::vector<std::pair<int,int> > * dofs_link_H1 =
                         CreateBotToTopDofsLink("linearH1",*H1_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
@@ -1038,9 +1038,12 @@ void TimeSlabHyper::InitProblem()
             MPI_Barrier(comm);
         } // end fo loop over all processors, one after another
 
+        std::cout << "Got here \n";
         // creating restriction matrices from all tdofs to bot tdofs
         Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
+        std::cout << "Got there \n";
         Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+        std::cout << "Got there 2 \n";
         Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
         Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
 
@@ -4167,6 +4170,8 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     int global_marked_tdofs = 0;
     MPI_Allreduce(&local_size, &global_marked_tdofs, 1, MPI_INT, MPI_SUM, comm);
 
+    std::cout << "Got after Allreduce \n";
+
     int global_num_rows = global_marked_tdofs;
     int global_num_cols = pfespace.GlobalTrueVSize();
     int * row_starts = new int[2];
@@ -4181,11 +4186,18 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     // FIXME:
     // MFEM_ABORT("Don't know how to create row_starts and col_starts \n");
 
+    std::cout << "Creating resT \n";
+
     HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
+
+    std::cout << "resT created \n";
+
 
     HypreParMatrix * res = resT->Transpose();
     res->CopyRowStarts();
     res->CopyColStarts();
+
+    std::cout << "Got after resT creation \n";
 
     return res;
 }
