@@ -1003,7 +1003,7 @@ void TimeSlabHyper::InitProblem()
         {
             if (myid == i)
             {
-                std::cout << "I am " << myid << ", creating my tdof link \n";
+                //std::cout << "I am " << myid << ", creating my tdof link \n";
 
                 std::vector<std::pair<int,int> > * dofs_link_H1 =
                         CreateBotToTopDofsLink("linearH1",*H1_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
@@ -1038,12 +1038,9 @@ void TimeSlabHyper::InitProblem()
             MPI_Barrier(comm);
         } // end fo loop over all processors, one after another
 
-        std::cout << "Got here \n";
         // creating restriction matrices from all tdofs to bot tdofs
         Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
-        std::cout << "Got there \n";
         Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
-        std::cout << "Got there 2 \n";
         Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
         Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
 
@@ -2593,6 +2590,94 @@ int main(int argc, char *argv[])
   Ablock->Finalize();
   A = Ablock->ParallelAssemble();
 
+  /*
+  for (int i = 0; i < num_procs; ++i)
+  {
+      if (myid == i)
+      {
+          std::cout << "I am " << myid << "\n";
+          int * row_starts_A = A->GetRowStarts();
+          std::cout << "my row starts for A: \n";
+          std::cout << row_starts_A[0] << " " <<  row_starts_A[1] << " " << row_starts_A[2] << " " << row_starts_A[3] << "\n";
+          std::cout << "\n";
+          std::cout << std::flush;
+      }
+
+      MPI_Barrier(comm);
+  } // end fo loop over all processors, one after another
+
+  int m = A->Height();
+  int n = A->Width();
+
+  int * local_row_sizes = new int[num_procs + 1];
+  local_row_sizes[0] = 0;
+  MPI_Allgather(&m, 1, MPI_INT, local_row_sizes + 1, 1, MPI_INT, comm);
+
+  int * local_col_sizes = new int[num_procs + 1];
+  local_col_sizes[0] = 0;
+  MPI_Allgather(&n, 1, MPI_INT, local_col_sizes + 1, 1, MPI_INT, comm);
+
+  for (int i = 0; i < num_procs; ++i)
+  {
+      if (myid == i)
+      {
+          std::cout << "I am " << myid << "\n";
+          std::cout << "my local_row_sizes: \n";
+          for (int j = 0; j < num_procs + 1; ++j)
+              std::cout << local_row_sizes[j] << " ";
+          std::cout << "\n";
+
+          std::cout << "my local_col_sizes: \n";
+          for (int j = 0; j < num_procs + 1; ++j)
+              std::cout << local_col_sizes[j] << " ";
+          std::cout << "\n";
+          std::cout << "\n";
+
+          for (int j = 1; j < num_procs + 1; ++j)
+              local_row_sizes[j] += local_row_sizes[j - 1];
+
+          for (int j = 1; j < num_procs + 1; ++j)
+              local_col_sizes[j] += local_col_sizes[j - 1];
+
+          std::cout << "my local_row_offsets: \n";
+          for (int j = 0; j < num_procs + 1; ++j)
+              std::cout << local_row_sizes[j] << " ";
+          std::cout << "\n";
+
+          std::cout << "my local_col_offsets: \n";
+          for (int j = 0; j < num_procs + 1; ++j)
+              std::cout << local_row_sizes[j] << " ";
+          std::cout << "\n";
+          std::cout << "\n";
+
+          int * row_starts = new int[3];
+          row_starts[0] = local_row_sizes[myid];
+          row_starts[1] = local_row_sizes[myid + 1];
+          row_starts[2] = local_row_sizes[num_procs];
+          int * col_starts = new int[3];
+          col_starts[0] = local_col_sizes[myid];
+          col_starts[1] = local_col_sizes[myid + 1];
+          col_starts[2] = local_col_sizes[num_procs];
+
+          std::cout << "my computed row starts for A: \n";
+          std::cout << row_starts[0] << " " <<  row_starts[1] << " " << row_starts[2];
+          std::cout << "\n";
+
+          std::cout << "my computed col starts for A: \n";
+          std::cout << col_starts[0] << " " <<  col_starts[1] << " " << col_starts[2];
+          std::cout << "\n";
+
+          std::cout << std::flush;
+      }
+
+      MPI_Barrier(comm);
+  } // end fo loop over all processors, one after another
+
+  MPI_Finalize();
+  return 0;
+  */
+
+
   ParBilinearForm *Ablock_nobnd(new ParBilinearForm(Sigma_space));
   HypreParMatrix *A_nobnd;
   if (strcmp(space_for_S,"H1") == 0) // S is from H1
@@ -3699,7 +3784,7 @@ int main(int argc, char *argv[])
 
           ParMeshCyl * pmeshcyl_coarse = timeslab_test->Get_ParMeshCyl(solve_at_lvl);
 
-          std::cout << "pmeshcyl_coarse ne = " << pmeshcyl_coarse->GetNE() << "\n";
+          //std::cout << "pmeshcyl_coarse ne = " << pmeshcyl_coarse->GetNE() << "\n";
           ParMeshCyl * pmeshcyl_fine = timeslab_test->Get_ParMeshCyl(0);
 
           char vishost[] = "localhost";
@@ -4141,7 +4226,7 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 {
     if (strcmp(top_or_bot, "top") != 0 && strcmp(top_or_bot, "bot") != 0)
     {
-        MFEM_ABORT ("In CreateRestriction() top_or_bot must be 'top' or 'bot'!\n");
+        MFEM_ABORT ("In num_lvls() top_or_bot must be 'top' or 'bot'!\n");
     }
 
     MPI_Comm comm = pfespace.GetComm();
@@ -4170,34 +4255,114 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     int global_marked_tdofs = 0;
     MPI_Allreduce(&local_size, &global_marked_tdofs, 1, MPI_INT, MPI_SUM, comm);
 
-    std::cout << "Got after Allreduce \n";
+    //std::cout << "Got after Allreduce \n";
 
     int global_num_rows = global_marked_tdofs;
     int global_num_cols = pfespace.GlobalTrueVSize();
-    int * row_starts = new int[2];
-    int * col_starts = new int[2];
-    // how to fill row_starts, col_starts?
-    row_starts[0] = 0;
-    row_starts[1] = m;
 
-    col_starts[0] = 0;
-    col_starts[1] = n;
+    int num_procs;
+    MPI_Comm_size(comm, &num_procs);
+
+    int myid;
+    MPI_Comm_rank(comm, &myid);
+
+    int * local_row_offsets = new int[num_procs + 1];
+    local_row_offsets[0] = 0;
+    MPI_Allgather(&m, 1, MPI_INT, local_row_offsets + 1, 1, MPI_INT, comm);
+
+    int * local_col_offsets = new int[num_procs + 1];
+    local_col_offsets[0] = 0;
+    MPI_Allgather(&n, 1, MPI_INT, local_col_offsets + 1, 1, MPI_INT, comm);
+
+    for (int j = 1; j < num_procs + 1; ++j)
+        local_row_offsets[j] += local_row_offsets[j - 1];
+
+    for (int j = 1; j < num_procs + 1; ++j)
+        local_col_offsets[j] += local_col_offsets[j - 1];
+
+    int * row_starts = new int[3];
+    row_starts[0] = local_row_offsets[myid];
+    row_starts[1] = local_row_offsets[myid + 1];
+    row_starts[2] = local_row_offsets[num_procs];
+    int * col_starts = new int[3];
+    col_starts[0] = local_col_offsets[myid];
+    col_starts[1] = local_col_offsets[myid + 1];
+    col_starts[2] = local_col_offsets[num_procs];
+
+    /*
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "my local_row_offsets not summed: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+
+            std::cout << "my local_col_offsets not summed: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_col_offsets[j] << " ";
+            std::cout << "\n";
+            std::cout << "\n";
+
+            for (int j = 1; j < num_procs + 1; ++j)
+                local_row_offsets[j] += local_row_offsets[j - 1];
+
+            for (int j = 1; j < num_procs + 1; ++j)
+                local_col_offsets[j] += local_col_offsets[j - 1];
+
+            std::cout << "my local_row_offsets: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+
+            std::cout << "my local_col_offsets: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+            std::cout << "\n";
+
+            int * row_starts = new int[3];
+            row_starts[0] = local_row_offsets[myid];
+            row_starts[1] = local_row_offsets[myid + 1];
+            row_starts[2] = local_row_offsets[num_procs];
+            int * col_starts = new int[3];
+            col_starts[0] = local_col_offsets[myid];
+            col_starts[1] = local_col_offsets[myid + 1];
+            col_starts[2] = local_col_offsets[num_procs];
+
+            std::cout << "my computed row starts: \n";
+            std::cout << row_starts[0] << " " <<  row_starts[1] << " " << row_starts[2];
+            std::cout << "\n";
+
+            std::cout << "my computed col starts: \n";
+            std::cout << col_starts[0] << " " <<  col_starts[1] << " " << col_starts[2];
+            std::cout << "\n";
+
+            std::cout << std::flush;
+        }
+
+        MPI_Barrier(comm);
+    } // end fo loop over all processors, one after another
+    */
+
 
     // FIXME:
     // MFEM_ABORT("Don't know how to create row_starts and col_starts \n");
 
-    std::cout << "Creating resT \n";
+    //std::cout << "Creating resT \n";
 
     HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
 
-    std::cout << "resT created \n";
+    //std::cout << "resT created \n";
 
 
     HypreParMatrix * res = resT->Transpose();
     res->CopyRowStarts();
     res->CopyColStarts();
 
-    std::cout << "Got after resT creation \n";
+    //std::cout << "Got after resT creation \n";
 
     return res;
 }

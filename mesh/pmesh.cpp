@@ -8472,10 +8472,10 @@ void ParMeshCyl::Refine(int par_ref_levels)
         {
             if (myid == i)
             {
-                std::cout << "I am " << myid << "\n";
+                //std::cout << "I am " << myid << "\n";
                 UpdateBotToTopLink(*BE_AE_be);
 
-                std::cout << "\n" << std::flush;
+                //std::cout << "\n" << std::flush;
             }
             MPI_Barrier(comm);
         } // end fo loop over all processors, one after another
