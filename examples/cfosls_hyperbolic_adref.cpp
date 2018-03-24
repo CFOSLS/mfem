@@ -39,103 +39,6 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
-
-// Some Operator inheriting classes used for analyzing the preconditioner
-
-// class for Op_new = beta * Identity  + gamma * Op
-class MyAXPYOperator : public Operator
-{
-private:
-    Operator & op;
-    double beta;
-    double gamma;
-public:
-    MyAXPYOperator(Operator& Op, double Beta = 0.0, double Gamma = 1.0)
-        : Operator(Op.Height(),Op.Width()), op(Op), beta(Beta), gamma(Gamma) {}
-
-    // Operator application
-    void Mult(const Vector& x, Vector& y) const;
-};
-
-// Computes y = beta * x + gamma * Op  * x
-void MyAXPYOperator::Mult(const Vector& x, Vector& y) const
-{
-    op.Mult(x, y);
-    y *= gamma; // y = gamma * Op * x
-
-    Vector tmp(x.Size());
-    tmp = x;
-    tmp *= beta; // tmp = beta * x
-
-    y += tmp;    // y +=  beta * x, finally
-}
-
-// class for Op_new = scale * Op
-class MyScaledOperator : public Operator
-{
-private:
-    Operator& op;
-    double scale;
-public:
-    MyScaledOperator(Operator& Op, double Scale = 1.0)
-        : Operator(Op.Height(),Op.Width()), op(Op), scale(Scale) {}
-
-    // Operator application
-    void Mult(const Vector& x, Vector& y) const;
-
-};
-
-// Computes y = scale * Op  * x
-void MyScaledOperator::Mult(const Vector& x, Vector& y) const
-{
-    op.Mult(x, y);
-    y *= scale;
-}
-
-class MyOperator : public Operator
-{
-private:
-    HypreParMatrix & leftmat;
-    HypreParMatrix & rightmat;
-    Operator & middleop;
-    //int inner_niter;
-public:
-    // Constructor
-    MyOperator(HypreParMatrix& LeftMatrix, Operator& MiddleOp, HypreParMatrix& RightMatrix/*, int Inner_NIter = 1*/)
-        : Operator(LeftMatrix.Height(),RightMatrix.Width()),
-          leftmat(LeftMatrix), rightmat(RightMatrix), middleop(MiddleOp)//,
-          //inner_niter(Inner_NIter)
-    {}
-
-    // Operator application
-    void Mult(const Vector& x, Vector& y) const;
-};
-
-// Computes y = leftmat * middleop * rightmat * x
-void MyOperator::Mult(const Vector& x, Vector& y) const
-{
-    Vector tmp1(rightmat.Height());
-    rightmat.Mult(x, tmp1);
-    Vector tmp2(leftmat.Width());
-    /*
-    if (inner_niter > 1)
-    {
-        std::cout << "Implementation is wrong \n";
-        for ( int iter = 0; iter < inner_niter; ++iter)
-        {
-            middleop.Mult(tmp1, tmp2);
-            if (iter < inner_niter - 1)
-                tmp1 = tmp2;
-        }
-    }
-    else
-        middleop.Mult(tmp1, tmp2);
-    */
-    middleop.Mult(tmp1, tmp2);
-    leftmat.Mult(tmp2, y);
-}
-
-
 /// Integrator for (q * u, v)
 /// where q is a scalar coefficient, u and v are from vector FE space
 /// created from scalar FE collection (called improper vector FE)
@@ -1122,7 +1025,7 @@ class Transport_test
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 0;
+    bool visualization = 1;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -1135,13 +1038,13 @@ int main(int argc, char *argv[])
     int nDimensions     = 3;
     int numsol          = 8;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int ser_ref_levels  = 0;
+    int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-    bool eliminateS = false;            // in case space_for_S = "L2" defines whether we eliminate S from the system
+    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
 
     // solver options
@@ -1152,6 +1055,7 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
 
     //const char *mesh_file = "../data/cube4d_low.MFEM";
+
     //const char *mesh_file = "../data/cube4d.MFEM";
     //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
@@ -1259,12 +1163,11 @@ int main(int argc, char *argv[])
         std::cout << "Running tests for the paper: \n";
 
 
-    mesh_file = "../data/cylinder_3d_moderate.mesh";
+    mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
-
 
     switch (prec_option)
     {
@@ -1283,7 +1186,7 @@ int main(int argc, char *argv[])
         std::cout << "use_ADS = " << use_ADS << "\n";
     }
 
-    MFEM_ASSERT(numsol == 8 && nDimensions == 3, "Adaptive refinement is tested currently only for the older reports' problem in the cylinder! \n");
+    //MFEM_ASSERT(numsol == 8 && nDimensions == 3, "Adaptive refinement is tested currently only for the older reports' problem in the cylinder! \n");
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
@@ -1862,8 +1765,8 @@ int main(int argc, char *argv[])
    solver.SetRelTol(rtol);
    solver.SetMaxIter(max_iter);
    solver.SetOperator(*CFOSLSop);
-   //if (prec_option > 0)
-        //solver.SetPreconditioner(prec);
+   if (prec_option > 0)
+        solver.SetPreconditioner(prec);
    solver.SetPrintLevel(1);
    trueX = 0.0;
 
@@ -1871,6 +1774,9 @@ int main(int argc, char *argv[])
    chrono.Start();
    solver.Mult(trueRhs, trueX);
    chrono.Stop();
+
+   //trueRhs.Print();
+
 
    if (verbose)
    {
@@ -1882,6 +1788,106 @@ int main(int argc, char *argv[])
                    << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
       std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
    }
+
+   Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+   sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+   Array<int> EssBnd_tdofs_sigma;
+   Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+   for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+   {
+       SparseMatrix A_diag;
+       A->GetDiag(A_diag);
+
+       SparseMatrix DT_diag;
+       DT->GetDiag(DT_diag);
+
+       int tdof = EssBnd_tdofs_sigma[i];
+       double value_ex = sigma_exact_truedofs[tdof];
+       double value_com = trueX.GetBlock(0)[tdof];
+
+       if (fabs(value_ex - value_com) > MYZEROTOL)
+       {
+           std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                     << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+           std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(0)[tdof] << "\n";
+           //std::cout << "rhs side2 at this tdof = " << trueRhs2.GetBlock(0)[tdof] << "\n";
+           //std::cout << "bnd at this tdof = " << trueBnd.GetBlock(0)[tdof] << "\n";
+           std::cout << "row entries of A matrix: \n";
+           int * A_rowcols = A_diag.GetRowColumns(tdof);
+           double * A_rowentries = A_diag.GetRowEntries(tdof);
+           for (int j = 0; j < A_diag.RowSize(tdof); ++j)
+               std::cout << "(" << A_rowcols[j] << "," << A_rowentries[j] << ") ";
+           std::cout << "\n";
+
+           std::cout << "row entries of DT matrix: \n";
+           int * DT_rowcols = DT_diag.GetRowColumns(tdof);
+           double * DT_rowentries = DT_diag.GetRowEntries(tdof);
+           for (int j = 0; j < DT_diag.RowSize(tdof); ++j)
+               std::cout << "(" << DT_rowcols[j] << "," << DT_rowentries[j] << ") ";
+           std::cout << "\n";
+       }
+   }
+
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+   {
+       SparseMatrix C_diag;
+       C->GetDiag(C_diag);
+
+       SparseMatrix B_diag;
+       B->GetDiag(B_diag);
+
+       Vector S_exact_truedofs(S_space->TrueVSize());
+       S_exact->ParallelProject(S_exact_truedofs);
+
+       Array<int> EssBnd_tdofs_S;
+       S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+       std::set<int> bnd_tdofs_S;
+
+       for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+       {
+           int tdof = EssBnd_tdofs_S[i];
+           bnd_tdofs_S.insert(tdof);
+           double value_ex = S_exact_truedofs[tdof];
+           double value_com = trueX.GetBlock(1)[tdof];
+
+           //std::cout << "diff = " << value_ex - value_com << "\n";
+           if (fabs(value_ex - value_com) > MYZEROTOL)
+           {
+               std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
+                         << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+               std::cout << "rhs side at this tdof = " << trueRhs.GetBlock(1)[tdof] << "\n";
+               //std::cout << "rhs side2 at this tdof = " << trueRhs2.GetBlock(1)[tdof] << "\n";
+               //std::cout << "bnd at this tdof = " << trueBnd.GetBlock(1)[tdof] << "\n";
+               std::cout << "row entries of C matrix: \n";
+               int * C_rowcols = C_diag.GetRowColumns(tdof);
+               double * C_rowentries = C_diag.GetRowEntries(tdof);
+               for (int j = 0; j < C_diag.RowSize(tdof); ++j)
+                   std::cout << "(" << C_rowcols[j] << "," << C_rowentries[j] << ") ";
+               std::cout << "\n";
+               std::cout << "row entries of B matrix: \n";
+               int * B_rowcols = B_diag.GetRowColumns(tdof);
+               double * B_rowentries = B_diag.GetRowEntries(tdof);
+               for (int j = 0; j < B_diag.RowSize(tdof); ++j)
+                   std::cout << "(" << B_rowcols[j] << "," << B_rowentries[j] << ") ";
+               std::cout << "\n";
+
+           }
+       }
+
+       /*
+       for (int i = 0; i < S_exact_truedofs.Size(); ++i)
+       {
+           if (bnd_tdofs_S.find(i) == bnd_tdofs_S.end())
+               trueX.GetBlock(1)[i] = S_exact_truedofs[i];
+       }
+       */
+
+
+   }
+
 
    ParGridFunction * sigma = new ParGridFunction(Sigma_space);
    sigma->Distribute(&(trueX.GetBlock(0)));
@@ -2598,12 +2604,38 @@ void uFun6_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(1) = -100.0 * 2.0 * y * uFun6_ex(xt);
 }
 
-
 double GaussianHill(const Vector&xvec)
 {
     double x = xvec(0);
     double y = xvec(1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
+    //return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+    //if (x > 0)
+        //teta = atan(y/x);
+    //else
+        //teta = M_PIatan(y/x);
+    return exp (-100.0 * (r * r - r * cos(teta) + 0.25));
+}
+
+double GaussianHill_dteta(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    return -100.0 * r * sin (teta) * GaussianHill(xvec);
+}
+
+double GaussianHill_dr(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    return -100.0 * (2.0 * r - cos (teta)) * GaussianHill(xvec);
 }
 
 double uFunCylinder_ex(const Vector& xt)
@@ -2611,15 +2643,8 @@ double uFunCylinder_ex(const Vector& xt)
     double x = xt(0);
     double y = xt(1);
     double r = sqrt(x*x + y*y);
-    double teta = atan(y/x);
-    /*
-    if (fabs(x) < MYZEROTOL && y > 0)
-        teta = M_PI / 2.0;
-    else if (fabs(x) < MYZEROTOL && y < 0)
-        teta = - M_PI / 2.0;
-    else
-        teta = atan(y,x);
-    */
+    double teta = atan2(y,x);
+
     double t = xt(xt.Size()-1);
     Vector xvec(2);
     xvec(0) = r * cos (teta - t);
@@ -2629,21 +2654,62 @@ double uFunCylinder_ex(const Vector& xt)
 
 double uFunCylinder_ex_dt(const Vector& xt)
 {
-    return 0.0;
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+    return 100.0 * r * sin (teta - t) * uFunCylinder_ex(xt);
 }
 
 void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
 {
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
 
+    // old, from parelag example slot 1
+    // provides the same result as the different formula below
+
+    // (x0,y0) = Q^tr * (x,y) = initial particle location
+    double x0 = x * cos(t) + y * sin(t);
+    double y0 = x * (-sin(t)) + y * cos(t);
+
+    Vector r0vec(3);
+
+    r0vec(0) = x0;
+    r0vec(1) = y0;
+    r0vec(2) = 0;
+
+    // tempvec = grad u(x0,y0) at t = 0
+    Vector tempvec(2);
+    tempvec(0) = -100.0 * 2.0 * (x0 - 0.5) * uFunCylinder_ex(r0vec);
+    tempvec(1) = -100.0 * 2.0 * y0 * uFunCylinder_ex(r0vec);
+
+
+    //gradx = Q * tempvec
     gradx.SetSize(xt.Size() - 1);
 
-    gradx(0) = 0.0;
-    gradx(1) = 0.0;
-}
+    gradx(0) = tempvec(0) * cos(t) + tempvec(1) * (-sin(t));
+    gradx(1) = tempvec(0) * sin(t) + tempvec(1) * cos(t);
 
+    /*
+     * new formula, gives the same result as the formula above
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    double dSdr = uFunCylinder_ex(xt) * (-100.0) * (2.0 * r - cos (teta - t));
+    double dSdteta = uFunCylinder_ex(xt) * (-100.0) * (r * sin (teta - t));
+
+    double dtetadx = - (1.0/r) * sin(teta);
+    double dtetady = + (1.0/r) * cos(teta);
+
+    gradx.SetSize(xt.Size() - 1);
+    gradx(0) = dSdr * cos(teta) + dSdteta * dtetadx;
+    gradx(1) = dSdr * sin(teta) + dSdteta * dtetady;
+    */
+
+}
 
 double uFun66_ex(const Vector& xt)
 {
