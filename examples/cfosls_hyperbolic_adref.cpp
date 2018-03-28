@@ -40,12 +40,6 @@ using std::shared_ptr;
 using std::make_shared;
 
 double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Vector &error_estimates)
-                        /*BilinearFormIntegrator &blfi,
-                        GridFunction &u,
-                        GridFunction &flux,
-                        Vector &error_estimates,
-                        Array<int> *aniso_flags = NULL,
-                        int with_subdomains = 1)*/
 {
     FiniteElementSpace * fes = sigma.FESpace();
     int ne = fes->GetNE();
@@ -85,10 +79,74 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Ve
     return std::sqrt(total_error);
 }
 
+double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & sols, Vector &error_estimates)
+{
+    if (sols.Size() == 1)
+    {
+        return FOSLSErrorEstimator(*blfis(0,0), *sols[0], error_estimates);
+    }
+    else
+    {
+        Array<FiniteElementSpace*> fess(sols.Size());
+        for (int i = 0; i < sols.Size(); ++i)
+            fess = sols[i]->FESpace();
+
+        int ne = fess[0]->GetNE();
+        error_estimates.SetSize(ne);
+
+        double total_error = 0.0;
+        for (int i = 0; i < ne; ++i)
+        {
+            double err = 0.0;
+            for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
+                for (int colblk = 0; colblk < blfis.NumCols(); ++colblk)
+                    if (blfis(rowblk,colblk))
+                    {
+                        FiniteElementSpace * fes1 = fess[rowblk];
+                        FiniteElementSpace * fes2 = fess[colblk];
+                        const FiniteElement * fe1 = fes1->GetFE(i);
+                        const FiniteElement * fe2 = fes2->GetFE(i);
+                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
+                        DenseMatrix elmat;
+                        blfis(rowblk,colblk)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
+
+                        Vector localv1;
+                        Array<int> eldofs1;
+                        fes1->GetElementDofs(i, eldofs1);
+                        sols[rowblk]->GetSubVector(eldofs1, localv1);
+
+                        Vector localv2;
+                        Array<int> eldofs2;
+                        fes2->GetElementDofs(i, eldofs2);
+                        sols[colblk]->GetSubVector(eldofs2, localv2);
+
+                        Vector localAv2(localv2.Size());
+                        elmat.Mult(localv2, localAv2);
+
+                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
+                        //sigma.Print();
+                        //eldofs.Print();
+                        //localv.Print();
+                        //localAv.Print();
+
+                        err += localAv2 * localv1;
+                    }
+
+            error_estimates(i) = std::sqrt(err);
+            total_error += err;
+        }
+
+        return std::sqrt(total_error);
+    }
+}
+
 class FOSLSEstimator : public ErrorEstimator
 {
 protected:
+    const int numblocks;
     long current_sequence;
+    Array<ParGridFunction*> sols;
+    Array2D<BilinearFormIntegrator*> integs;
     ParGridFunction *sol;           // is not owned
     BilinearFormIntegrator *integ;  // is not owned
     Vector error_estimates;
@@ -97,22 +155,35 @@ protected:
     /// Check if the mesh of the solution was modified (copied from L2ZienkkiewiczZhuEstimator).
     bool MeshIsModified();
 
-    /// Compute the element error estimates ((copied from L2ZienkkiewiczZhuEstimator).
+    /// Compute the element error estimates (copied from L2ZienkkiewiczZhuEstimator).
     void ComputeEstimates();
 public:
-    ~FOSLSEstimator();
+    ~FOSLSEstimator() {}
     FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator);
+    FOSLSEstimator(Array<ParGridFunction*>& solutions, Array2D<BilinearFormIntegrator*>& integrators);
     virtual const Vector & GetLocalErrors () override;
     virtual void Reset () override;
 };
 
-FOSLSEstimator::~FOSLSEstimator()
+FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator)
+    : numblocks(1), current_sequence(-1), sol(&solution), integ(&integrator), total_error(0.0)
 {
+    sols.SetSize(numblocks);
+    sols[0] = &solution;
+    integs.SetSize(numblocks, numblocks);
+    integs(0,0) = &integrator;
 }
 
-FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator)
-    : current_sequence(-1), sol(&solution), integ(&integrator), total_error(0.0)
+FOSLSEstimator::FOSLSEstimator(Array<ParGridFunction *> &solutions, Array2D<BilinearFormIntegrator *> &integrators)
+    : numblocks(solutions.Size()), current_sequence(-1), total_error(0.0)
 {
+    sols.SetSize(numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        sols[i] = solutions[i];
+    integs.SetSize(numblocks, numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            integs(i,j) = integrators(i,j);
 }
 
 bool FOSLSEstimator::MeshIsModified()
@@ -130,7 +201,7 @@ const Vector & FOSLSEstimator::GetLocalErrors()
 
 void FOSLSEstimator::ComputeEstimates()
 {
-    total_error = FOSLSErrorEstimator(*integ, *sol, error_estimates);
+    total_error = FOSLSErrorEstimator(integs, sols, error_estimates);
 
     //error_estimates.Print();
 
