@@ -309,6 +309,10 @@ void bFunCircle2D_ex(const Vector& xt, Vector& b )
     b(0) = -y;  // -x2
     b(1) = x;   // x1
 
+    //double r = x * x + y * y;
+    //b(0) = -y / r;  // -x2
+    //b(1) = x / r;   // x1
+
     b(xt.Size()-1) = 1.;
     return;
 }

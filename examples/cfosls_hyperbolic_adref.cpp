@@ -27,7 +27,7 @@
 #include <iomanip>
 #include <list>
 
-#include"cfosls_testsuite.hpp"
+#include "cfosls_testsuite.hpp"
 
 //#define REGULARIZE_A
 
@@ -1163,7 +1163,8 @@ int main(int argc, char *argv[])
         std::cout << "Running tests for the paper: \n";
 
 
-    mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
+    //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
+    mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -1468,7 +1469,6 @@ int main(int argc, char *argv[])
    ParLinearForm *fform = new ParLinearForm(Sigma_space);
    if (strcmp(space_for_S,"L2") == 0 && keep_divdiv) // if L2 for S and we keep div-div term
        fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(*Mytest.scalardivsigma));
-
    fform->Assemble();
 
    ParLinearForm *qform;
@@ -1482,7 +1482,8 @@ int main(int argc, char *argv[])
    {
        //if (strcmp(space_for_sigma,"Hdiv") == 0 )
            qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
-       qform->Assemble();//qform->Print();
+       qform->Assemble();
+       qform->Print();
    }
    else // "L2"
    {
@@ -1497,7 +1498,7 @@ int main(int argc, char *argv[])
    if (strcmp(formulation,"cfosls") == 0)
    {
        gform = new ParLinearForm(W_space);
-       gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+       //gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
        gform->Assemble();
    }
 
@@ -1830,6 +1831,15 @@ int main(int argc, char *argv[])
        }
    }
 
+   Vector checkvec1(S_space->TrueVSize());
+   checkvec1 = 0.0;
+   ParGridFunction * checkgrfun1 = new ParGridFunction(S_space);
+
+   Vector checkvec2(S_space->TrueVSize());
+   checkvec2 = 0.0;
+   ParGridFunction * checkgrfun2 = new ParGridFunction(S_space);
+
+
    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
    {
        SparseMatrix C_diag;
@@ -1852,6 +1862,9 @@ int main(int argc, char *argv[])
            bnd_tdofs_S.insert(tdof);
            double value_ex = S_exact_truedofs[tdof];
            double value_com = trueX.GetBlock(1)[tdof];
+
+           checkvec1[tdof] = S_exact_truedofs[tdof];
+           checkvec2[tdof] = trueX.GetBlock(1)[tdof];
 
            //std::cout << "diff = " << value_ex - value_com << "\n";
            if (fabs(value_ex - value_com) > MYZEROTOL)
@@ -1885,9 +1898,12 @@ int main(int argc, char *argv[])
        }
        */
 
-
    }
 
+   //checkvec1.Print();
+
+   checkgrfun1->Distribute(&checkvec1);
+   checkgrfun2->Distribute(&checkvec2);
 
    ParGridFunction * sigma = new ParGridFunction(Sigma_space);
    sigma->Distribute(&(trueX.GetBlock(0)));
@@ -1945,16 +1961,22 @@ int main(int argc, char *argv[])
 
    if (verbose)
    {
-       cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+       if (fabs(norm_div) > 1.0e-13)
+            cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
                  << err_div/norm_div  << "\n";
+       else
+           cout << "|| div (sigma_h) || = "
+                << err_div  << " (norm_div = 0) \n";
    }
 
+   /*
    if (verbose)
    {
        cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
        cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
                  << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
    }
+   */
 
    // Computing error for S
 
@@ -2071,6 +2093,8 @@ int main(int argc, char *argv[])
    {
       char vishost[] = "localhost";
       int  visport   = 19916;
+
+      /*
       socketstream u_sock(vishost, visport);
       u_sock << "parallel " << num_procs << " " << myid << "\n";
       u_sock.precision(8);
@@ -2093,6 +2117,21 @@ int main(int argc, char *argv[])
       uuu_sock.precision(8);
       uuu_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'difference for sigma'"
              << endl;
+      */
+
+      socketstream check1_sock(vishost, visport);
+      check1_sock << "parallel " << num_procs << " " << myid << "\n";
+      check1_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      check1_sock << "solution\n" << *pmesh << *checkgrfun1 << "window_title 'checkgrfun1 (exact)'"
+              << endl;
+
+      socketstream check2_sock(vishost, visport);
+      check2_sock << "parallel " << num_procs << " " << myid << "\n";
+      check2_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      check2_sock << "solution\n" << *pmesh << *checkgrfun2 << "window_title 'checkgrfun2 (computed)'"
+              << endl;
 
       socketstream s_sock(vishost, visport);
       s_sock << "parallel " << num_procs << " " << myid << "\n";
@@ -2286,8 +2325,8 @@ void bfTemplate(const Vector& xt, Vector& bf)
 
     res += dSdt(xt);
     for ( int i= 0; i < xt.Size() - 1; ++i )
-        res += b(i) * (gradS(i) - gradS0(i));
-    res += divbfunc(xt) * (S(xt) - S(xt0));
+        res += b(i) * gradS(i);
+    res += divbfunc(xt) * S(xt) ;
 
     bf.SetSize(xt.Size());
 
