@@ -39,6 +39,109 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
+double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Vector &error_estimates)
+                        /*BilinearFormIntegrator &blfi,
+                        GridFunction &u,
+                        GridFunction &flux,
+                        Vector &error_estimates,
+                        Array<int> *aniso_flags = NULL,
+                        int with_subdomains = 1)*/
+{
+    FiniteElementSpace * fes = sigma.FESpace();
+    int ne = fes->GetNE();
+    error_estimates.SetSize(ne);
+
+    double total_error = 0.0;
+    for (int i = 0; i < ne; ++i)
+    {
+        const FiniteElement * fe = fes->GetFE(i);
+        ElementTransformation * eltrans = fes->GetElementTransformation(i);
+        DenseMatrix elmat;
+        blfi.AssembleElementMatrix(*fe, *eltrans, elmat);
+
+        Array<int> eldofs;
+        fes->GetElementDofs(i, eldofs);
+        Vector localv;
+        sigma.GetSubVector(eldofs, localv);
+
+        Vector localAv(localv.Size());
+        elmat.Mult(localv, localAv);
+
+        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
+        //sigma.Print();
+        //eldofs.Print();
+        //localv.Print();
+        //localAv.Print();
+
+        double err = localAv * localv;
+
+
+        error_estimates(i) = std::sqrt(err);
+        total_error += err;
+    }
+
+    std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
+
+    return std::sqrt(total_error);
+}
+
+class FOSLSEstimator : public ErrorEstimator
+{
+protected:
+    long current_sequence;
+    ParGridFunction *sol;           // is not owned
+    BilinearFormIntegrator *integ;  // is not owned
+    Vector error_estimates;
+    double total_error;
+
+    /// Check if the mesh of the solution was modified (copied from L2ZienkkiewiczZhuEstimator).
+    bool MeshIsModified();
+
+    /// Compute the element error estimates ((copied from L2ZienkkiewiczZhuEstimator).
+    void ComputeEstimates();
+public:
+    ~FOSLSEstimator();
+    FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator);
+    virtual const Vector & GetLocalErrors () override;
+    virtual void Reset () override;
+};
+
+FOSLSEstimator::~FOSLSEstimator()
+{
+}
+
+FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator)
+    : current_sequence(-1), sol(&solution), integ(&integrator), total_error(0.0)
+{
+}
+
+bool FOSLSEstimator::MeshIsModified()
+{
+   long mesh_sequence = sol->FESpace()->GetMesh()->GetSequence();
+   MFEM_ASSERT(mesh_sequence >= current_sequence, "");
+   return (mesh_sequence > current_sequence);
+}
+
+const Vector & FOSLSEstimator::GetLocalErrors()
+{
+    if (MeshIsModified()) { ComputeEstimates(); }
+    return error_estimates;
+}
+
+void FOSLSEstimator::ComputeEstimates()
+{
+    total_error = FOSLSErrorEstimator(*integ, *sol, error_estimates);
+
+    //error_estimates.Print();
+
+    current_sequence = sol->FESpace()->GetMesh()->GetSequence();
+}
+
+void FOSLSEstimator::Reset()
+{
+    current_sequence = -1;
+}
+
 /// Integrator for (q * u, v)
 /// where q is a scalar coefficient, u and v are from vector FE space
 /// created from scalar FE collection (called improper vector FE)
@@ -1042,7 +1145,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1164,7 +1267,7 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
+    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -1204,7 +1307,7 @@ int main(int argc, char *argv[])
     StopWatch chrono;
 
     //DEFAULTED LINEAR SOLVER OPTIONS
-    int max_iter = 150000;
+    int max_iter = 100000;
     double rtol = 1e-12;//1e-7;//1e-9;
     double atol = 1e-14;//1e-9;//1e-12;
 
@@ -1416,11 +1519,11 @@ int main(int argc, char *argv[])
     }
     block_trueOffsets.PartialSum();
 
-    BlockVector x(block_offsets), rhs(block_offsets);
+    BlockVector x(block_offsets)/*, rhs(block_offsets)*/;
     BlockVector trueX(block_trueOffsets);
     BlockVector trueRhs(block_trueOffsets);
     x = 0.0;
-    rhs = 0.0;
+    //rhs = 0.0;
     trueX = 0.0;
     trueRhs = 0.0;
 
@@ -1475,7 +1578,7 @@ int main(int argc, char *argv[])
    if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
    {
        qform = new ParLinearForm(S_space);
-       qform->Update(S_space, rhs.GetBlock(1), 0);
+       //qform->Update(S_space, rhs.GetBlock(1), 0);
    }
 
    if (strcmp(space_for_S,"H1") == 0)
@@ -1483,7 +1586,7 @@ int main(int argc, char *argv[])
        //if (strcmp(space_for_sigma,"Hdiv") == 0 )
            qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
        qform->Assemble();
-       qform->Print();
+       //qform->Print();
    }
    else // "L2"
    {
@@ -1608,12 +1711,13 @@ int main(int argc, char *argv[])
    //  D Block:
    //-----------------
 
+   ParMixedBilinearForm *Dblock;
    HypreParMatrix *D;
    HypreParMatrix *DT;
 
    if (strcmp(formulation,"cfosls") == 0)
    {
-      ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space, W_space));
+      Dblock = new ParMixedBilinearForm(Sigma_space, W_space);
       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
         Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
       else // sigma is from H1vec
@@ -1908,6 +2012,9 @@ int main(int argc, char *argv[])
    ParGridFunction * sigma = new ParGridFunction(Sigma_space);
    sigma->Distribute(&(trueX.GetBlock(0)));
 
+   //std::cout << "sigma linf norm = " << sigma->Normlinf() << "\n";
+   //sigma->Print();
+
    ParGridFunction * S = new ParGridFunction(S_space);
    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        S->Distribute(&(trueX.GetBlock(1)));
@@ -2089,6 +2196,230 @@ int main(int argc, char *argv[])
                        << projection_error_S / norm_S << endl;
 
 
+   if (verbose)
+       std::cout << "Running AMR if there was no S in the formulation... \n";
+
+   if (numblocks != 2)
+   {
+       MFEM_ABORT("Currently adaptive mesh refinement is implemented when only sigma is present, "
+                  "numblocks must equal 2 for CFOSLS formulation! \n");
+   }
+
+
+   BilinearFormIntegrator *integ = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
+   FOSLSEstimator estimator(*sigma, *integ);
+   ThresholdRefiner refiner(estimator);
+   refiner.SetTotalErrorFraction(0.5);
+
+   delete Ablock;
+   Ablock = new ParBilinearForm(Sigma_space);
+   Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+
+   delete Dblock;
+   Dblock = new ParMixedBilinearForm(Sigma_space, W_space);
+   Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+
+   // 12. The main AMR loop. In each iteration we solve the problem on the
+   //     current mesh, visualize the solution, and refine the mesh.
+   const int max_dofs = 200000;
+   for (int it = 0; ; it++)
+   {
+      HYPRE_Int global_dofs = Sigma_space->GlobalTrueVSize();
+      if (myid == 0)
+      {
+         cout << "\nAMR iteration " << it << endl;
+         cout << "Number of unknowns: " << global_dofs << endl;
+      }
+
+      HypreParMatrix *A, *D, *DT;
+
+      // 13. Assemble the stiffness matrix and the right-hand side. Note that
+      //     MFEM doesn't care at this point that the mesh is nonconforming
+      //     and parallel. The FE space is considered 'cut' along hanging
+      //     edges/faces, and also across processor boundaries.
+
+      Array<int> block_offsets(numblocks + 1);
+      block_offsets[0] = 0;
+      block_offsets[1] = Sigma_space->GetVSize();
+      block_offsets[2] = W_space->GetVSize();
+      block_offsets.PartialSum();
+      BlockVector x(block_offsets);
+      x = 0.0;
+      ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+      sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+      x.GetBlock(0) = *sigma_exact;
+
+      fform->Assemble();
+      gform->Assemble();
+
+      Ablock->Assemble();
+      Ablock->EliminateEssentialBC(ess_bdrSigma, x.GetBlock(0), *fform);
+      Ablock->Finalize();
+      A = Ablock->ParallelAssemble();
+
+      Dblock->Assemble();
+      Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
+      Dblock->Finalize();
+      D = Dblock->ParallelAssemble();
+      DT = D->Transpose();
+
+      // 14. Create the parallel linear system: eliminate boundary conditions,
+      //     constrain hanging nodes and nodes across processor boundaries.
+      //     The system will be solved for true (unconstrained/unique) DOFs only.
+
+      Array<int> block_trueOffsets(numblocks + 1);
+      block_trueOffsets[0] = 0;
+      block_trueOffsets[1] = Sigma_space->GetTrueVSize();
+      block_trueOffsets[2] = W_space->TrueVSize();
+      block_trueOffsets.PartialSum();
+
+      BlockVector trueX(block_trueOffsets);
+      BlockVector trueRhs(block_trueOffsets);
+      trueX = 0.0;
+      trueRhs = 0.0;
+
+      fform->ParallelAssemble(trueRhs.GetBlock(0));
+      gform->ParallelAssemble(trueRhs.GetBlock(1));
+
+      BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets);
+      CFOSLSop->SetBlock(0,0, A);
+      CFOSLSop->SetBlock(0,1, DT);
+      CFOSLSop->SetBlock(1,0, D);
+
+      // 15. Define and apply a parallel PCG solver for AX=B with the BoomerAMG
+      //     preconditioner from hypre.
+
+      HypreParMatrix *Schur;
+      HypreParMatrix *AinvDt = D->Transpose();
+      HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(), A->GetRowStarts());
+      A->GetDiag(*Ad);
+      AinvDt->InvScaleRows(*Ad);
+      Schur = ParMult(D, AinvDt);
+
+      Solver * invA;
+      if (use_ADS)
+          invA = new HypreADS(*A, Sigma_space);
+      else // using Diag(A);
+           invA = new HypreDiagScale(*A);
+
+      invA->iterative_mode = false;
+
+      Solver * invS;
+      invS = new HypreBoomerAMG(*Schur);
+      ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+      ((HypreBoomerAMG *)invS)->iterative_mode = false;
+
+      BlockDiagonalPreconditioner prec(block_trueOffsets);
+      if (prec_option > 0)
+      {
+          prec.SetDiagonalBlock(0, invA);
+          prec.SetDiagonalBlock(1, invS);
+      }
+      else
+          if (verbose)
+              cout << "No preconditioner is used. \n";
+
+      MINRESSolver solver(MPI_COMM_WORLD);
+      solver.SetAbsTol(atol);
+      solver.SetRelTol(rtol);
+      solver.SetMaxIter(max_iter);
+      solver.SetOperator(*CFOSLSop);
+      if (prec_option > 0)
+           solver.SetPreconditioner(prec);
+      //solver.SetPrintLevel(1);
+      trueX = 0.0;
+
+      chrono.Clear();
+      chrono.Start();
+      solver.Mult(trueRhs, trueX);
+      chrono.Stop();
+
+      if (verbose)
+      {
+         if (solver.GetConverged())
+            std::cout << "MINRES converged in " << solver.GetNumIterations()
+                      << " iterations with a residual norm of " << solver.GetFinalNorm() << ".\n";
+         else
+            std::cout << "MINRES did not converge in " << solver.GetNumIterations()
+                      << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
+         std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
+      }
+
+      sigma->Distribute(&(trueX.GetBlock(0)));
+
+      int order_quad = max(2, 2*feorder+1);
+      const IntegrationRule *irs[Geometry::NumGeom];
+      for (int i=0; i < Geometry::NumGeom; ++i)
+      {
+         irs[i] = &(IntRules.Get(i, order_quad));
+      }
+
+      double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
+      double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+      if (verbose)
+          cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
+
+      // 17. Send the solution by socket to a GLVis server.
+      if (visualization)
+      {
+          char vishost[] = "localhost";
+          int  visport   = 19916;
+
+          socketstream s_sock(vishost, visport);
+
+          s_sock << "parallel " << num_procs << " " << myid << "\n";
+          s_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                 << it <<"'" << flush;
+      }
+
+      if (global_dofs > max_dofs)
+      {
+         if (myid == 0)
+         {
+            cout << "Reached the maximum number of dofs. Stop." << endl;
+         }
+         break;
+      }
+
+      // 18. Call the refiner to modify the mesh. The refiner calls the error
+      //     estimator to obtain element errors, then it selects elements to be
+      //     refined and finally it modifies the mesh. The Stop() method can be
+      //     used to determine if a stopping criterion was met.
+      refiner.Apply(*pmesh);
+      if (refiner.Stop())
+      {
+         if (myid == 0)
+         {
+            cout << "Stopping criterion satisfied. Stop." << endl;
+         }
+         break;
+      }
+
+      // 19. Update the finite element space (recalculate the number of DOFs,
+      //     etc.) and create a grid function update matrix. Apply the matrix
+      //     to any GridFunctions over the space. In this case, the update
+      //     matrix is an interpolation matrix so the updated GridFunction will
+      //     still represent the same function as before refinement.
+      Sigma_space->Update();
+      W_space->Update();
+      sigma->Update();
+
+      // 21. Inform also the bilinear and linear forms that the space has
+      //     changed.
+      fform->Update();
+      gform->Update();
+      Ablock->Update();
+      Dblock->Update();
+
+      delete sigma_exact;
+      delete A;
+      delete D;
+      delete DT;
+      delete CFOSLSop;
+   }
+
+
    if (visualization && nDimensions < 4)
    {
       char vishost[] = "localhost";
@@ -2119,6 +2450,7 @@ int main(int argc, char *argv[])
              << endl;
       */
 
+      /*
       socketstream check1_sock(vishost, visport);
       check1_sock << "parallel " << num_procs << " " << myid << "\n";
       check1_sock.precision(8);
@@ -2132,6 +2464,7 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh->GetComm());
       check2_sock << "solution\n" << *pmesh << *checkgrfun2 << "window_title 'checkgrfun2 (computed)'"
               << endl;
+      */
 
       socketstream s_sock(vishost, visport);
       s_sock << "parallel " << num_procs << " " << myid << "\n";
