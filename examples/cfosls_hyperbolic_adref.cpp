@@ -99,42 +99,85 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
         {
             double err = 0.0;
             for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
-                for (int colblk = 0; colblk < blfis.NumCols(); ++colblk)
-                    if (blfis(rowblk,colblk))
+            {
+                for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
+                {
+                    if (rowblk == colblk)
                     {
-                        FiniteElementSpace * fes1 = fess[rowblk];
-                        FiniteElementSpace * fes2 = fess[colblk];
-                        const FiniteElement * fe1 = fes1->GetFE(i);
-                        const FiniteElement * fe2 = fes2->GetFE(i);
-                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
+                        const FiniteElement * fe = fess[rowblk]->GetFE(i);
+                        ElementTransformation * eltrans = fess[rowblk]->GetElementTransformation(i);
                         DenseMatrix elmat;
-                        blfis(rowblk,colblk)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
+                        blfis(rowblk,colblk)->AssembleElementMatrix(*fe, *eltrans, elmat);
 
-                        Vector localv1;
-                        Array<int> eldofs1;
-                        fes1->GetElementDofs(i, eldofs1);
-                        sols[rowblk]->GetSubVector(eldofs1, localv1);
+                        Array<int> eldofs;
+                        fess[rowblk]->GetElementDofs(i, eldofs);
+                        Vector localv;
+                        sols[rowblk]->GetSubVector(eldofs, localv);
 
-                        Vector localv2;
-                        Array<int> eldofs2;
-                        fes2->GetElementDofs(i, eldofs2);
-                        sols[colblk]->GetSubVector(eldofs2, localv2);
+                        Vector localAv(localv.Size());
+                        elmat.Mult(localv, localAv);
 
-                        Vector localAv2(localv2.Size());
-                        elmat.Mult(localv2, localAv2);
-
-                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-                        //sigma.Print();
-                        //eldofs.Print();
-                        //localv.Print();
-                        //localAv.Print();
-
-                        err += localAv2 * localv1;
+                        err += localAv * localv;
                     }
+                    else
+                    // only using one of the off-diagonal itnegrators at symmetric places,
+                    // since a FOSLS functional must be symmetric
+                    {
+                        if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
+                        {
+                            int trial, test;
+                            if (blfis(rowblk,colblk))
+                            {
+                                trial = rowblk;
+                                test = colblk;
+                            }
+                            else // using an integrator for (colblk, rowblk) instead
+                            {
+                                trial = colblk;
+                                test = rowblk;
+                            }
+
+
+                            FiniteElementSpace * fes1 = fess[trial];
+                            FiniteElementSpace * fes2 = fess[test];
+                            const FiniteElement * fe1 = fes1->GetFE(i);
+                            const FiniteElement * fe2 = fes2->GetFE(i);
+                            ElementTransformation * eltrans = fes2->GetElementTransformation(i);
+                            DenseMatrix elmat;
+                            blfis(trial,test)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
+
+                            Vector localv1;
+                            Array<int> eldofs1;
+                            fes1->GetElementDofs(i, eldofs1);
+                            sols[trial]->GetSubVector(eldofs1, localv1);
+
+                            Vector localv2;
+                            Array<int> eldofs2;
+                            fes2->GetElementDofs(i, eldofs2);
+                            sols[test]->GetSubVector(eldofs2, localv2);
+
+                            Vector localAv2(localv2.Size());
+                            elmat.Mult(localv2, localAv2);
+
+                            //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
+                            //sigma.Print();
+                            //eldofs.Print();
+                            //localv.Print();
+                            //localAv.Print();
+
+                            // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
+                            // bilinear forms in the functional
+                            err += 2.0 * (localAv2 * localv1);
+                        }
+                    } // end of else for off-diagonal blocks
+                }
+            } // end of loop over blocks in the functional
 
             error_estimates(i) = std::sqrt(err);
             total_error += err;
         }
+
+        std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
 
         return std::sqrt(total_error);
     }
@@ -147,8 +190,6 @@ protected:
     long current_sequence;
     Array<ParGridFunction*> sols;
     Array2D<BilinearFormIntegrator*> integs;
-    ParGridFunction *sol;           // is not owned
-    BilinearFormIntegrator *integ;  // is not owned
     Vector error_estimates;
     double total_error;
 
@@ -166,7 +207,7 @@ public:
 };
 
 FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator)
-    : numblocks(1), current_sequence(-1), sol(&solution), integ(&integrator), total_error(0.0)
+    : numblocks(1), current_sequence(-1), total_error(0.0)
 {
     sols.SetSize(numblocks);
     sols[0] = &solution;
@@ -188,7 +229,7 @@ FOSLSEstimator::FOSLSEstimator(Array<ParGridFunction *> &solutions, Array2D<Bili
 
 bool FOSLSEstimator::MeshIsModified()
 {
-   long mesh_sequence = sol->FESpace()->GetMesh()->GetSequence();
+   long mesh_sequence = sols[0]->FESpace()->GetMesh()->GetSequence();
    MFEM_ASSERT(mesh_sequence >= current_sequence, "");
    return (mesh_sequence > current_sequence);
 }
@@ -205,12 +246,148 @@ void FOSLSEstimator::ComputeEstimates()
 
     //error_estimates.Print();
 
-    current_sequence = sol->FESpace()->GetMesh()->GetSequence();
+    current_sequence = sols[0]->FESpace()->GetMesh()->GetSequence();
 }
 
 void FOSLSEstimator::Reset()
 {
     current_sequence = -1;
+}
+
+class H1NormIntegrator : public BilinearFormIntegrator
+{
+private:
+   Vector vec, pointflux, shape;
+#ifndef MFEM_THREAD_SAFE
+   DenseMatrix dshape, dshapedxt, invdfdx, mq;
+   DenseMatrix te_dshape, te_dshapedxt;
+#endif
+   Coefficient *Qdiff;
+   Coefficient *Qmass;
+   MatrixCoefficient *MQ;
+
+public:
+   /// Construct an H1 norm integrator (mass + diffusion) with unit coefficients
+   H1NormIntegrator() { Qdiff = NULL; Qmass = NULL; MQ = NULL; }
+
+   /// Construct an H1 norm integrator with a scalar coefficients qdiff and qmass
+   H1NormIntegrator (Coefficient &qdiff, Coefficient &qmass) : Qdiff(&qdiff), Qmass(&qmass) { MQ = NULL; }
+
+   /// Construct an H1 norm integrator with a matrix coefficient q
+   H1NormIntegrator (MatrixCoefficient &q, Coefficient &qmass) : Qmass(&qmass), MQ(&q) { Qdiff = NULL; }
+
+   /** Given a particular Finite Element
+       computes the element stiffness matrix elmat. */
+   virtual void AssembleElementMatrix(const FiniteElement &el,
+                                      ElementTransformation &Trans,
+                                      DenseMatrix &elmat);
+};
+
+void H1NormIntegrator::AssembleElementMatrix
+( const FiniteElement &el, ElementTransformation &Trans,
+  DenseMatrix &elmat )
+{
+   int nd = el.GetDof();
+   int dim = el.GetDim();
+   int spaceDim = Trans.GetSpaceDim();
+   bool square = (dim == spaceDim);
+   double w;
+
+
+#ifdef MFEM_THREAD_SAFE
+   DenseMatrix dshape(nd,dim), dshapedxt(nd,spaceDim), invdfdx(dim,spaceDim);
+   Vector shape;
+#else
+   dshape.SetSize(nd,dim);
+   dshapedxt.SetSize(nd,spaceDim);
+   invdfdx.SetSize(dim,spaceDim);
+#endif
+   elmat.SetSize(nd);
+   shape.SetSize(nd);
+
+   const IntegrationRule *ir_diff = IntRule;
+   if (ir_diff == NULL)
+   {
+      int order;
+      if (el.Space() == FunctionSpace::Pk)
+      {
+         order = 2*el.GetOrder() - 2;
+      }
+      else
+         // order = 2*el.GetOrder() - 2;  // <-- this seems to work fine too
+      {
+         order = 2*el.GetOrder() + dim - 1;
+      }
+
+      if (el.Space() == FunctionSpace::rQk)
+      {
+         ir_diff = &RefinedIntRules.Get(el.GetGeomType(), order);
+      }
+      else
+      {
+         ir_diff = &IntRules.Get(el.GetGeomType(), order);
+      }
+   }
+
+   elmat = 0.0;
+   for (int i = 0; i < ir_diff->GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir_diff->IntPoint(i);
+      el.CalcDShape(ip, dshape);
+
+      Trans.SetIntPoint(&ip);
+      w = Trans.Weight();
+      w = ip.weight / (square ? w : w*w*w);
+      // AdjugateJacobian = / adj(J),         if J is square
+      //                    \ adj(J^t.J).J^t, otherwise
+      Mult(dshape, Trans.AdjugateJacobian(), dshapedxt);
+      if (!MQ)
+      {
+         if (Qdiff)
+         {
+            w *= Qdiff->Eval(Trans, ip);
+         }
+         AddMult_a_AAt(w, dshapedxt, elmat);
+      }
+      else
+      {
+         MQ->Eval(invdfdx, Trans, ip);
+         invdfdx *= w;
+         Mult(dshapedxt, invdfdx, dshape);
+         AddMultABt(dshape, dshapedxt, elmat);
+      }
+   }
+
+   const IntegrationRule *ir_mass = IntRule;
+   if (ir_mass == NULL)
+   {
+      // int order = 2 * el.GetOrder();
+      int order = 2 * el.GetOrder() + Trans.OrderW();
+
+      if (el.Space() == FunctionSpace::rQk)
+      {
+         ir_mass = &RefinedIntRules.Get(el.GetGeomType(), order);
+      }
+      else
+      {
+         ir_mass = &IntRules.Get(el.GetGeomType(), order);
+      }
+   }
+
+   for (int i = 0; i < ir_mass->GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir_mass->IntPoint(i);
+      el.CalcShape(ip, shape);
+
+      Trans.SetIntPoint (&ip);
+      w = Trans.Weight() * ip.weight;
+      if (Qmass)
+      {
+         w *= Qmass -> Eval(Trans, ip);
+      }
+
+      AddMult_a_VVt(w, shape, elmat);
+   }
 }
 
 /// Integrator for (q * u, v)
@@ -1216,7 +1393,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1735,11 +1912,20 @@ int main(int argc, char *argv[])
    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
    {
        Cblock = new ParBilinearForm(S_space);
+
        if (strcmp(space_for_S,"H1") == 0)
        {
+           if (strcmp(space_for_sigma,"Hdiv") == 0)
+               Cblock->AddDomainIntegrator(new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb));
+           else
+               Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+
+           /*
+            * old code, w/o H1NormIntegrator, gives the same result
            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
            if (strcmp(space_for_sigma,"Hdiv") == 0)
                 Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+           */
        }
        else // "L2" & !eliminateS
        {
@@ -1814,6 +2000,15 @@ int main(int argc, char *argv[])
   }
   if (strcmp(formulation,"cfosls") == 0)
      gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+
+  //SparseMatrix C_diag;
+  //C->GetDiag(C_diag);
+  //C_diag.Print();
+
+  //SparseMatrix B_diag;
+  //B->GetDiag(B_diag);
+  //B_diag.Print();
+
 
   BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets);
   CFOSLSop->SetBlock(0,0, A);
@@ -1941,18 +2136,17 @@ int main(int argc, char *argv[])
    solver.SetRelTol(rtol);
    solver.SetMaxIter(max_iter);
    solver.SetOperator(*CFOSLSop);
-   if (prec_option > 0)
-        solver.SetPreconditioner(prec);
+   //if (prec_option > 0)
+        //solver.SetPreconditioner(prec);
    solver.SetPrintLevel(1);
    trueX = 0.0;
+
+   //trueRhs.Print();
 
    chrono.Clear();
    chrono.Start();
    solver.Mult(trueRhs, trueX);
    chrono.Stop();
-
-   //trueRhs.Print();
-
 
    if (verbose)
    {
@@ -2198,6 +2392,7 @@ int main(int argc, char *argv[])
        delete N_space;
    }
 
+   /*
    // Check value of functional and mass conservation
    if (strcmp(formulation,"cfosls") == 0) // if CFOSLS, otherwise code requires some changes
    {
@@ -2248,6 +2443,7 @@ int main(int argc, char *argv[])
        if (verbose)
            cout << "Sum of local mass loss = " << mass_loss << "\n";
    }
+   */
 
    if (verbose)
        cout << "Computing projection errors \n";
@@ -2266,20 +2462,41 @@ int main(int argc, char *argv[])
        cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                        << projection_error_S / norm_S << endl;
 
+   //MPI_Finalize();
+   //return 0;
 
    if (verbose)
-       std::cout << "Running AMR if there was no S in the formulation... \n";
+       std::cout << "Running AMR ... \n";
 
-   if (numblocks != 2)
+   Array<ParGridFunction*> sols(numblocks-1);
+   sols[0] = sigma;
+   if (strcmp(space_for_S,"H1") == 0) // S is present
+       sols[1] = S;
+
+   Array2D<BilinearFormIntegrator *> integs(numblocks-1, numblocks-1);
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           integs(i,j) = NULL;
+   integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+   if (strcmp(space_for_S,"H1") == 0) // S is present
    {
-       MFEM_ABORT("Currently adaptive mesh refinement is implemented when only sigma is present, "
-                  "numblocks must equal 2 for CFOSLS formulation! \n");
+        if (strcmp(space_for_sigma,"Hdiv") == 0)
+            integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
+        else
+            integs(1,1) = new MassIntegrator(*Mytest.bTb);
+
+        if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+            integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
+        else // sigma is from H1
+            integs(1,0) = new MixedVectorScalarIntegrator(*Mytest.minb);
    }
 
+   // old interface which doesn't work for the blocked case
+   //BilinearFormIntegrator *integ = new VectorFEMassIntegrator(*Mytest.Ktilda);
+   //FOSLSEstimator estimator(*sigma, *integ);
 
-   BilinearFormIntegrator *integ = new VectorFEMassIntegrator(*Mytest.Ktilda);
+   FOSLSEstimator estimator(sols, integs);
 
-   FOSLSEstimator estimator(*sigma, *integ);
    ThresholdRefiner refiner(estimator);
    refiner.SetTotalErrorFraction(0.5);
 
@@ -2291,43 +2508,118 @@ int main(int argc, char *argv[])
    Dblock = new ParMixedBilinearForm(Sigma_space, W_space);
    Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
 
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+   {
+       delete Cblock;
+       Cblock = new ParBilinearForm(S_space);
+       if (strcmp(space_for_sigma,"Hdiv") == 0)
+           Cblock->AddDomainIntegrator(new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb));
+       else
+           Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+   }
+
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+   {
+       delete Bblock;
+       Bblock = new ParMixedBilinearForm(Sigma_space, S_space);
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+       {
+           //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+       }
+       else // sigma is from H1
+           Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+   }
+
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 200000;
    for (int it = 0; ; it++)
    {
       HYPRE_Int global_dofs = Sigma_space->GlobalTrueVSize();
+      if (strcmp(space_for_S,"H1") == 0)
+          global_dofs += S_space->GlobalTrueVSize();
+
       if (myid == 0)
       {
          cout << "\nAMR iteration " << it << endl;
          cout << "Number of unknowns: " << global_dofs << endl;
       }
 
-      HypreParMatrix *A, *D, *DT;
+      //Array<int> block_trueOffsets(numblocks + 1);
+      //BlockOperator * CFOSLS
+      //BuildSystem("hyperbolic", space_for_S, space_for_sigma)
+      // to be implemented... then all PDE's examples could be simplified
+
+      HypreParMatrix *A, *D, *DT, *C, *B, *BT;
 
       // 13. Assemble the stiffness matrix and the right-hand side. Note that
       //     MFEM doesn't care at this point that the mesh is nonconforming
       //     and parallel. The FE space is considered 'cut' along hanging
       //     edges/faces, and also across processor boundaries.
 
-      Array<int> block_offsets(numblocks + 1);
+      Array<int> block_offsets(numblocks + 1); // number of variables + 1
+      int tempblknum = 0;
       block_offsets[0] = 0;
-      block_offsets[1] = Sigma_space->GetVSize();
-      block_offsets[2] = W_space->GetVSize();
+      tempblknum++;
+      block_offsets[tempblknum] = Sigma_space->GetVSize();
+      tempblknum++;
+
+      if (strcmp(space_for_S,"H1") == 0)
+      {
+          block_offsets[tempblknum] = H_space->GetVSize();
+          tempblknum++;
+      }
+      else // "L2"
+          if (!eliminateS)
+          {
+              block_offsets[tempblknum] = W_space->GetVSize();
+              tempblknum++;
+          }
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+          block_offsets[tempblknum] = W_space->GetVSize();
+          tempblknum++;
+      }
       block_offsets.PartialSum();
+
       BlockVector x(block_offsets);
       x = 0.0;
+
+      ParGridFunction *S_exact = new ParGridFunction(S_space);
+      S_exact->ProjectCoefficient(*(Mytest.scalarS));
+
       ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
       sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
       x.GetBlock(0) = *sigma_exact;
+      if (strcmp(space_for_S,"H1") == 0)
+          x.GetBlock(1) = *S_exact;
 
       fform->Assemble();
+      if (strcmp(space_for_S,"H1") == 0)
+          qform->Assemble();
       gform->Assemble();
 
       Ablock->Assemble();
       Ablock->EliminateEssentialBC(ess_bdrSigma, x.GetBlock(0), *fform);
       Ablock->Finalize();
       A = Ablock->ParallelAssemble();
+
+      if (strcmp(space_for_S,"H1") == 0)
+      {
+          Cblock->Assemble();
+          Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
+          Cblock->Finalize();
+          C = Cblock->ParallelAssemble();
+
+          Bblock->Assemble();
+          Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
+          Bblock->EliminateTestDofs(ess_bdrS);
+          Bblock->Finalize();
+          B = Bblock->ParallelAssemble();
+          BT = B->Transpose();
+      }
 
       Dblock->Assemble();
       Dblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *gform);
@@ -2339,10 +2631,29 @@ int main(int argc, char *argv[])
       //     constrain hanging nodes and nodes across processor boundaries.
       //     The system will be solved for true (unconstrained/unique) DOFs only.
 
-      Array<int> block_trueOffsets(numblocks + 1);
+      Array<int> block_trueOffsets(numblocks + 1); // number of variables + 1
+      tempblknum = 0;
       block_trueOffsets[0] = 0;
-      block_trueOffsets[1] = Sigma_space->GetTrueVSize();
-      block_trueOffsets[2] = W_space->TrueVSize();
+      tempblknum++;
+      block_trueOffsets[tempblknum] = Sigma_space->TrueVSize();
+      tempblknum++;
+
+      if (strcmp(space_for_S,"H1") == 0)
+      {
+          block_trueOffsets[tempblknum] = H_space->TrueVSize();
+          tempblknum++;
+      }
+      else // "L2"
+          if (!eliminateS)
+          {
+              block_trueOffsets[tempblknum] = W_space->TrueVSize();
+              tempblknum++;
+          }
+      if (strcmp(formulation,"cfosls") == 0)
+      {
+          block_trueOffsets[tempblknum] = W_space->TrueVSize();
+          tempblknum++;
+      }
       block_trueOffsets.PartialSum();
 
       BlockVector trueX(block_trueOffsets);
@@ -2350,23 +2661,59 @@ int main(int argc, char *argv[])
       trueX = 0.0;
       trueRhs = 0.0;
 
-      fform->ParallelAssemble(trueRhs.GetBlock(0));
-      gform->ParallelAssemble(trueRhs.GetBlock(1));
+      tempblknum = 0;
+      fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+      tempblknum++;
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+        qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+        tempblknum++;
+      }
+      if (strcmp(formulation,"cfosls") == 0)
+         gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+
+      //SparseMatrix C_diag;
+      //C->GetDiag(C_diag);
+      //C_diag.Print();
+
+      //SparseMatrix B_diag;
+      //B->GetDiag(B_diag);
+      //B_diag.Print();
 
       BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets);
       CFOSLSop->SetBlock(0,0, A);
-      CFOSLSop->SetBlock(0,1, DT);
-      CFOSLSop->SetBlock(1,0, D);
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+          CFOSLSop->SetBlock(0,1, BT);
+          CFOSLSop->SetBlock(1,0, B);
+          CFOSLSop->SetBlock(1,1, C);
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop->SetBlock(0,2, DT);
+            CFOSLSop->SetBlock(2,0, D);
+          }
+      }
+      else // no S
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop->SetBlock(0,1, DT);
+            CFOSLSop->SetBlock(1,0, D);
+          }
+
 
       // 15. Define and apply a parallel PCG solver for AX=B with the BoomerAMG
       //     preconditioner from hypre.
 
       HypreParMatrix *Schur;
-      HypreParMatrix *AinvDt = D->Transpose();
-      HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(), A->GetRowStarts());
-      A->GetDiag(*Ad);
-      AinvDt->InvScaleRows(*Ad);
-      Schur = ParMult(D, AinvDt);
+      if (strcmp(formulation,"cfosls") == 0 )
+      {
+         HypreParMatrix *AinvDt = D->Transpose();
+         HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(),
+                                              A->GetRowStarts());
+         A->GetDiag(*Ad);
+         AinvDt->InvScaleRows(*Ad);
+         Schur = ParMult(D, AinvDt);
+      }
 
       Solver * invA;
       if (use_ADS)
@@ -2376,34 +2723,68 @@ int main(int argc, char *argv[])
 
       invA->iterative_mode = false;
 
+      Solver * invC;
+      if (strcmp(space_for_S,"H1") == 0) // S is from H1
+      {
+          invC = new HypreBoomerAMG(*C);
+          ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+          ((HypreBoomerAMG*)invC)->iterative_mode = false;
+      }
+      else // S from L2
+      {
+          if (!eliminateS) // S is from L2 and not eliminated
+          {
+              invC = new HypreDiagScale(*C);
+              ((HypreDiagScale*)invC)->iterative_mode = false;
+          }
+      }
+
       Solver * invS;
-      invS = new HypreBoomerAMG(*Schur);
-      ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
-      ((HypreBoomerAMG *)invS)->iterative_mode = false;
+      if (strcmp(formulation,"cfosls") == 0 )
+      {
+           invS = new HypreBoomerAMG(*Schur);
+           ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+           ((HypreBoomerAMG *)invS)->iterative_mode = false;
+      }
 
       BlockDiagonalPreconditioner prec(block_trueOffsets);
       if (prec_option > 0)
       {
-          prec.SetDiagonalBlock(0, invA);
-          prec.SetDiagonalBlock(1, invS);
+          tempblknum = 0;
+          prec.SetDiagonalBlock(tempblknum, invA);
+          tempblknum++;
+          if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+          {
+              prec.SetDiagonalBlock(tempblknum, invC);
+              tempblknum++;
+          }
+          if (strcmp(formulation,"cfosls") == 0)
+               prec.SetDiagonalBlock(tempblknum, invS);
+
+          if (verbose)
+              std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
       }
       else
           if (verbose)
               cout << "No preconditioner is used. \n";
+
 
       MINRESSolver solver(MPI_COMM_WORLD);
       solver.SetAbsTol(atol);
       solver.SetRelTol(rtol);
       solver.SetMaxIter(max_iter);
       solver.SetOperator(*CFOSLSop);
-      if (prec_option > 0)
-           solver.SetPreconditioner(prec);
-      //solver.SetPrintLevel(1);
+      //if (prec_option > 0)
+           //solver.SetPreconditioner(prec);
+      solver.SetPrintLevel(0);
       trueX = 0.0;
+
+      //trueRhs.Print();
 
       chrono.Clear();
       chrono.Start();
       solver.Mult(trueRhs, trueX);
+
       chrono.Stop();
 
       if (verbose)
@@ -2417,7 +2798,35 @@ int main(int argc, char *argv[])
          std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
       }
 
-      sigma->Distribute(&(trueX.GetBlock(0)));
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+          S->Distribute(&(trueX.GetBlock(1)));
+      else // no S in the formulation
+      {
+          ParBilinearForm *Cblock(new ParBilinearForm(S_space));
+          Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+          Cblock->Assemble();
+          Cblock->Finalize();
+          HypreParMatrix * C = Cblock->ParallelAssemble();
+
+          ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
+          Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+          Bblock->Assemble();
+          Bblock->Finalize();
+          HypreParMatrix * B = Bblock->ParallelAssemble();
+          Vector bTsigma(C->Height());
+          B->Mult(trueX.GetBlock(0),bTsigma);
+
+          Vector trueS(C->Height());
+
+          CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+          S->Distribute(trueS);
+
+          delete Cblock;
+          delete Bblock;
+          delete B;
+          delete C;
+      }
+
 
       int order_quad = max(2, 2*feorder+1);
       const IntegrationRule *irs[Geometry::NumGeom];
@@ -2431,16 +2840,28 @@ int main(int argc, char *argv[])
       if (verbose)
           cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
 
+      double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
+      double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+      if (verbose)
+      {
+          std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                       err_S / norm_S << "\n";
+      }
+
       // 17. Send the solution by socket to a GLVis server.
       if (visualization)
       {
           char vishost[] = "localhost";
           int  visport   = 19916;
 
-          socketstream s_sock(vishost, visport);
+          socketstream sigma_sock(vishost, visport);
+          sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+          sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                 << it <<"'" << flush;
 
+          socketstream s_sock(vishost, visport);
           s_sock << "parallel " << num_procs << " " << myid << "\n";
-          s_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+          s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
                  << it <<"'" << flush;
       }
 
@@ -2473,20 +2894,38 @@ int main(int argc, char *argv[])
       //     matrix is an interpolation matrix so the updated GridFunction will
       //     still represent the same function as before refinement.
       Sigma_space->Update();
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+          S_space->Update();
       W_space->Update();
       sigma->Update();
+      S->Update();
 
       // 21. Inform also the bilinear and linear forms that the space has
       //     changed.
       fform->Update();
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+          qform->Update();
       gform->Update();
       Ablock->Update();
       Dblock->Update();
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+          Bblock->Update();
+          Cblock->Update();
+      }
 
       delete sigma_exact;
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+          delete S_exact;
       delete A;
       delete D;
       delete DT;
+      if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+      {
+          delete C;
+          delete B;
+          delete BT;
+      }
       delete CFOSLSop;
    }
 
