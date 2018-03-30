@@ -39,6 +39,8 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
+// old implementation, now is a simplified form of the blocked case
+// here FOSLS functional is given as a bilinear form(sigma, sigma)
 double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Vector &error_estimates)
 {
     FiniteElementSpace * fes = sigma.FESpace();
@@ -79,30 +81,134 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Ve
     return std::sqrt(total_error);
 }
 
+// here FOSLS functional is given as a symmetric block matrix with bilinear forms for different grid functions sols
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & sols, Vector &error_estimates)
 {
-    if (sols.Size() == 1)
+    /*
+     * using a simpler version
+    if  (sols.Size() == 1)
     {
         return FOSLSErrorEstimator(*blfis(0,0), *sols[0], error_estimates);
     }
-    else
+    */
+
+    Array<FiniteElementSpace*> fess(sols.Size());
+    for (int i = 0; i < sols.Size(); ++i)
+        fess[i] = sols[i]->FESpace();
+
+    int ne = fess[0]->GetNE();
+    error_estimates.SetSize(ne);
+
+    double total_error = 0.0;
+    for (int i = 0; i < ne; ++i)
     {
-        Array<FiniteElementSpace*> fess(sols.Size());
-        for (int i = 0; i < sols.Size(); ++i)
-            fess[i] = sols[i]->FESpace();
-
-        int ne = fess[0]->GetNE();
-        error_estimates.SetSize(ne);
-
-        double total_error = 0.0;
-        for (int i = 0; i < ne; ++i)
+        double err = 0.0;
+        for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
         {
-            double err = 0.0;
-            for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
+            for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
             {
-                for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
+                if (rowblk == colblk)
                 {
-                    if (rowblk == colblk)
+                    const FiniteElement * fe = fess[rowblk]->GetFE(i);
+                    ElementTransformation * eltrans = fess[rowblk]->GetElementTransformation(i);
+                    DenseMatrix elmat;
+                    blfis(rowblk,colblk)->AssembleElementMatrix(*fe, *eltrans, elmat);
+
+                    Array<int> eldofs;
+                    fess[rowblk]->GetElementDofs(i, eldofs);
+                    Vector localv;
+                    sols[rowblk]->GetSubVector(eldofs, localv);
+
+                    Vector localAv(localv.Size());
+                    elmat.Mult(localv, localAv);
+
+                    err += localAv * localv;
+                }
+                else
+                // only using one of the off-diagonal integrators at symmetric places,
+                // since a FOSLS functional must be symmetric
+                {
+                    if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
+                    {
+                        int trial, test;
+                        if (blfis(rowblk,colblk))
+                        {
+                            trial = colblk;
+                            test = rowblk;
+                        }
+                        else // using an integrator for (colblk, rowblk) instead
+                        {
+                            trial = rowblk;
+                            test = colblk;
+                        }
+
+
+                        FiniteElementSpace * fes1 = fess[trial];
+                        FiniteElementSpace * fes2 = fess[test];
+                        const FiniteElement * fe1 = fes1->GetFE(i);
+                        const FiniteElement * fe2 = fes2->GetFE(i);
+                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
+                        DenseMatrix elmat;
+                        blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
+
+                        Vector localv1;
+                        Array<int> eldofs1;
+                        fes1->GetElementDofs(i, eldofs1);
+                        sols[trial]->GetSubVector(eldofs1, localv1);
+
+                        Vector localv2;
+                        Array<int> eldofs2;
+                        fes2->GetElementDofs(i, eldofs2);
+                        sols[test]->GetSubVector(eldofs2, localv2);
+
+                        Vector localAv2(localv2.Size());
+                        elmat.Mult(localv2, localAv2);
+
+                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
+                        //sigma.Print();
+                        //eldofs.Print();
+                        //localv.Print();
+                        //localAv.Print();
+
+                        // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
+                        // bilinear forms in the functional
+                        err += 2.0 * (localAv2 * localv1);
+                    }
+                } // end of else for off-diagonal blocks
+            }
+        } // end of loop over blocks in the functional
+
+        error_estimates(i) = std::sqrt(err);
+        total_error += err;
+    }
+
+    std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
+
+    return std::sqrt(total_error);
+}
+
+/*
+// here FOSLS functional is given as a sum of
+double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & grfuns, Vector &error_estimates)
+{
+    Array<FiniteElementSpace*> fess(grfuns.Size());
+    for (int i = 0; i < grfuns.Size(); ++i)
+        fess[i] = grfuns[i]->FESpace();
+
+    int ne = fess[0]->GetNE();
+    error_estimates.SetSize(ne);
+
+    double total_error = 0.0;
+    for (int i = 0; i < ne; ++i)
+    {
+        double err = 0.0;
+        for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
+        {
+            for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
+            {
+                if (rowblk == colblk)
+                {
+                    if (blfis(rowblk,colblk))
                     {
                         const FiniteElement * fe = fess[rowblk]->GetFE(i);
                         ElementTransformation * eltrans = fess[rowblk]->GetElementTransformation(i);
@@ -112,83 +218,84 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
                         Array<int> eldofs;
                         fess[rowblk]->GetElementDofs(i, eldofs);
                         Vector localv;
-                        sols[rowblk]->GetSubVector(eldofs, localv);
+                        grfuns[rowblk]->GetSubVector(eldofs, localv);
 
                         Vector localAv(localv.Size());
                         elmat.Mult(localv, localAv);
 
                         err += localAv * localv;
                     }
-                    else
-                    // only using one of the off-diagonal integrators at symmetric places,
-                    // since a FOSLS functional must be symmetric
-                    {
-                        if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
-                        {
-                            int trial, test;
-                            if (blfis(rowblk,colblk))
-                            {
-                                trial = colblk;
-                                test = rowblk;
-                            }
-                            else // using an integrator for (colblk, rowblk) instead
-                            {
-                                trial = rowblk;
-                                test = colblk;
-                            }
-
-
-                            FiniteElementSpace * fes1 = fess[trial];
-                            FiniteElementSpace * fes2 = fess[test];
-                            const FiniteElement * fe1 = fes1->GetFE(i);
-                            const FiniteElement * fe2 = fes2->GetFE(i);
-                            ElementTransformation * eltrans = fes2->GetElementTransformation(i);
-                            DenseMatrix elmat;
-                            blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
-
-                            Vector localv1;
-                            Array<int> eldofs1;
-                            fes1->GetElementDofs(i, eldofs1);
-                            sols[trial]->GetSubVector(eldofs1, localv1);
-
-                            Vector localv2;
-                            Array<int> eldofs2;
-                            fes2->GetElementDofs(i, eldofs2);
-                            sols[test]->GetSubVector(eldofs2, localv2);
-
-                            Vector localAv2(localv2.Size());
-                            elmat.Mult(localv2, localAv2);
-
-                            //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-                            //sigma.Print();
-                            //eldofs.Print();
-                            //localv.Print();
-                            //localAv.Print();
-
-                            // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
-                            // bilinear forms in the functional
-                            err += 2.0 * (localAv2 * localv1);
-                        }
-                    } // end of else for off-diagonal blocks
                 }
-            } // end of loop over blocks in the functional
+                else
+                // only using one of the off-diagonal integrators at symmetric places,
+                // since a FOSLS functional must be symmetric
+                {
+                    if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
+                    {
+                        int trial, test;
+                        if (blfis(rowblk,colblk))
+                        {
+                            trial = colblk;
+                            test = rowblk;
+                        }
+                        else // using an integrator for (colblk, rowblk) instead
+                        {
+                            trial = rowblk;
+                            test = colblk;
+                        }
 
-            error_estimates(i) = std::sqrt(err);
-            total_error += err;
-        }
 
-        std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
+                        FiniteElementSpace * fes1 = fess[trial];
+                        FiniteElementSpace * fes2 = fess[test];
+                        const FiniteElement * fe1 = fes1->GetFE(i);
+                        const FiniteElement * fe2 = fes2->GetFE(i);
+                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
+                        DenseMatrix elmat;
+                        blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
 
-        return std::sqrt(total_error);
+                        Vector localv1;
+                        Array<int> eldofs1;
+                        fes1->GetElementDofs(i, eldofs1);
+                        grfuns[trial]->GetSubVector(eldofs1, localv1);
+
+                        Vector localv2;
+                        Array<int> eldofs2;
+                        fes2->GetElementDofs(i, eldofs2);
+                        grfuns[test]->GetSubVector(eldofs2, localv2);
+
+                        Vector localAv2(localv2.Size());
+                        elmat.Mult(localv2, localAv2);
+
+                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
+                        //sigma.Print();
+                        //eldofs.Print();
+                        //localv.Print();
+                        //localAv.Print();
+
+                        // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
+                        // bilinear forms in the functional
+                        err += 2.0 * (localAv2 * localv1);
+                    }
+                } // end of else for off-diagonal blocks
+            }
+        } // end of loop over blocks in the functional
+
+        error_estimates(i) = std::sqrt(err);
+        total_error += err;
     }
+
+    std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
+
+    return std::sqrt(total_error);
 }
+*/
 
 class FOSLSEstimator : public ErrorEstimator
 {
 protected:
     const int numblocks;
     long current_sequence;
-    Array<ParGridFunction*> sols;
+    Array<ParGridFunction*> grfuns;
     Array2D<BilinearFormIntegrator*> integs;
     Vector error_estimates;
     double total_error;
@@ -209,8 +316,8 @@ public:
 FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator &integrator)
     : numblocks(1), current_sequence(-1), total_error(0.0)
 {
-    sols.SetSize(numblocks);
-    sols[0] = &solution;
+    grfuns.SetSize(numblocks);
+    grfuns[0] = &solution;
     integs.SetSize(numblocks, numblocks);
     integs(0,0) = &integrator;
 }
@@ -218,9 +325,9 @@ FOSLSEstimator::FOSLSEstimator(ParGridFunction &solution, BilinearFormIntegrator
 FOSLSEstimator::FOSLSEstimator(Array<ParGridFunction *> &solutions, Array2D<BilinearFormIntegrator *> &integrators)
     : numblocks(solutions.Size()), current_sequence(-1), total_error(0.0)
 {
-    sols.SetSize(numblocks);
+    grfuns.SetSize(numblocks);
     for (int i = 0; i < numblocks; ++i)
-        sols[i] = solutions[i];
+        grfuns[i] = solutions[i];
     integs.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
@@ -229,7 +336,7 @@ FOSLSEstimator::FOSLSEstimator(Array<ParGridFunction *> &solutions, Array2D<Bili
 
 bool FOSLSEstimator::MeshIsModified()
 {
-   long mesh_sequence = sols[0]->FESpace()->GetMesh()->GetSequence();
+   long mesh_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
    MFEM_ASSERT(mesh_sequence >= current_sequence, "");
    return (mesh_sequence > current_sequence);
 }
@@ -242,11 +349,11 @@ const Vector & FOSLSEstimator::GetLocalErrors()
 
 void FOSLSEstimator::ComputeEstimates()
 {
-    total_error = FOSLSErrorEstimator(integs, sols, error_estimates);
+    total_error = FOSLSErrorEstimator(integs, grfuns, error_estimates);
 
     //error_estimates.Print();
 
-    current_sequence = sols[0]->FESpace()->GetMesh()->GetSequence();
+    current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
 }
 
 void FOSLSEstimator::Reset()
@@ -1393,7 +1500,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1516,6 +1623,7 @@ int main(int argc, char *argv[])
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
     mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -2477,7 +2585,17 @@ int main(int argc, char *argv[])
    for (int i = 0; i < integs.NumRows(); ++i)
        for (int j = 0; j < integs.NumCols(); ++j)
            integs(i,j) = NULL;
-   integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
+   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   {
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           integs(0,0) = new VectorFEMassIntegrator;
+       else // sigma is from H1vec
+           integs(0,0) = new ImproperVectorMassIntegrator;
+   }
+   else // "L2"
+       integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
    if (strcmp(space_for_S,"H1") == 0) // S is present
    {
         /*
@@ -3719,4 +3837,20 @@ void uFun10_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(1) = sin(t)*exp(t)*x;
     gradx(2) = 0.0;
 }
+
+/*
+ * don't see the point of this anymore
+ * since it's diffuclt to implement in such a way
+ * that one can replace both system assembling
+ * inside and outside AMR
+ * Probably a solution is to implement a build for a system
+ * with integrators as the input
+void BuildCFOSLSSystem(ParMesh& pmesh, const char * space_for_S, const char * space_for_sigma,
+                       Array<int> * block_trueOffsets, BlockOperator * CFOSLSop)
+{
+
+
+
+}
+*/
 
