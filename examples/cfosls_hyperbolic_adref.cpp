@@ -81,16 +81,16 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Ve
     return std::sqrt(total_error);
 }
 
+/*
 // here FOSLS functional is given as a symmetric block matrix with bilinear forms for different grid functions sols
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & sols, Vector &error_estimates)
 {
-    /*
-     * using a simpler version
-    if  (sols.Size() == 1)
-    {
-        return FOSLSErrorEstimator(*blfis(0,0), *sols[0], error_estimates);
-    }
-    */
+
+    // using a simpler version
+    //if  (sols.Size() == 1)
+    //{
+        //return FOSLSErrorEstimator(*blfis(0,0), *sols[0], error_estimates);
+    //}
 
     Array<FiniteElementSpace*> fess(sols.Size());
     for (int i = 0; i < sols.Size(); ++i)
@@ -186,11 +186,20 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
 
     return std::sqrt(total_error);
 }
+*/
 
-/*
-// here FOSLS functional is given as a sum of
+// here FOSLS functional is given as a symmetric block matrix with bilinear forms for different grid functions
+// (for solution components and rhs)
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & grfuns, Vector &error_estimates)
 {
+    /*
+     * using a simpler version
+    if  (sols.Size() == 1)
+    {
+        return FOSLSErrorEstimator(*blfis(0,0), *grfuns[0], error_estimates);
+    }
+    */
+
     Array<FiniteElementSpace*> fess(grfuns.Size());
     for (int i = 0; i < grfuns.Size(); ++i)
         fess[i] = grfuns[i]->FESpace();
@@ -263,8 +272,8 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
                         fes2->GetElementDofs(i, eldofs2);
                         grfuns[test]->GetSubVector(eldofs2, localv2);
 
-                        Vector localAv2(localv2.Size());
-                        elmat.Mult(localv2, localAv2);
+                        Vector localAv1(localv2.Size());
+                        elmat.Mult(localv1, localAv1);
 
                         //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
                         //sigma.Print();
@@ -274,7 +283,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
 
                         // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
                         // bilinear forms in the functional
-                        err += 2.0 * (localAv2 * localv1);
+                        err += 2.0 * (localAv1 * localv2);
                     }
                 } // end of else for off-diagonal blocks
             }
@@ -288,7 +297,6 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
 
     return std::sqrt(total_error);
 }
-*/
 
 class FOSLSEstimator : public ErrorEstimator
 {
@@ -1500,7 +1508,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -2576,50 +2584,97 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "Running AMR ... \n";
 
-   Array<ParGridFunction*> sols(numblocks-1);
-   sols[0] = sigma;
-   if (strcmp(space_for_S,"H1") == 0) // S is present
-       sols[1] = S;
+   ParGridFunction * f = new ParGridFunction(W_space);
+   f->ProjectCoefficient(*Mytest.scalardivsigma);
 
-   Array2D<BilinearFormIntegrator *> integs(numblocks-1, numblocks-1);
+   int fosls_func_version = 1;
+
+   int numfoslsfuns = -1;
+   if (fosls_func_version == 1)
+       numfoslsfuns = numblocks - 1;
+   else if (fosls_func_version == 2)
+       numfoslsfuns = 3;
+
+   Array<ParGridFunction*> grfuns(numfoslsfuns);
+
+   Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
    for (int i = 0; i < integs.NumRows(); ++i)
        for (int j = 0; j < integs.NumCols(); ++j)
            integs(i,j) = NULL;
 
-   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   // version 1, only || sigma - b S ||^2, or || K sigma ||^2
+   if (fosls_func_version == 1)
    {
+       grfuns[0] = sigma;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+           grfuns[1] = S;
+
+       for (int i = 0; i < integs.NumRows(); ++i)
+           for (int j = 0; j < integs.NumCols(); ++j)
+               integs(i,j) = NULL;
+
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+               integs(0,0) = new VectorFEMassIntegrator;
+           else // sigma is from H1vec
+               integs(0,0) = new ImproperVectorMassIntegrator;
+       }
+       else // "L2"
+           integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+            /*
+             * if using this function for fosls, one also includes (b grad S, b grad S)
+             * but then one needs additional terms to make it || div bS - f ||^2
+             * which are currently not implemented
+            if (strcmp(space_for_sigma,"Hdiv") == 0)
+                integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
+            else
+                integs(1,1) = new MassIntegrator(*Mytest.bTb);
+            */
+            integs(1,1) = new MassIntegrator(*Mytest.bTb);
+
+            if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+                integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
+            else // sigma is from H1
+                integs(1,0) = new MixedVectorScalarIntegrator(*Mytest.minb);
+       }
+   }
+   else if (fosls_func_version == 2)
+   {
+       // version 2, only || sigma - b S ||^2 + || div bS - f ||^2
+       MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Version 2 works only if S is from H1 \n");
+
+       grfuns[0] = sigma;
+       grfuns[1] = S;
+       grfuns[2] = f;
+
        if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
            integs(0,0) = new VectorFEMassIntegrator;
        else // sigma is from H1vec
            integs(0,0) = new ImproperVectorMassIntegrator;
+
+       integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
+       //integs(1,1) = new MassIntegrator(*Mytest.bTb);
+
+       integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
+
+       // integrators related to f (rhs side)
+       integs(2,2) = new MassIntegrator;
+       integs(1,2) = new MixedDirectionalDerivativeIntegrator(*Mytest.minb);
    }
-   else // "L2"
-       integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
-
-   if (strcmp(space_for_S,"H1") == 0) // S is present
+   else
    {
-        /*
-         * if using this function for fosls, one also includes (b grad S, b grad S)
-         * but then one needs additional terms to make it || div bS - f ||^2
-         * which are currently not implemented
-        if (strcmp(space_for_sigma,"Hdiv") == 0)
-            integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
-        else
-            integs(1,1) = new MassIntegrator(*Mytest.bTb);
-        */
-        integs(1,1) = new MassIntegrator(*Mytest.bTb);
-
-        if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
-            integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
-        else // sigma is from H1
-            integs(1,0) = new MixedVectorScalarIntegrator(*Mytest.minb);
+       MFEM_ABORT("Unsupported version of fosls functional \n");
    }
 
    // old interface which doesn't work for the blocked case
    //BilinearFormIntegrator *integ = new VectorFEMassIntegrator(*Mytest.Ktilda);
    //FOSLSEstimator estimator(*sigma, *integ);
 
-   FOSLSEstimator estimator(sols, integs);
+   FOSLSEstimator estimator(grfuns, integs);
 
    ThresholdRefiner refiner(estimator);
    refiner.SetTotalErrorFraction(0.5);
@@ -3056,6 +3111,9 @@ int main(int argc, char *argv[])
       W_space->Update();
       sigma->Update();
       S->Update();
+
+      f->Update();
+      f->ProjectCoefficient(*Mytest.scalardivsigma);
 
       // 21. Inform also the bilinear and linear forms that the space has
       //     changed.
