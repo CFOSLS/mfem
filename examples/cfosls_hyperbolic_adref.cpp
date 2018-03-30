@@ -89,7 +89,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
     {
         Array<FiniteElementSpace*> fess(sols.Size());
         for (int i = 0; i < sols.Size(); ++i)
-            fess = sols[i]->FESpace();
+            fess[i] = sols[i]->FESpace();
 
         int ne = fess[0]->GetNE();
         error_estimates.SetSize(ne);
@@ -120,7 +120,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
                         err += localAv * localv;
                     }
                     else
-                    // only using one of the off-diagonal itnegrators at symmetric places,
+                    // only using one of the off-diagonal integrators at symmetric places,
                     // since a FOSLS functional must be symmetric
                     {
                         if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
@@ -128,13 +128,13 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
                             int trial, test;
                             if (blfis(rowblk,colblk))
                             {
-                                trial = rowblk;
-                                test = colblk;
+                                trial = colblk;
+                                test = rowblk;
                             }
                             else // using an integrator for (colblk, rowblk) instead
                             {
-                                trial = colblk;
-                                test = rowblk;
+                                trial = rowblk;
+                                test = colblk;
                             }
 
 
@@ -144,7 +144,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGri
                             const FiniteElement * fe2 = fes2->GetFE(i);
                             ElementTransformation * eltrans = fes2->GetElementTransformation(i);
                             DenseMatrix elmat;
-                            blfis(trial,test)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
+                            blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
 
                             Vector localv1;
                             Array<int> eldofs1;
@@ -2480,10 +2480,16 @@ int main(int argc, char *argv[])
    integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
    if (strcmp(space_for_S,"H1") == 0) // S is present
    {
+        /*
+         * if using this function for fosls, one also includes (b grad S, b grad S)
+         * but then one needs additional terms to make it || div bS - f ||^2
+         * which are currently not implemented
         if (strcmp(space_for_sigma,"Hdiv") == 0)
             integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
         else
             integs(1,1) = new MassIntegrator(*Mytest.bTb);
+        */
+        integs(1,1) = new MassIntegrator(*Mytest.bTb);
 
         if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
             integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
