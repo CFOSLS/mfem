@@ -2953,6 +2953,8 @@ int main(int argc, char *argv[])
          std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
       }
 
+      sigma->Distribute(&(trueX.GetBlock(0)));
+
       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
           S->Distribute(&(trueX.GetBlock(1)));
       else // no S in the formulation
