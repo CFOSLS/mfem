@@ -2136,8 +2136,8 @@ int main(int argc, char *argv[])
    solver.SetRelTol(rtol);
    solver.SetMaxIter(max_iter);
    solver.SetOperator(*CFOSLSop);
-   //if (prec_option > 0)
-        //solver.SetPreconditioner(prec);
+   if (prec_option > 0)
+        solver.SetPreconditioner(prec);
    solver.SetPrintLevel(1);
    trueX = 0.0;
 
@@ -2502,7 +2502,38 @@ int main(int argc, char *argv[])
 
    delete Ablock;
    Ablock = new ParBilinearForm(Sigma_space);
-   Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   {
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       else // sigma is from H1vec
+           Ablock->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+   }
+   else // "L2"
+   {
+       if (eliminateS) // S is eliminated
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+       else // S is present
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+       if (keep_divdiv)
+           Ablock->AddDomainIntegrator(new DivDivIntegrator);
+#ifdef REGULARIZE_A
+       if (verbose)
+           std::cout << "regularization is ON \n";
+       double h_min, h_max, kappa_min, kappa_max;
+       pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+       if (verbose)
+           std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+       double reg_param;
+       reg_param = 0.1 * h_min * h_min;
+       if (verbose)
+           std::cout << "regularization parameter: " << reg_param << "\n";
+       ConstantCoefficient reg_coeff(reg_param);
+       Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+       //Ablock->AddDomainIntegrator(new DivDivIntegrator(reg_coeff)); // doesn't change much in the iteration count
+#endif
+   }
 
    delete Dblock;
    Dblock = new ParMixedBilinearForm(Sigma_space, W_space);
@@ -2774,8 +2805,8 @@ int main(int argc, char *argv[])
       solver.SetRelTol(rtol);
       solver.SetMaxIter(max_iter);
       solver.SetOperator(*CFOSLSop);
-      //if (prec_option > 0)
-           //solver.SetPreconditioner(prec);
+      if (prec_option > 0)
+           solver.SetPreconditioner(prec);
       solver.SetPrintLevel(0);
       trueX = 0.0;
 
