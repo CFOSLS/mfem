@@ -3791,8 +3791,6 @@ void uFun10_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(2) = 0.0;
 }
 
-#if 0
-
 struct CFOSLSHyperbolicFormulation
 {
     friend class CFOSLSHyperbolicProblem;
@@ -3805,6 +3803,7 @@ protected:
     bool have_constraint;
     const int bdrattrnum;
     int numblocks;
+    int unknowns_number;
     const char * formulation;
     //bool keep_divdiv; unsupported because then we need additional integrators (sum of smth)
     Array2D<BilinearFormIntegrator*> blfis;
@@ -3835,10 +3834,13 @@ public:
 
         Transport_test Mytest(dim,numsol);
 
-        int numblocks = 1;
+        numblocks = 1;
 
         if (strcmp(space_for_S,"H1") == 0)
             numblocks++;
+
+        unknowns_number = numblocks;
+
         if (strcmp(formulation,"cfosls") == 0)
             numblocks++;
 
@@ -3980,9 +3982,9 @@ protected:
     ParFiniteElementSpace * Sigma_space;
     ParFiniteElementSpace * S_space;
 
-    ParGridFunction * sigma;
-    ParGridFunction * S;
-    ParGridFunction * f;
+    // all par grid functions which are relevant to the formulation
+    // e.g., solution components and right hand sides
+    Array<ParGridFunction*> grfuns;
 
     Array<ParFiniteElementSpace*> pfes;
     BlockProblemForms pbforms;
@@ -3993,6 +3995,9 @@ protected:
     Array<int> blkoffsets;
     Array2D<HypreParMatrix*> hpmats;
     BlockOperator *CFOSLSop;
+    BlockVector * trueRhs;
+    BlockVector * trueX;
+    BlockVector * x; // inital condition
     BlockDiagonalPreconditioner *prec;
     IterativeSolver * solver;
 
@@ -4005,14 +4010,20 @@ protected:
     void AssembleSystem(bool verbose);
     void InitSolver(bool verbose);
     void InitPrec(int prec_option, bool verbose);
+    BlockVector *  SetInitialCondition();
+    void InitGrFuns();
+    void DistributeSolution();
+    void ComputeError();
 public:
     CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
                             int fe_order, bool verbose);
     CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation& struct_formulation,
-                            int fe_order, bool verbose);
+                            int fe_order, int prec_option, bool verbose);
     void BuildCFOSLSSystem(ParMesh& pmesh, bool verbose);
     void Solve(bool verbose);
     void Update();
+    // deletes everything which was related to a specific mesh
+    void Reset() {MFEM_ABORT("Not implemented \n");}
 };
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
@@ -4025,7 +4036,7 @@ CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &st
 }
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation &struct_formulation,
-                                                 int fe_order, bool verbose)
+                                                 int fe_order, int prec_option, bool verbose)
     : feorder (fe_order), struct_formul(struct_formulation), pbforms(struct_formul.numblocks)
 {
     InitFEColls(verbose);
@@ -4036,6 +4047,8 @@ CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperboli
     AssembleSystem(verbose);
     InitSolver(verbose);
     solver_initialized = true;
+    InitPrec(prec_option, verbose);
+    InitGrFuns();
 }
 
 void CFOSLSHyperbolicProblem::InitFEColls(bool verbose)
@@ -4078,6 +4091,7 @@ void CFOSLSHyperbolicProblem::InitSpaces(ParMesh &pmesh)
     Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
     H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
     L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
+    H1vec_space = new ParFiniteElementSpace(&pmesh, h1_coll, struct_formul.dim, Ordering::byVDIM);
 
     pfes.SetSize(struct_formul.numblocks);
 
@@ -4130,6 +4144,39 @@ void CFOSLSHyperbolicProblem::InitForms()
 
 }
 
+BlockVector * CFOSLSHyperbolicProblem::SetInitialCondition()
+{
+    BlockVector * init_cond = new BlockVector(blkoffsets);
+    *init_cond = 0.0;
+
+    Transport_test Mytest(struct_formul.dim,struct_formul.numsol);
+
+    ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
+    init_cond->GetBlock(0) = *sigma_exact;
+    if (strcmp(struct_formul.space_for_S,"H1") == 0)
+    {
+        ParGridFunction *S_exact = new ParGridFunction(S_space);
+        S_exact->ProjectCoefficient(*(Mytest.scalarS));
+        init_cond->GetBlock(1) = *S_exact;
+    }
+
+    return init_cond;
+}
+
+void CFOSLSHyperbolicProblem::InitGrFuns()
+{
+    // + 1 for the f stored as a grid function from L2
+    grfuns.SetSize(struct_formul.unknowns_number + 1);
+    for (int i = 0; i < struct_formul.unknowns_number; ++i)
+        grfuns[i] = new ParGridFunction(pfes[i]);
+    grfuns[struct_formul.unknowns_number] = new ParGridFunction(L2_space);
+
+    Transport_test Mytest(struct_formul.dim,struct_formul.numsol);
+    grfuns[struct_formul.unknowns_number]->ProjectCoefficient(*Mytest.scalardivsigma);
+}
+
 void CFOSLSHyperbolicProblem::BuildCFOSLSSystem(ParMesh &pmesh, bool verbose)
 {
     if (!spaces_initialized)
@@ -4161,9 +4208,10 @@ void CFOSLSHyperbolicProblem::BuildCFOSLSSystem(ParMesh &pmesh, bool verbose)
 
 void CFOSLSHyperbolicProblem::Solve(bool verbose)
 {
+    *trueX = 0;
     chrono.Clear();
     chrono.Start();
-    solver->Mult(trueRhs, trueX);
+    solver->Mult(*trueRhs, *trueX);
 
     chrono.Stop();
 
@@ -4178,6 +4226,79 @@ void CFOSLSHyperbolicProblem::Solve(bool verbose)
        std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
     }
 
+    DistributeSolution();
+
+    ComputeError();
+}
+
+void CFOSLSHyperbolicProblem::DistributeSolution()
+{
+    for (int i = 0; i < struct_formul.unknowns_number; ++i)
+        grfuns[0]->Distribute(&(trueX->GetBlock(i)));
+}
+
+void CFOSLSHyperbolicProblem::ComputeError()
+{
+    bool verbose = true;
+    Transport_test Mytest(struct_formul.dim,struct_formul.numsol);
+
+    ParMesh * pmesh = pfes[0]->GetParMesh();
+
+    ParGridFunction * sigma = grfuns[0];
+
+    int order_quad = max(2, 2*feorder+1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i=0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
+    double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+    if (verbose)
+        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
+
+    ParGridFunction * S;
+    if (strcmp(struct_formul.space_for_sigma,"H1") == 0)
+    {
+        S = grfuns[1];
+    }
+    else
+    {
+        ParBilinearForm *Cblock(new ParBilinearForm(S_space));
+        Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+        Cblock->Assemble();
+        Cblock->Finalize();
+        HypreParMatrix * C = Cblock->ParallelAssemble();
+
+        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
+        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+        Bblock->Assemble();
+        Bblock->Finalize();
+        HypreParMatrix * B = Bblock->ParallelAssemble();
+        Vector bTsigma(C->Height());
+        B->Mult(trueX->GetBlock(0),bTsigma);
+
+        Vector trueS(C->Height());
+
+        CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+        S = new ParGridFunction(S_space);
+        S->Distribute(trueS);
+
+        delete Cblock;
+        delete Bblock;
+        delete B;
+        delete C;
+    }
+
+    double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
+    double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+    if (verbose)
+    {
+        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                     err_S / norm_S << "\n";
+    }
 }
 
 
@@ -4200,6 +4321,11 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
         blkoffsets[i + 1] = pfes[i]->GetVSize();
     blkoffsets.PartialSum();
 
+    x = SetInitialCondition();
+
+    trueRhs = new BlockVector(blkoffsets_true);
+    trueX = new BlockVector(blkoffsets_true);
+
     for (int i = 0; i < numblocks; ++i)
         plforms[i]->Assemble();
 
@@ -4217,7 +4343,7 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
                 {
                     pbforms.diag(i)->Assemble();
                     pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
-                            x.GetBlock(i), *plforms[i]);
+                            x->GetBlock(i), *plforms[i]);
                     pbforms.diag(i)->Finalize();
                     hpmats(i,j) = pbforms.diag(i)->ParallelAssemble();
                 }
@@ -4241,7 +4367,7 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
                     pbforms.offd(exist_row,exist_col)->Assemble();
 
                     pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
-                                                                          x.GetBlock(exist_col), *plforms[exist_row]);
+                                                                          x->GetBlock(exist_col), *plforms[exist_row]);
                     pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
 
                     pbforms.offd(exist_row,exist_col)->Finalize();
@@ -4251,14 +4377,9 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
             }
         }
 
-
-    //=======================================================
-    // Setting up the block system Matrix
-    //-------------------------------------------------------
-
     for (int i = 0; i < numblocks; ++i)
     {
-        plforms[i]->ParallelAssemble(trueRhs.GetBlock(i));
+        plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
     }
 
    CFOSLSop = new BlockOperator(blkoffsets_true);
@@ -4269,11 +4390,14 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
 
     if (verbose)
         cout << "Final saddle point matrix assembled \n";
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Comm comm = pfes[0]->GetComm();
+    MPI_Barrier(comm);
 }
 
 void CFOSLSHyperbolicProblem::InitSolver(bool verbose)
 {
+    MPI_Comm comm = pfes[0]->GetComm();
+
     int max_iter = 100000;
     double rtol = 1e-12;//1e-7;//1e-9;
     double atol = 1e-14;//1e-9;//1e-12;
@@ -4295,6 +4419,19 @@ void CFOSLSHyperbolicProblem::InitSolver(bool verbose)
 // and should be a virtual function in the abstract base
 void CFOSLSHyperbolicProblem::InitPrec(int prec_option, bool verbose)
 {
+    bool use_ADS;
+    switch (prec_option)
+    {
+    case 1: // smth simple like AMS
+        use_ADS = false;
+        break;
+    case 2: // MG
+        use_ADS = true;
+        break;
+    default: // no preconditioner
+        break;
+    }
+
     HypreParMatrix & A = (HypreParMatrix&)CFOSLSop->GetBlock(0,0);
     HypreParMatrix & C = (HypreParMatrix&)CFOSLSop->GetBlock(1,1);
     HypreParMatrix & D = (HypreParMatrix&)CFOSLSop->GetBlock(2,0);
@@ -4303,10 +4440,14 @@ void CFOSLSHyperbolicProblem::InitPrec(int prec_option, bool verbose)
     if (struct_formul.have_constraint)
     {
        HypreParMatrix *AinvDt = D.Transpose();
-       HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
-                                            A.GetRowStarts());
-       A.GetDiag(*Ad);
-       AinvDt->InvScaleRows(*Ad);
+       //FIXME: Do we actually need a hypreparvector here? Can't we just use a vector?
+       //HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
+                                            //A.GetRowStarts());
+       //A.GetDiag(*Ad);
+       //AinvDt->InvScaleRows(*Ad);
+       Vector Ad;
+       A.GetDiag(Ad);
+       AinvDt->InvScaleRows(Ad);
        Schur = ParMult(&D, AinvDt);
     }
 
@@ -4360,16 +4501,18 @@ void CFOSLSHyperbolicProblem::InitPrec(int prec_option, bool verbose)
 void CFOSLSHyperbolicProblem::Update()
 {
     // update spaces
-    Sigma_space->Update();
-    S_space->Update();
+    Hdiv_space->Update();
+    H1vec_space->Update();
+    H1_space->Update();
     L2_space->Update();
+    // this is not enough, better update all pfes as above
+    //for (int i = 0; i < numblocks; ++i)
+        //pfes[i]->Update();
 
     // update grid functions
-    sigma->Update();
-    S->Update();
-    f->Update();
+    for (int i = 0; i < grfuns.Size(); ++i)
+        grfuns[i]->Update();
 }
 
-#endif
 
 
