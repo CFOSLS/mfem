@@ -81,115 +81,8 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Ve
     return std::sqrt(total_error);
 }
 
-/*
-// here FOSLS functional is given as a symmetric block matrix with bilinear forms for different grid functions sols
-double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & sols, Vector &error_estimates)
-{
-
-    // using a simpler version
-    //if  (sols.Size() == 1)
-    //{
-        //return FOSLSErrorEstimator(*blfis(0,0), *sols[0], error_estimates);
-    //}
-
-    Array<FiniteElementSpace*> fess(sols.Size());
-    for (int i = 0; i < sols.Size(); ++i)
-        fess[i] = sols[i]->FESpace();
-
-    int ne = fess[0]->GetNE();
-    error_estimates.SetSize(ne);
-
-    double total_error = 0.0;
-    for (int i = 0; i < ne; ++i)
-    {
-        double err = 0.0;
-        for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
-        {
-            for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
-            {
-                if (rowblk == colblk)
-                {
-                    const FiniteElement * fe = fess[rowblk]->GetFE(i);
-                    ElementTransformation * eltrans = fess[rowblk]->GetElementTransformation(i);
-                    DenseMatrix elmat;
-                    blfis(rowblk,colblk)->AssembleElementMatrix(*fe, *eltrans, elmat);
-
-                    Array<int> eldofs;
-                    fess[rowblk]->GetElementDofs(i, eldofs);
-                    Vector localv;
-                    sols[rowblk]->GetSubVector(eldofs, localv);
-
-                    Vector localAv(localv.Size());
-                    elmat.Mult(localv, localAv);
-
-                    err += localAv * localv;
-                }
-                else
-                // only using one of the off-diagonal integrators at symmetric places,
-                // since a FOSLS functional must be symmetric
-                {
-                    if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
-                    {
-                        int trial, test;
-                        if (blfis(rowblk,colblk))
-                        {
-                            trial = colblk;
-                            test = rowblk;
-                        }
-                        else // using an integrator for (colblk, rowblk) instead
-                        {
-                            trial = rowblk;
-                            test = colblk;
-                        }
-
-
-                        FiniteElementSpace * fes1 = fess[trial];
-                        FiniteElementSpace * fes2 = fess[test];
-                        const FiniteElement * fe1 = fes1->GetFE(i);
-                        const FiniteElement * fe2 = fes2->GetFE(i);
-                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
-                        DenseMatrix elmat;
-                        blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
-
-                        Vector localv1;
-                        Array<int> eldofs1;
-                        fes1->GetElementDofs(i, eldofs1);
-                        sols[trial]->GetSubVector(eldofs1, localv1);
-
-                        Vector localv2;
-                        Array<int> eldofs2;
-                        fes2->GetElementDofs(i, eldofs2);
-                        sols[test]->GetSubVector(eldofs2, localv2);
-
-                        Vector localAv2(localv2.Size());
-                        elmat.Mult(localv2, localAv2);
-
-                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-                        //sigma.Print();
-                        //eldofs.Print();
-                        //localv.Print();
-                        //localAv.Print();
-
-                        // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
-                        // bilinear forms in the functional
-                        err += 2.0 * (localAv2 * localv1);
-                    }
-                } // end of else for off-diagonal blocks
-            }
-        } // end of loop over blocks in the functional
-
-        error_estimates(i) = std::sqrt(err);
-        total_error += err;
-    }
-
-    std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
-
-    return std::sqrt(total_error);
-}
-*/
-
-// here FOSLS functional is given as a symmetric block matrix with bilinear forms for different grid functions
-// (for solution components and rhs)
+// here FOSLS functional is given as a symmetric block matrix with bilinear forms for
+// different grid functions (each for all solution and rhs components)
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & grfuns, Vector &error_estimates)
 {
     /*
@@ -1965,7 +1858,7 @@ int main(int argc, char *argv[])
    if (strcmp(formulation,"cfosls") == 0)
    {
        gform = new ParLinearForm(W_space);
-       //gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+       gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
        gform->Assemble();
    }
 
@@ -3898,19 +3791,585 @@ void uFun10_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(2) = 0.0;
 }
 
-/*
- * don't see the point of this anymore
- * since it's diffuclt to implement in such a way
- * that one can replace both system assembling
- * inside and outside AMR
- * Probably a solution is to implement a build for a system
- * with integrators as the input
-void BuildCFOSLSSystem(ParMesh& pmesh, const char * space_for_S, const char * space_for_sigma,
-                       Array<int> * block_trueOffsets, BlockOperator * CFOSLSop)
+#if 0
+
+struct CFOSLSHyperbolicFormulation
 {
+    friend class CFOSLSHyperbolicProblem;
+
+protected:
+    const int dim;
+    const int numsol;
+    const char * space_for_S;
+    const char * space_for_sigma;
+    bool have_constraint;
+    const int bdrattrnum;
+    int numblocks;
+    const char * formulation;
+    //bool keep_divdiv; unsupported because then we need additional integrators (sum of smth)
+    Array2D<BilinearFormIntegrator*> blfis;
+    Array<LinearFormIntegrator*> lfis;
+    Array<Array<int>* > essbdr_attrs;
+public:
+    CFOSLSHyperbolicFormulation(int dimension, int solution_number,
+                            const char * S_space, const char * sigma_space,
+                            bool with_constraint, int number_of_bdrattribs, bool verbose)
+        : dim(dimension), numsol(solution_number),
+          space_for_S(S_space), space_for_sigma(sigma_space),
+          have_constraint(with_constraint), bdrattrnum(number_of_bdrattribs)
+          //, keep_divdiv(with_divdiv)
+    {
+        if (with_constraint)
+            formulation = "cfosls";
+        else
+            formulation = "fosls";
+        MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
+                    "Formulation must be cfosls or fosls!\n");
+        MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
+                    "Space for S must be H1 or L2!\n");
+        MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
+                    "Space for sigma must be Hdiv or H1!\n");
+        MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0
+                                                           && strcmp(space_for_S,"H1") == 0),
+                    "Sigma from H1vec must be coupled with S from H1!\n");
+
+        Transport_test Mytest(dim,numsol);
+
+        int numblocks = 1;
+
+        if (strcmp(space_for_S,"H1") == 0)
+            numblocks++;
+        if (strcmp(formulation,"cfosls") == 0)
+            numblocks++;
+
+        if (verbose)
+            std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
+
+        if (strcmp(formulation,"cfosls") == 0)
+            essbdr_attrs.SetSize(numblocks - 1);
+        else // fosls
+            essbdr_attrs.SetSize(numblocks);
+
+        for (int i = 0; i < essbdr_attrs.Size(); ++i)
+        {
+            essbdr_attrs[i] = new Array<int>(bdrattrnum);
+            essbdr_attrs[i] = 0;
+        }
+
+        // S is from H1, so we impose bdr condition for S at t = 0
+        if (strcmp(space_for_S,"H1") == 0)
+            (*essbdr_attrs[1])[0] = 1; // t = 0;
+
+        // S is from L2, so we impose bdr condition for sigma at t = 0
+        if (strcmp(space_for_S,"L2") == 0)
+            (*essbdr_attrs[0])[0] = 1; // t = 0;
+
+        if (verbose)
+        {
+            std::cout << "Boundary conditions: \n";
+            std::cout << "ess bdr for sigma: \n";
+            essbdr_attrs[0]->Print(std::cout, bdrattrnum);
+            if (strcmp(space_for_S,"H1") == 0)
+            {
+                std::cout << "ess bdr for S: \n";
+                essbdr_attrs[1]->Print(std::cout, bdrattrnum);
+            }
+        }
+
+        // bilinear forms
+        blfis.SetSize(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = 0; j < numblocks; ++j)
+                blfis(i,j) = NULL;
+
+        if (strcmp(space_for_S,"H1") == 0) // S is from H1
+        {
+            if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+                blfis(0,0) = new VectorFEMassIntegrator;
+            else // sigma is from H1vec
+                blfis(0,0) = new ImproperVectorMassIntegrator;
+        }
+        else // "L2"
+            blfis(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            if (strcmp(space_for_sigma,"Hdiv") == 0)
+                blfis(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
+            else
+                blfis(1,1) = new MassIntegrator(*Mytest.bTb);
+        }
+        else // "L2"
+        {
+            blfis(1,1) = new MassIntegrator(*Mytest.bTb);
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+            {
+                //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+                blfis(2,1) = new VectorFEMassIntegrator(*Mytest.minb);
+            }
+            else // sigma is from H1
+                blfis(1,1) = new MixedVectorScalarIntegrator(*Mytest.minb);
+        }
+
+        if (strcmp(formulation,"cfosls") == 0)
+        {
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+             blfis(3,1) = new VectorFEDivergenceIntegrator;
+           else // sigma is from H1vec
+             blfis(3,1) = new VectorDivergenceIntegrator;
+        }
+
+        // linear forms
+        lfis.SetSize(numblocks);
+        for (int i = 0; i < numblocks; ++i)
+            lfis[i] = NULL;
+
+        if (strcmp(space_for_S,"H1") == 0)
+            lfis[1] = new GradDomainLFIntegrator(*Mytest.bf);
+
+        if (strcmp(formulation,"cfosls") == 0)
+            lfis[2] = new DomainLFIntegrator(*Mytest.scalardivsigma);
+    }
+
+};
+
+class BlockProblemForms
+{
+    friend class CFOSLSHyperbolicProblem;
+protected:
+    const int numblocks;
+    Array<ParBilinearForm*> diag_forms;
+    Array2D<ParMixedBilinearForm*> offd_forms;
+public:
+    BlockProblemForms(int num_blocks) : numblocks(num_blocks)
+    {
+        for (int i = 0; i < num_blocks; ++i)
+            diag_forms[i] = NULL;
+        for (int i = 0; i < num_blocks; ++i)
+            for (int j = 0; j < num_blocks; ++j)
+                offd_forms(i,j) = NULL;
+    }
+    ParBilinearForm* & diag(int i) {return diag_forms[i];}
+    ParMixedBilinearForm* & offd(int i, int j) {return offd_forms(i,j);}
+};
 
 
+
+class CFOSLSHyperbolicProblem
+{
+protected:
+    int feorder;
+    CFOSLSHyperbolicFormulation& struct_formul;
+    bool spaces_initialized;
+    bool forms_initialized;
+    bool solver_initialized;
+
+    FiniteElementCollection *hdiv_coll;
+    FiniteElementCollection *h1_coll;
+    FiniteElementCollection *l2_coll;
+    ParFiniteElementSpace * Hdiv_space;
+    ParFiniteElementSpace * H1_space;
+    ParFiniteElementSpace * H1vec_space;
+    ParFiniteElementSpace * L2_space;
+
+    // FIXME: to be removed in the abstract base class
+    ParFiniteElementSpace * Sigma_space;
+    ParFiniteElementSpace * S_space;
+
+    ParGridFunction * sigma;
+    ParGridFunction * S;
+    ParGridFunction * f;
+
+    Array<ParFiniteElementSpace*> pfes;
+    BlockProblemForms pbforms;
+    Array<ParLinearForm*> plforms;
+
+
+    Array<int> blkoffsets_true;
+    Array<int> blkoffsets;
+    Array2D<HypreParMatrix*> hpmats;
+    BlockOperator *CFOSLSop;
+    BlockDiagonalPreconditioner *prec;
+    IterativeSolver * solver;
+
+    StopWatch chrono;
+
+protected:
+    void InitFEColls(bool verbose);
+    void InitSpaces(ParMesh& pmesh);
+    void InitForms();
+    void AssembleSystem(bool verbose);
+    void InitSolver(bool verbose);
+    void InitPrec(int prec_option, bool verbose);
+public:
+    CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
+                            int fe_order, bool verbose);
+    CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation& struct_formulation,
+                            int fe_order, bool verbose);
+    void BuildCFOSLSSystem(ParMesh& pmesh, bool verbose);
+    void Solve(bool verbose);
+    void Update();
+};
+
+CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
+                                                 int fe_order, bool verbose)
+    : feorder (fe_order), struct_formul(struct_formulation),
+      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      pbforms(struct_formul.numblocks)
+{
+    InitFEColls(verbose);
+}
+
+CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation &struct_formulation,
+                                                 int fe_order, bool verbose)
+    : feorder (fe_order), struct_formul(struct_formulation), pbforms(struct_formul.numblocks)
+{
+    InitFEColls(verbose);
+    InitSpaces(pmesh);
+    spaces_initialized = true;
+    InitForms();
+    forms_initialized = true;
+    AssembleSystem(verbose);
+    InitSolver(verbose);
+    solver_initialized = true;
+}
+
+void CFOSLSHyperbolicProblem::InitFEColls(bool verbose)
+{
+    if ( struct_formul.dim == 4 )
+    {
+        hdiv_coll = new RT0_4DFECollection;
+        if(verbose)
+            cout << "RT: order 0 for 4D" << endl;
+    }
+    else
+    {
+        hdiv_coll = new RT_FECollection(feorder, struct_formul.dim);
+        if(verbose)
+            cout << "RT: order " << feorder << " for 3D" << endl;
+    }
+
+    if (struct_formul.dim == 4)
+        MFEM_ASSERT(feorder == 0, "Only lowest order elements are support in 4D!");
+
+    if (struct_formul.dim == 4)
+    {
+        h1_coll = new LinearFECollection;
+        if (verbose)
+            cout << "H1 in 4D: linear elements are used" << endl;
+    }
+    else
+    {
+        h1_coll = new H1_FECollection(feorder+1, struct_formul.dim);
+        if(verbose)
+            cout << "H1: order " << feorder + 1 << " for 3D" << endl;
+    }
+    l2_coll = new L2_FECollection(feorder, struct_formul.dim);
+    if (verbose)
+        cout << "L2: order " << feorder << endl;
+}
+
+void CFOSLSHyperbolicProblem::InitSpaces(ParMesh &pmesh)
+{
+    Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
+    H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
+    L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
+
+    pfes.SetSize(struct_formul.numblocks);
+
+    int blkcount = 0;
+    if (strcmp(struct_formul.space_for_sigma,"Hdiv") == 0)
+        pfes[0] = Hdiv_space;
+    else
+        pfes[0] = H1vec_space;
+    ++blkcount;
+
+    if (strcmp(struct_formul.space_for_S,"H1") == 0)
+        pfes[blkcount] = H1_space;
+    else // "L2"
+        pfes[blkcount] = L2_space;
+    ++blkcount;
+
+    if (struct_formul.have_constraint)
+        pfes[blkcount] = L2_space;
 
 }
-*/
+
+void CFOSLSHyperbolicProblem::InitForms()
+{
+    MFEM_ASSERT(spaces_initialized, "Spaces must have been initialized by this moment!\n");
+
+    plforms.SetSize(struct_formul.numblocks);
+    for (int i = 0; i < struct_formul.numblocks; ++i)
+    {
+        plforms[i] = new ParLinearForm(pfes[i]);
+        if (struct_formul.lfis[i])
+            plforms[i]->AddDomainIntegrator(struct_formul.lfis[i]);
+    }
+
+    for (int i = 0; i < struct_formul.numblocks; ++i)
+        for (int j = 0; j < struct_formul.numblocks; ++j)
+        {
+            if (i == j)
+                pbforms.diag(i) = new ParBilinearForm(pfes[i]);
+            else
+                pbforms.offd(i,j) = new ParMixedBilinearForm(pfes[i], pfes[j]);
+
+            if (struct_formul.blfis(i,j))
+            {
+                if (i == j)
+                    pbforms.diag(i)->AddDomainIntegrator(struct_formul.blfis(i,j));
+                else
+                    pbforms.offd(i,j)->AddDomainIntegrator(struct_formul.blfis(i,j));
+            }
+        }
+
+}
+
+void CFOSLSHyperbolicProblem::BuildCFOSLSSystem(ParMesh &pmesh, bool verbose)
+{
+    if (!spaces_initialized)
+    {
+        Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
+        H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
+        L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
+
+        if (strcmp(struct_formul.space_for_sigma,"H1") == 0)
+            H1vec_space = new ParFiniteElementSpace(&pmesh, h1_coll, struct_formul.dim, Ordering::byVDIM);
+
+        if (strcmp(struct_formul.space_for_sigma,"Hdiv") == 0)
+            Sigma_space = Hdiv_space;
+        else
+            Sigma_space = H1vec_space;
+
+        if (strcmp(struct_formul.space_for_S,"H1") == 0)
+            S_space = H1_space;
+        else // "L2"
+            S_space = L2_space;
+
+        MFEM_ASSERT(!forms_initialized, "Forms cannot have been already initialized by this moment!");
+
+        InitForms();
+    }
+
+    AssembleSystem(verbose);
+}
+
+void CFOSLSHyperbolicProblem::Solve(bool verbose)
+{
+    chrono.Clear();
+    chrono.Start();
+    solver->Mult(trueRhs, trueX);
+
+    chrono.Stop();
+
+    if (verbose)
+    {
+       if (solver->GetConverged())
+          std::cout << "MINRES converged in " << solver->GetNumIterations()
+                    << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
+       else
+          std::cout << "MINRES did not converge in " << solver->GetNumIterations()
+                    << " iterations. Residual norm is " << solver->GetFinalNorm() << ".\n";
+       std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
+    }
+
+}
+
+
+// works correctly only for problems with homogeneous initial conditions?
+// see the times-stepping branch, think of how boundary conditions for off-diagonal blocks are imposed
+// system is assumed to be symmetric
+void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
+{
+    int numblocks = struct_formul.numblocks;
+
+    blkoffsets_true.SetSize(numblocks + 1);
+    blkoffsets_true[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets_true[i + 1] = pfes[i]->TrueVSize();
+    blkoffsets_true.PartialSum();
+
+    blkoffsets.SetSize(numblocks + 1);
+    blkoffsets[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets[i + 1] = pfes[i]->GetVSize();
+    blkoffsets.PartialSum();
+
+    for (int i = 0; i < numblocks; ++i)
+        plforms[i]->Assemble();
+
+    hpmats.SetSize(numblocks, numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            hpmats(i,j) = NULL;
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+        {
+            if (i == j)
+            {
+                if (pbforms.diag(i))
+                {
+                    pbforms.diag(i)->Assemble();
+                    pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
+                            x.GetBlock(i), *plforms[i]);
+                    pbforms.diag(i)->Finalize();
+                    hpmats(i,j) = pbforms.diag(i)->ParallelAssemble();
+                }
+            }
+            else // off-diagonal
+            {
+                if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                {
+                    int exist_row, exist_col;
+                    if (pbforms.offd(i,j))
+                    {
+                        exist_row = i;
+                        exist_col = j;
+                    }
+                    else
+                    {
+                        exist_row = j;
+                        exist_col = i;
+                    }
+
+                    pbforms.offd(exist_row,exist_col)->Assemble();
+
+                    pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
+                                                                          x.GetBlock(exist_col), *plforms[exist_row]);
+                    pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
+
+                    pbforms.offd(exist_row,exist_col)->Finalize();
+                    hpmats(exist_row,exist_col) = pbforms.offd(exist_row,exist_col)->ParallelAssemble();
+                    hpmats(exist_col, exist_row) = hpmats(exist_row,exist_col)->Transpose();
+                }
+            }
+        }
+
+
+    //=======================================================
+    // Setting up the block system Matrix
+    //-------------------------------------------------------
+
+    for (int i = 0; i < numblocks; ++i)
+    {
+        plforms[i]->ParallelAssemble(trueRhs.GetBlock(i));
+    }
+
+   CFOSLSop = new BlockOperator(blkoffsets_true);
+
+   for (int i = 0; i < numblocks; ++i)
+       for (int j = 0; j < numblocks; ++j)
+           CFOSLSop->SetBlock(i,j, hpmats(i,j));
+
+    if (verbose)
+        cout << "Final saddle point matrix assembled \n";
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+void CFOSLSHyperbolicProblem::InitSolver(bool verbose)
+{
+    int max_iter = 100000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
+
+    solver = new MINRESSolver(comm);
+    solver->SetAbsTol(atol);
+    solver->SetRelTol(rtol);
+    solver->SetMaxIter(max_iter);
+    solver->SetOperator(*CFOSLSop);
+    if (prec)
+         solver->SetPreconditioner(*prec);
+    solver->SetPrintLevel(0);
+
+    if (verbose)
+        std::cout << "Here you should print out parameters of the linear solver \n";
+}
+
+// this works only for hyperbolic case
+// and should be a virtual function in the abstract base
+void CFOSLSHyperbolicProblem::InitPrec(int prec_option, bool verbose)
+{
+    HypreParMatrix & A = (HypreParMatrix&)CFOSLSop->GetBlock(0,0);
+    HypreParMatrix & C = (HypreParMatrix&)CFOSLSop->GetBlock(1,1);
+    HypreParMatrix & D = (HypreParMatrix&)CFOSLSop->GetBlock(2,0);
+
+    HypreParMatrix *Schur;
+    if (struct_formul.have_constraint)
+    {
+       HypreParMatrix *AinvDt = D.Transpose();
+       HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                            A.GetRowStarts());
+       A.GetDiag(*Ad);
+       AinvDt->InvScaleRows(*Ad);
+       Schur = ParMult(&D, AinvDt);
+    }
+
+    Solver * invA;
+    if (use_ADS)
+        invA = new HypreADS(A, Sigma_space);
+    else // using Diag(A);
+         invA = new HypreDiagScale(A);
+
+    invA->iterative_mode = false;
+
+    Solver * invC;
+    if (strcmp(struct_formul.space_for_S,"H1") == 0) // S is from H1
+    {
+        invC = new HypreBoomerAMG(C);
+        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+        ((HypreBoomerAMG*)invC)->iterative_mode = false;
+    }
+
+    Solver * invS;
+    if (struct_formul.have_constraint)
+    {
+         invS = new HypreBoomerAMG(*Schur);
+         ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+         ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        int tempblknum = 0;
+        prec->SetDiagonalBlock(tempblknum, invA);
+        tempblknum++;
+        if (strcmp(struct_formul.space_for_S,"H1") == 0) // S is present
+        {
+            prec->SetDiagonalBlock(tempblknum, invC);
+            tempblknum++;
+        }
+        if (struct_formul.have_constraint)
+             prec->SetDiagonalBlock(tempblknum, invS);
+
+        if (verbose)
+            std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+}
+
+
+void CFOSLSHyperbolicProblem::Update()
+{
+    // update spaces
+    Sigma_space->Update();
+    S_space->Update();
+    L2_space->Update();
+
+    // update grid functions
+    sigma->Update();
+    S->Update();
+    f->Update();
+}
+
+#endif
+
 
