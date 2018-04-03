@@ -1487,6 +1487,7 @@ class Transport_test
                 for (int j = 0; j < numblocks; ++j)
                     blfis(i,j) = NULL;
 
+            int blkcount = 0;
             if (strcmp(space_for_S,"H1") == 0) // S is from H1
             {
                 if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
@@ -1496,6 +1497,7 @@ class Transport_test
             }
             else // "L2"
                 blfis(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+            ++blkcount;
 
             if (strcmp(space_for_S,"H1") == 0)
             {
@@ -1503,10 +1505,7 @@ class Transport_test
                     blfis(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
                 else
                     blfis(1,1) = new MassIntegrator(*Mytest.bTb);
-            }
-            else // "L2"
-            {
-                blfis(1,1) = new MassIntegrator(*Mytest.bTb);
+                ++blkcount;
             }
 
             if (strcmp(space_for_S,"H1") == 0) // S is present
@@ -1523,9 +1522,9 @@ class Transport_test
             if (strcmp(formulation,"cfosls") == 0)
             {
                if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
-                 blfis(2,0) = new VectorFEDivergenceIntegrator;
+                 blfis(blkcount,0) = new VectorFEDivergenceIntegrator;
                else // sigma is from H1vec
-                 blfis(2,0) = new VectorDivergenceIntegrator;
+                 blfis(blkcount,0) = new VectorDivergenceIntegrator;
             }
 
             // linear forms
@@ -1533,11 +1532,15 @@ class Transport_test
             for (int i = 0; i < numblocks; ++i)
                 lfis[i] = NULL;
 
+            blkcount = 1;
             if (strcmp(space_for_S,"H1") == 0)
+            {
                 lfis[1] = new GradDomainLFIntegrator(*Mytest.bf);
+                ++blkcount;
+            }
 
             if (strcmp(formulation,"cfosls") == 0)
-                lfis[2] = new DomainLFIntegrator(*Mytest.scalardivsigma);
+                lfis[blkcount] = new DomainLFIntegrator(*Mytest.scalardivsigma);
         }
 
     };
@@ -1709,11 +1712,15 @@ class Transport_test
         ++blkcount;
 
         if (strcmp(struct_formul.space_for_S,"H1") == 0)
+        {
             pfes[blkcount] = H1_space;
+            S_space = pfes[blkcount];
+            ++blkcount;
+        }
         else // "L2"
-            pfes[blkcount] = L2_space;
-        S_space = pfes[blkcount];
-        ++blkcount;
+        {
+            S_space = L2_space;
+        }
 
         if (struct_formul.have_constraint)
             pfes[blkcount] = L2_space;
@@ -2043,8 +2050,14 @@ class Transport_test
         }
 
         HypreParMatrix & A = (HypreParMatrix&)CFOSLSop->GetBlock(0,0);
-        HypreParMatrix & C = (HypreParMatrix&)CFOSLSop->GetBlock(1,1);
-        HypreParMatrix & D = (HypreParMatrix&)CFOSLSop->GetBlock(2,0);
+        HypreParMatrix * C;
+        int blkcount = 1;
+        if (strcmp(struct_formul.space_for_S,"H1") == 0) // S is from H1
+        {
+            C = &((HypreParMatrix&)CFOSLSop->GetBlock(1,1));
+            ++blkcount;
+        }
+        HypreParMatrix & D = (HypreParMatrix&)CFOSLSop->GetBlock(blkcount,0);
 
         HypreParMatrix *Schur;
         if (struct_formul.have_constraint)
@@ -2072,7 +2085,7 @@ class Transport_test
         Solver * invC;
         if (strcmp(struct_formul.space_for_S,"H1") == 0) // S is from H1
         {
-            invC = new HypreBoomerAMG(C);
+            invC = new HypreBoomerAMG(*C);
             ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
             ((HypreBoomerAMG*)invC)->iterative_mode = false;
         }
