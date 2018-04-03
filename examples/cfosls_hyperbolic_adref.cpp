@@ -1603,9 +1603,12 @@ class Transport_test
         Array<int> blkoffsets;
         Array2D<HypreParMatrix*> hpmats;
         BlockOperator *CFOSLSop;
+        Array2D<HypreParMatrix*> hpmats_nobnd;
+        BlockOperator *CFOSLSop_nobnd;
         BlockVector * trueRhs;
         BlockVector * trueX;
-        BlockVector * x; // inital condition
+        BlockVector * trueBnd;
+        BlockVector * x; // inital condition (~bnd conditions)
         BlockDiagonalPreconditioner *prec;
         IterativeSolver * solver;
 
@@ -1619,9 +1622,10 @@ class Transport_test
         void InitSolver(bool verbose);
         void InitPrec(int prec_option, bool verbose);
         BlockVector *  SetInitialCondition();
+        BlockVector * SetTrueInitialCondition();
         void InitGrFuns();
         void DistributeSolution();
-        void ComputeError(bool verbose);
+        void ComputeError(bool verbose, bool checkbnd);
     public:
         CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
                                 int fe_order, bool verbose);
@@ -1758,6 +1762,48 @@ class Transport_test
 
     }
 
+    BlockVector * CFOSLSHyperbolicProblem::SetTrueInitialCondition()
+    {
+        BlockVector * truebnd = new BlockVector(blkoffsets_true);
+        *truebnd = 0.0;
+
+        Transport_test Mytest(struct_formul.dim,struct_formul.numsol);
+
+        ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+        sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+        Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+        sigma_exact->ParallelProject(sigma_exact_truedofs);
+
+        Array<int> ess_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[0], ess_tdofs_sigma);
+
+        for (int j = 0; j < ess_tdofs_sigma.Size(); ++j)
+        {
+            int tdof = ess_tdofs_sigma[j];
+            truebnd->GetBlock(0)[tdof] = sigma_exact_truedofs[tdof];
+        }
+
+        if (strcmp(struct_formul.space_for_S,"H1") == 0)
+        {
+            ParGridFunction *S_exact = new ParGridFunction(S_space);
+            S_exact->ProjectCoefficient(*(Mytest.scalarS));
+            Vector S_exact_truedofs(S_space->TrueVSize());
+            S_exact->ParallelProject(S_exact_truedofs);
+
+            Array<int> ess_tdofs_S;
+            S_space->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[1], ess_tdofs_S);
+
+            for (int j = 0; j < ess_tdofs_S.Size(); ++j)
+            {
+                int tdof = ess_tdofs_S[j];
+                truebnd->GetBlock(1)[tdof] = S_exact_truedofs[tdof];
+            }
+
+        }
+
+        return truebnd;
+    }
+
     BlockVector * CFOSLSHyperbolicProblem::SetInitialCondition()
     {
         BlockVector * init_cond = new BlockVector(blkoffsets);
@@ -1823,6 +1869,7 @@ class Transport_test
     void CFOSLSHyperbolicProblem::Solve(bool verbose)
     {
         *trueX = 0;
+
         chrono.Clear();
         chrono.Start();
         solver->Mult(*trueRhs, *trueX);
@@ -1842,7 +1889,7 @@ class Transport_test
 
         DistributeSolution();
 
-        ComputeError(verbose);
+        ComputeError(verbose, true);
     }
 
     void CFOSLSHyperbolicProblem::DistributeSolution()
@@ -1851,7 +1898,7 @@ class Transport_test
             grfuns[i]->Distribute(&(trueX->GetBlock(i)));
     }
 
-    void CFOSLSHyperbolicProblem::ComputeError(bool verbose)
+    void CFOSLSHyperbolicProblem::ComputeError(bool verbose, bool checkbnd)
     {
         Transport_test Mytest(struct_formul.dim,struct_formul.numsol);
 
@@ -1916,6 +1963,57 @@ class Transport_test
             std::cout << "|| S_h - S_ex || / || S_ex || = " <<
                          err_S / norm_S << "\n";
         }
+
+        if (checkbnd)
+        {
+            ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+            sigma_exact->ProjectCoefficient(*Mytest.sigma);
+            Vector sigma_exact_truedofs(Sigma_space->TrueVSize());
+            sigma_exact->ParallelAssemble(sigma_exact_truedofs);
+
+            Array<int> EssBnd_tdofs_sigma;
+            Sigma_space->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[0], EssBnd_tdofs_sigma);
+
+            for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_sigma[i];
+                double value_ex = sigma_exact_truedofs[tdof];
+                double value_com = trueX->GetBlock(0)[tdof];
+
+                if (fabs(value_ex - value_com) > MYZEROTOL)
+                {
+                    std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                              << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                    std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(0)[tdof] << "\n";
+                }
+            }
+
+            if (strcmp(struct_formul.space_for_S,"H1") == 0) // S is present
+            {
+                ParGridFunction * S_exact = new ParGridFunction(S_space);
+                S_exact->ProjectCoefficient(*Mytest.scalarS);
+
+                Vector S_exact_truedofs(S_space->TrueVSize());
+                S_exact->ParallelAssemble(S_exact_truedofs);
+
+                Array<int> EssBnd_tdofs_S;
+                S_space->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[1], EssBnd_tdofs_S);
+
+                for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+                {
+                    int tdof = EssBnd_tdofs_S[i];
+                    double value_ex = S_exact_truedofs[tdof];
+                    double value_com = trueX->GetBlock(1)[tdof];
+
+                    if (fabs(value_ex - value_com) > MYZEROTOL)
+                    {
+                        std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
+                                  << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                        std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(1)[tdof] << "\n";
+                    }
+                }
+            }
+        }
     }
 
 
@@ -1946,6 +2044,55 @@ class Transport_test
         for (int i = 0; i < numblocks; ++i)
             plforms[i]->Assemble();
 
+        hpmats_nobnd.SetSize(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = 0; j < numblocks; ++j)
+                hpmats_nobnd(i,j) = NULL;
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = 0; j < numblocks; ++j)
+            {
+                if (i == j)
+                {
+                    if (pbforms.diag(i))
+                    {
+                        pbforms.diag(i)->Assemble();
+                        pbforms.diag(i)->Finalize();
+                        hpmats_nobnd(i,j) = pbforms.diag(i)->ParallelAssemble();
+                    }
+                }
+                else // off-diagonal
+                {
+                    if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                    {
+                        int exist_row, exist_col;
+                        if (pbforms.offd(i,j))
+                        {
+                            exist_row = i;
+                            exist_col = j;
+                        }
+                        else
+                        {
+                            exist_row = j;
+                            exist_col = i;
+                        }
+
+                        pbforms.offd(exist_row,exist_col)->Assemble();
+
+                        pbforms.offd(exist_row,exist_col)->Finalize();
+                        hpmats_nobnd(exist_row,exist_col) = pbforms.offd(exist_row,exist_col)->ParallelAssemble();
+                        hpmats_nobnd(exist_col, exist_row) = hpmats_nobnd(exist_row,exist_col)->Transpose();
+                    }
+                }
+            }
+
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = 0; j < numblocks; ++j)
+                if (i == j)
+                    pbforms.diag(i)->LoseMat();
+                else
+                    if (pbforms.offd(i,j))
+                        pbforms.offd(i,j)->LoseMat();
+
         hpmats.SetSize(numblocks, numblocks);
         for (int i = 0; i < numblocks; ++i)
             for (int j = 0; j < numblocks; ++j)
@@ -1959,8 +2106,13 @@ class Transport_test
                     if (pbforms.diag(i))
                     {
                         pbforms.diag(i)->Assemble();
+
+                        //pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
+                                //x->GetBlock(i), *plforms[i]);
+                        Vector dummy(pbforms.diag(i)->Height());
+                        dummy = 0.0;
                         pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
-                                x->GetBlock(i), *plforms[i]);
+                                x->GetBlock(i), dummy);
                         pbforms.diag(i)->Finalize();
                         hpmats(i,j) = pbforms.diag(i)->ParallelAssemble();
                     }
@@ -1983,9 +2135,16 @@ class Transport_test
 
                         pbforms.offd(exist_row,exist_col)->Assemble();
 
+                        //pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
+                                                                              //x->GetBlock(exist_col), *plforms[exist_row]);
+                        //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
+
+                        Vector dummy(pbforms.offd(exist_row,exist_col)->Height());
+                        dummy = 0.0;
                         pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
-                                                                              x->GetBlock(exist_col), *plforms[exist_row]);
+                                                                              x->GetBlock(exist_col), dummy);
                         pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
+
 
                         pbforms.offd(exist_row,exist_col)->Finalize();
                         hpmats(exist_row,exist_col) = pbforms.offd(exist_row,exist_col)->ParallelAssemble();
@@ -1994,18 +2153,45 @@ class Transport_test
                 }
             }
 
-        for (int i = 0; i < numblocks; ++i)
-        {
-            plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
-        }
-
        CFOSLSop = new BlockOperator(blkoffsets_true);
-
        for (int i = 0; i < numblocks; ++i)
            for (int j = 0; j < numblocks; ++j)
                CFOSLSop->SetBlock(i,j, hpmats(i,j));
 
-        if (verbose)
+       CFOSLSop_nobnd = new BlockOperator(blkoffsets_true);
+       for (int i = 0; i < numblocks; ++i)
+           for (int j = 0; j < numblocks; ++j)
+               CFOSLSop_nobnd->SetBlock(i,j, hpmats_nobnd(i,j));
+
+       // assembling rhs forms without boundary conditions
+       for (int i = 0; i < numblocks; ++i)
+       {
+           plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
+       }
+
+       trueBnd = SetTrueInitialCondition();
+
+       // moving the contribution from inhomogenous bnd conditions
+       // from the rhs
+       BlockVector trueBndCor(blkoffsets_true);
+       trueBndCor = 0.0;
+       CFOSLSop_nobnd->Mult(*trueBnd, trueBndCor);
+       *trueRhs -= trueBndCor;
+
+       // restoring correct boundary values for boundary tdofs
+       for (int i = 0; i < numblocks; ++i)
+       {
+           Array<int> ess_bnd_tdofs;
+           pfes[i]->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[i], ess_bnd_tdofs);
+
+           for (int j = 0; j < ess_bnd_tdofs.Size(); ++j)
+           {
+               int tdof = ess_bnd_tdofs[j];
+               trueRhs->GetBlock(i)[tdof] = trueBnd->GetBlock(i)[tdof];
+           }
+       }
+
+       if (verbose)
             cout << "Final saddle point matrix assembled \n";
         MPI_Comm comm = pfes[0]->GetComm();
         MPI_Barrier(comm);
@@ -2155,11 +2341,11 @@ int main(int argc, char *argv[])
     int nDimensions     = 3;
     int numsol          = 8;
 
-    int ser_ref_levels  = 0;
+    int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -3241,6 +3427,77 @@ int main(int argc, char *argv[])
        cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                        << projection_error_S / norm_S << endl;
 
+   if (visualization && nDimensions < 4)
+   {
+      char vishost[] = "localhost";
+      int  visport   = 19916;
+
+      /*
+      socketstream u_sock(vishost, visport);
+      u_sock << "parallel " << num_procs << " " << myid << "\n";
+      u_sock.precision(8);
+      u_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'sigma_exact'"
+             << endl;
+      // Make sure all ranks have sent their 'u' solution before initiating
+      // another set of GLVis connections (one from each rank):
+
+
+      socketstream uu_sock(vishost, visport);
+      uu_sock << "parallel " << num_procs << " " << myid << "\n";
+      uu_sock.precision(8);
+      uu_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
+             << endl;
+
+      *sigma_exact -= *sigma;
+
+      socketstream uuu_sock(vishost, visport);
+      uuu_sock << "parallel " << num_procs << " " << myid << "\n";
+      uuu_sock.precision(8);
+      uuu_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'difference for sigma'"
+             << endl;
+      */
+
+      /*
+      socketstream check1_sock(vishost, visport);
+      check1_sock << "parallel " << num_procs << " " << myid << "\n";
+      check1_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      check1_sock << "solution\n" << *pmesh << *checkgrfun1 << "window_title 'checkgrfun1 (exact)'"
+              << endl;
+
+      socketstream check2_sock(vishost, visport);
+      check2_sock << "parallel " << num_procs << " " << myid << "\n";
+      check2_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      check2_sock << "solution\n" << *pmesh << *checkgrfun2 << "window_title 'checkgrfun2 (computed)'"
+              << endl;
+      */
+
+      socketstream s_sock(vishost, visport);
+      s_sock << "parallel " << num_procs << " " << myid << "\n";
+      s_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      s_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
+              << endl;
+
+      socketstream ss_sock(vishost, visport);
+      ss_sock << "parallel " << num_procs << " " << myid << "\n";
+      ss_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      ss_sock << "solution\n" << *pmesh << *S << "window_title 'S'"
+              << endl;
+
+      *S_exact -= *S;
+      socketstream sss_sock(vishost, visport);
+      sss_sock << "parallel " << num_procs << " " << myid << "\n";
+      sss_sock.precision(8);
+      MPI_Barrier(pmesh->GetComm());
+      sss_sock << "solution\n" << *pmesh << *S_exact
+               << "window_title 'difference for S'" << endl;
+
+      MPI_Barrier(pmesh->GetComm());
+   }
+
    //MPI_Finalize();
    //return 0;
 
@@ -3409,7 +3666,7 @@ int main(int argc, char *argv[])
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 1600000;
-   for (int it = 0; ; it++)
+   for (int it = 0; it < 1; it++)
    {
       HYPRE_Int global_dofs = Sigma_space->GlobalTrueVSize();
       if (strcmp(space_for_S,"H1") == 0)
@@ -3706,7 +3963,6 @@ int main(int argc, char *argv[])
           delete C;
       }
 
-
       int order_quad = max(2, 2*feorder+1);
       const IntegrationRule *irs[Geometry::NumGeom];
       for (int i=0; i < Geometry::NumGeom; ++i)
@@ -3809,78 +4065,6 @@ int main(int argc, char *argv[])
           delete BT;
       }
       delete CFOSLSop;
-   }
-
-
-   if (visualization && nDimensions < 4)
-   {
-      char vishost[] = "localhost";
-      int  visport   = 19916;
-
-      /*
-      socketstream u_sock(vishost, visport);
-      u_sock << "parallel " << num_procs << " " << myid << "\n";
-      u_sock.precision(8);
-      u_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'sigma_exact'"
-             << endl;
-      // Make sure all ranks have sent their 'u' solution before initiating
-      // another set of GLVis connections (one from each rank):
-
-
-      socketstream uu_sock(vishost, visport);
-      uu_sock << "parallel " << num_procs << " " << myid << "\n";
-      uu_sock.precision(8);
-      uu_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
-             << endl;
-
-      *sigma_exact -= *sigma;
-
-      socketstream uuu_sock(vishost, visport);
-      uuu_sock << "parallel " << num_procs << " " << myid << "\n";
-      uuu_sock.precision(8);
-      uuu_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'difference for sigma'"
-             << endl;
-      */
-
-      /*
-      socketstream check1_sock(vishost, visport);
-      check1_sock << "parallel " << num_procs << " " << myid << "\n";
-      check1_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      check1_sock << "solution\n" << *pmesh << *checkgrfun1 << "window_title 'checkgrfun1 (exact)'"
-              << endl;
-
-      socketstream check2_sock(vishost, visport);
-      check2_sock << "parallel " << num_procs << " " << myid << "\n";
-      check2_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      check2_sock << "solution\n" << *pmesh << *checkgrfun2 << "window_title 'checkgrfun2 (computed)'"
-              << endl;
-      */
-
-      socketstream s_sock(vishost, visport);
-      s_sock << "parallel " << num_procs << " " << myid << "\n";
-      s_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      s_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
-              << endl;
-
-      socketstream ss_sock(vishost, visport);
-      ss_sock << "parallel " << num_procs << " " << myid << "\n";
-      ss_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      ss_sock << "solution\n" << *pmesh << *S << "window_title 'S'"
-              << endl;
-
-      *S_exact -= *S;
-      socketstream sss_sock(vishost, visport);
-      sss_sock << "parallel " << num_procs << " " << myid << "\n";
-      sss_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      sss_sock << "solution\n" << *pmesh << *S_exact
-               << "window_title 'difference for S'" << endl;
-
-      MPI_Barrier(pmesh->GetComm());
    }
 
    // 17. Free the used memory.
