@@ -15,6 +15,7 @@
 
 #define NONHOMO_TEST
 
+// must be active
 #define USE_TSL
 
 using namespace std;
@@ -372,6 +373,9 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
 
     BlockVector trueBndCor(block_trueOffsets);
     trueBndCor = 0.0;
+
+    //trueBnd.Print();
+
     CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
 
     ParLinearForm *fform_nobnd = new ParLinearForm(Sigma_space);
@@ -407,6 +411,9 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
 
     BlockVector trueRhs2(block_trueOffsets);
     trueRhs2 = trueRhs_nobnd;
+
+    //trueRhs2.Print();
+
     trueRhs2 -= trueBndCor;
 
     // TODO: this is just for faster integration.
@@ -442,6 +449,12 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     StopWatch chrono;
     chrono.Clear();
     chrono.Start();
+
+    //trueRhs2.Print();
+    //SparseMatrix diag;
+    //((HypreParMatrix&)(CFOSLSop->GetBlock(0,0))).GetDiag(diag);
+    //diag.Print();
+
     solver->Mult(trueRhs2, trueX);
     chrono.Stop();
 
@@ -1051,6 +1064,46 @@ void TimeCylHyper::InitProblem()
             MPI_Barrier(comm);
         } // end fo loop over all processors, one after another
 
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::vector<std::pair<int,int> > * dofs_link_RT0 =
+                           CreateBotToTopDofsLink("RT0",*Hdiv_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
+                std::cout << std::flush;
+
+                tdofs_link_Hdiv_lvls[l].reserve(dofs_link_RT0->size());
+
+                int count = 0;
+                //std::cout << "dof pairs for Hdiv: \n";
+                for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
+                {
+                    int dof1 = (*dofs_link_RT0)[i].first;
+                    int dof2 = (*dofs_link_RT0)[i].second;
+                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
+                    int tdof1 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof1);
+                    int tdof2 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof2);
+                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                    if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
+                    {
+                        //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
+                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+                    }
+
+                    if (tdof1 > -1)
+                    {
+                        tdofs_link_Hdiv_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
+                        ++count;
+                    }
+                    else
+                    {
+                        //std::cout << "Ignored a dofs pair which are not own tdofs \n";
+                    }
+                }
+            }
+            MPI_Barrier(comm);
+        } // end fo loop over all processors, one after another
+
         // creating restriction matrices from all tdofs to bot tdofs
         Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
         Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
@@ -1168,46 +1221,6 @@ void TimeCylHyper::InitProblem()
                    << endl;
         }
         */
-
-        for (int i = 0; i < num_procs; ++i)
-        {
-            if (myid == i)
-            {
-                std::vector<std::pair<int,int> > * dofs_link_RT0 =
-                           CreateBotToTopDofsLink("RT0",*Hdiv_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
-                std::cout << std::flush;
-
-                tdofs_link_Hdiv_lvls[l].reserve(dofs_link_RT0->size());
-
-                int count = 0;
-                //std::cout << "dof pairs for Hdiv: \n";
-                for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
-                {
-                    int dof1 = (*dofs_link_RT0)[i].first;
-                    int dof2 = (*dofs_link_RT0)[i].second;
-                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
-                    int tdof1 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof1);
-                    int tdof2 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof2);
-                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
-                    if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
-                    {
-                        //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
-                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
-                    }
-
-                    if (tdof1 > -1)
-                    {
-                        tdofs_link_Hdiv_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
-                        ++count;
-                    }
-                    else
-                    {
-                        //std::cout << "Ignored a dofs pair which are not own tdofs \n";
-                    }
-                }
-            }
-            MPI_Barrier(comm);
-        } // end fo loop over all processors, one after another
 
         /*
         if (verbose)
@@ -2037,7 +2050,7 @@ int main(int argc, char *argv[])
    if (num_procs == 1)
    {
        std::stringstream fname;
-       fname << "pmesh_tsl_1proc.mesh";
+       fname << "pmesh_check.mesh";
        std::ofstream ofid(fname.str().c_str());
        ofid.precision(8);
        pmesh->Print(ofid);
@@ -2127,8 +2140,8 @@ int main(int argc, char *argv[])
                     "created for the entire domain \n";
 
   {
-      int pref_lvls_tslab = 1;
-      int solve_at_lvl = 1;
+      int pref_lvls_tslab = 0;
+      int solve_at_lvl = 0;
       TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          formulation, space_for_S, space_for_sigma);
 
@@ -2237,8 +2250,8 @@ int main(int argc, char *argv[])
       delete timeslab_test;
   }
 
-  //MPI_Finalize();
-  //return 0;
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";

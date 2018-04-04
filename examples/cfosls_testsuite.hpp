@@ -22,6 +22,9 @@ void uFunTestNh_ex_gradx(const Vector& xt, Vector& grad);
 void uFunTestNh_ex_gradxt(const Vector& xt, Vector& gradxt);
 void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx );
 
+double uFunCylinder_ex(const Vector& xt);
+double uFunCylinder_ex_dt(const Vector& xt);
+void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
 
 void bFunRect2D_ex(const Vector& xt, Vector& b );
 double  bFunRect2Ddiv_ex(const Vector& xt);
@@ -817,6 +820,8 @@ bool Transport_test::CheckTestConfig()
             return true;
         if (numsol == -44 && dim == 4)
             return true;
+        if ( numsol == 8 && dim == 3 )
+            return true;
         return false;
     }
     else
@@ -848,6 +853,11 @@ Transport_test::Transport_test (int Dim, int NumSol)
         if (numsol == -44) // 4D test for the paper
         {
             SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
+        }
+        if (numsol == 8)
+        {
+            //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
+            SetTestCoeffs<&uFunCylinder_ex, &uFunCylinder_ex_dt, &uFunCylinder_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
         }
     } // end of setting test coefficients in correct case
 }
@@ -1130,5 +1140,110 @@ void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx )
         gradx(1) *= sin (M_PI * z);
         gradx(2) = exp(t) * sin (3.0 * M_PI * x) * sin ( 2.0 * M_PI * y) * M_PI * cos (M_PI * z);
     }
+}
+
+
+double GaussianHill(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    //return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+    //if (x > 0)
+        //teta = atan(y/x);
+    //else
+        //teta = M_PIatan(y/x);
+    return exp (-100.0 * (r * r - r * cos(teta) + 0.25));
+}
+
+double GaussianHill_dteta(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    return -100.0 * r * sin (teta) * GaussianHill(xvec);
+}
+
+double GaussianHill_dr(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    return -100.0 * (2.0 * r - cos (teta)) * GaussianHill(xvec);
+}
+
+double uFunCylinder_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    double t = xt(xt.Size()-1);
+    Vector xvec(2);
+    xvec(0) = r * cos (teta - t);
+    xvec(1) = r * sin (teta - t);
+    return GaussianHill(xvec);
+}
+
+double uFunCylinder_ex_dt(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+    return 100.0 * r * sin (teta - t) * uFunCylinder_ex(xt);
+}
+
+void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    // old, from parelag example slot 1
+    // provides the same result as the different formula below
+
+    // (x0,y0) = Q^tr * (x,y) = initial particle location
+    double x0 = x * cos(t) + y * sin(t);
+    double y0 = x * (-sin(t)) + y * cos(t);
+
+    Vector r0vec(3);
+
+    r0vec(0) = x0;
+    r0vec(1) = y0;
+    r0vec(2) = 0;
+
+    // tempvec = grad u(x0,y0) at t = 0
+    Vector tempvec(2);
+    tempvec(0) = -100.0 * 2.0 * (x0 - 0.5) * uFunCylinder_ex(r0vec);
+    tempvec(1) = -100.0 * 2.0 * y0 * uFunCylinder_ex(r0vec);
+
+
+    //gradx = Q * tempvec
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = tempvec(0) * cos(t) + tempvec(1) * (-sin(t));
+    gradx(1) = tempvec(0) * sin(t) + tempvec(1) * cos(t);
+
+    /*
+     * new formula, gives the same result as the formula above
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+    double dSdr = uFunCylinder_ex(xt) * (-100.0) * (2.0 * r - cos (teta - t));
+    double dSdteta = uFunCylinder_ex(xt) * (-100.0) * (r * sin (teta - t));
+    double dtetadx = - (1.0/r) * sin(teta);
+    double dtetady = + (1.0/r) * cos(teta);
+    gradx.SetSize(xt.Size() - 1);
+    gradx(0) = dSdr * cos(teta) + dSdteta * dtetadx;
+    gradx(1) = dSdr * sin(teta) + dSdteta * dtetady;
+    */
 
 }
+
