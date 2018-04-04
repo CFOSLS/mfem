@@ -2341,11 +2341,11 @@ int main(int argc, char *argv[])
     int nDimensions     = 3;
     int numsol          = 8;
 
-    int ser_ref_levels  = 2;
+    int ser_ref_levels  = 0;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -2467,8 +2467,11 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
+    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
+
+    //mesh_file = "../data/cube_3d_moderate.mesh";
+
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -3498,8 +3501,8 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh->GetComm());
    }
 
-   //MPI_Finalize();
-   //return 0;
+   MPI_Finalize();
+   return 0;
 
    if (verbose)
        std::cout << "Running AMR ... \n";
@@ -3666,7 +3669,7 @@ int main(int argc, char *argv[])
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 1600000;
-   for (int it = 0; it < 1; it++)
+   for (int it = 0; ; it++)
    {
       HYPRE_Int global_dofs = Sigma_space->GlobalTrueVSize();
       if (strcmp(space_for_S,"H1") == 0)
