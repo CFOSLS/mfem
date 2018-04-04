@@ -1129,7 +1129,7 @@ class Transport_test
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 0;
+    bool visualization = 1;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -1143,7 +1143,7 @@ int main(int argc, char *argv[])
     int numsol          = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
