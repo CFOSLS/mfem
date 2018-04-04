@@ -164,6 +164,9 @@ public:
     }
 
     void Interpolate(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+
+    // FIXME: Does one need to scale the restriction?
+    void Restrict(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
 };
 
 TimeCylHyper::~TimeCylHyper()
@@ -241,8 +244,33 @@ void TimeCylHyper::Interpolate(const char * top_or_bot, int lvl, const Vector& v
         }
 
     }
+}
 
+void TimeCylHyper::Restrict(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        if (strcmp(top_or_bot, "top") == 0)
+            TrueP_bndtop_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+        else if (strcmp(top_or_bot, "bot") == 0)
+            TrueP_bndbot_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+        else
+        {
+            MFEM_ABORT("In TimeCylHyper::Restrict() top_or_bot must be 'top' or 'bot'!");
+        }
+    }
+    else
+    {
+        if (strcmp(top_or_bot, "top") == 0)
+            TrueP_bndtop_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+        else if (strcmp(top_or_bot, "bot") == 0)
+            TrueP_bndbot_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+        else
+        {
+            MFEM_ABORT("In TimeCylHyper::Restrict() top_or_bot must be 'top' or 'bot'!");
+        }
 
+    }
 }
 
 TimeCylHyper::TimeCylHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
@@ -2250,8 +2278,8 @@ int main(int argc, char *argv[])
       delete timeslab_test;
   }
 
-  MPI_Finalize();
-  return 0;
+  //MPI_Finalize();
+  //return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
@@ -2524,6 +2552,7 @@ int main(int argc, char *argv[])
       Xinits_fine[0] = new Vector(init_cond_size_fine);
       timeslabs[0]->Interpolate("bot", solve_at_lvl, *Xouts_coarse[0], *Xinits_fine[0]);
       Xouts_fine[0] = new Vector(init_cond_size_fine);
+      *Xouts_fine[0] = *Xinits_fine[0];
 
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
@@ -2588,6 +2617,38 @@ int main(int argc, char *argv[])
           }
           */
       } // end of loop over all time slabs, performing fine solves
+
+      // Computing the corrections as the coarse level initial conditions
+      if (verbose)
+          std::cout << "Computing corrections \n";
+
+      std::vector<Vector*> Xcorrs_coarse(nslabs + 1);
+
+      solve_at_lvl = 1;
+
+      int init_cond_size_coarse = timeslabs[0]->GetInitCondSize(solve_at_lvl);
+
+      Xcorrs_coarse[0] = new Vector(init_cond_size_coarse);
+      timeslabs[0]->Restrict("bot", solve_at_lvl, *Xouts_fine[0], *Xcorrs_coarse[0]);
+
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          Xcorrs_coarse[tslab + 1] = new Vector(init_cond_size_coarse);
+
+          // restricts Xouts_fine to the coarser mesh into Xcorrs_coarse
+          timeslabs[tslab]->Restrict("top", solve_at_lvl, *Xouts_fine[tslab], *Xcorrs_coarse[tslab + 1]);
+      }
+
+      for (int t = 0; t <= nslabs; ++t )
+      {
+          *Xcorrs_coarse[t] += *Xouts_coarse[t];
+      }
+
+      // prolongating correstiions in time
+      if (verbose)
+          std::cout << "Prolongating corrections \n";
+
+
 
   }// end of block of testing a parallel-in-time solver
 
