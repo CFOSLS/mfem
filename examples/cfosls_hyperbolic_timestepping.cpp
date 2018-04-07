@@ -31,7 +31,6 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
                                    std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
 
-
 // abstract base class for a problem in a time cylinder
 class TimeCyl
 {
@@ -93,6 +92,7 @@ protected:
     std::vector<BlockOperator*> CFOSLSop_nobnd_lvls;
     std::vector<BlockDiagonalPreconditioner*> prec_lvls;
     std::vector<MINRESSolver*> solver_lvls;
+    std::vector<BlockVector*> trueRhs_nobnd_lvls;
 
     std::vector<int> init_cond_size_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
@@ -166,7 +166,20 @@ public:
     void Interpolate(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
 
     // FIXME: Does one need to scale the restriction?
+    // Yes, in general it should be a canonical interpolator transpose, not of the standard
     void Restrict(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+
+    // Takes a vector of values corresponding to the bdr condition
+    // and computes the corresponding change to the rhs side
+    void ConvertBdrCndIntoRhs(int lvl, const Vector& vec_in, Vector& vec_out);
+
+    // vec_in is considered as a vector of strictly values at the bottom boundary,
+    // vec_out is a full vector which coincides with vec_in at initial boundary and
+    // has 0's for all the rest entries
+    void ConvertInitCndToFullVector(int lvl, const Vector& vec_in, Vector& vec_out);
+
+    void ComputeResidual(int lvl, const Vector& vec_in, Vector& residual);
+
 };
 
 TimeCylHyper::~TimeCylHyper()
@@ -182,6 +195,8 @@ TimeCylHyper::~TimeCylHyper()
         delete CFOSLSop_lvls[i];
     for (unsigned int i = 0; i < CFOSLSop_nobnd_lvls.size(); ++i)
         delete CFOSLSop_nobnd_lvls[i];
+    for (unsigned int i = 0; i < trueRhs_nobnd_lvls.size(); ++i)
+        delete trueRhs_nobnd_lvls[i];
     for (unsigned int i = 0; i < prec_lvls.size(); ++i)
         delete prec_lvls[i];
     for (unsigned int i = 0; i < solver_lvls.size(); ++i)
@@ -272,6 +287,98 @@ void TimeCylHyper::Restrict(const char * top_or_bot, int lvl, const Vector& vec_
 
     }
 }
+
+void TimeCylHyper::ConvertInitCndToFullVector(int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    BlockVector viewer(vec_out.GetData(),  *block_trueOffsets_lvls[lvl]);
+    vec_out = 0.0;
+
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        if (vec_in.Size() != tdofs_link_H1_lvls[lvl].size())
+        {
+            MFEM_ABORT("Size of vec_in in ConvertInitCndToFullVector differs from the size of tdofs_link_H1_lvls \n");
+        }
+
+        for (int i = 0; i < vec_in.Size(); ++i)
+        {
+            int tdof = tdofs_link_H1_lvls[lvl][i].first;
+            viewer.GetBlock(1)[tdof] = vec_in[i];
+        }
+    }
+    else
+    {
+        if (vec_in.Size() != tdofs_link_Hdiv_lvls[lvl].size())
+        {
+            MFEM_ABORT("Size of vec_in in ConvertInitCndToFullVector differs from the size of tdofs_link_Hdiv_lvls \n");
+        }
+
+        for (int i = 0; i < vec_in.Size(); ++i)
+        {
+            int tdof = tdofs_link_H1_lvls[lvl][i].first;
+            viewer.GetBlock(0)[tdof] = vec_in[i];
+        }
+    }
+
+}
+
+// it is assumed that CFOSLSop_nobnd was already created
+void TimeCylHyper::ConvertBdrCndIntoRhs(int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    vec_out = 0.0;
+    CFOSLSop_nobnd_lvls[lvl]->Mult(vec_in, vec_out);
+
+    BlockVector viewer(vec_out.GetData(), *block_trueOffsets_lvls[lvl]);
+
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        Array<int> essbdr_tdofs;
+
+        Array<int> ess_bdr_S(ess_bdrat_S.size());
+        for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+            ess_bdr_S[i] = ess_bdrat_S[i];
+
+        S_space_lvls[lvl]->GetEssentialTrueDofs(ess_bdr_S, essbdr_tdofs);
+
+        for (int i = 0; i < essbdr_tdofs.Size(); ++i)
+        {
+            int tdof = essbdr_tdofs[i];
+            viewer.GetBlock(1)[tdof] = vec_in[tdof];
+        }
+    }
+    else
+    {
+        Array<int> essbdr_tdofs;
+
+        Array<int> ess_bdr_sigma(ess_bdrat_sigma.size());
+        for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+            ess_bdr_sigma[i] = ess_bdrat_sigma[i];
+
+        Sigma_space_lvls[lvl]->GetEssentialTrueDofs(ess_bdr_sigma, essbdr_tdofs);
+
+        for (int i = 0; i < essbdr_tdofs.Size(); ++i)
+        {
+            int tdof = essbdr_tdofs[i];
+            viewer.GetBlock(0)[tdof] = vec_in[tdof];
+        }
+    }
+}
+
+void TimeCylHyper::ComputeResidual(int lvl, const Vector& vec_in, Vector& residual)
+{
+    // trasnform vector with initial condition values into a full vector with nonzero bdr values
+    BlockVector fullvec_in(*block_trueOffsets_lvls[lvl]);
+    ConvertInitCndToFullVector(lvl, vec_in, fullvec_in);
+
+    // compute the correction to the rhs which is implied by bdr vector
+    BlockVector bdr_corr(*block_trueOffsets_lvls[lvl]);
+    ConvertBdrCndIntoRhs(lvl, fullvec_in, bdr_corr);
+
+    residual = *trueRhs_nobnd_lvls[lvl];
+    residual -= bdr_corr;
+}
+
+
 
 TimeCylHyper::TimeCylHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
                               const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
@@ -436,6 +543,8 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     if (strcmp(space_for_S,"H1") == 0)
         qform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(1));
     gform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(numblocks - 1));
+
+    *trueRhs_nobnd_lvls[lvl] = trueRhs_nobnd;
 
     BlockVector trueRhs2(block_trueOffsets);
     trueRhs2 = trueRhs_nobnd;
@@ -1007,6 +1116,7 @@ void TimeCylHyper::InitProblem()
 
     block_trueOffsets_lvls.resize(num_lvls);
     CFOSLSop_lvls.resize(num_lvls);
+    trueRhs_nobnd_lvls.resize(num_lvls);
     CFOSLSop_nobnd_lvls.resize(num_lvls);
     prec_lvls.resize(num_lvls);
     solver_lvls.resize(num_lvls);
@@ -1709,6 +1819,8 @@ void TimeCylHyper::InitProblem()
 
       CFOSLSop_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l]);
 
+      trueRhs_nobnd_lvls[l] = new BlockVector(*block_trueOffsets_lvls[l]);
+
       //block_trueOffsets.Print();
 
       CFOSLSop_lvls[l]->SetBlock(0,0, A);
@@ -1984,9 +2096,9 @@ int main(int argc, char *argv[])
    StopWatch chrono;
 
    //DEFAULTED LINEAR SOLVER OPTIONS
-   int max_iter = 150000;
-   double rtol = 1e-12;//1e-7;//1e-9;
-   double atol = 1e-14;//1e-9;//1e-12;
+   //int max_iter = 150000;
+   //double rtol = 1e-12;//1e-7;//1e-9;
+   //double atol = 1e-14;//1e-9;//1e-12;
 
 #ifdef NONHOMO_TEST
    if (nDimensions == 3)
