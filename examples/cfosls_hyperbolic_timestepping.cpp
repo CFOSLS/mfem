@@ -89,10 +89,12 @@ protected:
 
     std::vector<Array<int>*> block_trueOffsets_lvls;
     std::vector<BlockOperator*> CFOSLSop_lvls;
+    std::vector<Operator*> CFOSLSop_coarsened_lvls;
     std::vector<BlockOperator*> CFOSLSop_nobnd_lvls;
     std::vector<BlockDiagonalPreconditioner*> prec_lvls;
     std::vector<MINRESSolver*> solver_lvls;
     std::vector<BlockVector*> trueRhs_nobnd_lvls;
+    std::vector<BlockVector*> trueX_lvls;
 
     std::vector<int> init_cond_size_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
@@ -100,8 +102,11 @@ protected:
 
     std::vector<SparseMatrix*> P_H1_lvls;
     std::vector<SparseMatrix*> P_Hdiv_lvls;
+    std::vector<SparseMatrix*> P_L2_lvls;
     std::vector<HypreParMatrix*> TrueP_H1_lvls;
     std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
+    std::vector<HypreParMatrix*> TrueP_L2_lvls;
+    std::vector<BlockOperator*> TrueP_lvls;
 
     std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
     std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
@@ -129,6 +134,8 @@ public:
     { Solve(0, bnd_tdofs_bot, bnd_tdofs_top); }
 
     void Solve(int lvl, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+    void Solve(int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+    void Solve(const char * mode, int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
     int GetInitCondSize(int lvl) {return init_cond_size_lvls[lvl];}
     std::vector<std::pair<int,int> > * GetTdofsLink(int lvl)
     {
@@ -163,11 +170,24 @@ public:
         return NULL;
     }
 
-    void Interpolate(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+    Vector* GetSol(int lvl)
+    { return trueX_lvls[lvl]; }
+
+    Array<int>* GetBlockTrueOffsets(int lvl)
+    { return block_trueOffsets_lvls[lvl]; }
+
+    int ProblemSize(int lvl)
+    {return CFOSLSop_lvls[lvl]->Height();}
+
+    void InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+
+    void Interpolate(int lvl, const Vector& vec_in, Vector& vec_out);
 
     // FIXME: Does one need to scale the restriction?
     // Yes, in general it should be a canonical interpolator transpose, not of the standard
-    void Restrict(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+    void RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+
+    void Restrict(int lvl, const Vector& vec_in, Vector& vec_out);
 
     // Takes a vector of values corresponding to the bdr condition
     // and computes the corresponding change to the rhs side
@@ -178,7 +198,9 @@ public:
     // has 0's for all the rest entries
     void ConvertInitCndToFullVector(int lvl, const Vector& vec_in, Vector& vec_out);
 
-    void ComputeResidual(int lvl, const Vector& vec_in, Vector& residual);
+    void ComputeResidual(int lvl, const Vector& initcond_in, const Vector& sol, Vector& residual);
+
+    void ComputeError(int lvl, Vector& sol) const;
 
 };
 
@@ -193,10 +215,14 @@ TimeCylHyper::~TimeCylHyper()
             delete L2_space_lvls[i];
     for (unsigned int i = 0; i < CFOSLSop_lvls.size(); ++i)
         delete CFOSLSop_lvls[i];
+    for (unsigned int i = 1; i < CFOSLSop_coarsened_lvls.size(); ++i)
+        delete CFOSLSop_coarsened_lvls[i];
     for (unsigned int i = 0; i < CFOSLSop_nobnd_lvls.size(); ++i)
         delete CFOSLSop_nobnd_lvls[i];
     for (unsigned int i = 0; i < trueRhs_nobnd_lvls.size(); ++i)
         delete trueRhs_nobnd_lvls[i];
+    for (unsigned int i = 0; i < trueX_lvls.size(); ++i)
+        delete trueX_lvls[i];
     for (unsigned int i = 0; i < prec_lvls.size(); ++i)
         delete prec_lvls[i];
     for (unsigned int i = 0; i < solver_lvls.size(); ++i)
@@ -205,10 +231,14 @@ TimeCylHyper::~TimeCylHyper()
         delete P_H1_lvls[i];
     for (unsigned int i = 0; i < P_Hdiv_lvls.size(); ++i)
         delete P_Hdiv_lvls[i];
-    for (unsigned int i = 0; i < P_H1_lvls.size(); ++i)
+    for (unsigned int i = 0; i < TrueP_H1_lvls.size(); ++i)
         delete TrueP_H1_lvls[i];
-    for (unsigned int i = 0; i < P_Hdiv_lvls.size(); ++i)
+    for (unsigned int i = 0; i < TrueP_Hdiv_lvls.size(); ++i)
         delete TrueP_Hdiv_lvls[i];
+    for (unsigned int i = 0; i < P_L2_lvls.size(); ++i)
+        delete P_L2_lvls[i];
+    for (unsigned int i = 0; i < TrueP_L2_lvls.size(); ++i)
+        delete TrueP_L2_lvls[i];
 
     for (unsigned int i = 0; i < TrueP_bndbot_H1_lvls.size(); ++i)
         delete TrueP_bndbot_H1_lvls[i];
@@ -233,7 +263,14 @@ TimeCylHyper::~TimeCylHyper()
         delete Restrict_top_Hdiv_lvls[i];
 }
 
-void TimeCylHyper::Interpolate(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
+void TimeCylHyper::Interpolate(int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    BlockVector viewer_in(vec_in.GetData(),  *block_trueOffsets_lvls[lvl + 1]);
+    BlockVector viewer_out(vec_out.GetData(),  *block_trueOffsets_lvls[lvl]);
+    TrueP_lvls[lvl]->Mult(viewer_in, viewer_out);
+}
+
+void TimeCylHyper::InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
 {
     //MFEM_ABORT("Interpolate not implemented \n");
     if (strcmp(space_for_S, "H1") == 0)
@@ -244,7 +281,7 @@ void TimeCylHyper::Interpolate(const char * top_or_bot, int lvl, const Vector& v
             TrueP_bndbot_H1_lvls[lvl]->Mult(vec_in, vec_out);
         else
         {
-            MFEM_ABORT("In TimeCylHyper::Interpolate() top_or_bot must be 'top' or 'bot'!");
+            MFEM_ABORT("In TimeCylHyper::InterpolateAtBase() top_or_bot must be 'top' or 'bot'!");
         }
     }
     else
@@ -255,13 +292,23 @@ void TimeCylHyper::Interpolate(const char * top_or_bot, int lvl, const Vector& v
             TrueP_bndbot_Hdiv_lvls[lvl]->Mult(vec_in, vec_out);
         else
         {
-            MFEM_ABORT("In TimeCylHyper::Interpolate() top_or_bot must be 'top' or 'bot'!");
+            MFEM_ABORT("In TimeCylHyper::InterpolateAtBase() top_or_bot must be 'top' or 'bot'!");
         }
 
     }
 }
 
-void TimeCylHyper::Restrict(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
+void TimeCylHyper::Restrict(int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    BlockVector viewer_in(vec_in.GetData(),  *block_trueOffsets_lvls[lvl]);
+    BlockVector viewer_out(vec_out.GetData(),  *block_trueOffsets_lvls[lvl + 1]);
+    TrueP_lvls[lvl]->MultTranspose(viewer_in, viewer_out);
+    // FIXME: Do we need to clear the boundary conditions on the coarse level after that?
+    // I guess, no.
+}
+
+
+void TimeCylHyper::RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
 {
     if (strcmp(space_for_S, "H1") == 0)
     {
@@ -271,7 +318,7 @@ void TimeCylHyper::Restrict(const char * top_or_bot, int lvl, const Vector& vec_
             TrueP_bndbot_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else
         {
-            MFEM_ABORT("In TimeCylHyper::Restrict() top_or_bot must be 'top' or 'bot'!");
+            MFEM_ABORT("In TimeCylHyper::RestrictAtBase() top_or_bot must be 'top' or 'bot'!");
         }
     }
     else
@@ -282,7 +329,7 @@ void TimeCylHyper::Restrict(const char * top_or_bot, int lvl, const Vector& vec_
             TrueP_bndbot_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else
         {
-            MFEM_ABORT("In TimeCylHyper::Restrict() top_or_bot must be 'top' or 'bot'!");
+            MFEM_ABORT("In TimeCylHyper::RestrictAtBase() top_or_bot must be 'top' or 'bot'!");
         }
 
     }
@@ -364,20 +411,228 @@ void TimeCylHyper::ConvertBdrCndIntoRhs(int lvl, const Vector& vec_in, Vector& v
     }
 }
 
-void TimeCylHyper::ComputeResidual(int lvl, const Vector& vec_in, Vector& residual)
+void TimeCylHyper::ComputeResidual(int lvl, const Vector& initcond_in, const Vector& sol, Vector& residual)
 {
-    // trasnform vector with initial condition values into a full vector with nonzero bdr values
-    BlockVector fullvec_in(*block_trueOffsets_lvls[lvl]);
-    ConvertInitCndToFullVector(lvl, vec_in, fullvec_in);
+    // transform vector with initial condition values into a full vector with nonzero bdr values
+    BlockVector full_initcond_in(*block_trueOffsets_lvls[lvl]);
+    ConvertInitCndToFullVector(lvl, initcond_in, full_initcond_in);
 
     // compute the correction to the rhs which is implied by bdr vector
     BlockVector bdr_corr(*block_trueOffsets_lvls[lvl]);
-    ConvertBdrCndIntoRhs(lvl, fullvec_in, bdr_corr);
+    ConvertBdrCndIntoRhs(lvl, full_initcond_in, bdr_corr);
+
+    BlockVector Asol(*block_trueOffsets_lvls[lvl]);
+    CFOSLSop_lvls[lvl]->Mult(sol, Asol);
 
     residual = *trueRhs_nobnd_lvls[lvl];
+    residual -= Asol;
     residual -= bdr_corr;
 }
 
+void TimeCylHyper::ComputeError(int lvl, Vector& sol) const
+{
+    BlockVector sol_viewer(sol.GetData(), *block_trueOffsets_lvls[lvl]);
+
+    ParMeshCyl * pmeshtsl = pmeshtsl_lvls[lvl];
+
+    ParFiniteElementSpace * S_space = S_space_lvls[lvl];
+    ParFiniteElementSpace * Sigma_space = Sigma_space_lvls[lvl];
+    ParFiniteElementSpace * L2_space = L2_space_lvls[lvl];
+
+    Transport_test Mytest(dim, numsol);
+
+    ParGridFunction *S_exact = new ParGridFunction(S_space);
+    S_exact->ProjectCoefficient(*(Mytest.scalarS));
+
+    ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
+    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+
+    ParGridFunction * sigma = new ParGridFunction(Sigma_space);
+    sigma->Distribute(&(sol_viewer.GetBlock(0)));
+
+    ParGridFunction * S = new ParGridFunction(S_space);
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+        S->Distribute(&(sol_viewer.GetBlock(1)));
+    else // no S in the formulation
+    {
+        ParBilinearForm *Cblock(new ParBilinearForm(S_space));
+        Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+        Cblock->Assemble();
+        Cblock->Finalize();
+        HypreParMatrix * C = Cblock->ParallelAssemble();
+
+        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
+        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+        Bblock->Assemble();
+        Bblock->Finalize();
+        HypreParMatrix * B = Bblock->ParallelAssemble();
+        Vector bTsigma(C->Height());
+        B->Mult(sol_viewer.GetBlock(0),bTsigma);
+
+        Vector trueS(C->Height());
+
+        CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+        S->Distribute(trueS);
+    }
+
+    // 13. Extract the parallel grid function corresponding to the finite element
+    //     approximation X. This is the local solution on each processor. Compute
+    //     L2 error norms.
+
+    int order_quad = max(2, 2*feorder+1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i=0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+
+    double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
+    double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmeshtsl, irs);
+    if (verbose)
+        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
+
+    DiscreteLinearOperator Div(Sigma_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(*sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmeshtsl, irs);
+
+    if (verbose)
+    {
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+    }
+
+    if (verbose)
+    {
+        cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
+        cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
+                  << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
+    }
+
+    // Computing error for S
+
+    double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
+    double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmeshtsl, irs);
+    if (verbose)
+    {
+        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                     err_S / norm_S << "\n";
+    }
+
+    if (strcmp(space_for_S,"H1") == 0) // S is from H1
+    {
+        FiniteElementCollection * hcurl_coll;
+        if(dim==4)
+            hcurl_coll = new ND1_4DFECollection;
+        else
+            hcurl_coll = new ND_FECollection(feorder+1, dim);
+        ParFiniteElementSpace* N_space = new ParFiniteElementSpace(pmeshtsl, hcurl_coll);
+
+        DiscreteLinearOperator Grad(S_space, N_space);
+        Grad.AddDomainInterpolator(new GradientInterpolator());
+        ParGridFunction GradS(N_space);
+        Grad.Assemble();
+        Grad.Mult(*S, GradS);
+
+        if (numsol != -34 && verbose)
+            std::cout << "For this norm we are grad S for S from numsol = -34 \n";
+        VectorFunctionCoefficient GradS_coeff(dim, uFunTest_ex_gradxt);
+        double err_GradS = GradS.ComputeL2Error(GradS_coeff, irs);
+        double norm_GradS = ComputeGlobalLpNorm(2, GradS_coeff, *pmeshtsl, irs);
+        if (verbose)
+        {
+            std::cout << "|| Grad_h (S_h - S_ex) || / || Grad S_ex || = " <<
+                         err_GradS / norm_GradS << "\n";
+            std::cout << "|| S_h - S_ex ||_H^1 / || S_ex ||_H^1 = " <<
+                         sqrt(err_S*err_S + err_GradS*err_GradS) / sqrt(norm_S*norm_S + norm_GradS*norm_GradS) << "\n";
+        }
+
+        delete hcurl_coll;
+        delete N_space;
+    }
+
+    if (verbose)
+        cout << "Computing projection errors \n";
+
+    double projection_error_sigma = sigma_exact->ComputeL2Error(*(Mytest.sigma), irs);
+
+    if(verbose)
+    {
+        cout << "|| sigma_ex - Pi_h sigma_ex || / || sigma_ex || = "
+                        << projection_error_sigma / norm_sigma << endl;
+    }
+
+    double projection_error_S = S_exact->ComputeL2Error(*(Mytest.scalarS), irs);
+
+    if(verbose)
+        cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
+                        << projection_error_S / norm_S << endl;
+
+    if (visualization && dim < 4)
+    {
+        int num_procs, myid;
+        MPI_Comm_size(comm, &num_procs);
+        MPI_Comm_rank(comm, &myid);
+
+
+       char vishost[] = "localhost";
+       int  visport   = 19916;
+       socketstream u_sock(vishost, visport);
+       u_sock << "parallel " << num_procs << " " << myid << "\n";
+       u_sock.precision(8);
+       u_sock << "solution\n" << *pmeshtsl << *sigma_exact << "window_title 'sigma_exact'"
+              << endl;
+       // Make sure all ranks have sent their 'u' solution before initiating
+       // another set of GLVis connections (one from each rank):
+
+
+       socketstream uu_sock(vishost, visport);
+       uu_sock << "parallel " << num_procs << " " << myid << "\n";
+       uu_sock.precision(8);
+       uu_sock << "solution\n" << *pmeshtsl << *sigma << "window_title 'sigma'"
+              << endl;
+
+       *sigma_exact -= *sigma;
+
+       socketstream uuu_sock(vishost, visport);
+       uuu_sock << "parallel " << num_procs << " " << myid << "\n";
+       uuu_sock.precision(8);
+       uuu_sock << "solution\n" << *pmeshtsl << *sigma_exact << "window_title 'difference for sigma'"
+              << endl;
+
+       socketstream s_sock(vishost, visport);
+       s_sock << "parallel " << num_procs << " " << myid << "\n";
+       s_sock.precision(8);
+       MPI_Barrier(comm);
+       s_sock << "solution\n" << *pmeshtsl << *S_exact << "window_title 'S_exact'"
+               << endl;
+
+       socketstream ss_sock(vishost, visport);
+       ss_sock << "parallel " << num_procs << " " << myid << "\n";
+       ss_sock.precision(8);
+       MPI_Barrier(comm);
+       ss_sock << "solution\n" << *pmeshtsl << *S << "window_title 'S'"
+               << endl;
+
+       *S_exact -= *S;
+       socketstream sss_sock(vishost, visport);
+       sss_sock << "parallel " << num_procs << " " << myid << "\n";
+       sss_sock.precision(8);
+       MPI_Barrier(comm);
+       sss_sock << "solution\n" << *pmeshtsl << *S_exact
+                << "window_title 'difference for S'" << endl;
+
+       MPI_Barrier(comm);
+    }
+
+    if (verbose)
+        std::cout << "\n";
+}
 
 
 TimeCylHyper::TimeCylHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
@@ -394,6 +649,171 @@ TimeCylHyper::TimeCylHyper (ParMeshCyl& Pmeshtsl, int Ref_Lvls,
       formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
 {
     InitProblem();
+}
+
+void TimeCylHyper::Solve(int lvl, const Vector& rhs, Vector& sol,
+                         const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
+{
+    return Solve("regular", lvl, rhs, sol, bnd_tdofs_bot, bnd_tdofs_top);
+}
+
+// mode options:
+// a) "regular" to solve with a matrix assembled from bilinear forms at corr. level
+// b) "coarsened" to solve with RAP-based matrix
+void TimeCylHyper::Solve(const char * mode, int lvl, const Vector& rhs, Vector& sol,
+                         const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
+{
+    if (!(lvl >= 0 && lvl <= ref_lvls))
+    {
+        MFEM_ABORT("Incorrect lvl argument for TimeCylHyper::Solve() \n");
+    }
+
+    if (strcmp(mode,"regular") != 0 && strcmp(mode,"coarsened") != 0 )
+    {
+        MFEM_ABORT("Incorrect mode for TimeCylHyper::Solve() \n");
+    }
+
+    if (strcmp(mode,"coarsened") == 0)
+    {
+        MFEM_ABORT("Mode coarsened was not implemented yet \n");
+    }
+
+    int init_cond_size = init_cond_size_lvls[lvl];
+
+    if (bnd_tdofs_bot.Size() != init_cond_size || bnd_tdofs_top.Size() != init_cond_size)
+    {
+        std::cerr << "Error: sizes mismatch, input vector's size = " <<  bnd_tdofs_bot.Size()
+                  << ", output's size = " << bnd_tdofs_top.Size() << ", expected: " << init_cond_size << "\n";
+        MFEM_ABORT("Wrong size of the input and output vectors");
+    }
+
+    BlockOperator* CFOSLSop = CFOSLSop_lvls[lvl];
+    BlockOperator* CFOSLSop_nobnd = CFOSLSop_nobnd_lvls[lvl];
+    ParFiniteElementSpace * S_space = S_space_lvls[lvl];
+    ParFiniteElementSpace * Sigma_space = Sigma_space_lvls[lvl];
+    ParFiniteElementSpace * L2_space = L2_space_lvls[lvl];
+    MINRESSolver * solver = solver_lvls[lvl];
+    ParMeshCyl * pmeshtsl = pmeshtsl_lvls[lvl];
+    Array<int> block_trueOffsets(block_trueOffsets_lvls[lvl]->Size());
+    for (int i = 0; i < block_trueOffsets.Size(); ++i)
+        block_trueOffsets[i] = (*block_trueOffsets_lvls[lvl])[i];
+
+    std::vector<std::pair<int,int> > tdofs_link_H1;
+    std::vector<std::pair<int,int> > tdofs_link_Hdiv;
+    if (strcmp(space_for_S, "H1") == 0)
+        tdofs_link_H1 = tdofs_link_H1_lvls[lvl];
+    else
+        tdofs_link_Hdiv = tdofs_link_Hdiv_lvls[lvl];
+
+    Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+        ess_bdrS[i] = ess_bdrat_S[i];
+
+    Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+    for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+        ess_bdrSigma[i] = ess_bdrat_sigma[i];
+
+    int numblocks = CFOSLSop->NumRowBlocks();
+    BlockVector trueX(block_trueOffsets);
+    trueX = 0.0;
+
+    // using an alternative way of imposing boundary conditions on the right hand side
+    BlockVector trueBnd(block_trueOffsets);
+    trueBnd = 0.0;
+
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        for (unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
+        {
+            int tdof_bot = tdofs_link_H1[i].first;
+            trueBnd.GetBlock(1)[tdof_bot] = bnd_tdofs_bot[i];
+        }
+    }
+    else // S is from l2
+    {
+        for (unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
+        {
+            int tdof_bot = tdofs_link_Hdiv[i].first;
+            trueBnd.GetBlock(0)[tdof_bot] = bnd_tdofs_bot[i];
+        }
+    }
+
+    BlockVector trueBndCor(block_trueOffsets);
+    trueBndCor = 0.0;
+
+    //trueBnd.Print();
+
+    CFOSLSop_nobnd->Mult(trueBnd, trueBndCor); // more general that lines below
+
+    BlockVector trueRhs_nobnd(block_trueOffsets);
+    BlockVector rhs_viewer(rhs.GetData(), block_trueOffsets);
+    trueRhs_nobnd = rhs_viewer;
+
+    *trueRhs_nobnd_lvls[lvl] = trueRhs_nobnd;
+
+    BlockVector trueRhs2(block_trueOffsets);
+    trueRhs2 = trueRhs_nobnd;
+
+    //trueRhs2.Print();
+
+    trueRhs2 -= trueBndCor;
+
+    // TODO: this is just for faster integration.
+    // TODO: After checks this can be everywhere replaced by trueRhs2
+    //trueRhs = trueRhs2;
+
+    {
+        Array<int> EssBnd_tdofs_sigma;
+        Sigma_space->GetEssentialTrueDofs(ess_bdrSigma, EssBnd_tdofs_sigma);
+
+        for (int i = 0; i < EssBnd_tdofs_sigma.Size(); ++i)
+        {
+            int tdof = EssBnd_tdofs_sigma[i];
+            trueRhs2.GetBlock(0)[tdof] = trueBnd.GetBlock(0)[tdof];
+        }
+
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            Array<int> EssBnd_tdofs_S;
+            S_space->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+
+            for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+            {
+                int tdof = EssBnd_tdofs_S[i];
+                trueRhs2.GetBlock(1)[tdof] = trueBnd.GetBlock(1)[tdof];
+            }
+        }
+    }
+
+
+    trueX = 0.0;
+
+    StopWatch chrono;
+    chrono.Clear();
+    chrono.Start();
+
+    solver->Mult(trueRhs2, trueX);
+    chrono.Stop();
+
+    if (strcmp(space_for_S, "H1") == 0)
+    {
+        for (unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
+        {
+            int tdof_top = tdofs_link_H1[i].second;
+            bnd_tdofs_top[i] = trueX.GetBlock(1)[tdof_top];
+        }
+    }
+    else // S is from l2
+    {
+        for (unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
+        {
+            int tdof_top = tdofs_link_Hdiv[i].second;
+            bnd_tdofs_top[i] = trueX.GetBlock(0)[tdof_top];
+        }
+    }
+
+    BlockVector viewer_out(sol.GetData(), block_trueOffsets);
+    viewer_out = *trueX;
 }
 
 void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
@@ -444,9 +864,10 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     //for (int i = 0; i < block_trueOffsets.Size(); ++i)
         //block_trueOffsets[i] = block_trueoffsets[i];
     //block_trueOffsets.Print();
-    BlockVector trueX(block_trueOffsets);
+    //BlockVector trueX(block_trueOffsets);
     //BlockVector trueRhs(block_trueOffsets);
-    trueX = 0.0;
+    //trueX = 0.0;
+    *trueX_lvls[lvl] = 0.0;
 
     Transport_test Mytest(dim, numsol);
 
@@ -580,8 +1001,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         }
     }
 
-
-    trueX = 0.0;
+    *trueX_lvls[lvl] = 0.0;
 
     StopWatch chrono;
     chrono.Clear();
@@ -592,7 +1012,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     //((HypreParMatrix&)(CFOSLSop->GetBlock(0,0))).GetDiag(diag);
     //diag.Print();
 
-    solver->Mult(trueRhs2, trueX);
+    solver->Mult(trueRhs2, *trueX_lvls[lvl]);
     chrono.Stop();
 
     if (strcmp(space_for_S, "H1") == 0)
@@ -600,7 +1020,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         for (unsigned int i = 0; i < tdofs_link_H1.size(); ++i)
         {
             int tdof_top = tdofs_link_H1[i].second;
-            bnd_tdofs_top[i] = trueX.GetBlock(1)[tdof_top];
+            bnd_tdofs_top[i] = trueX_lvls[lvl]->GetBlock(1)[tdof_top];
         }
     }
     else // S is from l2
@@ -608,7 +1028,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         for (unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
         {
             int tdof_top = tdofs_link_Hdiv[i].second;
-            bnd_tdofs_top[i] = trueX.GetBlock(0)[tdof_top];
+            bnd_tdofs_top[i] = trueX_lvls[lvl]->GetBlock(0)[tdof_top];
         }
     }
 
@@ -719,7 +1139,9 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     }
     */
 
+    //ComputeError(lvl, *trueX_lvls[lvl]);
 
+#if 0
     ParGridFunction * sigma = new ParGridFunction(Sigma_space);
     sigma->Distribute(&(trueX.GetBlock(0)));
 
@@ -1018,6 +1440,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
 
        MPI_Barrier(comm);
     }
+#endif
 
 }
 
@@ -1116,15 +1539,20 @@ void TimeCylHyper::InitProblem()
 
     block_trueOffsets_lvls.resize(num_lvls);
     CFOSLSop_lvls.resize(num_lvls);
+    CFOSLSop_coarsened_lvls.resize(num_lvls);
     trueRhs_nobnd_lvls.resize(num_lvls);
+    trueX_lvls.resize(num_lvls);
     CFOSLSop_nobnd_lvls.resize(num_lvls);
     prec_lvls.resize(num_lvls);
     solver_lvls.resize(num_lvls);
 
+    TrueP_lvls.resize(num_lvls - 1);
+    TrueP_L2_lvls.resize(num_lvls - 1);
     TrueP_H1_lvls.resize(num_lvls - 1);
     TrueP_Hdiv_lvls.resize(num_lvls - 1);
     P_H1_lvls.resize(num_lvls - 1);
     P_Hdiv_lvls.resize(num_lvls - 1);
+    P_L2_lvls.resize(num_lvls - 1);
     TrueP_bndbot_H1_lvls.resize(num_lvls - 1);
     TrueP_bndbot_Hdiv_lvls.resize(num_lvls - 1);
     TrueP_bndtop_H1_lvls.resize(num_lvls - 1);
@@ -1140,6 +1568,7 @@ void TimeCylHyper::InitProblem()
 
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
+    const SparseMatrix* P_L2_local;
 
     // 0 will correspond to the finest level for all items in the hierarchy
 
@@ -1254,6 +1683,7 @@ void TimeCylHyper::InitProblem()
         {
             Hdiv_space->Update();
             H1_space->Update();
+            L2_space->Update();
 
             // TODO: Rewrite these computations
 
@@ -1281,6 +1711,18 @@ void TimeCylHyper::InitProblem()
             TrueP_H1_lvls[l]->CopyRowStarts();
 
             delete RP_H1_local;
+
+            P_L2_local = (SparseMatrix *)L2_space->GetUpdateOperator();
+            P_L2_lvls[l] = RemoveZeroEntries(*P_L2_local);
+
+            auto d_td_coarse_L2 = L2_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_L2_local = Mult(*L2_space_lvls[l]->GetRestrictionMatrix(), *P_L2_lvls[l]);
+            TrueP_L2_lvls[l] = d_td_coarse_L2->LeftDiagMult(
+                        *RP_L2_local, L2_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_L2_lvls[l]->CopyColStarts();
+            TrueP_L2_lvls[l]->CopyRowStarts();
+
+            delete RP_L2_local;
 
             TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
             TrueP_bndbot_H1_lvls[l]->CopyColStarts();
@@ -1817,9 +2259,23 @@ void TimeCylHyper::InitProblem()
        // Setting up the block system Matrix
        //-------------------------------------------------------
 
+       if (l < num_lvls - 1)
+       {
+           TrueP_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l], *block_trueOffsets_lvls[l + 1]);
+           TrueP_lvls[l]->SetBlock(0,0, TrueP_Hdiv_lvls[l]);
+           if (strcmp(space_for_S,"H1") == 0) // S is present
+           {
+               TrueP_lvls[l]->SetBlock(1,1, TrueP_H1_lvls[l]);
+               TrueP_lvls[l]->SetBlock(2,2, TrueP_L2_lvls[l]);
+           }
+           else
+               TrueP_lvls[l]->SetBlock(1,1, TrueP_L2_lvls[l]);
+      }
+
       CFOSLSop_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l]);
 
       trueRhs_nobnd_lvls[l] = new BlockVector(*block_trueOffsets_lvls[l]);
+      trueX_lvls[l] = new BlockVector(*block_trueOffsets_lvls[l]);
 
       //block_trueOffsets.Print();
 
@@ -1952,6 +2408,19 @@ void TimeCylHyper::InitProblem()
        solver_lvls[l]->SetPrintLevel(0);
 
     }
+
+    for (int l = 0; l < num_lvls; ++l)
+    {
+        if (l == 0)
+        {
+            CFOSLSop_coarsened_lvls[l] = CFOSLSop_lvls[0];
+        }
+        else // coarsening
+        {
+            CFOSLSop_coarsened_lvls[l] = new RAPOperator(*TrueP_lvls[l - 1], *CFOSLSop_coarsened_lvls[l - 1], *TrueP_lvls[l - 1]);
+        }
+    }
+
     /////////////////////////////////////////////////////////////////
 
 }
@@ -1984,7 +2453,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "H1";     // "H1" or "L2"
+   const char *space_for_S = "L2";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -2336,11 +2805,11 @@ int main(int argc, char *argv[])
                        (Xout_exact.Norml2() / sqrt (Xout_exact.Size()))<< "\n";
       }
 
-      // testing Interpolate()
+      // testing InterpolateAtBase()
       if (solve_at_lvl == 1)
       {
           Vector Xout_fine(timeslab_test->GetInitCondSize(0));
-          timeslab_test->Interpolate("top", 0, Xout, Xout_fine);
+          timeslab_test->InterpolateAtBase("top", 0, Xout, Xout_fine);
 
           Vector Xout_truedofs(timeslab_test->Get_S_space(solve_at_lvl)->TrueVSize());
           Xout_truedofs = 0.0;
@@ -2527,6 +2996,291 @@ int main(int argc, char *argv[])
   //return 0;
 
   if (verbose)
+    std::cout << "Checking a two-grid scheme with independent fine and sequential coarse solvers \n";
+  {
+      int fine_lvl = 0;
+      int coarse_lvl = 1;
+
+      int pref_lvls_tslab = 1;
+
+      int nslabs = 2;
+      std::vector<TimeCylHyper*> timeslabs(nslabs);
+      double slab_tau = 0.125;
+      int slab_width = 4; // in time steps (as time intervals) withing a single time slab
+
+      if (verbose)
+      {
+          std::cout << "Creating a sequence of time slabs: \n";
+          std::cout << "# of slabs: " << nslabs << "\n";
+          std::cout << "# of time intervals per slab: " << slab_width << "\n";
+          std::cout << "time step within a time slab: " << slab_tau << "\n";
+          std::cout << "# of refinements: " << pref_lvls_tslab << "\n";
+      }
+
+      double tinit_tslab = 0.0;
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          timeslabs[tslab] = new TimeCylHyper (*pmeshbase, tinit_tslab, slab_tau, slab_width, pref_lvls_tslab,
+                                                formulation, space_for_S, space_for_sigma);
+          tinit_tslab += slab_tau * slab_width;
+      }
+
+      MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                    "[0,1] but the upper bound doesn't match \n");
+
+      // getting some approximations for the first iteration from the coarse solver
+      // sequential coarse solve
+      if (verbose)
+          std::cout << "Sequential coarse solve: \n";
+
+      std::vector<Vector*> Xouts_coarse(nslabs + 1);
+      int solve_at_lvl = 1;
+
+      Vector Xinit;
+      // initializing the input boundary condition for the first vector
+      int init_cond_size = timeslabs[0]->GetInitCondSize(solve_at_lvl);
+      std::vector<std::pair<int,int> > * tdofs_link = timeslabs[0]->GetTdofsLink(solve_at_lvl);
+      Xinit.SetSize(init_cond_size);
+
+      ParFiniteElementSpace * testfespace;
+      ParGridFunction * sol_exact;
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          testfespace = timeslabs[0]->Get_S_space(solve_at_lvl);
+          sol_exact = new ParGridFunction(testfespace);
+          sol_exact->ProjectCoefficient(*Mytest.scalarS);
+      }
+      else
+      {
+          testfespace = timeslabs[0]->Get_Sigma_space(solve_at_lvl);
+          sol_exact = new ParGridFunction(testfespace);
+          sol_exact->ProjectCoefficient(*Mytest.sigma);
+      }
+
+      Vector sol_exact_truedofs(testfespace->TrueVSize());
+      sol_exact->ParallelProject(sol_exact_truedofs);
+
+      for (int i = 0; i < init_cond_size; ++i)
+      {
+          int tdof_bot = (*tdofs_link)[i].first;
+          Xinit[i] = sol_exact_truedofs[tdof_bot];
+      }
+
+      Vector Xout(init_cond_size);
+
+      Xouts_coarse[0] = new Vector(init_cond_size);
+      (*Xouts_coarse[0]) = Xinit;
+
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          timeslabs[tslab]->Solve(solve_at_lvl, Xinit, Xout);
+          Xinit = Xout;
+          if (strcmp(space_for_S,"L2") == 0)
+              Xinit *= -1.0;
+
+          Xouts_coarse[tslab + 1] = new Vector(init_cond_size);
+          (*Xouts_coarse[tslab]) = Xinit;
+
+
+          Vector Xout_exact(init_cond_size);
+
+          // checking the error at the top boundary
+          ParFiniteElementSpace * testfespace;
+          ParGridFunction * sol_exact;
+
+          if (strcmp(space_for_S,"H1") == 0) // S is present
+          {
+              testfespace = timeslabs[0]->Get_S_space(solve_at_lvl);
+              sol_exact = new ParGridFunction(testfespace);
+              sol_exact->ProjectCoefficient(*Mytest.scalarS);
+          }
+          else
+          {
+              testfespace = timeslabs[0]->Get_Sigma_space(solve_at_lvl);
+              sol_exact = new ParGridFunction(testfespace);
+              sol_exact->ProjectCoefficient(*Mytest.sigma);
+          }
+
+          Vector sol_exact_truedofs(testfespace->TrueVSize());
+          sol_exact->ParallelProject(sol_exact_truedofs);
+
+          for (int i = 0; i < init_cond_size; ++i)
+          {
+              int tdof_top = (*tdofs_link)[i].second;
+              Xout_exact[i] = sol_exact_truedofs[tdof_top];
+          }
+
+          Vector Xout_error(init_cond_size);
+          Xout_error = Xout;
+          Xout_error -= Xout_exact;
+          if (verbose)
+          {
+              std::cout << "|| Xout  - Xout_exact || = " << Xout_error.Norml2() / sqrt (Xout_error.Size()) << "\n";
+              std::cout << "|| Xout  - Xout_exact || / || Xout_exact || = " << (Xout_error.Norml2() / sqrt (Xout_error.Size())) /
+                           (Xout_exact.Norml2() / sqrt (Xout_exact.Size()))<< "\n";
+          }
+
+      } // end of loop over all time slabs, performing a coarse solve
+
+      if (verbose)
+          std::cout << "Creating initial data for the two-grid method \n";
+      solve_at_lvl = 0;
+
+      std::vector<Vector*> Xinits_fine(nslabs + 1);
+      std::vector<Vector*> Xouts_fine(nslabs + 1);
+
+      int init_cond_size_fine = timeslabs[0]->GetInitCondSize(solve_at_lvl);
+
+      Xinits_fine[0] = new Vector(init_cond_size_fine);
+      timeslabs[0]->InterpolateAtBase("bot", solve_at_lvl, *Xouts_coarse[0], *Xinits_fine[0]);
+      Xouts_fine[0] = new Vector(init_cond_size_fine);
+      *Xouts_fine[0] = *Xinits_fine[0];
+
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          Xinits_fine[tslab + 1] = new Vector(init_cond_size_fine);
+
+          // interpolate Xouts_coarse on the finer mesh into Xinits_fine
+          timeslabs[tslab]->InterpolateAtBase("top", solve_at_lvl, *Xouts_coarse[tslab + 1], *Xinits_fine[tslab + 1]);
+
+          Xouts_fine[tslab + 1] = new Vector(init_cond_size_fine);
+      }
+
+      // now we have Xinits_fine as initial conditions for the fine grid solves
+
+      if (verbose)
+          std::cout << "Starting two-grid iterations ... \n";
+
+      int numlvls = pref_lvls_tslab + 1;
+      MFEM_ASSERT(numlvls == 2, "Current implementation allows only a two-grid scheme \n");
+      std::vector<Array<Vector*>*> residuals_lvls(numlvls);
+      std::vector<Array<Vector*>*> corr_lvls(numlvls);
+      std::vector<Array<Vector*>*> sol_lvls(numlvls);
+      for (unsigned int i = 0; i < residuals_lvls.size(); ++i)
+      {
+          residuals_lvls[i] = new Array<Vector*>(nslabs);
+          corr_lvls[i] = new Array<Vector*>(nslabs);
+          sol_lvls[i] = new Array<Vector*>(nslabs);
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              (*residuals_lvls[i])[tslab] = new Vector(timeslabs[tslab]->ProblemSize(i));
+              (*corr_lvls[i])[tslab] = new Vector(timeslabs[tslab]->ProblemSize(i));
+              (*sol_lvls[i])[tslab] = new Vector(timeslabs[tslab]->ProblemSize(i));
+              *(*sol_lvls[i])[tslab] = 0.0;
+          }
+      }
+
+      for (int it = 0; it < 2; ++it)
+      {
+          // 1. parallel-in-time smoothing
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              timeslabs[tslab]->Solve(fine_lvl, *Xinits_fine[tslab], *Xouts_fine[tslab]);
+              *(*sol_lvls[fine_lvl])[tslab] = *(timeslabs[tslab]->GetSol(fine_lvl));
+              if (tslab > 0)
+                  timeslabs[tslab]->ComputeResidual(fine_lvl, *Xouts_fine[tslab - 1], *(*sol_lvls[fine_lvl])[tslab],
+                          *(*residuals_lvls[fine_lvl])[tslab]);
+              else
+                  timeslabs[tslab]->ComputeResidual(fine_lvl, *Xinits_fine[0], *(*sol_lvls[fine_lvl])[0],
+                          *(*residuals_lvls[fine_lvl])[0]);
+
+              //(*residuals_lvls[fine_lvl])[tslab]->Print();
+              //;
+          }
+
+
+          // 2. projecting onto coarse space
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              timeslabs[tslab]->Restrict(fine_lvl, *(*residuals_lvls[fine_lvl])[tslab], *(*residuals_lvls[coarse_lvl])[tslab]);
+          }
+
+          // 3. coarse problem solve
+          Xinit = 0.0;
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              //(*residuals_lvls[coarse_lvl])[tslab]->Print();
+
+              timeslabs[tslab]->Solve("coarsened", coarse_lvl, *(*residuals_lvls[coarse_lvl])[tslab],
+                                      *(*corr_lvls[coarse_lvl])[tslab], Xinit, Xout);
+              Xinit = Xout;
+              if (strcmp(space_for_S,"L2") == 0)
+                  Xinit *= -1.0;
+
+              (*Xouts_coarse[tslab]) = Xinit;
+
+          } // end of loop over all time slabs, performing a coarse solve
+
+          // 4. interpolating back and updating the solution
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              //for (int i = 0; i < (*corr_lvls[coarse_lvl])[tslab]->Size(); ++i)
+                  //std::cout << "corr coarse = " << (*(*corr_lvls[coarse_lvl])[tslab])[i] << "\n";
+
+              //(*corr_lvls[coarse_lvl])[tslab]->Print();
+
+              timeslabs[tslab]->Interpolate(fine_lvl, *(*corr_lvls[coarse_lvl])[tslab], *(*corr_lvls[fine_lvl])[tslab]);
+          }
+
+          // computing error in each time slab before update
+          if (verbose)
+              std::cout << "Errors before adding the coarse grid corrections \n";
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              timeslabs[tslab]->ComputeError(fine_lvl, *(*sol_lvls[fine_lvl])[tslab]);
+          }
+
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              //for (int i = 0; i < (*sol_lvls[fine_lvl])[tslab]->Size(); ++i)
+                  //std::cout << "sol before = " << (*(*sol_lvls[fine_lvl])[tslab])[i] <<
+                               //", corr = " << (*(*corr_lvls[fine_lvl])[tslab])[i] << "\n";
+              *(*sol_lvls[fine_lvl])[tslab] += *(*corr_lvls[fine_lvl])[tslab];
+          }
+
+          // 4.5 computing error in each time slab
+          if (verbose)
+              std::cout << "Errors after adding the coarse grid corrections \n";
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              timeslabs[tslab]->ComputeError(fine_lvl, *(*sol_lvls[fine_lvl])[tslab]);
+          }
+
+
+          // 5. update initial conditions to start the next iteration
+          int bdrcond_block = -1;
+          if (strcmp(space_for_S,"H1") == 0) // S is present
+              bdrcond_block = 1;
+          else
+              bdrcond_block = 0;
+
+          for (int tslab = 0; tslab < nslabs; ++tslab )
+          {
+              std::vector<std::pair<int,int> > * tdofs_link = timeslabs[tslab]->GetTdofsLink(fine_lvl);
+              *Xinits_fine[tslab] = 0.0;
+
+              BlockVector sol_viewer((*sol_lvls[fine_lvl])[tslab]->GetData(),
+                                     *timeslabs[tslab]->GetBlockTrueOffsets(fine_lvl));
+
+              // FIXME: We have actually two values at all interfaces from two time slabs
+              // Here I simply chose the time slab which is above the interface
+              for (int i = 0; i < init_cond_size_fine; ++i)
+              {
+                  int tdof_bot = (*tdofs_link)[i].first;
+                  (*Xinits_fine[tslab])[i] = sol_viewer.GetBlock(bdrcond_block)[tdof_bot];
+              }
+
+          }
+
+      }
+
+  }
+
+
+
+#if 0
+  if (verbose)
     std::cout << "Checking a sequential coarse solve with following ~parallel fine solves \n";
 
   {
@@ -2662,7 +3416,7 @@ int main(int argc, char *argv[])
       int init_cond_size_fine = timeslabs[0]->GetInitCondSize(solve_at_lvl);
 
       Xinits_fine[0] = new Vector(init_cond_size_fine);
-      timeslabs[0]->Interpolate("bot", solve_at_lvl, *Xouts_coarse[0], *Xinits_fine[0]);
+      timeslabs[0]->InterpolateAtBase("bot", solve_at_lvl, *Xouts_coarse[0], *Xinits_fine[0]);
       Xouts_fine[0] = new Vector(init_cond_size_fine);
       *Xouts_fine[0] = *Xinits_fine[0];
 
@@ -2671,7 +3425,7 @@ int main(int argc, char *argv[])
           Xinits_fine[tslab + 1] = new Vector(init_cond_size_fine);
 
           // interpolate Xouts_coarse on the finer mesh into Xinits_fine
-          timeslabs[tslab]->Interpolate("top", solve_at_lvl, *Xouts_coarse[tslab + 1], *Xinits_fine[tslab + 1]);
+          timeslabs[tslab]->InterpolateAtBase("top", solve_at_lvl, *Xouts_coarse[tslab + 1], *Xinits_fine[tslab + 1]);
 
           Xouts_fine[tslab + 1] = new Vector(init_cond_size_fine);
       }
@@ -2741,14 +3495,14 @@ int main(int argc, char *argv[])
       int init_cond_size_coarse = timeslabs[0]->GetInitCondSize(solve_at_lvl);
 
       Xcorrs_coarse[0] = new Vector(init_cond_size_coarse);
-      timeslabs[0]->Restrict("bot", solve_at_lvl, *Xouts_fine[0], *Xcorrs_coarse[0]);
+      timeslabs[0]->RestrictAtBase("bot", solve_at_lvl, *Xouts_fine[0], *Xcorrs_coarse[0]);
 
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
           Xcorrs_coarse[tslab + 1] = new Vector(init_cond_size_coarse);
 
           // restricts Xouts_fine to the coarser mesh into Xcorrs_coarse
-          timeslabs[tslab]->Restrict("top", solve_at_lvl, *Xouts_fine[tslab], *Xcorrs_coarse[tslab + 1]);
+          timeslabs[tslab]->RestrictAtBase("top", solve_at_lvl, *Xouts_fine[tslab], *Xcorrs_coarse[tslab + 1]);
       }
 
       for (int t = 0; t <= nslabs; ++t )
@@ -2763,10 +3517,10 @@ int main(int argc, char *argv[])
 
 
   }// end of block of testing a parallel-in-time solver
+#endif
 
-  // 17. Free the used memory.
-
-  MPI_Barrier(comm);
+   // 17. Free the used memory.
+   MPI_Barrier(comm);
 
    MPI_Finalize();
    return 0;
