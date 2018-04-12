@@ -24,7 +24,7 @@ using namespace mfem;
 // TODO: Instead of specifying tdofs_link_H1 and _Hdiv and manually choosing by if-clauses,
 // which to use for the Solve() int TimeCyl, it would be better to implement it as a block case
 // with arbitrary number of blocks. Then input and output would be BlockVectors and there will be
-// less switches
+// less switche calls
 
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
@@ -184,7 +184,7 @@ public:
     void Interpolate(int lvl, const Vector& vec_in, Vector& vec_out);
 
     // FIXME: Does one need to scale the restriction?
-    // Yes, in general it should be a canonical interpolator transpose, not of the standard
+    // Yes, in general it should be a canonical interpolator transpose, not just transpose of the standard
     void RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
 
     void Restrict(int lvl, const Vector& vec_in, Vector& vec_out);
