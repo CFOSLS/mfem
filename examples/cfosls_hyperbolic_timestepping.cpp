@@ -117,8 +117,9 @@ protected:
     std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
     std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
 
-    bool verbose;
     bool visualization;
+public:
+    bool verbose;
 
 protected:
     void InitProblem();
@@ -136,7 +137,10 @@ public:
     void Solve(int lvl, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
     void Solve(int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
     void Solve(const char * mode, int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+
     int GetInitCondSize(int lvl) {return init_cond_size_lvls[lvl];}
+    int GetNLevels() {return ref_lvls;}
+
     std::vector<std::pair<int,int> > * GetTdofsLink(int lvl)
     {
         if (strcmp(space_for_S,"H1") == 0)
@@ -173,11 +177,15 @@ public:
     Vector* GetSol(int lvl)
     { return trueX_lvls[lvl]; }
 
+    Vector *GetExactBase(const char * top_or_bot, int level);
+
     Array<int>* GetBlockTrueOffsets(int lvl)
     { return block_trueOffsets_lvls[lvl]; }
 
     int ProblemSize(int lvl)
     {return CFOSLSop_lvls[lvl]->Height();}
+
+    bool NeedSignSwitch() {return (strcmp(space_for_S, "L2") == 0);}
 
     void InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
 
@@ -203,6 +211,53 @@ public:
     void ComputeError(int lvl, Vector& sol) const;
 
 };
+
+
+Vector* TimeCylHyper::GetExactBase(const char * top_or_bot, int level)
+{
+    if (strcmp(top_or_bot,"bot") != 0 && strcmp(top_or_bot,"top") != 0 )
+    {
+        MFEM_ABORT("In TimeCylHyper::GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+    }
+
+    // checking the error at the top boundary
+    ParFiniteElementSpace * testfespace;
+    ParGridFunction * sol_exact;
+
+    Transport_test Mytest(dim, numsol);
+
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+    {
+        testfespace = Get_S_space(level);
+        sol_exact = new ParGridFunction(testfespace);
+        sol_exact->ProjectCoefficient(*Mytest.scalarS);
+    }
+    else
+    {
+        testfespace = Get_Sigma_space(level);
+        sol_exact = new ParGridFunction(testfespace);
+        sol_exact->ProjectCoefficient(*Mytest.sigma);
+    }
+
+    Vector sol_exact_truedofs(testfespace->TrueVSize());
+    sol_exact->ParallelProject(sol_exact_truedofs);
+
+    Vector * Xout_exact = new Vector(GetInitCondSize(level));
+
+    std::vector<std::pair<int,int> > * tdofs_link = GetTdofsLink(level);
+
+    for (int i = 0; i < ProblemSize(level); ++i)
+    {
+        int tdof_top = ( strcmp(top_or_bot,"bot") == 0 ? (*tdofs_link)[i].first : (*tdofs_link)[i].second);
+        (*Xout_exact)[i] = sol_exact_truedofs[tdof_top];
+    }
+
+    delete sol_exact;
+
+    return Xout_exact;
+}
+
+
 
 TimeCylHyper::~TimeCylHyper()
 {
@@ -659,7 +714,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& rhs, Vector& sol,
 
 // mode options:
 // a) "regular" to solve with a matrix assembled from bilinear forms at corr. level
-// b) "coarsened" to solve with RAP-based matrix
+// b) "coarsened" to solve with RAP-coarsened matrix
 void TimeCylHyper::Solve(const char * mode, int lvl, const Vector& rhs, Vector& sol,
                          const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
 {
@@ -2425,6 +2480,348 @@ void TimeCylHyper::InitProblem()
 
 }
 
+class TimeSteppingScheme
+{
+protected:
+    std::vector<TimeCylHyper*> timeslab_problems;
+    int nslabs;
+    int nlevels;
+    bool verbose;
+    std::vector<std::vector<Vector*> > vec_ins_lvls;
+    std::vector<std::vector<Vector*> > vec_outs_lvls;
+
+    std::vector<std::vector<Vector*> > residuals_lvls;
+    std::vector<std::vector<Vector*> > sols_lvls;
+
+public:
+    TimeSteppingScheme (std::vector<TimeCylHyper*> & timeslab_problems);
+
+    void Solve(char const * mode, const char *level_mode, std::vector<Vector *> rhss, int level, bool compute_accuracy);
+    void Solve(char const * mode, const char *level_mode, int level, bool compute_accuracy);
+
+    void ComputeResiduals(int level);
+
+    void RestrictToCoarser(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs);
+    void InterpolateToFiner(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs);
+
+    std::vector<Vector*> * Get_vec_ins(int level){return &vec_ins_lvls[level];}
+    std::vector<Vector*> * Get_vec_outs(int level){return &vec_outs_lvls[level];}
+    std::vector<Vector*> * Get_sols(int level){return &sols_lvls[level];}
+    std::vector<Vector*> * Get_residuals(int level){return &residuals_lvls[level];}
+
+    TimeCylHyper * GetTimeSlab(int tslab) {return timeslab_problems[tslab];}
+
+    void SetInitialCondition(const Vector& x_init, int level)
+    { *vec_ins_lvls[level][0] = x_init;}
+
+    void SetInitialConditions(std::vector<Vector*> x_inits, int level)
+    {
+        MFEM_ASSERT(x_inits.size() >= nslabs, "Number of initial vectors is less than number of time slabs! \n");
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+            *vec_ins_lvls[level][tslab] = *x_inits[tslab];
+    }
+
+    int GetNSlabs() {return nslabs;}
+    int GetNLevels() {return nlevels;}
+};
+
+void TimeSteppingScheme::RestrictToCoarser(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs)
+{
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        timeslab_problems[tslab]->Restrict(level, *vec_ins[tslab], *vec_outs[tslab]);
+    }
+}
+
+void TimeSteppingScheme::InterpolateToFiner(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs)
+{
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        timeslab_problems[tslab]->Interpolate(level, *vec_ins[tslab], *vec_outs[tslab]);
+    }
+}
+
+
+void TimeSteppingScheme::ComputeResiduals(int level)
+{
+    timeslab_problems[0]->ComputeResidual(level, *vec_ins_lvls[level][0], *sols_lvls[level][0],
+            *residuals_lvls[level][0]);
+
+    for (int tslab = 1; tslab < nslabs; ++tslab )
+            timeslab_problems[tslab]->ComputeResidual(level, *vec_outs_lvls[level][tslab - 1], *sols_lvls[level][tslab],
+                    *residuals_lvls[level][tslab]);
+}
+
+void TimeSteppingScheme::Solve(char const * mode, char const * level_mode, std::vector<Vector*> rhss, int level, bool compute_accuracy)
+{
+    if (strcmp(mode,"parallel") !=0 && strcmp(mode, "sequential") != 0)
+    {
+        MFEM_ABORT("In TimeSteppingScheme::Solve mode must be 'sequential' or 'parallel'");
+    }
+
+    if (strcmp(mode,"sequential") == 0) // sequential time-stepping, time slab after time slab
+    {
+        for (int tslab = 0; tslab < nslabs; ++tslab )
+        {
+            timeslab_problems[tslab]->Solve(level_mode, level, *rhss[tslab], *sols_lvls[level][tslab],
+                                            *vec_ins_lvls[level][tslab], *vec_outs_lvls[level][tslab]);
+
+            *vec_ins_lvls[level][tslab + 1] = *vec_outs_lvls[level][tslab];
+
+            if (timeslab_problems[tslab]->NeedSignSwitch())
+                *vec_ins_lvls[level][tslab + 1] *= -1;
+
+            //Xinit = Xout;
+            //if (strcmp(space_for_S,"L2") == 0)
+                //Xinit *= -1.0;
+
+            if (compute_accuracy)
+            {
+                Vector * Xout_exact = timeslab_problems[tslab]->GetExactBase("top", level);
+
+                Vector Xout_error(timeslab_problems[tslab]->GetInitCondSize(level));
+                Xout_error = *vec_outs_lvls[level][tslab];
+                Xout_error -= *Xout_exact;
+                if (verbose)
+                {
+                    std::cout << "|| Xout  - Xout_exact || = " << Xout_error.Norml2() / sqrt (Xout_error.Size()) << "\n";
+                    std::cout << "|| Xout  - Xout_exact || / || Xout_exact || = " << (Xout_error.Norml2() / sqrt (Xout_error.Size())) /
+                                 (Xout_exact->Norml2() / sqrt (Xout_exact->Size()))<< "\n";
+                }
+
+                delete Xout_exact;
+            }
+
+
+        } // end of loop over all time slabs, performing a coarse solve
+
+    }
+    else // 'parallel'
+    {
+        for (int tslab = 0; tslab < nslabs; ++tslab )
+        {
+            timeslab_problems[tslab]->Solve(level_mode, level, *rhss[tslab], *sols_lvls[level][tslab],
+                                            *vec_ins_lvls[level][tslab], *vec_outs_lvls[level][tslab]);
+        }
+    }
+
+    MFEM_ABORT("Not implemented \n");
+}
+
+TimeSteppingScheme::TimeSteppingScheme (std::vector<TimeCylHyper*> & timeslab_problems)
+    : timeslab_problems(timeslab_problems),
+      nslabs(timeslab_problems.size()),
+      nlevels(timeslab_problems[0]->GetNLevels()),
+      verbose(timeslab_problems[0]->verbose)
+{
+    vec_ins_lvls.resize(nlevels);
+    for (unsigned int l = 0; l < vec_ins_lvls.size(); ++l)
+    {
+        vec_ins_lvls[l].resize(nslabs + 1);
+        for (int slab = 0; slab < nslabs; ++slab)
+            vec_ins_lvls[l][slab] = new Vector(timeslab_problems[slab]->GetInitCondSize(l));
+        vec_ins_lvls[l][nslabs] = new Vector(timeslab_problems[nslabs - 1]->GetInitCondSize(l));
+    }
+
+    vec_outs_lvls.resize(nlevels);
+    for (unsigned int l = 0; l < vec_outs_lvls.size(); ++l)
+    {
+        vec_outs_lvls[l].resize(nslabs + 1);
+        for (int slab = 0; slab < nslabs; ++slab)
+            vec_outs_lvls[l][slab] = new Vector(timeslab_problems[slab]->GetInitCondSize(l));
+        vec_outs_lvls[l][nslabs] = new Vector(timeslab_problems[nslabs - 1]->GetInitCondSize(l));
+    }
+
+    sols_lvls.resize(nlevels);
+    for (unsigned int l = 0; l < sols_lvls.size(); ++l)
+    {
+        sols_lvls[l].resize(nslabs);
+        for (int slab = 0; slab < nslabs; ++slab)
+            sols_lvls[l][slab] = new Vector(timeslab_problems[slab]->ProblemSize(l));
+    }
+
+    residuals_lvls.resize(nlevels);
+    for (unsigned int l = 0; l < residuals_lvls.size(); ++l)
+    {
+        residuals_lvls[l].resize(nslabs);
+        for (int slab = 0; slab < nslabs; ++slab)
+            residuals_lvls[l][slab] = new Vector(timeslab_problems[slab]->ProblemSize(l));
+    }
+
+}
+
+class SpaceTimeTwoGrid
+{
+protected:
+    TimeSteppingScheme& timestepping;
+    int nslabs;
+    int max_iter;
+    double tol;
+
+    const int num_lvls = 2;
+
+    std::vector<std::vector<Vector*> > res_lvls;
+    std::vector<std::vector<Vector*> > corr_lvls;
+
+public:
+    SpaceTimeTwoGrid(TimeSteppingScheme& TimeStepping, int Max_Iter, double Tol )
+        : timestepping(TimeStepping),
+          nslabs(TimeStepping.GetNSlabs()),
+          max_iter(Max_Iter),
+          tol(Tol)
+    {
+        MFEM_ASSERT(timestepping.GetNLevels() > 1, "For a two-grid method at least two levels must exist! \n");
+
+        res_lvls.resize(num_lvls);
+        for (unsigned int l = 0; l < res_lvls.size(); ++l)
+        {
+            res_lvls[l].resize(nslabs);
+            for (int slab = 0; slab < nslabs; ++slab)
+                res_lvls[l][slab] = new Vector(timestepping.GetTimeSlab(slab)->ProblemSize(l));
+        }
+
+        corr_lvls.resize(num_lvls);
+        for (unsigned int l = 0; l < corr_lvls.size(); ++l)
+        {
+            corr_lvls[l].resize(nslabs);
+            for (int slab = 0; slab < nslabs; ++slab)
+                corr_lvls[l][slab] = new Vector(timestepping.GetTimeSlab(slab)->ProblemSize(l));
+        }
+
+    }
+    void Solve(std::vector<Vector *> rhss, std::vector<Vector *> sols);
+
+protected:
+    void Iterate(std::vector<Vector*> ress, std::vector<Vector*> corrs);
+    void ComputeResidual(std::vector<Vector*> rhss, std::vector<Vector*> sols);
+    void UpdateResidual(std::vector<Vector*> corrs);
+    void UpdateSolution(std::vector<Vector*> sols, std::vector<Vector*> corrs);
+
+};
+
+void SpaceTimeTwoGrid::ComputeResidual(std::vector<Vector*> rhss, std::vector<Vector*> sols)
+{
+    MFEM_ABORT("Not implemented \n");
+}
+
+void SpaceTimeTwoGrid::UpdateResidual(std::vector<Vector*> corrs)
+{
+    MFEM_ABORT("Not implemented \n");
+}
+
+void SpaceTimeTwoGrid::UpdateSolution(std::vector<Vector*> sols, std::vector<Vector*> corrs)
+{
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+        *sols[tslab] += * corrs[tslab];
+}
+
+
+void SpaceTimeTwoGrid::Solve(std::vector<Vector*> rhss, std::vector<Vector*> sols)
+{
+    bool converged = false;
+
+    ComputeResidual(rhss, sols);
+
+    for (int it = 0; it < max_iter; ++it)
+    {
+        Iterate(res_lvls[0], corr_lvls[0]);
+
+        UpdateResidual(corr_lvls[0]);
+
+        UpdateSolution(sols, corr_lvls[0]);
+
+        if (converged)
+            break;
+    }
+}
+
+void SpaceTimeTwoGrid::Iterate(std::vector<Vector*> ress, std::vector<Vector *> corrs)
+{
+    MFEM_ABORT("Not implemented yet \n");
+    /*
+    const int fine_level = 0;
+    const int coarse_level = 1;
+    // 1. parallel-in-time smoothing
+    timestepping.Solve("parallel", fine_level, false);
+
+    // 2. compute residuals
+    timestepping.ComputeResiduals(fine_level);
+
+    // 3. restrict residuals
+    timestepping.RestrictToCoarser(fine_level, *timestepping.Get_residuals(0), *timestepping.Get_residuals(1));
+
+    // 4. solve at the coarse level with zero initial guess
+    timestepping.SetZeroInitialCondition(coarse_level);
+    timestepping.Solve("sequential", coarse_level, false);
+
+    // 5.
+    timestepping
+
+    // 4. interpolating back and updating the solution
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        //for (int i = 0; i < (*corr_lvls[coarse_lvl])[tslab]->Size(); ++i)
+            //std::cout << "corr coarse = " << (*(*corr_lvls[coarse_lvl])[tslab])[i] << "\n";
+
+        //(*corr_lvls[coarse_lvl])[tslab]->Print();
+
+        timeslabs[tslab]->Interpolate(fine_lvl, *(*corr_lvls[coarse_lvl])[tslab], *(*corr_lvls[fine_lvl])[tslab]);
+    }
+
+    // computing error in each time slab before update
+    if (verbose)
+        std::cout << "Errors before adding the coarse grid corrections \n";
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        timeslabs[tslab]->ComputeError(fine_lvl, *(*sol_lvls[fine_lvl])[tslab]);
+    }
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        //for (int i = 0; i < (*sol_lvls[fine_lvl])[tslab]->Size(); ++i)
+            //std::cout << "sol before = " << (*(*sol_lvls[fine_lvl])[tslab])[i] <<
+                         //", corr = " << (*(*corr_lvls[fine_lvl])[tslab])[i] << "\n";
+        *(*sol_lvls[fine_lvl])[tslab] += *(*corr_lvls[fine_lvl])[tslab];
+    }
+
+    // 4.5 computing error in each time slab
+    if (verbose)
+        std::cout << "Errors after adding the coarse grid corrections \n";
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        timeslabs[tslab]->ComputeError(fine_lvl, *(*sol_lvls[fine_lvl])[tslab]);
+    }
+
+
+    // 5. update initial conditions to start the next iteration
+    int bdrcond_block = -1;
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+        bdrcond_block = 1;
+    else
+        bdrcond_block = 0;
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        std::vector<std::pair<int,int> > * tdofs_link = timeslabs[tslab]->GetTdofsLink(fine_lvl);
+        *Xinits_fine[tslab] = 0.0;
+
+        BlockVector sol_viewer((*sol_lvls[fine_lvl])[tslab]->GetData(),
+                               *timeslabs[tslab]->GetBlockTrueOffsets(fine_lvl));
+
+        // FIXME: We have actually two values at all interfaces from two time slabs
+        // Here I simply chose the time slab which is above the interface
+        for (int i = 0; i < init_cond_size_fine; ++i)
+        {
+            int tdof_bot = (*tdofs_link)[i].first;
+            (*Xinits_fine[tslab])[i] = sol_viewer.GetBlock(bdrcond_block)[tdof_bot];
+        }
+
+    }
+    */
+}
+
+
+
 int main(int argc, char *argv[])
 {
    // 1. Initialize MPI.
@@ -2992,8 +3389,86 @@ int main(int argc, char *argv[])
       }
   }
 
-  //MPI_Finalize();
-  //return 0;
+  if (verbose)
+    std::cout << "Checking a sequential solve within a TimeStepping instance \n";
+
+  {
+      int pref_lvls_tslab = 1;
+
+      int nslabs = 2;
+      std::vector<TimeCylHyper*> timeslabs(nslabs);
+      double slab_tau = 0.125;
+      int slab_width = 4; // in time steps (as time intervals) withing a single time slab
+      double tinit_tslab = 0.0;
+
+      if (verbose)
+      {
+          std::cout << "Creating a sequence of time slabs: \n";
+          std::cout << "# of slabs: " << nslabs << "\n";
+          std::cout << "# of time intervals per slab: " << slab_width << "\n";
+          std::cout << "time step within a time slab: " << slab_tau << "\n";
+          std::cout << "# of refinements: " << pref_lvls_tslab << "\n";
+          if (solve_at_lvl == 0)
+              std::cout << "solution level: " << solve_at_lvl << "\n";
+      }
+
+      for (int tslab = 0; tslab < nslabs; ++tslab )
+      {
+          timeslabs[tslab] = new TimeCylHyper (*pmeshbase, tinit_tslab, slab_tau, slab_width, pref_lvls_tslab,
+                                                formulation, space_for_S, space_for_sigma);
+          tinit_tslab += slab_tau * slab_width;
+      }
+
+      MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                    "[0,1] but the upper bound doesn't match \n");
+
+      TimeSteppingScheme * timestepping = new TimeSteppingScheme(timeslabs);
+
+      Vector Xinit;
+
+      int init_cond_size = timestepping->GetTimeSlab(0)->GetInitCondSize(solve_at_lvl);
+      std::vector<std::pair<int,int> > * tdofs_link = timestepping->GetTimeSlab(0)->GetTdofsLink(solve_at_lvl);
+      Xinit.SetSize(init_cond_size);
+
+      ParFiniteElementSpace * testfespace;
+      ParGridFunction * sol_exact;
+
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          testfespace = timestepping->GetTimeSlab(0)->Get_S_space(solve_at_lvl);
+          sol_exact = new ParGridFunction(testfespace);
+          sol_exact->ProjectCoefficient(*Mytest.scalarS);
+      }
+      else
+      {
+          testfespace = timestepping->GetTimeSlab(0)->Get_Sigma_space(solve_at_lvl);
+          sol_exact = new ParGridFunction(testfespace);
+          sol_exact->ProjectCoefficient(*Mytest.sigma);
+      }
+
+      Vector sol_exact_truedofs(testfespace->TrueVSize());
+      sol_exact->ParallelProject(sol_exact_truedofs);
+
+      for (int i = 0; i < init_cond_size; ++i)
+      {
+          int tdof_bot = (*tdofs_link)[i].first;
+          Xinit[i] = sol_exact_truedofs[tdof_bot];
+      }
+
+
+
+      // initializing the input boundary condition for the first vector
+
+      int solve_at_lvl = 0;
+      timestepping->SetInitialCondition(X_init, solve_at_lvl);
+
+      timestepping->ComputeAnalyticalRhs(solve_at_lvl); ...
+
+      timestepping->Solve("sequential", "regular", rhss, solve_at_lvl, true);
+  }
+
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a two-grid scheme with independent fine and sequential coarse solvers \n";
