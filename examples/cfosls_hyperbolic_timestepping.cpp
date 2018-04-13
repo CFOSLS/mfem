@@ -138,6 +138,8 @@ public:
     void Solve(int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
     void Solve(const char * mode, int lvl, const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
 
+    void ComputeAnalyticalRhs(int lvl);
+
     int GetInitCondSize(int lvl) {return init_cond_size_lvls[lvl];}
     int GetNLevels() {return ref_lvls;}
 
@@ -211,6 +213,11 @@ public:
     void ComputeError(int lvl, Vector& sol) const;
 
 };
+
+void TimeCylHyper::ComputeAnalyticalRhs(int lvl)
+{
+
+}
 
 
 Vector* TimeCylHyper::GetExactBase(const char * top_or_bot, int level)
@@ -2504,6 +2511,8 @@ public:
     void RestrictToCoarser(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs);
     void InterpolateToFiner(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs);
 
+    void ComputeAnalyticalRhs(int level);
+
     std::vector<Vector*> * Get_vec_ins(int level){return &vec_ins_lvls[level];}
     std::vector<Vector*> * Get_vec_outs(int level){return &vec_outs_lvls[level];}
     std::vector<Vector*> * Get_sols(int level){return &sols_lvls[level];}
@@ -2524,6 +2533,12 @@ public:
     int GetNSlabs() {return nslabs;}
     int GetNLevels() {return nlevels;}
 };
+
+void TimeSteppingScheme::ComputeAnalyticalRhs(int level)
+{
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+        timeslab_problems[tslab]->ComputeAnalyticalRhs(level);
+}
 
 void TimeSteppingScheme::RestrictToCoarser(int level, std::vector<Vector*> vec_ins, std::vector<Vector*> vec_outs)
 {
@@ -3401,6 +3416,8 @@ int main(int argc, char *argv[])
       int slab_width = 4; // in time steps (as time intervals) withing a single time slab
       double tinit_tslab = 0.0;
 
+      int solve_at_lvl = 0;
+
       if (verbose)
       {
           std::cout << "Creating a sequence of time slabs: \n";
@@ -3458,8 +3475,6 @@ int main(int argc, char *argv[])
 
 
       // initializing the input boundary condition for the first vector
-
-      int solve_at_lvl = 0;
       timestepping->SetInitialCondition(X_init, solve_at_lvl);
 
       timestepping->ComputeAnalyticalRhs(solve_at_lvl); ...
