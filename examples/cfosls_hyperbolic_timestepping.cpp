@@ -8,10 +8,14 @@
 #include <list>
 #include <unistd.h>
 
+#define MYZEROTOL (1.0e-13)
+#define ZEROTOL (1.0e-13)
+
 #include "cfosls_testsuite.hpp"
+#include "cfosls_integrators.hpp"
+#include "cfosls_tools.hpp"
 #include "divfree_solver_tools.hpp"
 
-#define ZEROTOL (1.0e-13)
 
 #define NONHOMO_TEST
 
@@ -24,10 +28,71 @@ using namespace mfem;
 // TODO: Instead of specifying tdofs_link_H1 and _Hdiv and manually choosing by if-clauses,
 // which to use for the Solve() int TimeCyl, it would be better to implement it as a block case
 // with arbitrary number of blocks. Then input and output would be BlockVectors and there will be
-// less switche calls
+// less switch calls
+
+// a class for square block operators where each block is given as a HypreParMatrix
+// used as an interface to handle coarsened operators for multigrid
+// FIXME: Who should delete the matrices?
+class BlkHypreOperator : public Operator
+{
+protected:
+    int numblocks;
+    Array2D<HypreParMatrix*> hpmats;
+    Array<int> block_offsets;
+public:
+    BlkHypreOperator(Array2D<HypreParMatrix*> & Hpmats)
+        : numblocks(Hpmats.NumRows())
+    {
+        hpmats.SetSize(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i )
+            for (int j = 0; j < numblocks; ++j )
+                if (Hpmats(i,j))
+                    hpmats(i,j) = Hpmats(i,j);
+                else
+                    hpmats(i,j) = NULL;
+
+
+        block_offsets.SetSize(numblocks + 1);
+        block_offsets[0] = 0;
+        for (int i = 0; i < numblocks; ++i )
+            block_offsets[i + 1] = hpmats(i,i)->Height();
+        block_offsets.PartialSum();
+    }
+
+    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void MultTranspose(const Vector &x, Vector &y) const;
+};
+
+void BlkHypreOperator::Mult(const Vector &x, Vector &y) const
+{
+    BlockVector x_viewer(x.GetData(), block_offsets);
+    BlockVector y_viewer(y.GetData(), block_offsets);
+
+    for (int i = 0; i < numblocks; ++i)
+    {
+        for (int j = 0; j < numblocks; ++j)
+            if (hpmats(i,j))
+                hpmats(i,j)->Mult(x_viewer.GetBlock(j), y_viewer.GetBlock(i));
+    }
+}
+
+void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
+{
+    BlockVector x_viewer(x.GetData(), block_offsets);
+    BlockVector y_viewer(y.GetData(), block_offsets);
+
+    for (int i = 0; i < numblocks; ++i)
+    {
+        for (int j = 0; j < numblocks; ++j)
+            if (hpmats(i,j))
+                hpmats(i,j)->MultTranspose(x_viewer.GetBlock(j), y_viewer.GetBlock(i));
+    }
+}
+
+
 
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose);
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
                                    std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
 
@@ -89,7 +154,7 @@ protected:
 
     std::vector<Array<int>*> block_trueOffsets_lvls;
     std::vector<BlockOperator*> CFOSLSop_lvls;
-    std::vector<Operator*> CFOSLSop_coarsened_lvls;
+    std::vector<BlkHypreOperator*> CFOSLSop_coarsened_lvls;
     std::vector<BlockOperator*> CFOSLSop_nobnd_lvls;
     std::vector<BlockDiagonalPreconditioner*> prec_lvls;
     std::vector<MINRESSolver*> solver_lvls;
@@ -1628,9 +1693,22 @@ void TimeCylHyper::InitProblem()
     tdofs_link_H1_lvls.resize(num_lvls);
     tdofs_link_Hdiv_lvls.resize(num_lvls);
 
+    std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_lvls);
+
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
     const SparseMatrix* P_L2_local;
+
+
+    int numblocks = 1;
+
+    if (strcmp(space_for_S,"H1") == 0)
+        numblocks++;
+    if (strcmp(formulation,"cfosls") == 0)
+        numblocks++;
+
+    if (verbose)
+        std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
     // 0 will correspond to the finest level for all items in the hierarchy
 
@@ -1980,15 +2058,6 @@ void TimeCylHyper::InitProblem()
         //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
         //    for the rhs and solution of the linear system).  The offsets computed
         //    here are local to the processor.
-        int numblocks = 1;
-
-        if (strcmp(space_for_S,"H1") == 0)
-            numblocks++;
-        if (strcmp(formulation,"cfosls") == 0)
-            numblocks++;
-
-        if (verbose)
-            std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
         Array<int> block_offsets(numblocks + 1); // number of variables + 1
         int tempblknum = 0;
@@ -2473,14 +2542,102 @@ void TimeCylHyper::InitProblem()
 
     for (int l = 0; l < num_lvls; ++l)
     {
+        Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numblocks, numblocks);
+
         if (l == 0)
         {
-            CFOSLSop_coarsened_lvls[l] = CFOSLSop_lvls[0];
+            for (int i = 0; i < numblocks; ++i)
+                for (int j = 0; j < numblocks; ++j)
+                {
+                    HypreParMatrix& Block = (HypreParMatrix&)CFOSLSop_lvls[0]->GetBlock(0,0);
+
+                    (*Funct_hpmat_lvls[0])(i,j) = &Block;
+                }
         }
-        else // coarsening
+        else // doing RAP for the Functional matrix as an Array2D<HypreParMatrix*>
         {
-            CFOSLSop_coarsened_lvls[l] = new RAPOperator(*TrueP_lvls[l - 1], *CFOSLSop_coarsened_lvls[l - 1], *TrueP_lvls[l - 1]);
-        }
+             // TODO: Rewrite this in a general form
+            (*Funct_hpmat_lvls[l])(0,0) = RAP(TrueP_Hdiv_lvls[l-1], (*Funct_hpmat_lvls[l-1])(0,0), TrueP_Hdiv_lvls[l-1]);
+            (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
+            (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
+
+            {
+                const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][0];
+
+                Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom, *temp_dom );
+                HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,0)->Transpose();
+                Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
+                (*Funct_hpmat_lvls[l])(0,0) = temphpmat->Transpose();
+                Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom);
+                SparseMatrix diag;
+                (*Funct_hpmat_lvls[l])(0,0)->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+
+                (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
+                (*Funct_hpmat_lvls[l])(0,0)->CopyColStarts();
+                delete temphpmat;
+            }
+
+
+            if (strcmp(space_for_S,"H1") == 0)
+            {
+                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H1_lvls[l-1], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H1_lvls[l-1]);
+                //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+                //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+
+                {
+                    const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][1];
+
+                    Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom, *temp_dom );
+                    HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(1,1)->Transpose();
+                    Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
+                    (*Funct_hpmat_lvls[l])(1,1) = temphpmat->Transpose();
+                    Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom);
+                    SparseMatrix diag;
+                    (*Funct_hpmat_lvls[l])(1,1)->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+
+                    (*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
+                    (*Funct_hpmat_lvls[l])(1,1)->CopyColStarts();
+                    delete temphpmat;
+                }
+
+                HypreParMatrix * P_R_T = TrueP_Hdiv_lvls[l-1]->Transpose();
+                HypreParMatrix * temp1 = ParMult((*Funct_hpmat_lvls[l-1])(0,1), TrueP_H1_lvls[l-1]);
+                (*Funct_hpmat_lvls[l])(0,1) = ParMult(P_R_T, temp1);
+                //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+                //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+
+                {
+                    const Array<int> *temp_range = EssBdrTrueDofs_Funct_lvls[l][0];
+                    const Array<int> *temp_dom = EssBdrTrueDofs_Funct_lvls[l][1];
+
+                    Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,1), *temp_dom, *temp_range );
+                    HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,1)->Transpose();
+                    Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+                    (*Funct_hpmat_lvls[l])(0,1) = temphpmat->Transpose();
+                    (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
+                    (*Funct_hpmat_lvls[l])(0,1)->CopyColStarts();
+                    delete temphpmat;
+                }
+
+
+
+                (*Funct_hpmat_lvls[l])(1,0) = (*Funct_hpmat_lvls[l])(0,1)->Transpose();
+                (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
+                (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
+
+                delete P_R_T;
+                delete temp1;
+            }
+
+        } // end of else for if (l == 0)
+
+    }
+
+    for (int l = 0; l < num_lvls; ++l)
+    {
+        CFOSLSop_coarsened_lvls[l] = new BlkHypreOperator(*Funct_hpmat_lvls[l]);
     }
 
     /////////////////////////////////////////////////////////////////
@@ -3404,6 +3561,8 @@ int main(int argc, char *argv[])
       }
   }
 
+  /*
+
   if (verbose)
     std::cout << "Checking a sequential solve within a TimeStepping instance \n";
 
@@ -3484,6 +3643,7 @@ int main(int argc, char *argv[])
 
   MPI_Finalize();
   return 0;
+  */
 
   if (verbose)
     std::cout << "Checking a two-grid scheme with independent fine and sequential coarse solvers \n";

@@ -4,6 +4,11 @@
 using namespace std;
 using namespace mfem;
 
+HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
+                                   std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
+
 struct CFOSLSHyperbolicFormulation
 {
     friend class CFOSLSHyperbolicProblem;
@@ -957,4 +962,312 @@ void CFOSLSHyperbolicProblem::Update()
     // update grid functions
     for (int i = 0; i < grfuns.Size(); ++i)
         grfuns[i]->Update();
+}
+
+SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
+
+// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
+class GeneralHierarchy
+{
+protected:
+    int num_lvls;
+    std::vector<ParMesh*> pmesh_lvls;
+    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
+    std::vector<ParFiniteElementSpace* > H1_space_lvls;
+    std::vector<ParFiniteElementSpace* > L2_space_lvls;
+
+    std::vector<SparseMatrix*> P_H1_lvls;
+    std::vector<SparseMatrix*> P_Hdiv_lvls;
+    std::vector<SparseMatrix*> P_L2_lvls;
+    std::vector<HypreParMatrix*> TrueP_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
+    std::vector<HypreParMatrix*> TrueP_L2_lvls;
+
+public:
+    GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
+
+    virtual void RefineAndCopy(int lvl, ParMesh* pmesh)
+    {
+        if (lvl == num_lvls - 1)
+            pmesh_lvls[lvl] = new ParMesh(*pmesh);
+        else
+        {
+            pmesh->UniformRefinement();
+            pmesh_lvls[lvl] = new ParMesh(*pmesh);
+        }
+    }
+};
+
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose)
+    : num_lvls (num_levels)
+{
+    int dim = pmesh.Dimension();
+
+    FiniteElementCollection *hdiv_coll;
+    FiniteElementCollection *l2_coll;
+
+    if (dim == 4)
+        hdiv_coll = new RT0_4DFECollection;
+    else
+        hdiv_coll = new RT_FECollection(feorder, dim);
+
+    l2_coll = new L2_FECollection(feorder, dim);
+
+    FiniteElementCollection *h1_coll;
+    if (dim == 3)
+        h1_coll = new H1_FECollection(feorder + 1, dim);
+    else
+    {
+        if (feorder + 1 == 1)
+            h1_coll = new LinearFECollection;
+        else if (feorder + 1 == 2)
+        {
+            if (verbose)
+                std::cout << "We have Quadratic FE for H1 in 4D, but are you sure? \n";
+            h1_coll = new QuadraticFECollection;
+        }
+        else
+            MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
+    }
+
+    ParFiniteElementSpace *Hdiv_space;
+    Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
+
+    ParFiniteElementSpace *L2_space;
+    L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
+
+    ParFiniteElementSpace *H1_space;
+    H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
+
+    const SparseMatrix* P_Hdiv_local;
+    const SparseMatrix* P_H1_local;
+    const SparseMatrix* P_L2_local;
+
+    for (int l = num_lvls - 1; l >= 0; --l)
+    {
+        RefineAndCopy(l, &pmesh);
+
+        // creating pfespaces for level l
+        Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
+        L2_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
+        H1_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
+
+        // for all but one levels we create projection matrices between levels
+        // and projectors assembled on true dofs if MG preconditioner is used
+        if (l < num_lvls - 1)
+        {
+            Hdiv_space->Update();
+            H1_space->Update();
+            L2_space->Update();
+
+            // TODO: Rewrite these computations
+
+            P_Hdiv_local = (SparseMatrix *)Hdiv_space->GetUpdateOperator();
+            P_Hdiv_lvls[l] = RemoveZeroEntries(*P_Hdiv_local);
+
+            auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
+            TrueP_Hdiv_lvls[l] = d_td_coarse_Hdiv->LeftDiagMult(
+                        *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_Hdiv_lvls[l]->CopyRowStarts();
+
+            delete RP_Hdiv_local;
+
+
+            P_H1_local = (SparseMatrix *)H1_space->GetUpdateOperator();
+            P_H1_lvls[l] = RemoveZeroEntries(*P_H1_local);
+
+            auto d_td_coarse_H1 = H1_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[l]->GetRestrictionMatrix(), *P_H1_lvls[l]);
+            TrueP_H1_lvls[l] = d_td_coarse_H1->LeftDiagMult(
+                        *RP_H1_local, H1_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_H1_lvls[l]->CopyColStarts();
+            TrueP_H1_lvls[l]->CopyRowStarts();
+
+            delete RP_H1_local;
+
+            P_L2_local = (SparseMatrix *)L2_space->GetUpdateOperator();
+            P_L2_lvls[l] = RemoveZeroEntries(*P_L2_local);
+
+            auto d_td_coarse_L2 = L2_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_L2_local = Mult(*L2_space_lvls[l]->GetRestrictionMatrix(), *P_L2_lvls[l]);
+            TrueP_L2_lvls[l] = d_td_coarse_L2->LeftDiagMult(
+                        *RP_L2_local, L2_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_L2_lvls[l]->CopyColStarts();
+            TrueP_L2_lvls[l]->CopyRowStarts();
+
+            delete RP_L2_local;
+        }
+
+    } // end of loop over levels
+
+}
+
+
+class GeneralCylHierarchy : public GeneralHierarchy
+{
+protected:
+    std::vector<ParMeshCyl*> pmeshcyl_lvls;
+
+    std::vector<int> init_cond_size_lvls;
+    std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
+    std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
+
+    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
+    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
+    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
+    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
+    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
+protected:
+    void ConstructRestrictions();
+    void ConstructInterpolations();
+    void ConstructTdofsLinks();
+
+public:
+    GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
+        : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
+    {
+        // don't change the order of these calls
+        ConstructTdofsLinks();
+        ConstructRestrictions();
+        ConstructInterpolations();
+    }
+
+    virtual void RefineAndCopy(int lvl, ParMeshCyl* pmesh);
+};
+
+void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMeshCyl* pmeshcyl)
+{
+    if (lvl == num_lvls - 1)
+    {
+        pmeshcyl_lvls[lvl] = new ParMeshCyl(*pmeshcyl);
+        pmesh_lvls[lvl] = pmeshcyl_lvls[lvl];
+    }
+    else
+    {
+        pmeshcyl->Refine(1);
+        pmeshcyl_lvls[lvl] = new ParMeshCyl(*pmeshcyl);
+        pmesh_lvls[lvl] = pmeshcyl_lvls[lvl];
+        // be careful about the update of bot_to_top so that it doesn't get lost
+    }
+}
+
+void GeneralCylHierarchy::ConstructRestrictions()
+{
+    Restrict_bot_H1_lvls.resize(num_lvls);
+    Restrict_bot_Hdiv_lvls.resize(num_lvls);
+    Restrict_top_H1_lvls.resize(num_lvls);
+    Restrict_top_Hdiv_lvls.resize(num_lvls);
+
+    for (int l = num_lvls - 1; l >= 0; --l)
+    {
+        Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
+        Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+        Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
+        Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+    }
+}
+
+void GeneralCylHierarchy::ConstructInterpolations()
+{
+    TrueP_bndbot_H1_lvls.resize(num_lvls - 1);
+    TrueP_bndbot_Hdiv_lvls.resize(num_lvls - 1);
+    TrueP_bndtop_H1_lvls.resize(num_lvls - 1);
+    TrueP_bndtop_Hdiv_lvls.resize(num_lvls - 1);
+
+    for (int l = num_lvls - 1; l >= 0; --l)
+    {
+        TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
+        TrueP_bndbot_H1_lvls[l]->CopyColStarts();
+        TrueP_bndbot_H1_lvls[l]->CopyRowStarts();
+
+        TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l], TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
+        TrueP_bndtop_H1_lvls[l]->CopyColStarts();
+        TrueP_bndtop_H1_lvls[l]->CopyRowStarts();
+
+        TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
+        TrueP_bndbot_Hdiv_lvls[l]->CopyColStarts();
+        TrueP_bndbot_Hdiv_lvls[l]->CopyRowStarts();
+
+        TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
+        TrueP_bndtop_Hdiv_lvls[l]->CopyColStarts();
+        TrueP_bndtop_Hdiv_lvls[l]->CopyRowStarts();
+    }
+}
+
+void GeneralCylHierarchy::ConstructTdofsLinks()
+{
+    init_cond_size_lvls.resize(num_lvls);
+    tdofs_link_H1_lvls.resize(num_lvls);
+    tdofs_link_Hdiv_lvls.resize(num_lvls);
+
+    for (int l = num_lvls - 1; l >= 0; --l)
+    {
+        std::vector<std::pair<int,int> > * dofs_link_H1 =
+                CreateBotToTopDofsLink("linearH1",*H1_space_lvls[l], pmeshcyl_lvls[l]->bot_to_top_bels);
+        std::cout << std::flush;
+
+        tdofs_link_H1_lvls[l].reserve(dofs_link_H1->size());
+
+        int count = 0;
+        for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
+        {
+            //std::cout << "<" << it->first << ", " << it->second << "> \n";
+            int dof1 = (*dofs_link_H1)[i].first;
+            int dof2 = (*dofs_link_H1)[i].second;
+            int tdof1 = H1_space_lvls[l]->GetLocalTDofNumber(dof1);
+            int tdof2 = H1_space_lvls[l]->GetLocalTDofNumber(dof2);
+            //std::cout << "corr. dof pair: <" << dof1 << "," << dof2 << ">\n";
+            //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+            if (tdof1 * tdof2 < 0)
+                MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+            if (tdof1 > -1)
+            {
+                tdofs_link_H1_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
+                ++count;
+            }
+            else
+            {
+                //std::cout << "Ignored dofs pair which are not own tdofs \n";
+            }
+        }
+
+        std::vector<std::pair<int,int> > * dofs_link_RT0 =
+                   CreateBotToTopDofsLink("RT0",*Hdiv_space_lvls[l], pmeshcyl_lvls[l]->bot_to_top_bels);
+        std::cout << std::flush;
+
+        tdofs_link_Hdiv_lvls[l].reserve(dofs_link_RT0->size());
+
+        count = 0;
+        //std::cout << "dof pairs for Hdiv: \n";
+        for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
+        {
+            int dof1 = (*dofs_link_RT0)[i].first;
+            int dof2 = (*dofs_link_RT0)[i].second;
+            //std::cout << "<" << it->first << ", " << it->second << "> \n";
+            int tdof1 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof1);
+            int tdof2 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof2);
+            //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+            if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
+            {
+                //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
+                MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+            }
+
+            if (tdof1 > -1)
+            {
+                tdofs_link_Hdiv_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
+                ++count;
+            }
+            else
+            {
+                //std::cout << "Ignored a dofs pair which are not own tdofs \n";
+            }
+        }
+    }
 }
