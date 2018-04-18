@@ -1,5 +1,6 @@
 #include "mfem.hpp"
 #include "linalg/linalg.hpp"
+#include "cfosls/testhead.hpp"
 
 #include <iterator>
 
@@ -20,6 +21,7 @@ using std::unique_ptr;
 // activates some additional checks
 //#define DEBUG_INFO
 
+//SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 /// Conjugate gradient method which checks for boundary conditions (used for debugging)
 class CGSolver_mod : public CGSolver
@@ -6010,6 +6012,8 @@ void Multigrid::MG_Cycle() const
 
 }
 
+
+/*
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
 {
     int * I = in.GetI();
@@ -6044,6 +6048,7 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
 
     return new SparseMatrix(outI, outJ, outData, in.Height(), in.Width());
 }
+*/
 
 namespace mfem
 {

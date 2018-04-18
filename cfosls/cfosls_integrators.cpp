@@ -1,34 +1,5 @@
-// TODO: split this into hpp and cpp, but the first attempt failed
-using namespace mfem;
-
-class H1NormIntegrator : public BilinearFormIntegrator
+namespace mfem
 {
-private:
-   Vector vec, pointflux, shape;
-#ifndef MFEM_THREAD_SAFE
-   DenseMatrix dshape, dshapedxt, invdfdx, mq;
-   DenseMatrix te_dshape, te_dshapedxt;
-#endif
-   Coefficient *Qdiff;
-   Coefficient *Qmass;
-   MatrixCoefficient *MQ;
-
-public:
-   /// Construct an H1 norm integrator (mass + diffusion) with unit coefficients
-   H1NormIntegrator() { Qdiff = NULL; Qmass = NULL; MQ = NULL; }
-
-   /// Construct an H1 norm integrator with a scalar coefficients qdiff and qmass
-   H1NormIntegrator (Coefficient &qdiff, Coefficient &qmass) : Qdiff(&qdiff), Qmass(&qmass) { MQ = NULL; }
-
-   /// Construct an H1 norm integrator with a matrix coefficient q
-   H1NormIntegrator (MatrixCoefficient &q, Coefficient &qmass) : Qmass(&qmass), MQ(&q) { Qdiff = NULL; }
-
-   /** Given a particular Finite Element
-       computes the element stiffness matrix elmat. */
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                      ElementTransformation &Trans,
-                                      DenseMatrix &elmat);
-};
 
 void H1NormIntegrator::AssembleElementMatrix
 ( const FiniteElement &el, ElementTransformation &Trans,
@@ -137,34 +108,6 @@ void H1NormIntegrator::AssembleElementMatrix
    }
 }
 
-/// Integrator for (q * u, v)
-/// where q is a scalar coefficient, u is from vector FE space created
-/// from scalar FE collection (called improper vector FE) and v is from
-/// proper vector FE space (like RT or ND)
-class MixedVectorVectorFEMassIntegrator : public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   void Init(Coefficient *q)
-   { Q = q; }
-
-#ifndef MFEM_THREAD_SAFE
-   DenseMatrix test_vshape;
-   Vector scalar_shape;
-   DenseMatrix trial_vshape; // components are test shapes
-#endif
-
-public:
-   MixedVectorVectorFEMassIntegrator() { Init(NULL); }
-   MixedVectorVectorFEMassIntegrator(Coefficient *_q) { Init(_q); }
-   MixedVectorVectorFEMassIntegrator(Coefficient &q) { Init(&q); }
-
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
 void MixedVectorVectorFEMassIntegrator::AssembleElementMatrix2(
    const FiniteElement &trial_fe, const FiniteElement &test_fe,
    ElementTransformation &Trans, DenseMatrix &elmat)
@@ -255,93 +198,6 @@ void MixedVectorVectorFEMassIntegrator::AssembleElementMatrix2(
     }
 
 }
-
-//********* NEW STUFF FOR 4D CFOSLS
-//-----------------------
-/// Integrator for (Q u, v) for VectorFiniteElements
-
-class PAUVectorFEMassIntegrator: public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   VectorCoefficient *VQ;
-   MatrixCoefficient *MQ;
-   void Init(Coefficient *q, VectorCoefficient *vq, MatrixCoefficient *mq)
-   { Q = q; VQ = vq; MQ = mq; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector shape;
-   Vector D;
-   Vector test_shape;
-   Vector b;
-   DenseMatrix trial_vshape;
-#endif
-
-public:
-   PAUVectorFEMassIntegrator() { Init(NULL, NULL, NULL); }
-   PAUVectorFEMassIntegrator(Coefficient *_q) { Init(_q, NULL, NULL); }
-   PAUVectorFEMassIntegrator(Coefficient &q) { Init(&q, NULL, NULL); }
-   PAUVectorFEMassIntegrator(VectorCoefficient *_vq) { Init(NULL, _vq, NULL); }
-   PAUVectorFEMassIntegrator(VectorCoefficient &vq) { Init(NULL, &vq, NULL); }
-   PAUVectorFEMassIntegrator(MatrixCoefficient *_mq) { Init(NULL, NULL, _mq); }
-   PAUVectorFEMassIntegrator(MatrixCoefficient &mq) { Init(NULL, NULL, &mq); }
-
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                      ElementTransformation &Trans,
-                                      DenseMatrix &elmat);
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-//=-=-=-=--=-=-=-=-=-=-=-=-=
-/// Integrator for (Q u, v) for VectorFiniteElements
-class PAUVectorFEMassIntegrator2: public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   VectorCoefficient *VQ;
-   MatrixCoefficient *MQ;
-   void Init(Coefficient *q, VectorCoefficient *vq, MatrixCoefficient *mq)
-   { Q = q; VQ = vq; MQ = mq; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector shape;
-   Vector D;
-   Vector trial_shape;
-   Vector test_shape;//<<<<<<<
-   DenseMatrix K;
-   DenseMatrix test_vshape;
-   DenseMatrix trial_vshape;
-   DenseMatrix trial_dshape;//<<<<<<<<<<<<<<
-   DenseMatrix test_dshape;//<<<<<<<<<<<<<<
-   DenseMatrix dshape;
-   DenseMatrix dshapedxt;
-   DenseMatrix invdfdx;
-#endif
-
-public:
-   PAUVectorFEMassIntegrator2() { Init(NULL, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(Coefficient *_q) { Init(_q, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(Coefficient &q) { Init(&q, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(VectorCoefficient *_vq) { Init(NULL, _vq, NULL); }
-   PAUVectorFEMassIntegrator2(VectorCoefficient &vq) { Init(NULL, &vq, NULL); }
-   PAUVectorFEMassIntegrator2(MatrixCoefficient *_mq) { Init(NULL, NULL, _mq); }
-   PAUVectorFEMassIntegrator2(MatrixCoefficient &mq) { Init(NULL, NULL, &mq); }
-
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                      ElementTransformation &Trans,
-                                      DenseMatrix &elmat);
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-//=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-
 
 void PAUVectorFEMassIntegrator::AssembleElementMatrix(
         const FiniteElement &el,
@@ -473,37 +329,6 @@ void PAUVectorFEMassIntegrator2::AssembleElementMatrix2(
         ElementTransformation &Trans, DenseMatrix &elmat)
 {}
 
-//********* END OF NEW STUFF FOR CFOSLS 4D
-
-//********* NEW STUFF FOR 4D CFOSLS
-//---------
-class VectordivDomainLFIntegrator : public LinearFormIntegrator
-{
-   Vector divshape;
-   Coefficient &Q;
-   int oa, ob;
-public:
-   /// Constructs a domain integrator with a given Coefficient
-   VectordivDomainLFIntegrator(Coefficient &QF, int a = 2, int b = 0)
-   // the old default was a = 1, b = 1
-   // for simple elliptic problems a = 2, b = -2 is ok
-      : Q(QF), oa(a), ob(b) { }
-
-   /// Constructs a domain integrator with a given Coefficient
-   VectordivDomainLFIntegrator(Coefficient &QF, const IntegrationRule *ir)
-      : LinearFormIntegrator(ir), Q(QF), oa(1), ob(1) { }
-
-   /** Given a particular Finite Element and a transformation (Tr)
-       computes the element right hand side element vector, elvect. */
-   virtual void AssembleRHSElementVect(const FiniteElement &el,
-                                       ElementTransformation &Tr,
-                                       Vector &elvect);
-
-   using LinearFormIntegrator::AssembleRHSElementVect;
-};
-//---------
-
-//------------------
 void VectordivDomainLFIntegrator::AssembleRHSElementVect(
    const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)//don't need the matrix but the vector
 {
@@ -537,9 +362,181 @@ void VectordivDomainLFIntegrator::AssembleRHSElementVect(
    }
 }
 
-//------------------
-//********* END OF NEW STUFF FOR CFOSLS 4D
+void MixedVectorScalarIntegrator::AssembleElementMatrix2(
+        const FiniteElement &trial_fe, const FiniteElement &test_fe,
+        ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    // assume trial_fe is vector FE but created from scalar f.e. collection,
+    // and test_fe is scalar FE
 
+    MFEM_ASSERT(test_fe.GetRangeType() == FiniteElement::SCALAR && trial_fe.GetRangeType() == FiniteElement::SCALAR,
+                "The improper vector FE should have a scalar type in the current implementation \n");
 
-//------------------
-//********* END OF NEW BilinearForm and LinearForm integrators FOR CFOSLS 4D (used only for heat equation, so can be deleted)
+    int dim  = test_fe.GetDim();
+    //int vdim = dim;
+    int trial_dof = trial_fe.GetDof();
+    int test_dof = test_fe.GetDof();
+    double w;
+
+    if (VQ == NULL)
+        mfem_error("MixedVectorScalarIntegrator::AssembleElementMatrix2(...)\n"
+                "   is not implemented for non-vector coefficients");
+
+#ifdef MFEM_THREAD_SAFE
+    Vector trial_shape(trial_dof);
+    DenseMatrix test_vshape(test_dof,dim);
+#else
+    trial_vshape.SetSize(trial_dof*dim,dim);
+    test_shape.SetSize(test_dof);
+#endif
+    elmat.SetSize (test_dof, trial_dof * dim);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+        int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
+        ir = &IntRules.Get(test_fe.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+        const IntegrationPoint &ip = ir->IntPoint(i);
+        test_fe.CalcShape(ip, test_shape);
+
+        Trans.SetIntPoint (&ip);
+        trial_fe.CalcShape(ip, trial_shape);
+
+        //std::cout << "trial_shape \n";
+        //trial_shape.Print();
+
+        for (int d = 0; d < dim; ++d )
+            for (int l = 0; l < dim; ++l)
+                for (int k = 0; k < trial_dof; ++k)
+                {
+                    if (l == d)
+                        trial_vshape(l*trial_dof+k,d) = trial_shape(k);
+                    else
+                        trial_vshape(l*trial_dof+k,d) = 0.0;
+                }
+        // now trial_vshape is of size trial_dof(scalar)*dim x dim
+
+        //trial_fe.CalcVShape(Trans, trial_vshape); would be nice if it worked but no
+
+        w = ip.weight * Trans.Weight();
+        VQ->Eval (b, Trans, ip);
+
+        for (int l = 0; l < dim; ++l)
+            for (int j = 0; j < trial_dof; j++)
+                for (int k = 0; k < test_dof; k++)
+                    for (int d = 0; d < dim; d++ )
+                    {
+                        elmat(k, l*trial_dof + j) += w*trial_vshape(l*trial_dof + j,d)*b(d)*test_shape(k);
+                    }
+    }
+}
+
+void GradDomainLFIntegrator::AssembleRHSElementVect(
+   const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)
+{
+   int dof = el.GetDof();
+   int dim  = el.GetDim();
+
+   dshape.SetSize(dof,dim);       // vector of size dof
+   elvect.SetSize(dof);
+   elvect = 0.0;
+
+   invdfdx.SetSize(dim,dim);
+   dshapedxt.SetSize(dof,dim);
+   bf.SetSize(dim);
+   bfdshapedxt.SetSize(dof);
+   double w;
+
+   const IntegrationRule *ir = IntRule;
+   if (ir == NULL)
+   {
+//       ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob
+//                          + Tr.OrderW());
+//      ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
+     // int order = 2 * el.GetOrder() ; // <--- OK for RTk
+      int order = (Tr.OrderW() + el.GetOrder() + el.GetOrder());
+      ir = &IntRules.Get(el.GetGeomType(), order);
+   }
+
+   for (int i = 0; i < ir->GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir->IntPoint(i);
+      el.CalcDShape(ip, dshape);
+
+      Tr.SetIntPoint (&ip);
+      w = ip.weight;// * Tr.Weight();
+      CalcAdjugate(Tr.Jacobian(), invdfdx);
+      Mult(dshape, invdfdx, dshapedxt);
+
+      Q.Eval(bf, Tr, ip);
+
+      dshapedxt.Mult(bf, bfdshapedxt);
+
+      add(elvect, w, bfdshapedxt, elvect);
+   }
+}
+
+void ImproperVectorMassIntegrator::AssembleElementMatrix(
+   const FiniteElement &el, ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    MFEM_ASSERT(el.GetRangeType() == FiniteElement::SCALAR,
+                "The improper vector FE should have a scalar type in the current implementation \n");
+
+    int dim  = el.GetDim();
+    int nd = el.GetDof();
+    int improper_nd = nd * dim;
+
+    double w;
+
+#ifdef MFEM_THREAD_SAFE
+    Vector scalar_shape.SetSize(nd);
+    DenseMatrix vector_vshape(improper_nd, dim);
+#else
+    scalar_shape.SetSize(nd);
+    vector_vshape.SetSize(improper_nd, dim);
+#endif
+    elmat.SetSize (improper_nd, improper_nd);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+       int order = (Trans.OrderW() + el.GetOrder() + el.GetOrder());
+       ir = &IntRules.Get(el.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+       const IntegrationPoint &ip = ir->IntPoint(i);
+
+       Trans.SetIntPoint (&ip);
+
+       el.CalcShape(ip, scalar_shape);
+       for (int d = 0; d < dim; ++d )
+           for (int l = 0; l < dim; ++l)
+               for (int k = 0; k < nd; ++k)
+               {
+                   if (l == d)
+                       vector_vshape(l*nd+k,d) = scalar_shape(k);
+                   else
+                       vector_vshape(l*nd+k,d) = 0.0;
+               }
+       // now vector_vshape is of size improper_nd x dim
+       //el.CalcVShape(Trans, vector_vshape); // would be easy but this doesn't work for improper vector L2
+
+       w = ip.weight * Trans.Weight();
+       if (Q)
+          w *= Q->Eval(Trans, ip);
+
+       AddMult_a_AAt (w, vector_vshape, elmat);
+
+    }
+}
+
+} // for namespace mfem
+

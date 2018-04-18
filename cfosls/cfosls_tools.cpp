@@ -1,258 +1,10 @@
-// TODO: split this into hpp and cpp, but the first attempt failed
 #include <iostream>
 
 using namespace std;
 using namespace mfem;
 
-HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
-                                   std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
-std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
-
-struct CFOSLSHyperbolicFormulation
+namespace mfem
 {
-    friend class CFOSLSHyperbolicProblem;
-
-protected:
-    const int dim;
-    const int numsol;
-    const char * space_for_S;
-    const char * space_for_sigma;
-    bool have_constraint;
-    const int bdrattrnum;
-    int numblocks;
-    int unknowns_number;
-    const char * formulation;
-    //bool keep_divdiv; unsupported because then we need additional integrators (sum of smth)
-    Array2D<BilinearFormIntegrator*> blfis;
-    Array<LinearFormIntegrator*> lfis;
-    Array<Array<int>* > essbdr_attrs;
-public:
-    CFOSLSHyperbolicFormulation(int dimension, int solution_number,
-                            const char * S_space, const char * sigma_space,
-                            bool with_constraint, int number_of_bdrattribs, bool verbose)
-        : dim(dimension), numsol(solution_number),
-          space_for_S(S_space), space_for_sigma(sigma_space),
-          have_constraint(with_constraint), bdrattrnum(number_of_bdrattribs)
-          //, keep_divdiv(with_divdiv)
-    {
-        if (with_constraint)
-            formulation = "cfosls";
-        else
-            formulation = "fosls";
-        MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
-                    "Formulation must be cfosls or fosls!\n");
-        MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
-                    "Space for S must be H1 or L2!\n");
-        MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
-                    "Space for sigma must be Hdiv or H1!\n");
-        MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0
-                                                           && strcmp(space_for_S,"H1") == 0),
-                    "Sigma from H1vec must be coupled with S from H1!\n");
-
-        Transport_test Mytest(dim,numsol);
-
-        numblocks = 1;
-
-        if (strcmp(space_for_S,"H1") == 0)
-            numblocks++;
-
-        unknowns_number = numblocks;
-
-        if (strcmp(formulation,"cfosls") == 0)
-            numblocks++;
-
-        if (verbose)
-            std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
-
-        //if (strcmp(formulation,"cfosls") == 0)
-            //essbdr_attrs.SetSize(numblocks - 1);
-        //else // fosls
-            //essbdr_attrs.SetSize(numblocks);
-        essbdr_attrs.SetSize(numblocks);
-
-        for (int i = 0; i < essbdr_attrs.Size(); ++i)
-        {
-            essbdr_attrs[i] = new Array<int>(bdrattrnum);
-            (*essbdr_attrs[i]) = 0;
-        }
-
-        // S is from H1, so we impose bdr condition for S at t = 0
-        if (strcmp(space_for_S,"H1") == 0)
-            (*essbdr_attrs[1])[0] = 1; // t = 0;
-
-        // S is from L2, so we impose bdr condition for sigma at t = 0
-        if (strcmp(space_for_S,"L2") == 0)
-            (*essbdr_attrs[0])[0] = 1; // t = 0;
-
-        if (verbose)
-        {
-            std::cout << "Boundary conditions: \n";
-            std::cout << "ess bdr for sigma: \n";
-            essbdr_attrs[0]->Print(std::cout, bdrattrnum);
-            if (strcmp(space_for_S,"H1") == 0)
-            {
-                std::cout << "ess bdr for S: \n";
-                essbdr_attrs[1]->Print(std::cout, bdrattrnum);
-            }
-        }
-
-        // bilinear forms
-        blfis.SetSize(numblocks, numblocks);
-        for (int i = 0; i < numblocks; ++i)
-            for (int j = 0; j < numblocks; ++j)
-                blfis(i,j) = NULL;
-
-        int blkcount = 0;
-        if (strcmp(space_for_S,"H1") == 0) // S is from H1
-        {
-            if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
-                blfis(0,0) = new VectorFEMassIntegrator;
-            else // sigma is from H1vec
-                blfis(0,0) = new ImproperVectorMassIntegrator;
-        }
-        else // "L2"
-            blfis(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
-        ++blkcount;
-
-        if (strcmp(space_for_S,"H1") == 0)
-        {
-            if (strcmp(space_for_sigma,"Hdiv") == 0)
-                blfis(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
-            else
-                blfis(1,1) = new MassIntegrator(*Mytest.bTb);
-            ++blkcount;
-        }
-
-        if (strcmp(space_for_S,"H1") == 0) // S is present
-        {
-            if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
-            {
-                //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
-                blfis(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
-            }
-            else // sigma is from H1
-                blfis(1,0) = new MixedVectorScalarIntegrator(*Mytest.minb);
-        }
-
-        if (strcmp(formulation,"cfosls") == 0)
-        {
-           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
-             blfis(blkcount,0) = new VectorFEDivergenceIntegrator;
-           else // sigma is from H1vec
-             blfis(blkcount,0) = new VectorDivergenceIntegrator;
-        }
-
-        // linear forms
-        lfis.SetSize(numblocks);
-        for (int i = 0; i < numblocks; ++i)
-            lfis[i] = NULL;
-
-        blkcount = 1;
-        if (strcmp(space_for_S,"H1") == 0)
-        {
-            lfis[1] = new GradDomainLFIntegrator(*Mytest.bf);
-            ++blkcount;
-        }
-
-        if (strcmp(formulation,"cfosls") == 0)
-            lfis[blkcount] = new DomainLFIntegrator(*Mytest.scalardivsigma);
-    }
-
-};
-
-class BlockProblemForms
-{
-    friend class CFOSLSHyperbolicProblem;
-protected:
-    const int numblocks;
-    Array<ParBilinearForm*> diag_forms;
-    Array2D<ParMixedBilinearForm*> offd_forms;
-public:
-    BlockProblemForms(int num_blocks) : numblocks(num_blocks)
-    {
-        diag_forms.SetSize(num_blocks);
-        for (int i = 0; i < num_blocks; ++i)
-            diag_forms[i] = NULL;
-        offd_forms.SetSize(numblocks, num_blocks);
-        for (int i = 0; i < num_blocks; ++i)
-            for (int j = 0; j < num_blocks; ++j)
-                offd_forms(i,j) = NULL;
-    }
-    ParBilinearForm* & diag(int i) {return diag_forms[i];}
-    ParMixedBilinearForm* & offd(int i, int j) {return offd_forms(i,j);}
-};
-
-
-
-class CFOSLSHyperbolicProblem
-{
-protected:
-    int feorder;
-    CFOSLSHyperbolicFormulation& struct_formul;
-    bool spaces_initialized;
-    bool forms_initialized;
-    bool solver_initialized;
-
-    FiniteElementCollection *hdiv_coll;
-    FiniteElementCollection *h1_coll;
-    FiniteElementCollection *l2_coll;
-    ParFiniteElementSpace * Hdiv_space;
-    ParFiniteElementSpace * H1_space;
-    ParFiniteElementSpace * H1vec_space;
-    ParFiniteElementSpace * L2_space;
-
-    // FIXME: to be removed in the abstract base class
-    ParFiniteElementSpace * Sigma_space;
-    ParFiniteElementSpace * S_space;
-
-    // all par grid functions which are relevant to the formulation
-    // e.g., solution components and right hand sides
-    Array<ParGridFunction*> grfuns;
-
-    Array<ParFiniteElementSpace*> pfes;
-    BlockProblemForms pbforms;
-    Array<ParLinearForm*> plforms;
-
-
-    Array<int> blkoffsets_true;
-    Array<int> blkoffsets;
-    Array2D<HypreParMatrix*> hpmats;
-    BlockOperator *CFOSLSop;
-    Array2D<HypreParMatrix*> hpmats_nobnd;
-    BlockOperator *CFOSLSop_nobnd;
-    BlockVector * trueRhs;
-    BlockVector * trueX;
-    BlockVector * trueBnd;
-    BlockVector * x; // inital condition (~bnd conditions)
-    BlockDiagonalPreconditioner *prec;
-    IterativeSolver * solver;
-
-    StopWatch chrono;
-
-protected:
-    void InitFEColls(bool verbose);
-    void InitSpaces(ParMesh& pmesh);
-    void InitForms();
-    void AssembleSystem(bool verbose);
-    void InitSolver(bool verbose);
-    void InitPrec(int prec_option, bool verbose);
-    BlockVector *  SetInitialCondition();
-    BlockVector * SetTrueInitialCondition();
-    void InitGrFuns();
-    void DistributeSolution();
-    void ComputeError(bool verbose, bool checkbnd);
-public:
-    CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
-                            int fe_order, bool verbose);
-    CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation& struct_formulation,
-                            int fe_order, int prec_option, bool verbose);
-    void BuildCFOSLSSystem(ParMesh& pmesh, bool verbose);
-    void Solve(bool verbose);
-    void Update();
-    // deletes everything which was related to a specific mesh
-    void Reset() {MFEM_ABORT("Not implemented \n");}
-};
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
                                                  int fe_order, bool verbose)
@@ -964,40 +716,6 @@ void CFOSLSHyperbolicProblem::Update()
         grfuns[i]->Update();
 }
 
-SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
-
-// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
-class GeneralHierarchy
-{
-protected:
-    int num_lvls;
-    std::vector<ParMesh*> pmesh_lvls;
-    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
-    std::vector<ParFiniteElementSpace* > H1_space_lvls;
-    std::vector<ParFiniteElementSpace* > L2_space_lvls;
-
-    std::vector<SparseMatrix*> P_H1_lvls;
-    std::vector<SparseMatrix*> P_Hdiv_lvls;
-    std::vector<SparseMatrix*> P_L2_lvls;
-    std::vector<HypreParMatrix*> TrueP_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_L2_lvls;
-
-public:
-    GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
-
-    virtual void RefineAndCopy(int lvl, ParMesh* pmesh)
-    {
-        if (lvl == num_lvls - 1)
-            pmesh_lvls[lvl] = new ParMesh(*pmesh);
-        else
-        {
-            pmesh->UniformRefinement();
-            pmesh_lvls[lvl] = new ParMesh(*pmesh);
-        }
-    }
-};
-
 GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose)
     : num_lvls (num_levels)
 {
@@ -1102,58 +820,6 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
 
     } // end of loop over levels
 
-}
-
-
-class GeneralCylHierarchy : public GeneralHierarchy
-{
-protected:
-    std::vector<ParMeshCyl*> pmeshcyl_lvls;
-
-    std::vector<int> init_cond_size_lvls;
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
-
-    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
-protected:
-    void ConstructRestrictions();
-    void ConstructInterpolations();
-    void ConstructTdofsLinks();
-
-public:
-    GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
-        : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
-    {
-        // don't change the order of these calls
-        ConstructTdofsLinks();
-        ConstructRestrictions();
-        ConstructInterpolations();
-    }
-
-    virtual void RefineAndCopy(int lvl, ParMeshCyl* pmesh);
-};
-
-void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMeshCyl* pmeshcyl)
-{
-    if (lvl == num_lvls - 1)
-    {
-        pmeshcyl_lvls[lvl] = new ParMeshCyl(*pmeshcyl);
-        pmesh_lvls[lvl] = pmeshcyl_lvls[lvl];
-    }
-    else
-    {
-        pmeshcyl->Refine(1);
-        pmeshcyl_lvls[lvl] = new ParMeshCyl(*pmeshcyl);
-        pmesh_lvls[lvl] = pmeshcyl_lvls[lvl];
-        // be careful about the update of bot_to_top so that it doesn't get lost
-    }
 }
 
 void GeneralCylHierarchy::ConstructRestrictions()
@@ -1271,3 +937,423 @@ void GeneralCylHierarchy::ConstructTdofsLinks()
         }
     }
 }
+
+HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace, std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
+{
+    if (strcmp(top_or_bot, "top") != 0 && strcmp(top_or_bot, "bot") != 0)
+    {
+        MFEM_ABORT ("In num_lvls() top_or_bot must be 'top' or 'bot'!\n");
+    }
+
+    MPI_Comm comm = pfespace.GetComm();
+
+    int m = bot_to_top_tdofs_link.size();
+    int n = pfespace.TrueVSize();
+    int * ia = new int[m + 1];
+    ia[0] = 0;
+    for (int i = 0; i < m; ++i)
+        ia[i + 1] = ia[i] + 1;
+    int * ja = new int [ia[m]];
+    double * data = new double [ia[m]];
+    int count = 0;
+    for (int row = 0; row < m; ++row)
+    {
+        if (strcmp(top_or_bot, "bot") == 0)
+            ja[count] = bot_to_top_tdofs_link[row].first;
+        else
+            ja[count] = bot_to_top_tdofs_link[row].second;
+        data[count] = 1.0;
+        count++;
+    }
+    SparseMatrix * diag = new SparseMatrix(ia, ja, data, m, n);
+
+    int local_size = bot_to_top_tdofs_link.size();
+    int global_marked_tdofs = 0;
+    MPI_Allreduce(&local_size, &global_marked_tdofs, 1, MPI_INT, MPI_SUM, comm);
+
+    //std::cout << "Got after Allreduce \n";
+
+    int global_num_rows = global_marked_tdofs;
+    int global_num_cols = pfespace.GlobalTrueVSize();
+
+    int num_procs;
+    MPI_Comm_size(comm, &num_procs);
+
+    int myid;
+    MPI_Comm_rank(comm, &myid);
+
+    int * local_row_offsets = new int[num_procs + 1];
+    local_row_offsets[0] = 0;
+    MPI_Allgather(&m, 1, MPI_INT, local_row_offsets + 1, 1, MPI_INT, comm);
+
+    int * local_col_offsets = new int[num_procs + 1];
+    local_col_offsets[0] = 0;
+    MPI_Allgather(&n, 1, MPI_INT, local_col_offsets + 1, 1, MPI_INT, comm);
+
+    for (int j = 1; j < num_procs + 1; ++j)
+        local_row_offsets[j] += local_row_offsets[j - 1];
+
+    for (int j = 1; j < num_procs + 1; ++j)
+        local_col_offsets[j] += local_col_offsets[j - 1];
+
+    int * row_starts = new int[3];
+    row_starts[0] = local_row_offsets[myid];
+    row_starts[1] = local_row_offsets[myid + 1];
+    row_starts[2] = local_row_offsets[num_procs];
+    int * col_starts = new int[3];
+    col_starts[0] = local_col_offsets[myid];
+    col_starts[1] = local_col_offsets[myid + 1];
+    col_starts[2] = local_col_offsets[num_procs];
+
+    /*
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "my local_row_offsets not summed: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+
+            std::cout << "my local_col_offsets not summed: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_col_offsets[j] << " ";
+            std::cout << "\n";
+            std::cout << "\n";
+
+            for (int j = 1; j < num_procs + 1; ++j)
+                local_row_offsets[j] += local_row_offsets[j - 1];
+
+            for (int j = 1; j < num_procs + 1; ++j)
+                local_col_offsets[j] += local_col_offsets[j - 1];
+
+            std::cout << "my local_row_offsets: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+
+            std::cout << "my local_col_offsets: \n";
+            for (int j = 0; j < num_procs + 1; ++j)
+                std::cout << local_row_offsets[j] << " ";
+            std::cout << "\n";
+            std::cout << "\n";
+
+            int * row_starts = new int[3];
+            row_starts[0] = local_row_offsets[myid];
+            row_starts[1] = local_row_offsets[myid + 1];
+            row_starts[2] = local_row_offsets[num_procs];
+            int * col_starts = new int[3];
+            col_starts[0] = local_col_offsets[myid];
+            col_starts[1] = local_col_offsets[myid + 1];
+            col_starts[2] = local_col_offsets[num_procs];
+
+            std::cout << "my computed row starts: \n";
+            std::cout << row_starts[0] << " " <<  row_starts[1] << " " << row_starts[2];
+            std::cout << "\n";
+
+            std::cout << "my computed col starts: \n";
+            std::cout << col_starts[0] << " " <<  col_starts[1] << " " << col_starts[2];
+            std::cout << "\n";
+
+            std::cout << std::flush;
+        }
+
+        MPI_Barrier(comm);
+    } // end fo loop over all processors, one after another
+    */
+
+
+    // FIXME:
+    // MFEM_ABORT("Don't know how to create row_starts and col_starts \n");
+
+    //std::cout << "Creating resT \n";
+
+    HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
+
+    //std::cout << "resT created \n";
+
+
+    HypreParMatrix * res = resT->Transpose();
+    res->CopyRowStarts();
+    res->CopyColStarts();
+
+    //std::cout << "Got after resT creation \n";
+
+    return res;
+}
+
+// eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
+// the fespace must correspond to the eltype provided
+// bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
+// which can be taken out of ParMeshCyl
+
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)
+{
+    if (strcmp(eltype, "linearH1") != 0 && strcmp(eltype, "RT0") != 0)
+    {
+        MFEM_ABORT ("Provided eltype is not supported in CreateBotToTopDofsLink: must be linearH1 or RT0 strictly! \n");
+    }
+
+    int nbelpairs = bot_to_top_bels.size();
+    // estimating the maximal memory size required
+    Array<int> dofs;
+    fespace.GetBdrElementDofs(0, dofs);
+    int ndofpairs_max = nbelpairs * dofs.Size();
+
+    if (verbose)
+        std::cout << "nbelpairs = " << nbelpairs << ", estimated ndofpairs_max = " << ndofpairs_max << "\n";
+
+    std::vector<std::pair<int,int> > * res = new std::vector<std::pair<int,int> >;
+    res->reserve(ndofpairs_max);
+
+    std::set<std::pair<int,int> > res_set;
+
+    Mesh * mesh = fespace.GetMesh();
+
+    for (int i = 0; i < nbelpairs; ++i)
+    {
+        if (verbose)
+            std::cout << "pair " << i << ": \n";
+
+        if (strcmp(eltype, "RT0") == 0)
+        {
+            int belind_first = bot_to_top_bels[i].first;
+            Array<int> bel_dofs_first;
+            fespace.GetBdrElementDofs(belind_first, bel_dofs_first);
+
+            int belind_second = bot_to_top_bels[i].second;
+            Array<int> bel_dofs_second;
+            fespace.GetBdrElementDofs(belind_second, bel_dofs_second);
+
+            if (verbose)
+            {
+                std::cout << "belind1: " << belind_first << ", bel_dofs_first: \n";
+                bel_dofs_first.Print();
+                std::cout << "belind2: " << belind_second << ", bel_dofs_second: \n";
+                bel_dofs_second.Print();
+            }
+
+
+            if (bel_dofs_first.Size() != 1 || bel_dofs_second.Size() != 1)
+            {
+                MFEM_ABORT("For RT0 exactly one dof must correspond to each boundary element \n");
+            }
+
+            if (res_set.find(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0])) == res_set.end())
+            {
+                res_set.insert(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+                res->push_back(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
+            }
+
+        }
+
+        if (strcmp(eltype, "linearH1") == 0)
+        {
+            int belind_first = bot_to_top_bels[i].first;
+            Array<int> bel_dofs_first;
+            fespace.GetBdrElementDofs(belind_first, bel_dofs_first);
+
+            Array<int> belverts_first;
+            mesh->GetBdrElementVertices(belind_first, belverts_first);
+
+            int nverts = mesh->GetBdrElement(belind_first)->GetNVertices();
+
+            int belind_second = bot_to_top_bels[i].second;
+            Array<int> bel_dofs_second;
+            fespace.GetBdrElementDofs(belind_second, bel_dofs_second);
+
+            if (verbose)
+            {
+                std::cout << "belind1: " << belind_first << ", bel_dofs_first: \n";
+                bel_dofs_first.Print();
+                std::cout << "belind2: " << belind_second << ", bel_dofs_second: \n";
+                bel_dofs_second.Print();
+            }
+
+            Array<int> belverts_second;
+            mesh->GetBdrElementVertices(belind_second, belverts_second);
+
+
+            if (bel_dofs_first.Size() != nverts || bel_dofs_second.Size() != nverts)
+            {
+                MFEM_ABORT("For linearH1 exactly #bel.vertices of dofs must correspond to each boundary element \n");
+            }
+
+            /*
+            Array<int> P, Po;
+            fespace.GetMesh()->GetBdrElementPlanars(i, P, Po);
+
+            std::cout << "P: \n";
+            P.Print();
+            std::cout << "Po: \n";
+            Po.Print();
+
+            Array<int> belverts_first;
+            mesh->GetBdrElementVertices(belind_first, belverts_first);
+            */
+
+            std::vector<std::vector<double> > vertscoos_first(nverts);
+            if (verbose)
+                std::cout << "verts of first bdr el \n";
+            for (int vert = 0; vert < nverts; ++vert)
+            {
+                vertscoos_first[vert].resize(mesh->Dimension());
+                double * vertcoos = mesh->GetVertex(belverts_first[vert]);
+                if (verbose)
+                    std::cout << "vert = " << vert << ": ";
+                for (int j = 0; j < mesh->Dimension(); ++j)
+                {
+                    vertscoos_first[vert][j] = vertcoos[j];
+                    if (verbose)
+                        std::cout << vertcoos[j] << " ";
+                }
+                if (verbose)
+                    std::cout << "\n";
+            }
+
+            int * verts_permutation_first = new int[nverts];
+            sortingPermutationNew(vertscoos_first, verts_permutation_first);
+
+            if (verbose)
+            {
+                std::cout << "permutation first: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_permutation_first[i] << " ";
+                std::cout << "\n";
+            }
+
+            std::vector<std::vector<double> > vertscoos_second(nverts);
+            if (verbose)
+                std::cout << "verts of second bdr el \n";
+            for (int vert = 0; vert < nverts; ++vert)
+            {
+                vertscoos_second[vert].resize(mesh->Dimension());
+                double * vertcoos = mesh->GetVertex(belverts_second[vert]);
+                if (verbose)
+                    std::cout << "vert = " << vert << ": ";
+                for (int j = 0; j < mesh->Dimension(); ++j)
+                {
+                    vertscoos_second[vert][j] = vertcoos[j];
+                    if (verbose)
+                        std::cout << vertcoos[j] << " ";
+                }
+                if (verbose)
+                    std::cout << "\n";
+            }
+
+            int * verts_permutation_second = new int[nverts];
+            sortingPermutationNew(vertscoos_second, verts_permutation_second);
+
+            if (verbose)
+            {
+                std::cout << "permutation second: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_permutation_second[i] << " ";
+                std::cout << "\n";
+            }
+
+            /*
+            int * verts_perm_second_inverse = new int[nverts];
+            invert_permutation(verts_permutation_second, nverts, verts_perm_second_inverse);
+
+            if (verbose)
+            {
+                std::cout << "inverted permutation second: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_perm_second_inverse[i] << " ";
+                std::cout << "\n";
+            }
+            */
+
+            int * verts_perm_first_inverse = new int[nverts];
+            invert_permutation(verts_permutation_first, nverts, verts_perm_first_inverse);
+
+            if (verbose)
+            {
+                std::cout << "inverted permutation first: ";
+                for (int i = 0; i < mesh->Dimension(); ++i)
+                    std::cout << verts_perm_first_inverse[i] << " ";
+                std::cout << "\n";
+            }
+
+
+            for (int dofno = 0; dofno < bel_dofs_first.Size(); ++dofno)
+            {
+                //int dofno_second = verts_perm_second_inverse[verts_permutation_first[dofno]];
+                int dofno_second = verts_permutation_second[verts_perm_first_inverse[dofno]];
+
+                if (res_set.find(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second])) == res_set.end())
+                {
+                    res_set.insert(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
+                    res->push_back(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
+                }
+                //res_set.insert(std::pair<int,int>(bel_dofs_first[dofno],
+                                                  //bel_dofs_second[dofno_second]));
+
+                if (verbose)
+                    std::cout << "matching dofs pair: <" << bel_dofs_first[dofno] << ","
+                          << bel_dofs_second[dofno_second] << "> \n";
+            }
+
+            if (verbose)
+               std::cout << "\n";
+        }
+
+    } // end of loop over all pairs of boundary elements
+
+    if (verbose)
+    {
+        if (strcmp(eltype,"RT0") == 0)
+            std::cout << "dof pairs for Hdiv: \n";
+        if (strcmp(eltype,"linearH1") == 0)
+            std::cout << "dof pairs for H1: \n";
+        std::set<std::pair<int,int> >::iterator it;
+        for ( unsigned int i = 0; i < res->size(); ++i )
+        {
+            std::cout << "<" << (*res)[i].first << ", " << (*res)[i].second << "> \n";
+        }
+    }
+
+
+    return res;
+}
+
+SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
+{
+    int * I = in.GetI();
+    int * J = in.GetJ();
+    double * Data = in.GetData();
+    double * End = Data+in.NumNonZeroElems();
+
+    int nnz = 0;
+    for (double * data_ptr = Data; data_ptr != End; data_ptr++)
+    {
+        if (*data_ptr != 0)
+            nnz++;
+    }
+
+    int * outI = new int[in.Height()+1];
+    int * outJ = new int[nnz];
+    double * outData = new double[nnz];
+    nnz = 0;
+    for (int i = 0; i < in.Height(); i++)
+    {
+        outI[i] = nnz;
+        for (int j = I[i]; j < I[i+1]; j++)
+        {
+            if (Data[j] !=0)
+            {
+                outJ[nnz] = J[j];
+                outData[nnz++] = Data[j];
+            }
+        }
+    }
+    outI[in.Height()] = nnz;
+
+    return new SparseMatrix(outI, outJ, outData, in.Height(), in.Width());
+}
+
+
+} // for namespace mfem
