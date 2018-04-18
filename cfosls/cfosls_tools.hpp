@@ -264,23 +264,6 @@ public:
     void Reset() {MFEM_ABORT("Not implemented \n");}
 };
 
-void CFOSLSHyperbolicProblem::Update()
-{
-    // update spaces
-    Hdiv_space->Update();
-    H1vec_space->Update();
-    H1_space->Update();
-    L2_space->Update();
-    // this is not enough, better update all pfes as above
-    //for (int i = 0; i < numblocks; ++i)
-        //pfes[i]->Update();
-
-    // update grid functions
-    for (int i = 0; i < grfuns.Size(); ++i)
-        grfuns[i]->Update();
-}
-
-//extern SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 // a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
 class GeneralHierarchy
