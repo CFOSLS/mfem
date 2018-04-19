@@ -1,7 +1,4 @@
-// TODO: split this into hpp and cpp, but the first attempt failed
 #include <iostream>
-//#include "cfosls_integrators.hpp"
-//#include "cfosls_testsuite.hpp"
 #include "testhead.hpp"
 
 #ifndef MFEM_CFOSLS_TOOLS
@@ -12,12 +9,70 @@ using namespace mfem;
 
 namespace mfem
 {
+//HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
+//HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
+
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
                                    std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
+
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range );
+void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs );
+
+/// Conjugate gradient method which checks for boundary conditions (used for debugging)
+class CGSolver_mod : public CGSolver
+{
+protected:
+    Array<int>& check_indices;
+
+    bool IndicesAreCorrect(const Vector& vec) const;
+
+public:
+   CGSolver_mod(Array<int>& Check_Indices) : CGSolver(), check_indices(Check_Indices) {}
+
+#ifdef MFEM_USE_MPI
+   CGSolver_mod(MPI_Comm _comm, Array<int>& Check_Indices) : CGSolver(_comm), check_indices(Check_Indices) { }
+#endif
+
+   virtual void Mult(const Vector &b, Vector &x) const;
+
+};
+
+// a class for square block operators where each block is given as a HypreParMatrix
+// used as an interface to handle coarsened operators for multigrid
+// FIXME: Who should delete the matrices?
+class BlkHypreOperator : public Operator
+{
+protected:
+    int numblocks;
+    Array2D<HypreParMatrix*> hpmats;
+    Array<int> block_offsets;
+public:
+    BlkHypreOperator(Array2D<HypreParMatrix*> & Hpmats)
+        : numblocks(Hpmats.NumRows())
+    {
+        hpmats.SetSize(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i )
+            for (int j = 0; j < numblocks; ++j )
+                if (Hpmats(i,j))
+                    hpmats(i,j) = Hpmats(i,j);
+                else
+                    hpmats(i,j) = NULL;
+
+
+        block_offsets.SetSize(numblocks + 1);
+        block_offsets[0] = 0;
+        for (int i = 0; i < numblocks; ++i )
+            block_offsets[i + 1] = hpmats(i,i)->Height();
+        block_offsets.PartialSum();
+    }
+
+    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void MultTranspose(const Vector &x, Vector &y) const;
+};
 
 struct CFOSLSHyperbolicFormulation
 {
@@ -285,13 +340,23 @@ protected:
 public:
     GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
 
-    virtual void RefineAndCopy(int lvl, ParMesh* pmesh)
+    void RefineAndCopy(int lvl, ParMesh* pmesh)
     {
+        if (dynamic_cast<ParMeshCyl*> (pmesh))
+            std::cout << "Unsuccessful cast \n";
+        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
+
         if (lvl == num_lvls - 1)
             pmesh_lvls[lvl] = new ParMesh(*pmesh);
         else
         {
-            pmesh->UniformRefinement();
+            if (!pmeshcyl_view)
+            {
+                pmesh->UniformRefinement();
+            }
+            else
+                pmeshcyl_view->Refine(1);
+            //pmesh->UniformRefinement();
             pmesh_lvls[lvl] = new ParMesh(*pmesh);
         }
     }
@@ -329,7 +394,7 @@ public:
         ConstructInterpolations();
     }
 
-    virtual void RefineAndCopy(int lvl, ParMeshCyl* pmesh);
+    //virtual void RefineAndCopy(int lvl, ParMesh* pmesh) override;
 };
 
 } // for namespace mfem

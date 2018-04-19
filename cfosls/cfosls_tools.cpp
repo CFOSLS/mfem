@@ -6,6 +6,226 @@ using namespace std;
 namespace mfem
 {
 
+bool CGSolver_mod::IndicesAreCorrect(const Vector& vec) const
+{
+    bool res = true;
+
+    for (int i = 0; i < check_indices.Size(); ++i)
+        if (fabs(vec[check_indices[i]]) > 1.0e-14)
+        {
+            std::cout << "index " << i << "has a nonzero value: " << vec[check_indices[i]] << "\n";
+            res = false;
+        }
+
+    return res;
+}
+
+void CGSolver_mod::Mult(const Vector &b, Vector &x) const
+{
+   int i;
+   double r0, den, nom, nom0, betanom, alpha, beta;
+
+   //std::cout << "look at b at the entrance \n";
+   //b.Print();
+   std::cout << "check for b: " << IndicesAreCorrect(b) << "\n";
+   MFEM_ASSERT(IndicesAreCorrect(b), "Indices check fails for b \n");
+
+   if (iterative_mode)
+   {
+      oper->Mult(x, r);
+      subtract(b, r, r); // r = b - A x
+   }
+   else
+   {
+      r = b;
+      x = 0.0;
+   }
+
+   MFEM_ASSERT(IndicesAreCorrect(r), "Indices check fails for r \n");
+   std::cout << "check for initial r: " << IndicesAreCorrect(r) << "\n";
+   check_indices.Print();
+   for ( int i = 0; i < check_indices.Size(); ++i)
+       std::cout << r[check_indices[i]] << " ";
+   std::cout << "\n";
+   //std::cout << "look at the initial residual\n";
+   //r.Print();
+
+   if (prec)
+   {
+      prec->Mult(r, z); // z = B r
+      //std::cout << "look at preconditioned residual at the entrance \n";
+      //z.Print();
+      d = z;
+   }
+   else
+   {
+      d = r;
+   }
+
+   std::cout << "check for initial d: " << IndicesAreCorrect(d) << "\n";
+   MFEM_ASSERT(IndicesAreCorrect(b), "Indices check fails for d \n");
+
+   //std::cout << "look at residual at the entrance \n";
+   //r.Print();
+
+   nom0 = nom = Dot(d, r);
+   MFEM_ASSERT(IsFinite(nom), "nom = " << nom);
+
+   std::cout << "nom = " << nom << "\n";
+
+   if (print_level == 1 || print_level == 3)
+   {
+      cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+           << nom << (print_level == 3 ? " ...\n" : "\n");
+   }
+
+   r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol);
+   if (nom <= r0)
+   {
+      converged = 1;
+      final_iter = 0;
+      final_norm = sqrt(nom);
+      return;
+   }
+
+   oper->Mult(d, z);  // z = A d
+   den = Dot(z, d);
+   MFEM_ASSERT(IsFinite(den), "den = " << den);
+
+   if (print_level >= 0 && den < 0.0)
+   {
+      cout << "Negative denominator in step 0 of PCG: " << den << '\n';
+   }
+
+   if (den == 0.0)
+   {
+      converged = 0;
+      final_iter = 0;
+      final_norm = sqrt(nom);
+      return;
+   }
+
+   // start iteration
+   converged = 0;
+   final_iter = max_iter;
+   for (i = 1; true; )
+   {
+      alpha = nom/den;
+      add(x,  alpha, d, x);     //  x = x + alpha d
+      add(r, -alpha, z, r);     //  r = r - alpha A d
+
+      std::cout << "check for new r: " << IndicesAreCorrect(r) << ", i = " << i << " \n";
+
+      if (prec)
+      {
+         prec->Mult(r, z);      //  z = B r
+         std::cout << "check for new z: " << IndicesAreCorrect(z) << ", i = " << i << " \n";
+         betanom = Dot(r, z);
+      }
+      else
+      {
+         betanom = Dot(r, r);
+      }
+
+      MFEM_ASSERT(IsFinite(betanom), "betanom = " << betanom);
+
+      if (print_level == 1)
+      {
+         cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+              << betanom << '\n';
+      }
+
+      if (betanom < r0)
+      {
+         if (print_level == 2)
+         {
+            cout << "Number of PCG iterations: " << i << '\n';
+         }
+         else if (print_level == 3)
+         {
+            cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+                 << betanom << '\n';
+         }
+         converged = 1;
+         final_iter = i;
+         break;
+      }
+
+      if (++i > max_iter)
+      {
+         break;
+      }
+
+      beta = betanom/nom;
+      if (prec)
+      {
+         add(z, beta, d, d);   //  d = z + beta d
+         std::cout << "check for new d: " << IndicesAreCorrect(d) << ", i = " << i << " \n";
+      }
+      else
+      {
+         add(r, beta, d, d);
+      }
+      oper->Mult(d, z);       //  z = A d
+      den = Dot(d, z);
+      MFEM_ASSERT(IsFinite(den), "den = " << den);
+      if (den <= 0.0)
+      {
+         if (print_level >= 0 && Dot(d, d) > 0.0)
+            cout << "PCG: The operator is not positive definite. (Ad, d) = "
+                 << den << '\n';
+      }
+      nom = betanom;
+   }
+   if (print_level >= 0 && !converged)
+   {
+      if (print_level != 1)
+      {
+         if (print_level != 3)
+         {
+            cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+                 << nom0 << " ...\n";
+         }
+         cout << "   Iteration : " << setw(3) << final_iter << "  (B r, r) = "
+              << betanom << '\n';
+      }
+      cout << "PCG: No convergence!" << '\n';
+   }
+   if (print_level >= 1 || (print_level >= 0 && !converged))
+   {
+      cout << "Average reduction factor = "
+           << pow (betanom/nom0, 0.5/final_iter) << '\n';
+   }
+   final_norm = sqrt(betanom);
+}
+
+void BlkHypreOperator::Mult(const Vector &x, Vector &y) const
+{
+    BlockVector x_viewer(x.GetData(), block_offsets);
+    BlockVector y_viewer(y.GetData(), block_offsets);
+
+    for (int i = 0; i < numblocks; ++i)
+    {
+        for (int j = 0; j < numblocks; ++j)
+            if (hpmats(i,j))
+                hpmats(i,j)->Mult(x_viewer.GetBlock(j), y_viewer.GetBlock(i));
+    }
+}
+
+void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
+{
+    BlockVector x_viewer(x.GetData(), block_offsets);
+    BlockVector y_viewer(y.GetData(), block_offsets);
+
+    for (int i = 0; i < numblocks; ++i)
+    {
+        for (int j = 0; j < numblocks; ++j)
+            if (hpmats(i,j))
+                hpmats(i,j)->MultTranspose(x_viewer.GetBlock(j), y_viewer.GetBlock(i));
+    }
+}
+
+
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
                                                  int fe_order, bool verbose)
     : feorder (fe_order), struct_formul(struct_formulation),
@@ -822,6 +1042,24 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
 
 }
 
+/*
+void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
+{
+    if (lvl == num_lvls - 1)
+        pmesh_lvls[lvl] = new ParMesh(*pmesh);
+    else
+    {
+        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
+        if (!pmeshcyl_view)
+        {
+            MFEM_ABORT("Dynamic cast into ParMeshCyl returned NULL \n");
+        }
+        pmeshcyl_view->Refine(1);
+        pmesh_lvls[lvl] = new ParMesh(*pmesh);
+    }
+}
+*/
+
 void GeneralCylHierarchy::ConstructRestrictions()
 {
     Restrict_bot_H1_lvls.resize(num_lvls);
@@ -1355,5 +1593,335 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
     return new SparseMatrix(outI, outJ, outData, in.Height(), in.Width());
 }
 
+// Eliminates all entries in the Operator acting in a pair of spaces,
+// assembled as a HypreParMatrix, which connect internal dofs to boundary dofs
+// Used to modife the Curl and Divskew operator for the new multigrid solver
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range )
+{
+    MPI_Comm comm = Op_hpmat.GetComm();
+
+    int ntdofs_dom = Op_hpmat.Width();
+    Array<int> btd_flags(ntdofs_dom);
+    btd_flags = 0;
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs_dom \n";
+    //EssBdrTrueDofs_dom.Print();
+
+    for ( int i = 0; i < EssBdrTrueDofs_dom.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs_dom[i];
+        btd_flags[tdof] = 1;
+    }
+
+    int * td_btd_i = new int[ ntdofs_dom + 1];
+    td_btd_i[0] = 0;
+    for (int i = 0; i < ntdofs_dom; ++i)
+        td_btd_i[i + 1] = td_btd_i[i] + 1;
+
+    int * td_btd_j = new int [td_btd_i[ntdofs_dom]];
+    double * td_btd_data = new double [td_btd_i[ntdofs_dom]];
+    for (int i = 0; i < ntdofs_dom; ++i)
+    {
+        td_btd_j[i] = i;
+        if (btd_flags[i] != 0)
+            td_btd_data[i] = 1.0;
+        else
+            td_btd_data[i] = 0.0;
+    }
+
+    SparseMatrix * td_btd_diag = new SparseMatrix(td_btd_i, td_btd_j, td_btd_data, ntdofs_dom, ntdofs_dom);
+
+    HYPRE_Int * row_starts = Op_hpmat.GetColStarts();
+
+    HypreParMatrix * td_btd_hpmat = new HypreParMatrix(comm, Op_hpmat.N(),
+            row_starts, td_btd_diag);
+    td_btd_hpmat->CopyColStarts();
+    td_btd_hpmat->CopyRowStarts();
+
+    HypreParMatrix * C_td_btd = ParMult(&Op_hpmat, td_btd_hpmat);
+
+    // processing local-to-process block of the Divfree matrix
+    SparseMatrix C_td_btd_diag;
+    C_td_btd->GetDiag(C_td_btd_diag);
+
+    //C_td_btd_diag.Print();
+
+    SparseMatrix C_diag;
+    Op_hpmat.GetDiag(C_diag);
+
+    //C_diag.Print();
+
+    int ntdofs_range = Op_hpmat.Height();
+
+    //std::cout << "Op_hpmat = " << Op_hpmat.Height() << " x " << Op_hpmat.Width() << "\n";
+    Array<int> btd_flags_range(ntdofs_range);
+    btd_flags_range = 0;
+    for ( int i = 0; i < EssBdrTrueDofs_range.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs_range[i];
+        btd_flags_range[tdof] = 1;
+    }
+
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs_range \n";
+    //EssBdrTrueDofs_range.Print();
+
+    for (int row = 0; row < C_td_btd_diag.Height(); ++row)
+    {
+        if (btd_flags_range[row] == 0)
+        {
+            for (int colind = 0; colind < C_td_btd_diag.RowSize(row); ++colind)
+            {
+                int nnz_ind = C_td_btd_diag.GetI()[row] + colind;
+                int col = C_td_btd_diag.GetJ()[nnz_ind];
+                double fabs_entry = fabs(C_td_btd_diag.GetData()[nnz_ind]);
+
+                if (fabs_entry > 1.0e-14)
+                {
+                    for (int j = 0; j < C_diag.RowSize(row); ++j)
+                    {
+                        int colorig = C_diag.GetJ()[C_diag.GetI()[row] + j];
+                        if (colorig == col)
+                        {
+                            //std::cout << "Changes made in row = " << row << ", col = " << colorig << "\n";
+                            C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
+
+                        }
+                    }
+                } // else of if fabs_entry is large enough
+
+            }
+        } // end of if row corresponds to the non-boundary range dof
+    }
+
+    //C_diag.Print();
+
+    // processing the off-diagonal block of the Divfree matrix
+    SparseMatrix C_td_btd_offd;
+    HYPRE_Int * C_td_btd_cmap;
+    C_td_btd->GetOffd(C_td_btd_offd, C_td_btd_cmap);
+
+    SparseMatrix C_offd;
+    HYPRE_Int * C_cmap;
+    Op_hpmat.GetOffd(C_offd, C_cmap);
+
+    //int * row_starts = Op_hpmat.GetRowStarts();
+
+    for (int row = 0; row < C_td_btd_offd.Height(); ++row)
+    {
+        if (btd_flags_range[row] == 0)
+        {
+            for (int colind = 0; colind < C_td_btd_offd.RowSize(row); ++colind)
+            {
+                int nnz_ind = C_td_btd_offd.GetI()[row] + colind;
+                int truecol = C_td_btd_cmap[C_td_btd_offd.GetJ()[nnz_ind]];
+                double fabs_entry = fabs(C_td_btd_offd.GetData()[nnz_ind]);
+
+                if (fabs_entry > 1.0e-14)
+                {
+                    for (int j = 0; j < C_offd.RowSize(row); ++j)
+                    {
+                        int col = C_offd.GetJ()[C_offd.GetI()[row] + j];
+                        int truecolorig = C_cmap[col];
+                        /*
+                        int tdof_for_truecolorig;
+                        if (truecolorig < row_starts[0])
+                            tdof_for_truecolorig = truecolorig;
+                        else
+                            tdof_for_truecolorig = truecolorig - row_starts[1];
+                        */
+                        if (truecolorig == truecol)
+                        {
+                            //std::cout << "Changes made in off-d: row = " << row << ", col = " << col << ", truecol = " << truecolorig << "\n";
+                            C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
+
+                        }
+                    }
+                } // else of if fabs_entry is large enough
+
+            }
+        } // end of if row corresponds to the non-boundary range dof
+
+    }
+}
+
+
+// Replaces "bb" block in the Operator acting in the same space,
+// assembled as a HypreParMatrix, which connects boundary dofs to boundary dofs by identity
+void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs )
+{
+    MFEM_ASSERT(Op_hpmat.Width() == Op_hpmat.Height(), "The matrix must be square in Eliminate_bb_block()! \n");
+
+    int ntdofs = Op_hpmat.Width();
+
+    Array<int> btd_flags(ntdofs);
+    btd_flags = 0;
+    //if (verbose)
+        //std::cout << "EssBdrTrueDofs \n";
+    //EssBdrTrueDofs.Print();
+
+    for ( int i = 0; i < EssBdrTrueDofs.Size(); ++i )
+    {
+        int tdof = EssBdrTrueDofs[i];
+        btd_flags[tdof] = 1;
+    }
+
+    SparseMatrix C_diag;
+    Op_hpmat.GetDiag(C_diag);
+
+    // processing local-to-process block of the matrix
+    for (int row = 0; row < C_diag.Height(); ++row)
+    {
+        if (btd_flags[row] != 0) // if the row tdof is at the boundary
+        {
+            for (int j = 0; j < C_diag.RowSize(row); ++j)
+            {
+                int col = C_diag.GetJ()[C_diag.GetI()[row] + j];
+                if  (col == row)
+                    C_diag.GetData()[C_diag.GetI()[row] + j] = 1.0;
+                else
+                    C_diag.GetData()[C_diag.GetI()[row] + j] = 0.0;
+            }
+        } // end of if row corresponds to the boundary tdof
+    }
+
+    //C_diag.Print();
+
+    SparseMatrix C_offd;
+    HYPRE_Int * C_cmap;
+    Op_hpmat.GetOffd(C_offd, C_cmap);
+
+    // processing the off-diagonal block of the matrix
+    for (int row = 0; row < C_offd.Height(); ++row)
+    {
+        if (btd_flags[row] != 0) // if the row tdof is at the boundary
+        {
+            for (int j = 0; j < C_offd.RowSize(row); ++j)
+            {
+                C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
+            }
+
+        } // end of if row corresponds to the boundary tdof
+
+    }
+}
+
+/*
+// self-written copy routine for HypreParMatrices
+// faces the issues with LeftDiagMult and ParMult combination
+// My guess is that offd.num_rownnz != 0 is the bug
+// but no proof for now
+HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
+{
+    MPI_Comm comm = inputmat.GetComm();
+    int num_procs;
+    MPI_Comm_size(comm, &num_procs);
+
+    HYPRE_Int global_num_rows = inputmat.M();
+    HYPRE_Int global_num_cols = inputmat.N();
+
+    int size_starts = num_procs;
+    if (num_procs > 1) // in thi case offd exists
+    {
+        //int myid;
+        //MPI_Comm_rank(comm,&myid);
+
+        HYPRE_Int * row_starts_in = inputmat.GetRowStarts();
+        HYPRE_Int * col_starts_in = inputmat.GetColStarts();
+
+        HYPRE_Int * row_starts = new HYPRE_Int[num_procs];
+        memcpy(row_starts, row_starts_in, size_starts * sizeof(HYPRE_Int));
+        HYPRE_Int * col_starts = new HYPRE_Int[num_procs];
+        memcpy(col_starts, col_starts_in, size_starts * sizeof(HYPRE_Int));
+
+        //std::cout << "memcpy calls finished \n";
+
+        SparseMatrix diag_in;
+        inputmat.GetDiag(diag_in);
+        SparseMatrix * diag_out = new SparseMatrix(diag_in);
+
+        //std::cout << "diag copied \n";
+
+        SparseMatrix offdiag_in;
+        HYPRE_Int * offdiag_cmap_in;
+        inputmat.GetOffd(offdiag_in, offdiag_cmap_in);
+
+        int size_offdiag_cmap = offdiag_in.Width();
+
+        SparseMatrix * offdiag_out = new SparseMatrix(offdiag_in);
+        HYPRE_Int * offdiag_cmap_out = new HYPRE_Int[size_offdiag_cmap];
+
+        memcpy(offdiag_cmap_out, offdiag_cmap_in, size_offdiag_cmap * sizeof(int));
+
+
+        return new HypreParMatrix(comm, global_num_rows, global_num_cols,
+                                  row_starts, col_starts,
+                                  diag_out, offdiag_out, offdiag_cmap_out);
+
+        //std::cout << "constructor called \n";
+    }
+    else // in this case offd doesn't exist and we have to use a different constructor
+    {
+        HYPRE_Int * row_starts = new HYPRE_Int[2];
+        row_starts[0] = 0;
+        row_starts[1] = global_num_rows;
+        HYPRE_Int * col_starts = new HYPRE_Int[2];
+        col_starts[0] = 0;
+        col_starts[1] = global_num_cols;
+
+        SparseMatrix diag_in;
+        inputmat.GetDiag(diag_in);
+        SparseMatrix * diag_out = new SparseMatrix(diag_in);
+
+        return new HypreParMatrix(comm, global_num_rows, global_num_cols,
+                                  row_starts, col_starts, diag_out);
+    }
+
+}
+
+// faces the same issues as CopyHypreParMatrix
+HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
+{
+    MPI_Comm comm = inputmat.GetComm();
+    int num_procs;
+    MPI_Comm_size(comm, &num_procs);
+
+    HYPRE_Int global_num_rows = inputmat.M();
+    HYPRE_Int global_num_cols = inputmat.N();
+
+    int size_starts = 2;
+
+    HYPRE_Int * row_starts_in = inputmat.GetRowStarts();
+    HYPRE_Int * col_starts_in = inputmat.GetColStarts();
+
+    HYPRE_Int * row_starts = new HYPRE_Int[num_procs];
+    memcpy(row_starts, row_starts_in, size_starts * sizeof(HYPRE_Int));
+    HYPRE_Int * col_starts = new HYPRE_Int[num_procs];
+    memcpy(col_starts, col_starts_in, size_starts * sizeof(HYPRE_Int));
+
+    int num_local_rows = row_starts[1] - row_starts[0];
+    int num_local_cols = col_starts[1] - col_starts[0];
+    int * ia_id = new int[num_local_rows + 1];
+    ia_id[0] = 0;
+    for ( int i = 0; i < num_local_rows; ++i)
+        ia_id[i + 1] = ia_id[i] + 1;
+
+    int id_nnz = num_local_rows;
+    int * ja_id = new int[id_nnz];
+    double * a_id = new double[id_nnz];
+    for ( int i = 0; i < id_nnz; ++i)
+    {
+        ja_id[i] = i;
+        a_id[i] = 1.0;
+    }
+
+    SparseMatrix * id_diag = new SparseMatrix(ia_id, ja_id, a_id, num_local_rows, num_local_cols);
+
+    HypreParMatrix * id = new HypreParMatrix(comm, global_num_rows, global_num_cols,
+                                             row_starts, col_starts, id_diag);
+
+    return RAP(&inputmat,id);
+}
+*/
 
 } // for namespace mfem
