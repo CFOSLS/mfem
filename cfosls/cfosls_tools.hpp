@@ -342,25 +342,79 @@ public:
 
     void RefineAndCopy(int lvl, ParMesh* pmesh)
     {
-        if (dynamic_cast<ParMeshCyl*> (pmesh))
-            std::cout << "Unsuccessful cast \n";
+        //if (!dynamic_cast<ParMeshCyl*> (pmesh))
+            //std::cout << "Unsuccessful cast \n";
         ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
 
         if (lvl == num_lvls - 1)
-            pmesh_lvls[lvl] = new ParMesh(*pmesh);
-        else
-        {
-            if (!pmeshcyl_view)
+            if (pmeshcyl_view)
             {
-                pmesh->UniformRefinement();
+                //ParMesh * temp = new ParMeshCyl(*pmeshcyl_view);
+                //pmesh_lvls[lvl] = dynamic_cast<ParMesh*>(temp);
+                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
             }
             else
+                pmesh_lvls[lvl] = new ParMesh(*pmesh);
+        else
+        {
+            if (pmeshcyl_view)
+            {
                 pmeshcyl_view->Refine(1);
+                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
+            }
+            else
+            {
+                pmesh->UniformRefinement();
+                pmesh_lvls[lvl] = new ParMesh(*pmesh);
+            }
             //pmesh->UniformRefinement();
-            pmesh_lvls[lvl] = new ParMesh(*pmesh);
         }
     }
+
+    ParMesh * GetPmesh(int l) {return pmesh_lvls[l];}
+
+    ParFiniteElementSpace * GetHdiv_space(int l) {return Hdiv_space_lvls[l];}
+    ParFiniteElementSpace * GetH1_space(int l) {return H1_space_lvls[l];}
+    ParFiniteElementSpace * GetL2_space(int l) {return L2_space_lvls[l];}
+
+    SparseMatrix * GetP_Hdiv(int l) {return P_Hdiv_lvls[l];}
+    SparseMatrix * GetP_H1(int l) {return P_H1_lvls[l];}
+    SparseMatrix * GetP_L2(int l) {return P_L2_lvls[l];}
+
+    HypreParMatrix * GetTrueP_Hdiv(int l) {return TrueP_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_H1(int l) {return TrueP_H1_lvls[l];}
+    HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
 };
+
+/*
+class testA
+{
+protected:
+    int atr;
+public:
+    testA(int param) {atr = param;}
+    void fooA();
+};
+
+void testA::fooA()
+{
+    return 1;
+}
+
+class testB : public A
+{
+protected:
+    int atr2;
+public:
+    testB(int param1, int param2) : testA(param1) { atr2 = param2; }
+    void fooB();
+};
+
+void testB::fooB()
+{
+    return 2;
+}
+*/
 
 class GeneralCylHierarchy : public GeneralHierarchy
 {
@@ -388,11 +442,40 @@ public:
     GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
         : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
     {
+        pmeshcyl_lvls.resize(num_lvls);
+        for (int l = 0; l < num_lvls; ++l)
+        {
+            ParMeshCyl * temp = dynamic_cast<ParMeshCyl*>(pmesh_lvls[l]);
+            if (temp)
+                pmeshcyl_lvls[l] = temp;
+            else
+            {
+                MFEM_ABORT ("Unsuccessful cast \n");
+            }
+        }
+
         // don't change the order of these calls
         ConstructTdofsLinks();
         ConstructRestrictions();
         ConstructInterpolations();
     }
+
+    ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
+
+    std::vector<std::pair<int,int> > * GetTdofs_Hdiv_link(int l) {return &(tdofs_link_Hdiv_lvls[l]);}
+    std::vector<std::pair<int,int> > * GetTdofs_H1_link(int l) {return &(tdofs_link_H1_lvls[l]);}
+
+    HypreParMatrix * GetTrueP_bndbot_Hdiv (int l) {return TrueP_bndbot_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_bndtop_Hdiv (int l) {return TrueP_bndtop_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_bndbot_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
+    HypreParMatrix * GetTrueP_bndtop_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
+
+    HypreParMatrix * GetRestrict_bot_Hdiv (int l) {return Restrict_bot_Hdiv_lvls[l];}
+    HypreParMatrix * GetRestrict_top_Hdiv (int l) {return Restrict_top_Hdiv_lvls[l];}
+    HypreParMatrix * GetRestrict_bot_H1 (int l) {return Restrict_bot_H1_lvls[l];}
+    HypreParMatrix * GetRestrict_top_H1 (int l) {return Restrict_top_H1_lvls[l];}
+
+    int GetInitCondSize(int l) {return init_cond_size_lvls[l];}
 
     //virtual void RefineAndCopy(int lvl, ParMesh* pmesh) override;
 };

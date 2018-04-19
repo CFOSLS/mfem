@@ -1453,307 +1453,18 @@ void TimeCylHyper::InitProblem()
 
     hierarchy = new GeneralCylHierarchy(num_lvls, *pmeshtsl, feorder, verbose);
 
-    // 0 will correspond to the finest level for all items in the hierarchy
-
     for (int l = num_lvls - 1; l >= 0; --l)
     {
-        // creating pmesh for level l
-        if (l == num_lvls - 1)
-        {
-            pmeshtsl_lvls[l] = new ParMeshCyl(*pmeshtsl);
-        }
-        else
-        {
-            pmeshtsl->Refine(1);
-            pmeshtsl_lvls[l] = new ParMeshCyl(*pmeshtsl);
-
-            // be careful about the update of bot_to_top so that it doesn't get lost
-        }
-
-        // creating pfespaces for level l
-        Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], hdiv_coll);
-        L2_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], l2_coll);
-        H1_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], h1_coll);
-
-        for (int i = 0; i < num_procs; ++i)
-        {
-            if (myid == i)
-            {
-                //std::cout << "I am " << myid << ", creating my tdof link \n";
-
-                std::vector<std::pair<int,int> > * dofs_link_H1 =
-                        CreateBotToTopDofsLink("linearH1",*H1_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
-                std::cout << std::flush;
-
-                tdofs_link_H1_lvls[l].reserve(dofs_link_H1->size());
-
-                int count = 0;
-                for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
-                {
-                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
-                    int dof1 = (*dofs_link_H1)[i].first;
-                    int dof2 = (*dofs_link_H1)[i].second;
-                    int tdof1 = H1_space_lvls[l]->GetLocalTDofNumber(dof1);
-                    int tdof2 = H1_space_lvls[l]->GetLocalTDofNumber(dof2);
-                    //std::cout << "corr. dof pair: <" << dof1 << "," << dof2 << ">\n";
-                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
-                    if (tdof1 * tdof2 < 0)
-                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
-
-                    if (tdof1 > -1)
-                    {
-                        tdofs_link_H1_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
-                        ++count;
-                    }
-                    else
-                    {
-                        //std::cout << "Ignored dofs pair which are not own tdofs \n";
-                    }
-                }
-            }
-            MPI_Barrier(comm);
-        } // end fo loop over all processors, one after another
-
-        for (int i = 0; i < num_procs; ++i)
-        {
-            if (myid == i)
-            {
-                std::vector<std::pair<int,int> > * dofs_link_RT0 =
-                           CreateBotToTopDofsLink("RT0",*Hdiv_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
-                std::cout << std::flush;
-
-                tdofs_link_Hdiv_lvls[l].reserve(dofs_link_RT0->size());
-
-                int count = 0;
-                //std::cout << "dof pairs for Hdiv: \n";
-                for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
-                {
-                    int dof1 = (*dofs_link_RT0)[i].first;
-                    int dof2 = (*dofs_link_RT0)[i].second;
-                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
-                    int tdof1 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof1);
-                    int tdof2 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof2);
-                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
-                    if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
-                    {
-                        //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
-                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
-                    }
-
-                    if (tdof1 > -1)
-                    {
-                        tdofs_link_Hdiv_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
-                        ++count;
-                    }
-                    else
-                    {
-                        //std::cout << "Ignored a dofs pair which are not own tdofs \n";
-                    }
-                }
-            }
-            MPI_Barrier(comm);
-        } // end fo loop over all processors, one after another
-
-        // creating restriction matrices from all tdofs to bot tdofs
-        Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
-        Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
-        Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
-        Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
-
-        // for all but one levels we create projection matrices between levels
-        // and projectors assembled on true dofs if MG preconditioner is used
-        if (l < num_lvls - 1)
-        {
-            Hdiv_space->Update();
-            H1_space->Update();
-            L2_space->Update();
-
-            // TODO: Rewrite these computations
-
-            P_Hdiv_local = (SparseMatrix *)Hdiv_space->GetUpdateOperator();
-            P_Hdiv_lvls[l] = RemoveZeroEntries(*P_Hdiv_local);
-
-            auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
-            TrueP_Hdiv_lvls[l] = d_td_coarse_Hdiv->LeftDiagMult(
-                        *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_Hdiv_lvls[l]->CopyColStarts();
-            TrueP_Hdiv_lvls[l]->CopyRowStarts();
-
-            delete RP_Hdiv_local;
-
-
-            P_H1_local = (SparseMatrix *)H1_space->GetUpdateOperator();
-            P_H1_lvls[l] = RemoveZeroEntries(*P_H1_local);
-
-            auto d_td_coarse_H1 = H1_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[l]->GetRestrictionMatrix(), *P_H1_lvls[l]);
-            TrueP_H1_lvls[l] = d_td_coarse_H1->LeftDiagMult(
-                        *RP_H1_local, H1_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_H1_lvls[l]->CopyColStarts();
-            TrueP_H1_lvls[l]->CopyRowStarts();
-
-            delete RP_H1_local;
-
-            P_L2_local = (SparseMatrix *)L2_space->GetUpdateOperator();
-            P_L2_lvls[l] = RemoveZeroEntries(*P_L2_local);
-
-            auto d_td_coarse_L2 = L2_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_L2_local = Mult(*L2_space_lvls[l]->GetRestrictionMatrix(), *P_L2_lvls[l]);
-            TrueP_L2_lvls[l] = d_td_coarse_L2->LeftDiagMult(
-                        *RP_L2_local, L2_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_L2_lvls[l]->CopyColStarts();
-            TrueP_L2_lvls[l]->CopyRowStarts();
-
-            delete RP_L2_local;
-
-            TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
-            TrueP_bndbot_H1_lvls[l]->CopyColStarts();
-            TrueP_bndbot_H1_lvls[l]->CopyRowStarts();
-
-            TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l], TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
-            TrueP_bndtop_H1_lvls[l]->CopyColStarts();
-            TrueP_bndtop_H1_lvls[l]->CopyRowStarts();
-
-            TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
-            TrueP_bndbot_Hdiv_lvls[l]->CopyColStarts();
-            TrueP_bndbot_Hdiv_lvls[l]->CopyRowStarts();
-
-            TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
-            TrueP_bndtop_Hdiv_lvls[l]->CopyColStarts();
-            TrueP_bndtop_Hdiv_lvls[l]->CopyRowStarts();
-        }
-
-        /*
-        if (verbose)
-             std::cout << "Drawing in H1 case \n";
-
-        ParGridFunction * testfullH1 = new ParGridFunction(H1_space);
-        FunctionCoefficient testH1_coeff(testH1fun);
-        testfullH1->ProjectCoefficient(testH1_coeff);
-        Vector testfullH1_tdofs(H1_space->TrueVSize());
-        testfullH1->ParallelAssemble(testfullH1_tdofs);
-
-        Vector testH1_bot_tdofs(H1_space->TrueVSize());
-        testH1_bot_tdofs = 0.0;
-
-        for ( unsigned int i = 0; i < tdofs_link_H1.size(); ++i )
-        {
-            int tdof_bot = tdofs_link_H1[i].first;
-            testH1_bot_tdofs[tdof_bot] = testfullH1_tdofs[tdof_bot];
-        }
-
-        ParGridFunction * testH1_bot = new ParGridFunction(H1_space);
-        testH1_bot->Distribute(&testH1_bot_tdofs);
-
-        Vector testH1_top_tdofs(H1_space->TrueVSize());
-        testH1_top_tdofs = 0.0;
-
-        for ( unsigned int i = 0; i < tdofs_link_H1.size(); ++i )
-        {
-            int tdof_top = tdofs_link_H1[i].second;
-            testH1_top_tdofs[tdof_top] = testfullH1_tdofs[tdof_top];
-        }
-
-        ParGridFunction * testH1_top = new ParGridFunction(H1_space);
-        testH1_top->Distribute(&testH1_top_tdofs);
-
-        if (visualization && dim < 4)
-        {
-            if (verbose)
-                 std::cout << "Sending to GLVis in H1 case \n";
-
-            char vishost[] = "localhost";
-            int  visport   = 19916;
-            socketstream u_sock(vishost, visport);
-            u_sock << "parallel " << num_procs << " " << myid << "\n";
-            u_sock.precision(8);
-            u_sock << "solution\n" << *pmeshtsl << *testfullH1 << "window_title 'testfullH1'"
-                   << endl;
-
-            socketstream ubot_sock(vishost, visport);
-            ubot_sock << "parallel " << num_procs << " " << myid << "\n";
-            ubot_sock.precision(8);
-            ubot_sock << "solution\n" << *pmeshtsl << *testH1_bot << "window_title 'testH1bot'"
-                   << endl;
-
-            socketstream utop_sock(vishost, visport);
-            utop_sock << "parallel " << num_procs << " " << myid << "\n";
-            utop_sock.precision(8);
-            utop_sock << "solution\n" << *pmeshtsl << *testH1_top << "window_title 'testH1top'"
-                   << endl;
-        }
-        */
-
-        /*
-        if (verbose)
-             std::cout << "Drawing in Hdiv case \n";
-
-        ParGridFunction * testfullHdiv = new ParGridFunction(Hdiv_space);
-        VectorFunctionCoefficient testHdiv_coeff(dim, testHdivfun);
-        testfullHdiv->ProjectCoefficient(testHdiv_coeff);
-        Vector testfullHdiv_tdofs(Hdiv_space->TrueVSize());
-        testfullHdiv->ParallelAssemble(testfullHdiv_tdofs);
-
-        Vector testHdiv_bot_tdofs(Hdiv_space->TrueVSize());
-        testHdiv_bot_tdofs = 0.0;
-
-        for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
-        {
-            int tdof_bot = tdofs_link_Hdiv[i].first;
-            testHdiv_bot_tdofs[tdof_bot] = testfullHdiv_tdofs[tdof_bot];
-        }
-
-        ParGridFunction * testHdiv_bot = new ParGridFunction(Hdiv_space);
-        testHdiv_bot->Distribute(&testHdiv_bot_tdofs);
-
-        Vector testHdiv_top_tdofs(Hdiv_space->TrueVSize());
-        testHdiv_top_tdofs = 0.0;
-
-        for ( unsigned int i = 0; i < tdofs_link_Hdiv.size(); ++i)
-        {
-            int tdof_top = tdofs_link_Hdiv[i].second;
-            testHdiv_top_tdofs[tdof_top] = testfullHdiv_tdofs[tdof_top];
-        }
-
-        ParGridFunction * testHdiv_top = new ParGridFunction(Hdiv_space);
-        testHdiv_top->Distribute(&testHdiv_top_tdofs);
-
-        if (visualization && dim < 4)
-        {
-            if (verbose)
-                 std::cout << "Sending to GLVis in Hdiv case \n";
-
-            char vishost[] = "localhost";
-            int  visport   = 19916;
-            socketstream u_sock(vishost, visport);
-            u_sock << "parallel " << num_procs << " " << myid << "\n";
-            u_sock.precision(8);
-            u_sock << "solution\n" << *pmeshtsl << *testfullHdiv << "window_title 'testfullHdiv'"
-                   << endl;
-
-            socketstream ubot_sock(vishost, visport);
-            ubot_sock << "parallel " << num_procs << " " << myid << "\n";
-            ubot_sock.precision(8);
-            ubot_sock << "solution\n" << *pmeshtsl << *testHdiv_bot << "window_title 'testHdivbot'"
-                   << endl;
-
-            socketstream utop_sock(vishost, visport);
-            utop_sock << "parallel " << num_procs << " " << myid << "\n";
-            utop_sock.precision(8);
-            utop_sock << "solution\n" << *pmeshtsl << *testHdiv_top << "window_title 'testHdivtop'"
-                   << endl;
-        }
-        */
-
         // critical for the considered problem
         if (strcmp(space_for_sigma,"H1") == 0)
             MFEM_ABORT ("Not supported case sigma from vector H1, think of the boundary conditions there");
 
         if (strcmp(space_for_S, "H1") == 0)
-            init_cond_size_lvls[l] = tdofs_link_H1_lvls[l].size();
+            init_cond_size_lvls[l] = hierarchy->GetLinksize_H1(l);
         else // L2
-            init_cond_size_lvls[l] = tdofs_link_Hdiv_lvls[l].size();
+            init_cond_size_lvls[l] = hierarchy->GetLinksize_Hdiv(l);
+
+        instead of all calls below we should use getters from the hierarchy
 
         //ParFiniteElementSpace *H1vec_space;
         //if (strcmp(space_for_sigma,"H1") == 0)
@@ -1869,21 +1580,9 @@ void TimeCylHyper::InitProblem()
        for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
            ess_bdrS[i] = ess_bdrat_S[i];
 
-       /*
-       ess_bdrS = 0;
-       if (strcmp(space_for_S,"H1") == 0)
-           ess_bdrS[0] = 1; // t = 0
-       */
        Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
        for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
            ess_bdrSigma[i] = ess_bdrat_sigma[i];
-       /*
-       ess_bdrSigma = 0;
-       if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
-       {
-           ess_bdrSigma[0] = 1;
-       }
-       */
 
        if (verbose)
        {
@@ -1966,15 +1665,6 @@ void TimeCylHyper::InitProblem()
        Ablock_nobnd->Assemble();
        Ablock_nobnd->Finalize();
        A_nobnd = Ablock_nobnd->ParallelAssemble();
-
-
-       /*
-       if (verbose)
-           std::cout << "Checking the A matrix \n";
-
-       MPI_Finalize();
-       return 0;
-       */
 
        //---------------
        //  C Block:
@@ -2282,6 +1972,695 @@ void TimeCylHyper::InitProblem()
        solver_lvls[l]->SetPrintLevel(0);
 
     }
+
+    /*
+    // 0 will correspond to the finest level for all items in the hierarchy
+
+    for (int l = num_lvls - 1; l >= 0; --l)
+    {
+        // creating pmesh for level l
+        if (l == num_lvls - 1)
+        {
+            pmeshtsl_lvls[l] = new ParMeshCyl(*pmeshtsl);
+        }
+        else
+        {
+            pmeshtsl->Refine(1);
+            pmeshtsl_lvls[l] = new ParMeshCyl(*pmeshtsl);
+
+            // be careful about the update of bot_to_top so that it doesn't get lost
+        }
+
+        // creating pfespaces for level l
+        Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], hdiv_coll);
+        L2_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], l2_coll);
+        H1_space_lvls[l] = new ParFiniteElementSpace(pmeshtsl_lvls[l], h1_coll);
+
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                //std::cout << "I am " << myid << ", creating my tdof link \n";
+
+                std::vector<std::pair<int,int> > * dofs_link_H1 =
+                        CreateBotToTopDofsLink("linearH1",*H1_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
+                std::cout << std::flush;
+
+                tdofs_link_H1_lvls[l].reserve(dofs_link_H1->size());
+
+                int count = 0;
+                for ( unsigned int i = 0; i < dofs_link_H1->size(); ++i )
+                {
+                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
+                    int dof1 = (*dofs_link_H1)[i].first;
+                    int dof2 = (*dofs_link_H1)[i].second;
+                    int tdof1 = H1_space_lvls[l]->GetLocalTDofNumber(dof1);
+                    int tdof2 = H1_space_lvls[l]->GetLocalTDofNumber(dof2);
+                    //std::cout << "corr. dof pair: <" << dof1 << "," << dof2 << ">\n";
+                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                    if (tdof1 * tdof2 < 0)
+                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+                    if (tdof1 > -1)
+                    {
+                        tdofs_link_H1_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
+                        ++count;
+                    }
+                    else
+                    {
+                        //std::cout << "Ignored dofs pair which are not own tdofs \n";
+                    }
+                }
+            }
+            MPI_Barrier(comm);
+        } // end fo loop over all processors, one after another
+
+        for (int i = 0; i < num_procs; ++i)
+        {
+            if (myid == i)
+            {
+                std::vector<std::pair<int,int> > * dofs_link_RT0 =
+                           CreateBotToTopDofsLink("RT0",*Hdiv_space_lvls[l], pmeshtsl_lvls[l]->bot_to_top_bels);
+                std::cout << std::flush;
+
+                tdofs_link_Hdiv_lvls[l].reserve(dofs_link_RT0->size());
+
+                int count = 0;
+                //std::cout << "dof pairs for Hdiv: \n";
+                for ( unsigned int i = 0; i < dofs_link_RT0->size(); ++i)
+                {
+                    int dof1 = (*dofs_link_RT0)[i].first;
+                    int dof2 = (*dofs_link_RT0)[i].second;
+                    //std::cout << "<" << it->first << ", " << it->second << "> \n";
+                    int tdof1 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof1);
+                    int tdof2 = Hdiv_space_lvls[l]->GetLocalTDofNumber(dof2);
+                    //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+                    if ((tdof1 > 0 && tdof2 < 0) || (tdof1 < 0 && tdof2 > 0))
+                    {
+                        //std::cout << "Caught you! tdof1 = " << tdof1 << ", tdof2 = " << tdof2 << "\n";
+                        MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+                    }
+
+                    if (tdof1 > -1)
+                    {
+                        tdofs_link_Hdiv_lvls[l].push_back(std::pair<int,int>(tdof1, tdof2));
+                        ++count;
+                    }
+                    else
+                    {
+                        //std::cout << "Ignored a dofs pair which are not own tdofs \n";
+                    }
+                }
+            }
+            MPI_Barrier(comm);
+        } // end fo loop over all processors, one after another
+
+        // creating restriction matrices from all tdofs to bot tdofs
+        Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
+        Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+        Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
+        Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+
+        // for all but one levels we create projection matrices between levels
+        // and projectors assembled on true dofs if MG preconditioner is used
+        if (l < num_lvls - 1)
+        {
+            Hdiv_space->Update();
+            H1_space->Update();
+            L2_space->Update();
+
+            // TODO: Rewrite these computations
+
+            P_Hdiv_local = (SparseMatrix *)Hdiv_space->GetUpdateOperator();
+            P_Hdiv_lvls[l] = RemoveZeroEntries(*P_Hdiv_local);
+
+            auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
+            TrueP_Hdiv_lvls[l] = d_td_coarse_Hdiv->LeftDiagMult(
+                        *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_Hdiv_lvls[l]->CopyRowStarts();
+
+            delete RP_Hdiv_local;
+
+
+            P_H1_local = (SparseMatrix *)H1_space->GetUpdateOperator();
+            P_H1_lvls[l] = RemoveZeroEntries(*P_H1_local);
+
+            auto d_td_coarse_H1 = H1_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[l]->GetRestrictionMatrix(), *P_H1_lvls[l]);
+            TrueP_H1_lvls[l] = d_td_coarse_H1->LeftDiagMult(
+                        *RP_H1_local, H1_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_H1_lvls[l]->CopyColStarts();
+            TrueP_H1_lvls[l]->CopyRowStarts();
+
+            delete RP_H1_local;
+
+            P_L2_local = (SparseMatrix *)L2_space->GetUpdateOperator();
+            P_L2_lvls[l] = RemoveZeroEntries(*P_L2_local);
+
+            auto d_td_coarse_L2 = L2_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_L2_local = Mult(*L2_space_lvls[l]->GetRestrictionMatrix(), *P_L2_lvls[l]);
+            TrueP_L2_lvls[l] = d_td_coarse_L2->LeftDiagMult(
+                        *RP_L2_local, L2_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_L2_lvls[l]->CopyColStarts();
+            TrueP_L2_lvls[l]->CopyRowStarts();
+
+            delete RP_L2_local;
+
+            TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
+            TrueP_bndbot_H1_lvls[l]->CopyColStarts();
+            TrueP_bndbot_H1_lvls[l]->CopyRowStarts();
+
+            TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l], TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
+            TrueP_bndtop_H1_lvls[l]->CopyColStarts();
+            TrueP_bndtop_H1_lvls[l]->CopyRowStarts();
+
+            TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
+            TrueP_bndbot_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_bndbot_Hdiv_lvls[l]->CopyRowStarts();
+
+            TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
+            TrueP_bndtop_Hdiv_lvls[l]->CopyColStarts();
+            TrueP_bndtop_Hdiv_lvls[l]->CopyRowStarts();
+        }
+
+        // critical for the considered problem
+        if (strcmp(space_for_sigma,"H1") == 0)
+            MFEM_ABORT ("Not supported case sigma from vector H1, think of the boundary conditions there");
+
+        if (strcmp(space_for_S, "H1") == 0)
+            init_cond_size_lvls[l] = tdofs_link_H1_lvls[l].size();
+        else // L2
+            init_cond_size_lvls[l] = tdofs_link_Hdiv_lvls[l].size();
+
+        //ParFiniteElementSpace *H1vec_space;
+        //if (strcmp(space_for_sigma,"H1") == 0)
+            //H1vec_space = new ParFiniteElementSpace(pmeshtsl, h1_coll, dim, Ordering::byVDIM);
+        //if (strcmp(space_for_sigma,"Hdiv") == 0)
+            //Sigma_space_lvls[l] = Hdiv_space_lvls[l];
+        //else
+            //Sigma_space_lvls[l] = H1vec_space_lvls[l];
+        Sigma_space_lvls[l] = Hdiv_space_lvls[l];
+
+        if (strcmp(space_for_S,"H1") == 0)
+            S_space_lvls[l] = H1_space_lvls[l];
+        else // "L2"
+            S_space_lvls[l] = L2_space_lvls[l];
+
+        HYPRE_Int dimR = Hdiv_space_lvls[l]->GlobalTrueVSize();
+        HYPRE_Int dimH = H1_space_lvls[l]->GlobalTrueVSize();
+        HYPRE_Int dimHvec;
+        //if (strcmp(space_for_sigma,"H1") == 0)
+            //dimHvec = H1vec_space_lvls[l]->GlobalTrueVSize();
+        HYPRE_Int dimW = L2_space_lvls[l]->GlobalTrueVSize();
+
+        if (verbose)
+        {
+           std::cout << "***********************************************************\n";
+           std::cout << "dim H(div)_h = " << dimR << ", ";
+           //if (strcmp(space_for_sigma,"H1") == 0)
+               //std::cout << "dim H1vec_h = " << dimHvec << ", ";
+           std::cout << "dim H1_h = " << dimH << ", ";
+           std::cout << "dim L2_h = " << dimW << "\n";
+           std::cout << "Spaces we use: \n";
+           if (strcmp(space_for_sigma,"Hdiv") == 0)
+               std::cout << "H(div)";
+           else
+               std::cout << "H1vec";
+           if (strcmp(space_for_S,"H1") == 0)
+               std::cout << " x H1";
+           if (strcmp(formulation,"cfosls") == 0)
+               std::cout << " x L2 \n";
+           std::cout << "***********************************************************\n";
+        }
+
+        // 7. Define the two BlockStructure of the problem.  block_offsets is used
+        //    for Vector based on dof (like ParGridFunction or ParLinearForm),
+        //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
+        //    for the rhs and solution of the linear system).  The offsets computed
+        //    here are local to the processor.
+
+        Array<int> block_offsets(numblocks + 1); // number of variables + 1
+        int tempblknum = 0;
+        block_offsets[0] = 0;
+        tempblknum++;
+        block_offsets[tempblknum] = Sigma_space_lvls[l]->GetVSize();
+        tempblknum++;
+
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            block_offsets[tempblknum] = H1_space_lvls[l]->GetVSize();
+            tempblknum++;
+        }
+        if (strcmp(formulation,"cfosls") == 0)
+        {
+            block_offsets[tempblknum] = L2_space_lvls[l]->GetVSize();
+            tempblknum++;
+        }
+        block_offsets.PartialSum();
+
+        //Array<int> block_trueOffsets(numblocks + 1); // number of variables + 1
+        block_trueOffsets_lvls[l] = new Array<int>(numblocks + 1);
+        tempblknum = 0;
+        (*block_trueOffsets_lvls[l])[0] = 0;
+        tempblknum++;
+        (*block_trueOffsets_lvls[l])[tempblknum] = Sigma_space_lvls[l]->TrueVSize();
+        tempblknum++;
+
+        if (strcmp(space_for_S,"H1") == 0)
+        {
+            (*block_trueOffsets_lvls[l])[tempblknum] = H1_space_lvls[l]->TrueVSize();
+            tempblknum++;
+        }
+        if (strcmp(formulation,"cfosls") == 0)
+        {
+            (*block_trueOffsets_lvls[l])[tempblknum] = L2_space_lvls[l]->TrueVSize();
+            tempblknum++;
+        }
+        block_trueOffsets_lvls[l]->PartialSum();
+
+        //block_trueoffsets.resize(numblocks + 1);
+        //for (int i = 0; i < block_trueOffsets.Size(); ++i)
+            //block_trueoffsets[i] = block_trueOffsets[i];
+
+       Transport_test Mytest(dim, numsol);
+
+       // 8. Define the coefficients, analytical solution, and rhs of the PDE.
+
+       //----------------------------------------------------------
+       // Setting boundary conditions.
+       //----------------------------------------------------------
+
+       ess_bdrat_S.resize(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+           ess_bdrat_S[i] = 0;
+       if (strcmp(space_for_S,"H1") == 0)
+           ess_bdrat_S[0] = 1; // t = 0
+
+       ess_bdrat_sigma.resize(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+           ess_bdrat_sigma[i] = 0;
+       if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
+           ess_bdrat_sigma[0] = 1;
+
+       Array<int> ess_bdrS(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
+           ess_bdrS[i] = ess_bdrat_S[i];
+
+       Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+       for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
+           ess_bdrSigma[i] = ess_bdrat_sigma[i];
+
+       if (verbose)
+       {
+           std::cout << "Boundary conditions: \n";
+           std::cout << "ess bdr Sigma: \n";
+           ess_bdrSigma.Print(std::cout, pmeshtsl_lvls[l]->bdr_attributes.Max());
+           std::cout << "ess bdr S: \n";
+           ess_bdrS.Print(std::cout, pmeshtsl_lvls[l]->bdr_attributes.Max());
+       }
+       //-----------------------
+
+       // 9. Define the parallel grid function and parallel linear forms, solution
+       //    vector and rhs.
+
+       // 10. Assemble the finite element matrices for the CFOSLS operator  A
+       //     where:
+
+       ParBilinearForm *Ablock(new ParBilinearForm(Sigma_space_lvls[l]));
+       HypreParMatrix *A;
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+               Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
+           else // sigma is from H1vec
+               Ablock->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+       }
+       else // "L2"
+       {
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+     #ifdef REGULARIZE_A
+           if (verbose)
+               std::cout << "regularization is ON \n";
+           double h_min, h_max, kappa_min, kappa_max;
+           pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+           if (verbose)
+               std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+           double reg_param;
+           reg_param = 0.1 * h_min * h_min;
+           if (verbose)
+               std::cout << "regularization parameter: " << reg_param << "\n";
+           ConstantCoefficient reg_coeff(reg_param);
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+           //Ablock->AddDomainIntegrator(new DivDivIntegrator(reg_coeff)); // doesn't change much in the iteration count
+     #endif
+       }
+       Ablock->Assemble();
+       Ablock->EliminateEssentialBC(ess_bdrSigma);
+       Ablock->Finalize();
+       A = Ablock->ParallelAssemble();
+
+       ParBilinearForm *Ablock_nobnd(new ParBilinearForm(Sigma_space_lvls[l]));
+       HypreParMatrix *A_nobnd;
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+               Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator);
+           else // sigma is from H1vec
+               Ablock_nobnd->AddDomainIntegrator(new ImproperVectorMassIntegrator);
+       }
+       else // "L2"
+       {
+           Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+     #ifdef REGULARIZE_A
+           if (verbose)
+               std::cout << "regularization is ON \n";
+           double h_min, h_max, kappa_min, kappa_max;
+           pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+           if (verbose)
+               std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+
+           double reg_param;
+           reg_param = 0.1 * h_min * h_min;
+           if (verbose)
+               std::cout << "regularization parameter: " << reg_param << "\n";
+           ConstantCoefficient reg_coeff(reg_param);
+           Ablock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff)); // reduces the convergence rate but helps with iteration count
+     #endif
+       }
+       Ablock_nobnd->Assemble();
+       Ablock_nobnd->Finalize();
+       A_nobnd = Ablock_nobnd->ParallelAssemble();
+
+       //---------------
+       //  C Block:
+       //---------------
+
+       ParBilinearForm *Cblock;
+       HypreParMatrix *C;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Cblock = new ParBilinearForm(S_space_lvls[l]);
+           if (strcmp(space_for_S,"H1") == 0)
+           {
+               Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+               if (strcmp(space_for_sigma,"Hdiv") == 0)
+                    Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+           }
+           else // "L2" & !eliminateS
+           {
+               Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+           }
+           Cblock->Assemble();
+           Cblock->EliminateEssentialBC(ess_bdrS);
+           Cblock->Finalize();
+           C = Cblock->ParallelAssemble();
+
+           SparseMatrix C_diag;
+           C->GetDiag(C_diag);
+           Array<int> EssBnd_tdofs_S;
+           S_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, EssBnd_tdofs_S);
+           for (int i = 0; i < EssBnd_tdofs_S.Size(); ++i)
+           {
+               int tdof = EssBnd_tdofs_S[i];
+               C_diag.EliminateRow(tdof,1.0);
+           }
+       }
+
+       ParBilinearForm *Cblock_nobnd;
+       HypreParMatrix *C_nobnd;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Cblock_nobnd = new ParBilinearForm(S_space_lvls[l]);
+           if (strcmp(space_for_S,"H1") == 0)
+           {
+               Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+               if (strcmp(space_for_sigma,"Hdiv") == 0)
+                    Cblock_nobnd->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+           }
+           else // "L2" & !eliminateS
+           {
+               Cblock_nobnd->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+           }
+           Cblock_nobnd->Assemble();
+           Cblock_nobnd->Finalize();
+           C_nobnd = Cblock_nobnd->ParallelAssemble();
+       }
+
+       //---------------
+       //  B Block:
+       //---------------
+
+       ParMixedBilinearForm *Bblock;
+       HypreParMatrix *B;
+       HypreParMatrix *BT;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Bblock = new ParMixedBilinearForm(Sigma_space_lvls[l], S_space_lvls[l]);
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           {
+               //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+               Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+           }
+           else // sigma is from H1
+               Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+           Bblock->Assemble();
+           {
+               Vector testx(Bblock->Width());
+               testx = 0.0;
+               Vector testrhs(Bblock->Height());
+               testrhs = 0.0;
+               Bblock->EliminateTrialDofs(ess_bdrSigma, testx, testrhs);
+           }
+           Bblock->EliminateTestDofs(ess_bdrS);
+           Bblock->Finalize();
+
+           B = Bblock->ParallelAssemble();
+           //*B *= -1.;
+           BT = B->Transpose();
+       }
+
+       ParMixedBilinearForm *Bblock_nobnd;
+       HypreParMatrix *B_nobnd;
+       HypreParMatrix *BT_nobnd;
+       if (strcmp(space_for_S,"H1") == 0) // S is present
+       {
+           Bblock_nobnd = new ParMixedBilinearForm(Sigma_space_lvls[l], S_space_lvls[l]);
+           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           {
+               //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+               Bblock_nobnd->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+           }
+           else // sigma is from H1
+               Bblock_nobnd->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+           Bblock_nobnd->Assemble();
+           Bblock_nobnd->Finalize();
+
+           B_nobnd = Bblock_nobnd->ParallelAssemble();
+           //*B *= -1.;
+           BT_nobnd = B_nobnd->Transpose();
+       }
+
+       //----------------
+       //  D Block:
+       //-----------------
+
+       HypreParMatrix *D;
+       HypreParMatrix *DT;
+
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+          ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvls[l]));
+          if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+            Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+          else // sigma is from H1vec
+            Dblock->AddDomainIntegrator(new VectorDivergenceIntegrator);
+          Dblock->Assemble();
+          {
+              Vector testx(Dblock->Width());
+              testx = 0.0;
+              Vector testrhs(Dblock->Height());
+              testrhs = 0.0;
+              Dblock->EliminateTrialDofs(ess_bdrSigma, testx, testrhs);
+          }
+
+          Dblock->Finalize();
+          D = Dblock->ParallelAssemble();
+          DT = D->Transpose();
+       }
+
+       HypreParMatrix *D_nobnd;
+       HypreParMatrix *DT_nobnd;
+
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+          ParMixedBilinearForm *Dblock_nobnd(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvls[l]));
+          if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+            Dblock_nobnd->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+          else // sigma is from H1vec
+            Dblock_nobnd->AddDomainIntegrator(new VectorDivergenceIntegrator);
+          Dblock_nobnd->Assemble();
+          Dblock_nobnd->Finalize();
+          D_nobnd = Dblock_nobnd->ParallelAssemble();
+          DT_nobnd = D_nobnd->Transpose();
+       }
+
+       //=======================================================
+       // Setting up the block system Matrix
+       //-------------------------------------------------------
+
+       if (l < num_lvls - 1)
+       {
+           TrueP_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l], *block_trueOffsets_lvls[l + 1]);
+           TrueP_lvls[l]->SetBlock(0,0, TrueP_Hdiv_lvls[l]);
+           if (strcmp(space_for_S,"H1") == 0) // S is present
+           {
+               TrueP_lvls[l]->SetBlock(1,1, TrueP_H1_lvls[l]);
+               TrueP_lvls[l]->SetBlock(2,2, TrueP_L2_lvls[l]);
+           }
+           else
+               TrueP_lvls[l]->SetBlock(1,1, TrueP_L2_lvls[l]);
+      }
+
+      CFOSLSop_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l]);
+
+      trueRhs_nobnd_lvls[l] = new BlockVector(*block_trueOffsets_lvls[l]);
+      trueX_lvls[l] = new BlockVector(*block_trueOffsets_lvls[l]);
+
+      //block_trueOffsets.Print();
+
+      CFOSLSop_lvls[l]->SetBlock(0,0, A);
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          CFOSLSop_lvls[l]->SetBlock(0,1, BT);
+          CFOSLSop_lvls[l]->SetBlock(1,0, B);
+          CFOSLSop_lvls[l]->SetBlock(1,1, C);
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop_lvls[l]->SetBlock(0,2, DT);
+            CFOSLSop_lvls[l]->SetBlock(2,0, D);
+          }
+      }
+      else // no S
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop_lvls[l]->SetBlock(0,1, DT);
+            CFOSLSop_lvls[l]->SetBlock(1,0, D);
+          }
+
+      CFOSLSop_nobnd_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l]);
+      CFOSLSop_nobnd_lvls[l]->SetBlock(0,0, A_nobnd);
+      if (strcmp(space_for_S,"H1") == 0) // S is present
+      {
+          CFOSLSop_nobnd_lvls[l]->SetBlock(0,1, BT_nobnd);
+          CFOSLSop_nobnd_lvls[l]->SetBlock(1,0, B_nobnd);
+          CFOSLSop_nobnd_lvls[l]->SetBlock(1,1, C_nobnd);
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop_nobnd_lvls[l]->SetBlock(0,2, DT_nobnd);
+            CFOSLSop_nobnd_lvls[l]->SetBlock(2,0, D_nobnd);
+          }
+      }
+      else // no S
+          if (strcmp(formulation,"cfosls") == 0)
+          {
+            CFOSLSop_nobnd_lvls[l]->SetBlock(0,1, DT_nobnd);
+            CFOSLSop_nobnd_lvls[l]->SetBlock(1,0, D_nobnd);
+          }
+       if (verbose)
+           cout << "Final saddle point matrix assembled \n";
+       MPI_Barrier(MPI_COMM_WORLD);
+
+       //=======================================================
+       // Setting up the preconditioner
+       //-------------------------------------------------------
+
+       // Construct the operators for preconditioner
+       if (verbose)
+       {
+           std::cout << "Block diagonal preconditioner: \n";
+           if (use_ADS)
+               std::cout << "ADS(A) for H(div) \n";
+           else
+                std::cout << "Diag(A) for H(div) or H1vec \n";
+           if (strcmp(space_for_S,"H1") == 0) // S is from H1
+               std::cout << "BoomerAMG(C) for H1 \n";
+           if (strcmp(formulation,"cfosls") == 0 )
+           {
+               std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+           }
+           std::cout << "\n";
+       }
+
+       HypreParMatrix *Schur;
+       if (strcmp(formulation,"cfosls") == 0 )
+       {
+          HypreParMatrix *AinvDt = D->Transpose();
+          HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(),
+                                               A->GetRowStarts());
+          A->GetDiag(*Ad);
+          AinvDt->InvScaleRows(*Ad);
+          Schur = ParMult(D, AinvDt);
+       }
+
+       Solver * invA;
+       if (use_ADS)
+           invA = new HypreADS(*A, Sigma_space_lvls[l]);
+       else // using Diag(A);
+            invA = new HypreDiagScale(*A);
+
+       invA->iterative_mode = false;
+
+       Solver * invC;
+       if (strcmp(space_for_S,"H1") == 0) // S is from H1
+       {
+           invC = new HypreBoomerAMG(*C);
+           ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+           ((HypreBoomerAMG*)invC)->iterative_mode = false;
+       }
+
+       Solver * invS;
+       if (strcmp(formulation,"cfosls") == 0 )
+       {
+            invS = new HypreBoomerAMG(*Schur);
+            ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+            ((HypreBoomerAMG *)invS)->iterative_mode = false;
+       }
+
+       prec_lvls[l] = new BlockDiagonalPreconditioner(*block_trueOffsets_lvls[l]);
+       if (prec_option > 0)
+       {
+           tempblknum = 0;
+           prec_lvls[l]->SetDiagonalBlock(tempblknum, invA);
+           tempblknum++;
+           if (strcmp(space_for_S,"H1") == 0) // S is present
+           {
+               prec_lvls[l]->SetDiagonalBlock(tempblknum, invC);
+               tempblknum++;
+           }
+           if (strcmp(formulation,"cfosls") == 0)
+                prec_lvls[l]->SetDiagonalBlock(tempblknum, invS);
+       }
+       else
+           if (verbose)
+               cout << "No preconditioner is used. \n";
+
+       // 12. Solve the linear system with MINRES.
+       //     Check the norm of the unpreconditioned residual.
+
+       solver_lvls[l] = new MINRESSolver(MPI_COMM_WORLD);
+       solver_lvls[l]->SetAbsTol(atol);
+       solver_lvls[l]->SetRelTol(rtol);
+       solver_lvls[l]->SetMaxIter(max_iter);
+       solver_lvls[l]->SetOperator(*CFOSLSop_lvls[l]);
+       if (prec_option > 0)
+            solver_lvls[l]->SetPreconditioner(*prec_lvls[l]);
+       solver_lvls[l]->SetPrintLevel(0);
+
+    }
+    */
 
     for (int l = 0; l < num_lvls; ++l)
     {

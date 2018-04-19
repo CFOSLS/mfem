@@ -981,6 +981,21 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
     const SparseMatrix* P_H1_local;
     const SparseMatrix* P_L2_local;
 
+    pmesh_lvls.resize(num_lvls);
+    Hdiv_space_lvls.resize(num_lvls);
+    H1_space_lvls.resize(num_lvls);
+    L2_space_lvls.resize(num_lvls);
+    P_Hdiv_lvls.resize(num_lvls - 1);
+    P_H1_lvls.resize(num_lvls - 1);
+    P_L2_lvls.resize(num_lvls - 1);
+    TrueP_Hdiv_lvls.resize(num_lvls - 1);
+    TrueP_H1_lvls.resize(num_lvls - 1);
+    TrueP_L2_lvls.resize(num_lvls - 1);
+
+    //std::cout << "Checking test for dynamic cast \n";
+    //if (dynamic_cast<testB*> (testA))
+        //std::cout << "Unsuccessful cast \n";
+
     for (int l = num_lvls - 1; l >= 0; --l)
     {
         RefineAndCopy(l, &pmesh);
@@ -1083,7 +1098,7 @@ void GeneralCylHierarchy::ConstructInterpolations()
     TrueP_bndtop_H1_lvls.resize(num_lvls - 1);
     TrueP_bndtop_Hdiv_lvls.resize(num_lvls - 1);
 
-    for (int l = num_lvls - 1; l >= 0; --l)
+    for (int l = num_lvls - 2; l >= 0; --l)
     {
         TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
         TrueP_bndbot_H1_lvls[l]->CopyColStarts();
