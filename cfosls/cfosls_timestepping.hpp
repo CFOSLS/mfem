@@ -49,10 +49,10 @@ protected:
 
     GeneralCylHierarchy * hierarchy;
 
-    std::vector<ParMeshCyl*> pmeshtsl_lvls;
-    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
-    std::vector<ParFiniteElementSpace* > H1_space_lvls;
-    std::vector<ParFiniteElementSpace* > L2_space_lvls;
+    //std::vector<ParMeshCyl*> pmeshtsl_lvls;
+    //std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
+    //std::vector<ParFiniteElementSpace* > H1_space_lvls;
+    //std::vector<ParFiniteElementSpace* > L2_space_lvls;
     std::vector<ParFiniteElementSpace* > Sigma_space_lvls; // shortcut (may be useful if consider vector H1 for sigma at some moment
     std::vector<ParFiniteElementSpace* > S_space_lvls;     // shortcut
 
@@ -65,26 +65,26 @@ protected:
     std::vector<BlockVector*> trueRhs_nobnd_lvls;
     std::vector<BlockVector*> trueX_lvls;
 
-    std::vector<int> init_cond_size_lvls;
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
+    //std::vector<int> init_cond_size_lvls;
+    //std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
+    //std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
 
-    std::vector<SparseMatrix*> P_H1_lvls;
-    std::vector<SparseMatrix*> P_Hdiv_lvls;
-    std::vector<SparseMatrix*> P_L2_lvls;
-    std::vector<HypreParMatrix*> TrueP_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_L2_lvls;
+    //std::vector<SparseMatrix*> P_H1_lvls;
+    //std::vector<SparseMatrix*> P_Hdiv_lvls;
+    //std::vector<SparseMatrix*> P_L2_lvls;
+    //std::vector<HypreParMatrix*> TrueP_H1_lvls;
+    //std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
+    //std::vector<HypreParMatrix*> TrueP_L2_lvls;
     std::vector<BlockOperator*> TrueP_lvls;
 
-    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
+    //std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
+    //std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
+    //std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
+    //std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
+    //std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
+    //std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
+    //std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
+    //std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
 
     bool visualization;
 public:
@@ -109,19 +109,30 @@ public:
 
     void ComputeAnalyticalRhs(int lvl);
 
-    int GetInitCondSize(int lvl) {return init_cond_size_lvls[lvl];}
+    GeneralCylHierarchy * GetHierarchy() {return hierarchy;}
+
+    int GetInitCondSize(int lvl) const
+    {
+        if (strcmp(space_for_S,"H1") == 0)
+            return hierarchy->GetTdofs_H1_link(lvl)->size();
+        else
+            return hierarchy->GetTdofs_Hdiv_link(lvl)->size();
+    }
+
     int GetNLevels() {return ref_lvls;}
 
     std::vector<std::pair<int,int> > * GetTdofsLink(int lvl)
     {
         if (strcmp(space_for_S,"H1") == 0)
-            return &(tdofs_link_H1_lvls[lvl]);
+            return hierarchy->GetTdofs_H1_link(lvl);
         else
-            return &(tdofs_link_Hdiv_lvls[lvl]);
+            return hierarchy->GetTdofs_Hdiv_link(lvl);
     }
 
     ParFiniteElementSpace * Get_S_space(int lvl = 0) {return S_space_lvls[lvl];}
     ParFiniteElementSpace * Get_Sigma_space(int lvl = 0) {return Sigma_space_lvls[lvl];}
+
+    /*
     HypreParMatrix * Get_TrueP_H1(int lvl)
     {
         if (lvl >= 0 && lvl < ref_lvls)
@@ -136,14 +147,9 @@ public:
                 return TrueP_Hdiv_lvls[lvl];
         return NULL;
     }
+    */
 
-    ParMeshCyl * Get_ParMeshCyl(int lvl)
-    {
-        if (lvl >= 0 && lvl <= ref_lvls)
-            if (pmeshtsl_lvls[lvl])
-                return pmeshtsl_lvls[lvl];
-        return NULL;
-    }
+    ParMeshCyl * GetParMeshCyl(int lvl) { return hierarchy->GetPmeshcyl(lvl);}
 
     Vector* GetSol(int lvl)
     { return trueX_lvls[lvl]; }

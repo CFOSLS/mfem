@@ -76,9 +76,9 @@ TimeCylHyper::~TimeCylHyper()
         delete Sigma_space_lvls[i];
     for (unsigned int i = 0; i < S_space_lvls.size(); ++i)
         delete S_space_lvls[i];
-    if (strcmp(space_for_S,"H1") == 0)
-        for (unsigned int i = 0; i < L2_space_lvls.size(); ++i)
-            delete L2_space_lvls[i];
+    //if (strcmp(space_for_S,"H1") == 0)
+        //for (unsigned int i = 0; i < L2_space_lvls.size(); ++i)
+            //delete L2_space_lvls[i];
     for (unsigned int i = 0; i < CFOSLSop_lvls.size(); ++i)
         delete CFOSLSop_lvls[i];
     for (unsigned int i = 1; i < CFOSLSop_coarsened_lvls.size(); ++i)
@@ -93,6 +93,7 @@ TimeCylHyper::~TimeCylHyper()
         delete prec_lvls[i];
     for (unsigned int i = 0; i < solver_lvls.size(); ++i)
         delete solver_lvls[i];
+    /*
     for (unsigned int i = 0; i < P_H1_lvls.size(); ++i)
         delete P_H1_lvls[i];
     for (unsigned int i = 0; i < P_Hdiv_lvls.size(); ++i)
@@ -127,6 +128,11 @@ TimeCylHyper::~TimeCylHyper()
         delete Restrict_top_H1_lvls[i];
     for (unsigned int i = 0; i < Restrict_top_Hdiv_lvls.size(); ++i)
         delete Restrict_top_Hdiv_lvls[i];
+    */
+
+
+    // TODO: Add a proper destructor for the hierarchy class
+    delete hierarchy;
 }
 
 void TimeCylHyper::Interpolate(int lvl, const Vector& vec_in, Vector& vec_out)
@@ -142,9 +148,11 @@ void TimeCylHyper::InterpolateAtBase(const char * top_or_bot, int lvl, const Vec
     if (strcmp(space_for_S, "H1") == 0)
     {
         if (strcmp(top_or_bot, "top") == 0)
-            TrueP_bndtop_H1_lvls[lvl]->Mult(vec_in, vec_out);
+            hierarchy->GetTrueP_bndtop_H1(lvl)->Mult(vec_in, vec_out);
+            //TrueP_bndtop_H1_lvls[lvl]->Mult(vec_in, vec_out);
         else if (strcmp(top_or_bot, "bot") == 0)
-            TrueP_bndbot_H1_lvls[lvl]->Mult(vec_in, vec_out);
+            hierarchy->GetTrueP_bndbot_H1(lvl)->Mult(vec_in, vec_out);
+            //TrueP_bndbot_H1_lvls[lvl]->Mult(vec_in, vec_out);
         else
         {
             MFEM_ABORT("In TimeCylHyper::InterpolateAtBase() top_or_bot must be 'top' or 'bot'!");
@@ -153,9 +161,11 @@ void TimeCylHyper::InterpolateAtBase(const char * top_or_bot, int lvl, const Vec
     else
     {
         if (strcmp(top_or_bot, "top") == 0)
-            TrueP_bndtop_Hdiv_lvls[lvl]->Mult(vec_in, vec_out);
+            hierarchy->GetTrueP_bndtop_Hdiv(lvl)->Mult(vec_in, vec_out);
+            //TrueP_bndtop_Hdiv_lvls[lvl]->Mult(vec_in, vec_out);
         else if (strcmp(top_or_bot, "bot") == 0)
-            TrueP_bndbot_Hdiv_lvls[lvl]->Mult(vec_in, vec_out);
+            hierarchy->GetTrueP_bndbot_Hdiv(lvl)->Mult(vec_in, vec_out);
+            //TrueP_bndbot_Hdiv_lvls[lvl]->Mult(vec_in, vec_out);
         else
         {
             MFEM_ABORT("In TimeCylHyper::InterpolateAtBase() top_or_bot must be 'top' or 'bot'!");
@@ -179,9 +189,11 @@ void TimeCylHyper::RestrictAtBase(const char * top_or_bot, int lvl, const Vector
     if (strcmp(space_for_S, "H1") == 0)
     {
         if (strcmp(top_or_bot, "top") == 0)
-            TrueP_bndtop_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+            hierarchy->GetTrueP_bndtop_H1(lvl - 1)->MultTranspose(vec_in, vec_out);
+            //TrueP_bndtop_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else if (strcmp(top_or_bot, "bot") == 0)
-            TrueP_bndbot_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+            hierarchy->GetTrueP_bndbot_H1(lvl - 1)->MultTranspose(vec_in, vec_out);
+            //TrueP_bndbot_H1_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else
         {
             MFEM_ABORT("In TimeCylHyper::RestrictAtBase() top_or_bot must be 'top' or 'bot'!");
@@ -190,9 +202,11 @@ void TimeCylHyper::RestrictAtBase(const char * top_or_bot, int lvl, const Vector
     else
     {
         if (strcmp(top_or_bot, "top") == 0)
-            TrueP_bndtop_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+            hierarchy->GetTrueP_bndtop_Hdiv(lvl - 1)->MultTranspose(vec_in, vec_out);
+            //TrueP_bndtop_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else if (strcmp(top_or_bot, "bot") == 0)
-            TrueP_bndbot_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
+            hierarchy->GetTrueP_bndbot_Hdiv(lvl - 1)->MultTranspose(vec_in, vec_out);
+            //TrueP_bndbot_Hdiv_lvls[lvl - 1]->MultTranspose(vec_in, vec_out);
         else
         {
             MFEM_ABORT("In TimeCylHyper::RestrictAtBase() top_or_bot must be 'top' or 'bot'!");
@@ -208,27 +222,27 @@ void TimeCylHyper::ConvertInitCndToFullVector(int lvl, const Vector& vec_in, Vec
 
     if (strcmp(space_for_S, "H1") == 0)
     {
-        if (vec_in.Size() != tdofs_link_H1_lvls[lvl].size())
+        if (vec_in.Size() != hierarchy->GetLinksize_H1(lvl))
         {
             MFEM_ABORT("Size of vec_in in ConvertInitCndToFullVector differs from the size of tdofs_link_H1_lvls \n");
         }
 
         for (int i = 0; i < vec_in.Size(); ++i)
         {
-            int tdof = tdofs_link_H1_lvls[lvl][i].first;
+            int tdof = (*hierarchy->GetTdofs_H1_link(lvl))[i].first;// tdofs_link_H1_lvls[lvl][i].first;
             viewer.GetBlock(1)[tdof] = vec_in[i];
         }
     }
     else
     {
-        if (vec_in.Size() != tdofs_link_Hdiv_lvls[lvl].size())
+        if (vec_in.Size() != hierarchy->GetLinksize_Hdiv(lvl))
         {
             MFEM_ABORT("Size of vec_in in ConvertInitCndToFullVector differs from the size of tdofs_link_Hdiv_lvls \n");
         }
 
         for (int i = 0; i < vec_in.Size(); ++i)
         {
-            int tdof = tdofs_link_H1_lvls[lvl][i].first;
+            int tdof = (*hierarchy->GetTdofs_Hdiv_link(lvl))[i].first; //tdofs_link_Hdiv_lvls[lvl][i].first;
             viewer.GetBlock(0)[tdof] = vec_in[i];
         }
     }
@@ -299,11 +313,11 @@ void TimeCylHyper::ComputeError(int lvl, Vector& sol) const
 {
     BlockVector sol_viewer(sol.GetData(), *block_trueOffsets_lvls[lvl]);
 
-    ParMeshCyl * pmeshtsl = pmeshtsl_lvls[lvl];
+    ParMeshCyl * pmeshtsl = hierarchy->GetPmeshcyl(lvl);//pmeshtsl_lvls[lvl];
 
     ParFiniteElementSpace * S_space = S_space_lvls[lvl];
     ParFiniteElementSpace * Sigma_space = Sigma_space_lvls[lvl];
-    ParFiniteElementSpace * L2_space = L2_space_lvls[lvl];
+    ParFiniteElementSpace * L2_space = hierarchy->GetL2_space(lvl);//L2_space_lvls[lvl];
 
     Transport_test Mytest(dim, numsol);
 
@@ -544,7 +558,7 @@ void TimeCylHyper::Solve(const char * mode, int lvl, const Vector& rhs, Vector& 
         MFEM_ABORT("Mode coarsened was not implemented yet \n");
     }
 
-    int init_cond_size = init_cond_size_lvls[lvl];
+    int init_cond_size = GetInitCondSize(lvl);// init_cond_size_lvls[lvl];
 
     if (bnd_tdofs_bot.Size() != init_cond_size || bnd_tdofs_top.Size() != init_cond_size)
     {
@@ -557,9 +571,9 @@ void TimeCylHyper::Solve(const char * mode, int lvl, const Vector& rhs, Vector& 
     BlockOperator* CFOSLSop_nobnd = CFOSLSop_nobnd_lvls[lvl];
     ParFiniteElementSpace * S_space = S_space_lvls[lvl];
     ParFiniteElementSpace * Sigma_space = Sigma_space_lvls[lvl];
-    ParFiniteElementSpace * L2_space = L2_space_lvls[lvl];
+    ParFiniteElementSpace * L2_space = hierarchy->GetL2_space(lvl);// L2_space_lvls[lvl];
     MINRESSolver * solver = solver_lvls[lvl];
-    ParMeshCyl * pmeshtsl = pmeshtsl_lvls[lvl];
+    ParMeshCyl * pmeshtsl = hierarchy->GetPmeshcyl(lvl);// pmeshtsl_lvls[lvl];
     Array<int> block_trueOffsets(block_trueOffsets_lvls[lvl]->Size());
     for (int i = 0; i < block_trueOffsets.Size(); ++i)
         block_trueOffsets[i] = (*block_trueOffsets_lvls[lvl])[i];
@@ -567,9 +581,9 @@ void TimeCylHyper::Solve(const char * mode, int lvl, const Vector& rhs, Vector& 
     std::vector<std::pair<int,int> > tdofs_link_H1;
     std::vector<std::pair<int,int> > tdofs_link_Hdiv;
     if (strcmp(space_for_S, "H1") == 0)
-        tdofs_link_H1 = tdofs_link_H1_lvls[lvl];
+        tdofs_link_H1 = *hierarchy->GetTdofs_H1_link(lvl); //tdofs_link_H1_lvls[lvl];
     else
-        tdofs_link_Hdiv = tdofs_link_Hdiv_lvls[lvl];
+        tdofs_link_Hdiv = *hierarchy->GetTdofs_Hdiv_link(lvl); //tdofs_link_Hdiv_lvls[lvl];
 
     Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
     for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
@@ -689,7 +703,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         MFEM_ABORT("Incorrect lvl argument for TimeCylHyper::Solve() \n");
     }
 
-    int init_cond_size = init_cond_size_lvls[lvl];
+    int init_cond_size = GetInitCondSize(lvl);// init_cond_size_lvls[lvl];
 
     if (bnd_tdofs_bot.Size() != init_cond_size || bnd_tdofs_top.Size() != init_cond_size)
     {
@@ -702,9 +716,9 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     BlockOperator* CFOSLSop_nobnd = CFOSLSop_nobnd_lvls[lvl];
     ParFiniteElementSpace * S_space = S_space_lvls[lvl];
     ParFiniteElementSpace * Sigma_space = Sigma_space_lvls[lvl];
-    ParFiniteElementSpace * L2_space = L2_space_lvls[lvl];
+    ParFiniteElementSpace * L2_space = hierarchy->GetL2_space(lvl);// L2_space_lvls[lvl];
     MINRESSolver * solver = solver_lvls[lvl];
-    ParMeshCyl * pmeshtsl = pmeshtsl_lvls[lvl];
+    ParMeshCyl * pmeshtsl = hierarchy->GetPmeshcyl(lvl);// pmeshtsl_lvls[lvl];
     Array<int> block_trueOffsets(block_trueOffsets_lvls[lvl]->Size());
     for (int i = 0; i < block_trueOffsets.Size(); ++i)
         block_trueOffsets[i] = (*block_trueOffsets_lvls[lvl])[i];
@@ -712,9 +726,9 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     std::vector<std::pair<int,int> > tdofs_link_H1;
     std::vector<std::pair<int,int> > tdofs_link_Hdiv;
     if (strcmp(space_for_S, "H1") == 0)
-        tdofs_link_H1 = tdofs_link_H1_lvls[lvl];
+        tdofs_link_H1 = *hierarchy->GetTdofs_H1_link(lvl); //tdofs_link_H1_lvls[lvl];
     else
-        tdofs_link_Hdiv = tdofs_link_Hdiv_lvls[lvl];
+        tdofs_link_Hdiv = *hierarchy->GetTdofs_Hdiv_link(lvl); //tdofs_link_Hdiv_lvls[lvl];
 
     Array<int> ess_bdrS(pmeshtsl->bdr_attributes.Max());
     for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
@@ -1396,10 +1410,10 @@ void TimeCylHyper::InitProblem()
     /////////////////////////////////////////////////////////////////
     int num_lvls = ref_lvls + 1;
 
-    pmeshtsl_lvls.resize(num_lvls);
-    Hdiv_space_lvls.resize(num_lvls);
-    H1_space_lvls.resize(num_lvls);
-    L2_space_lvls.resize(num_lvls);
+    //pmeshtsl_lvls.resize(num_lvls);
+    //Hdiv_space_lvls.resize(num_lvls);
+    //H1_space_lvls.resize(num_lvls);
+    //L2_space_lvls.resize(num_lvls);
     Sigma_space_lvls.resize(num_lvls);
     S_space_lvls.resize(num_lvls);
 
@@ -1413,6 +1427,8 @@ void TimeCylHyper::InitProblem()
     solver_lvls.resize(num_lvls);
 
     TrueP_lvls.resize(num_lvls - 1);
+
+    /*
     TrueP_L2_lvls.resize(num_lvls - 1);
     TrueP_H1_lvls.resize(num_lvls - 1);
     TrueP_Hdiv_lvls.resize(num_lvls - 1);
@@ -1427,16 +1443,17 @@ void TimeCylHyper::InitProblem()
     Restrict_bot_Hdiv_lvls.resize(num_lvls);
     Restrict_top_H1_lvls.resize(num_lvls);
     Restrict_top_Hdiv_lvls.resize(num_lvls);
+    */
 
-    init_cond_size_lvls.resize(num_lvls);
-    tdofs_link_H1_lvls.resize(num_lvls);
-    tdofs_link_Hdiv_lvls.resize(num_lvls);
+    //init_cond_size_lvls.resize(num_lvls);
+    //tdofs_link_H1_lvls.resize(num_lvls);
+    //tdofs_link_Hdiv_lvls.resize(num_lvls);
 
     std::vector<Array2D<HypreParMatrix*> *> Funct_hpmat_lvls(num_lvls);
 
-    const SparseMatrix* P_Hdiv_local;
-    const SparseMatrix* P_H1_local;
-    const SparseMatrix* P_L2_local;
+    //const SparseMatrix* P_Hdiv_local;
+    //const SparseMatrix* P_H1_local;
+    //const SparseMatrix* P_L2_local;
 
 
     int numblocks = 1;
@@ -1459,12 +1476,21 @@ void TimeCylHyper::InitProblem()
         if (strcmp(space_for_sigma,"H1") == 0)
             MFEM_ABORT ("Not supported case sigma from vector H1, think of the boundary conditions there");
 
+        /*
         if (strcmp(space_for_S, "H1") == 0)
             init_cond_size_lvls[l] = hierarchy->GetLinksize_H1(l);
         else // L2
             init_cond_size_lvls[l] = hierarchy->GetLinksize_Hdiv(l);
+        */
 
-        instead of all calls below we should use getters from the hierarchy
+        //instead of all calls below we should use getters from the hierarchy
+
+        // aliases
+        ParFiniteElementSpace * Hdiv_space_lvl = hierarchy->GetHdiv_space(l);
+        ParFiniteElementSpace * H1_space_lvl = hierarchy->GetH1_space(l);
+        ParFiniteElementSpace * L2_space_lvl = hierarchy->GetL2_space(l);
+
+        ParMeshCyl * pmeshtsl_lvl = hierarchy->GetPmeshcyl(l);
 
         //ParFiniteElementSpace *H1vec_space;
         //if (strcmp(space_for_sigma,"H1") == 0)
@@ -1473,19 +1499,19 @@ void TimeCylHyper::InitProblem()
             //Sigma_space_lvls[l] = Hdiv_space_lvls[l];
         //else
             //Sigma_space_lvls[l] = H1vec_space_lvls[l];
-        Sigma_space_lvls[l] = Hdiv_space_lvls[l];
+        Sigma_space_lvls[l] = Hdiv_space_lvl;
 
         if (strcmp(space_for_S,"H1") == 0)
-            S_space_lvls[l] = H1_space_lvls[l];
+            S_space_lvls[l] = H1_space_lvl;
         else // "L2"
-            S_space_lvls[l] = L2_space_lvls[l];
+            S_space_lvls[l] = L2_space_lvl;
 
-        HYPRE_Int dimR = Hdiv_space_lvls[l]->GlobalTrueVSize();
-        HYPRE_Int dimH = H1_space_lvls[l]->GlobalTrueVSize();
-        HYPRE_Int dimHvec;
+        HYPRE_Int dimR = Hdiv_space_lvl->GlobalTrueVSize();
+        HYPRE_Int dimH = H1_space_lvl->GlobalTrueVSize();
+        //HYPRE_Int dimHvec;
         //if (strcmp(space_for_sigma,"H1") == 0)
             //dimHvec = H1vec_space_lvls[l]->GlobalTrueVSize();
-        HYPRE_Int dimW = L2_space_lvls[l]->GlobalTrueVSize();
+        HYPRE_Int dimW = L2_space_lvl->GlobalTrueVSize();
 
         if (verbose)
         {
@@ -1522,12 +1548,12 @@ void TimeCylHyper::InitProblem()
 
         if (strcmp(space_for_S,"H1") == 0)
         {
-            block_offsets[tempblknum] = H1_space_lvls[l]->GetVSize();
+            block_offsets[tempblknum] = H1_space_lvl->GetVSize();
             tempblknum++;
         }
         if (strcmp(formulation,"cfosls") == 0)
         {
-            block_offsets[tempblknum] = L2_space_lvls[l]->GetVSize();
+            block_offsets[tempblknum] = L2_space_lvl->GetVSize();
             tempblknum++;
         }
         block_offsets.PartialSum();
@@ -1542,12 +1568,12 @@ void TimeCylHyper::InitProblem()
 
         if (strcmp(space_for_S,"H1") == 0)
         {
-            (*block_trueOffsets_lvls[l])[tempblknum] = H1_space_lvls[l]->TrueVSize();
+            (*block_trueOffsets_lvls[l])[tempblknum] = H1_space_lvl->TrueVSize();
             tempblknum++;
         }
         if (strcmp(formulation,"cfosls") == 0)
         {
-            (*block_trueOffsets_lvls[l])[tempblknum] = L2_space_lvls[l]->TrueVSize();
+            (*block_trueOffsets_lvls[l])[tempblknum] = L2_space_lvl->TrueVSize();
             tempblknum++;
         }
         block_trueOffsets_lvls[l]->PartialSum();
@@ -1564,23 +1590,23 @@ void TimeCylHyper::InitProblem()
        // Setting boundary conditions.
        //----------------------------------------------------------
 
-       ess_bdrat_S.resize(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       ess_bdrat_S.resize(pmeshtsl_lvl->bdr_attributes.Max());
        for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
            ess_bdrat_S[i] = 0;
        if (strcmp(space_for_S,"H1") == 0)
            ess_bdrat_S[0] = 1; // t = 0
 
-       ess_bdrat_sigma.resize(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       ess_bdrat_sigma.resize(pmeshtsl_lvl->bdr_attributes.Max());
        for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
            ess_bdrat_sigma[i] = 0;
        if (strcmp(space_for_S,"L2") == 0) // if S is from L2 we impose bdr condition for sigma at t = 0
            ess_bdrat_sigma[0] = 1;
 
-       Array<int> ess_bdrS(pmeshtsl_lvls[l]->bdr_attributes.Max());
+       Array<int> ess_bdrS(pmeshtsl_lvl->bdr_attributes.Max());
        for (unsigned int i = 0; i < ess_bdrat_S.size(); ++i)
            ess_bdrS[i] = ess_bdrat_S[i];
 
-       Array<int> ess_bdrSigma(pmeshtsl->bdr_attributes.Max());
+       Array<int> ess_bdrSigma(pmeshtsl_lvl->bdr_attributes.Max());
        for (unsigned int i = 0; i < ess_bdrat_sigma.size(); ++i)
            ess_bdrSigma[i] = ess_bdrat_sigma[i];
 
@@ -1588,9 +1614,9 @@ void TimeCylHyper::InitProblem()
        {
            std::cout << "Boundary conditions: \n";
            std::cout << "ess bdr Sigma: \n";
-           ess_bdrSigma.Print(std::cout, pmeshtsl_lvls[l]->bdr_attributes.Max());
+           ess_bdrSigma.Print(std::cout, pmeshtsl_lvl->bdr_attributes.Max());
            std::cout << "ess bdr S: \n";
-           ess_bdrS.Print(std::cout, pmeshtsl_lvls[l]->bdr_attributes.Max());
+           ess_bdrS.Print(std::cout, pmeshtsl_lvl->bdr_attributes.Max());
        }
        //-----------------------
 
@@ -1784,7 +1810,7 @@ void TimeCylHyper::InitProblem()
 
        if (strcmp(formulation,"cfosls") == 0)
        {
-          ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvls[l]));
+          ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvl));
           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
             Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
           else // sigma is from H1vec
@@ -1808,7 +1834,7 @@ void TimeCylHyper::InitProblem()
 
        if (strcmp(formulation,"cfosls") == 0)
        {
-          ParMixedBilinearForm *Dblock_nobnd(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvls[l]));
+          ParMixedBilinearForm *Dblock_nobnd(new ParMixedBilinearForm(Sigma_space_lvls[l], L2_space_lvl));
           if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
             Dblock_nobnd->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
           else // sigma is from H1vec
@@ -1822,19 +1848,6 @@ void TimeCylHyper::InitProblem()
        //=======================================================
        // Setting up the block system Matrix
        //-------------------------------------------------------
-
-       if (l < num_lvls - 1)
-       {
-           TrueP_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l], *block_trueOffsets_lvls[l + 1]);
-           TrueP_lvls[l]->SetBlock(0,0, TrueP_Hdiv_lvls[l]);
-           if (strcmp(space_for_S,"H1") == 0) // S is present
-           {
-               TrueP_lvls[l]->SetBlock(1,1, TrueP_H1_lvls[l]);
-               TrueP_lvls[l]->SetBlock(2,2, TrueP_L2_lvls[l]);
-           }
-           else
-               TrueP_lvls[l]->SetBlock(1,1, TrueP_L2_lvls[l]);
-      }
 
       CFOSLSop_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l]);
 
@@ -2662,6 +2675,23 @@ void TimeCylHyper::InitProblem()
     }
     */
 
+    for (int l = num_lvls - 1 - 1; l >= 0; --l)
+    {
+        HypreParMatrix * TrueP_Hdiv_lvl = hierarchy->GetTrueP_Hdiv(l);
+        HypreParMatrix * TrueP_H1_lvl = hierarchy->GetTrueP_H1(l);
+        HypreParMatrix * TrueP_L2_lvl = hierarchy->GetTrueP_L2(l);
+
+        TrueP_lvls[l] = new BlockOperator(*block_trueOffsets_lvls[l], *block_trueOffsets_lvls[l + 1]);
+        TrueP_lvls[l]->SetBlock(0,0, TrueP_Hdiv_lvl);
+        if (strcmp(space_for_S,"H1") == 0) // S is present
+        {
+            TrueP_lvls[l]->SetBlock(1,1, TrueP_H1_lvl);
+            TrueP_lvls[l]->SetBlock(2,2, TrueP_L2_lvl);
+        }
+        else
+            TrueP_lvls[l]->SetBlock(1,1, TrueP_L2_lvl);
+    }
+
     for (int l = 0; l < num_lvls; ++l)
     {
         Funct_hpmat_lvls[l] = new Array2D<HypreParMatrix*>(numvars, numvars);
@@ -2678,8 +2708,13 @@ void TimeCylHyper::InitProblem()
         }
         else // doing RAP for the Functional matrix as an Array2D<HypreParMatrix*>
         {
-             // TODO: Rewrite this in a general form
-            (*Funct_hpmat_lvls[l])(0,0) = RAP(TrueP_Hdiv_lvls[l-1], (*Funct_hpmat_lvls[l-1])(0,0), TrueP_Hdiv_lvls[l-1]);
+            // aliases
+            HypreParMatrix * TrueP_Hdiv_lvl = hierarchy->GetTrueP_Hdiv(l-1);
+            HypreParMatrix * TrueP_H1_lvl = hierarchy->GetTrueP_H1(l-1);
+            //HypreParMatrix * TrueP_L2_lvl = hierarchy->GetTrueP_L2(l-1);
+
+            // TODO: Rewrite this in a general form
+            (*Funct_hpmat_lvls[l])(0,0) = RAP(TrueP_Hdiv_lvl, (*Funct_hpmat_lvls[l-1])(0,0), TrueP_Hdiv_lvl);
             (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
             (*Funct_hpmat_lvls[l])(0,0)->CopyRowStarts();
 
@@ -2711,7 +2746,7 @@ void TimeCylHyper::InitProblem()
 
             if (strcmp(space_for_S,"H1") == 0)
             {
-                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H1_lvls[l-1], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H1_lvls[l-1]);
+                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H1_lvl, (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H1_lvl);
                 //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
                 //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
 
@@ -2740,9 +2775,9 @@ void TimeCylHyper::InitProblem()
                     delete temphpmat;
                 }
 
-                HypreParMatrix * P_R_T = TrueP_Hdiv_lvls[l-1]->Transpose();
-                HypreParMatrix * temp1 = ParMult((*Funct_hpmat_lvls[l-1])(0,1), TrueP_H1_lvls[l-1]);
-                (*Funct_hpmat_lvls[l])(0,1) = ParMult(P_R_T, temp1);
+                HypreParMatrix * TrueP_Hdiv_T = TrueP_Hdiv_lvl->Transpose();
+                HypreParMatrix * temp1 = ParMult((*Funct_hpmat_lvls[l-1])(0,1), TrueP_H1_lvl);
+                (*Funct_hpmat_lvls[l])(0,1) = ParMult(TrueP_Hdiv_T, temp1);
                 //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
                 //(*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
 
@@ -2782,7 +2817,7 @@ void TimeCylHyper::InitProblem()
                 (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
                 (*Funct_hpmat_lvls[l])(1,0)->CopyRowStarts();
 
-                delete P_R_T;
+                delete TrueP_Hdiv_T;
                 delete temp1;
             }
 

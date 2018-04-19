@@ -1120,7 +1120,7 @@ void GeneralCylHierarchy::ConstructInterpolations()
 
 void GeneralCylHierarchy::ConstructTdofsLinks()
 {
-    init_cond_size_lvls.resize(num_lvls);
+    //init_cond_size_lvls.resize(num_lvls);
     tdofs_link_H1_lvls.resize(num_lvls);
     tdofs_link_Hdiv_lvls.resize(num_lvls);
 

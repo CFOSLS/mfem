@@ -427,10 +427,10 @@ int main(int argc, char *argv[])
           ParGridFunction * Xout_fine_dofs = new ParGridFunction(timeslab_test->Get_S_space(0));
           Xout_fine_dofs->Distribute(&Xout_fine_truedofs);
 
-          ParMeshCyl * pmeshcyl_coarse = timeslab_test->Get_ParMeshCyl(solve_at_lvl);
+          ParMeshCyl * pmeshcyl_coarse = timeslab_test->GetParMeshCyl(solve_at_lvl);
 
           //std::cout << "pmeshcyl_coarse ne = " << pmeshcyl_coarse->GetNE() << "\n";
-          ParMeshCyl * pmeshcyl_fine = timeslab_test->Get_ParMeshCyl(0);
+          ParMeshCyl * pmeshcyl_fine = timeslab_test->GetParMeshCyl(0);
 
           char vishost[] = "localhost";
           int  visport   = 19916;

@@ -421,7 +421,7 @@ class GeneralCylHierarchy : public GeneralHierarchy
 protected:
     std::vector<ParMeshCyl*> pmeshcyl_lvls;
 
-    std::vector<int> init_cond_size_lvls;
+    //std::vector<int> init_cond_size_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
 
@@ -475,7 +475,9 @@ public:
     HypreParMatrix * GetRestrict_bot_H1 (int l) {return Restrict_bot_H1_lvls[l];}
     HypreParMatrix * GetRestrict_top_H1 (int l) {return Restrict_top_H1_lvls[l];}
 
-    int GetInitCondSize(int l) {return init_cond_size_lvls[l];}
+    //int GetInitCondSize(int l) const {return init_cond_size_lvls[l];}
+    int GetLinksize_Hdiv(int l) const {return tdofs_link_Hdiv_lvls[l].size();}
+    int GetLinksize_H1(int l) const {return tdofs_link_H1_lvls[l].size();}
 
     //virtual void RefineAndCopy(int lvl, ParMesh* pmesh) override;
 };
