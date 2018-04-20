@@ -261,6 +261,297 @@ CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulatio
 }
 
 
+void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFiniteElementSpace*>& pfes)
+{
+    MFEM_ASSERT(numblocks == fe_formul.Nblocks(), "numblocks mismatch in BlockProblemForms::InitForms!");
+    MFEM_ASSERT(pfes.Size() == numblocks, "size of pfes is different from numblocks in BlockProblemForms::InitForms!");
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+        {
+            if (i == j)
+                diag_forms[i] = new ParBilinearForm(pfes[i]);
+            else
+                offd_forms(i,j) = new ParMixedBilinearForm(pfes[j], pfes[i]);
+
+            if (fe_formul.GetBlfi(i,j))
+            {
+                if (i == j)
+                    diag_forms[i]->AddDomainIntegrator(fe_formul.GetBlfi(i,j));
+                else
+                    offd_forms(i,j)->AddDomainIntegrator(fe_formul.GetBlfi(i,j));
+            }
+        }
+
+    initialized_forms = true;
+}
+
+
+/*
+FOSLSProblem::FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_)
+    : fe_formul(fe_formulation),
+      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      pbforms(fe_formul.Nblocks()), verbose(verbose_)
+{
+
+}
+*/
+
+FOSLSProblem::FOSLSProblem(ParMesh& pmesh, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+    : fe_formul(fe_formulation),
+      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      pbforms(fe_formul.Nblocks()), verbose(verbose_)
+{
+    InitSpaces(pmesh);
+    spaces_initialized = true;
+    pbforms.InitForms(fe_formul, pfes);
+    forms_initialized = true;
+
+    AssembleSystem(verbose);
+    prec = NULL;
+    //InitPrec(prec_option, verbose);
+    InitSolver(verbose);
+    solver_initialized = true;
+    InitGrFuns();
+}
+
+void FOSLSProblem::InitSpaces(ParMesh &pmesh)
+{
+    pfes.SetSize(fe_formul.Nblocks());
+
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+        pfes[i] = new ParFiniteElementSpace(&pmesh, fe_formul.GetFeColl(i));
+}
+
+void FOSLSProblem::InitGrFuns()
+{
+    grfuns.SetSize(fe_formul.Nblocks());
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+        grfuns[i] = new ParGridFunction(pfes[i]);
+}
+
+void FOSLSProblem::InitSolver(bool verbose)
+{
+    MPI_Comm comm = pfes[0]->GetComm();
+
+    int max_iter = 100000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
+
+    solver = new MINRESSolver(comm);
+    solver->SetAbsTol(atol);
+    solver->SetRelTol(rtol);
+    solver->SetMaxIter(max_iter);
+    solver->SetOperator(*CFOSLSop);
+    if (prec)
+         solver->SetPreconditioner(*prec);
+    solver->SetPrintLevel(0);
+
+    if (verbose)
+        std::cout << "Here you should print out parameters of the linear solver \n";
+}
+
+
+// works correctly only for problems with homogeneous initial conditions?
+// see the times-stepping branch, think of how boundary conditions for off-diagonal blocks are imposed
+// system is assumed to be symmetric
+void FOSLSProblem::AssembleSystem(bool verbose)
+{
+    int numblocks =fe_formul.Nblocks();
+
+    blkoffsets_true.SetSize(numblocks + 1);
+    blkoffsets_true[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets_true[i + 1] = pfes[i]->TrueVSize();
+    blkoffsets_true.PartialSum();
+
+    blkoffsets.SetSize(numblocks + 1);
+    blkoffsets[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets[i + 1] = pfes[i]->GetVSize();
+    blkoffsets.PartialSum();
+
+    x = SetInitialCondition();
+
+    trueRhs = new BlockVector(blkoffsets_true);
+    trueX = new BlockVector(blkoffsets_true);
+
+    for (int i = 0; i < numblocks; ++i)
+        plforms[i]->Assemble();
+
+    hpmats_nobnd.SetSize(numblocks, numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            hpmats_nobnd(i,j) = NULL;
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+        {
+            if (i == j)
+            {
+                if (pbforms.diag(i))
+                {
+                    pbforms.diag(i)->Assemble();
+                    pbforms.diag(i)->Finalize();
+                    hpmats_nobnd(i,j) = pbforms.diag(i)->ParallelAssemble();
+                }
+            }
+            else // off-diagonal
+            {
+                if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                {
+                    int exist_row, exist_col;
+                    if (pbforms.offd(i,j))
+                    {
+                        exist_row = i;
+                        exist_col = j;
+                    }
+                    else
+                    {
+                        exist_row = j;
+                        exist_col = i;
+                    }
+
+                    pbforms.offd(exist_row,exist_col)->Assemble();
+
+                    pbforms.offd(exist_row,exist_col)->Finalize();
+                    hpmats_nobnd(exist_row,exist_col) = pbforms.offd(exist_row,exist_col)->ParallelAssemble();
+                    hpmats_nobnd(exist_col, exist_row) = hpmats_nobnd(exist_row,exist_col)->Transpose();
+                }
+            }
+        }
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            if (i == j)
+                pbforms.diag(i)->LoseMat();
+            else
+                if (pbforms.offd(i,j))
+                    pbforms.offd(i,j)->LoseMat();
+
+    hpmats.SetSize(numblocks, numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            hpmats(i,j) = NULL;
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+        {
+            if (i == j)
+            {
+                if (pbforms.diag(i))
+                {
+                    pbforms.diag(i)->Assemble();
+
+                    //pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
+                            //x->GetBlock(i), *plforms[i]);
+                    Vector dummy(pbforms.diag(i)->Height());
+                    dummy = 0.0;
+                    pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
+                            x->GetBlock(i), dummy);
+                    pbforms.diag(i)->Finalize();
+                    hpmats(i,j) = pbforms.diag(i)->ParallelAssemble();
+
+                    SparseMatrix diag;
+                    hpmats(i,j)->GetDiag(diag);
+                    Array<int> essbnd_tdofs;
+                    pfes[i]->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[i], essbnd_tdofs);
+                    for (int i = 0; i < essbnd_tdofs.Size(); ++i)
+                    {
+                        int tdof = essbnd_tdofs[i];
+                        diag.EliminateRow(tdof,1.0);
+                    }
+
+                }
+            }
+            else // off-diagonal
+            {
+                if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                {
+                    int exist_row, exist_col;
+                    if (pbforms.offd(i,j))
+                    {
+                        exist_row = i;
+                        exist_col = j;
+                    }
+                    else
+                    {
+                        exist_row = j;
+                        exist_col = i;
+                    }
+
+                    pbforms.offd(exist_row,exist_col)->Assemble();
+
+                    //pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
+                                                                          //x->GetBlock(exist_col), *plforms[exist_row]);
+                    //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
+
+                    Vector dummy(pbforms.offd(exist_row,exist_col)->Height());
+                    dummy = 0.0;
+                    pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(*struct_formul.essbdr_attrs[exist_col],
+                                                                          x->GetBlock(exist_col), dummy);
+                    pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
+
+
+                    pbforms.offd(exist_row,exist_col)->Finalize();
+                    hpmats(exist_row,exist_col) = pbforms.offd(exist_row,exist_col)->ParallelAssemble();
+                    hpmats(exist_col, exist_row) = hpmats(exist_row,exist_col)->Transpose();
+                }
+            }
+        }
+
+   CFOSLSop = new BlockOperator(blkoffsets_true);
+   for (int i = 0; i < numblocks; ++i)
+       for (int j = 0; j < numblocks; ++j)
+           CFOSLSop->SetBlock(i,j, hpmats(i,j));
+
+   CFOSLSop_nobnd = new BlockOperator(blkoffsets_true);
+   for (int i = 0; i < numblocks; ++i)
+       for (int j = 0; j < numblocks; ++j)
+           CFOSLSop_nobnd->SetBlock(i,j, hpmats_nobnd(i,j));
+
+   // assembling rhs forms without boundary conditions
+   for (int i = 0; i < numblocks; ++i)
+   {
+       plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
+   }
+
+   //trueRhs->Print();
+
+   trueBnd = SetTrueInitialCondition();
+
+   // moving the contribution from inhomogenous bnd conditions
+   // from the rhs
+   BlockVector trueBndCor(blkoffsets_true);
+   trueBndCor = 0.0;
+
+   //trueBnd->Print();
+
+   CFOSLSop_nobnd->Mult(*trueBnd, trueBndCor);
+
+   //trueBndCor.Print();
+
+   *trueRhs -= trueBndCor;
+
+   // restoring correct boundary values for boundary tdofs
+   for (int i = 0; i < numblocks; ++i)
+   {
+       Array<int> ess_bnd_tdofs;
+       pfes[i]->GetEssentialTrueDofs(*struct_formul.essbdr_attrs[i], ess_bnd_tdofs);
+
+       for (int j = 0; j < ess_bnd_tdofs.Size(); ++j)
+       {
+           int tdof = ess_bnd_tdofs[j];
+           trueRhs->GetBlock(i)[tdof] = trueBnd->GetBlock(i)[tdof];
+       }
+   }
+
+   if (verbose)
+        cout << "Final saddle point matrix assembled \n";
+    MPI_Comm comm = pfes[0]->GetComm();
+    MPI_Barrier(comm);
+}
+
+
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
                                                  int fe_order, bool verbose)
     : feorder (fe_order), struct_formul(struct_formulation),

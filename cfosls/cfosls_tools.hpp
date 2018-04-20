@@ -93,6 +93,8 @@ public:
     int Dim() const {return dim;}
     int Nblocks() const {return numblocks;}
     int Numunknowns() const {return unknowns_number;}
+
+    BilinearFormIntegrator* GetBlfi(int i, int j) {return blfis(i,j);}
 };
 
 struct CFOSLSFormulation_HdivL2Hyper : public FOSLSFormulation
@@ -120,6 +122,15 @@ public:
     }
 
     virtual void foo() = 0;
+
+    BilinearFormIntegrator* GetBlfi(int i, int j) {return formul.GetBlfi(i,j);}
+    FiniteElementCollection* & GetFeColl(int i)
+    {
+        MFEM_ASSERT( i >= 0 && i < fecolls.Size(), "i < 0 or i > size fo fecolls \n");
+        return fecolls[i];
+    }
+
+    int Nblocks() const {return formul.Nblocks();}
 };
 
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
@@ -134,28 +145,50 @@ public:
     virtual void foo() override {}
 };
 
-/*
-// class for CFOSLS problem
-class CFOSLSProblem
+class BlockProblemForms
+{
+    friend class CFOSLSHyperbolicProblem;
+protected:
+    const int numblocks;
+    Array<ParBilinearForm*> diag_forms;
+    Array2D<ParMixedBilinearForm*> offd_forms;
+    bool initialized_forms;
+public:
+    BlockProblemForms(int num_blocks) : numblocks(num_blocks), initialized_forms(false)
+    {
+        diag_forms.SetSize(num_blocks);
+        for (int i = 0; i < num_blocks; ++i)
+            diag_forms[i] = NULL;
+        offd_forms.SetSize(numblocks, num_blocks);
+        for (int i = 0; i < num_blocks; ++i)
+            for (int j = 0; j < num_blocks; ++j)
+                offd_forms(i,j) = NULL;
+    }
+
+    void InitForms(FOSLSFEFormulation& fe_formul, Array<ParFiniteElementSpace *> &pfes);
+
+    ParBilinearForm* & diag(int i)
+    {
+        MFEM_ASSERT(initialized_forms, "Calling diag() when forms were not initialized is forbidden");
+        return diag_forms[i];
+    }
+    ParMixedBilinearForm* & offd(int i, int j)
+    {
+        MFEM_ASSERT(initialized_forms, "Calling offd() when forms were not initialized is forbidden");
+        return offd_forms(i,j);
+    }
+};
+
+
+// class for general CFOSLS problem
+class FOSLSProblem
 {
 protected:
-    FOSLSFormulation& struct_formul;
-    int feorder;
+    FOSLSFEFormulation& fe_formul;
+
     bool spaces_initialized;
     bool forms_initialized;
     bool solver_initialized;
-
-    FiniteElementCollection *hdiv_coll;
-    FiniteElementCollection *h1_coll;
-    FiniteElementCollection *l2_coll;
-    ParFiniteElementSpace * Hdiv_space;
-    ParFiniteElementSpace * H1_space;
-    ParFiniteElementSpace * H1vec_space;
-    ParFiniteElementSpace * L2_space;
-
-    // FIXME: to be removed in the abstract base class
-    ParFiniteElementSpace * Sigma_space;
-    ParFiniteElementSpace * S_space;
 
     // all par grid functions which are relevant to the formulation
     // e.g., solution components and right hand sides
@@ -165,46 +198,49 @@ protected:
     BlockProblemForms pbforms;
     Array<ParLinearForm*> plforms;
 
-
     Array<int> blkoffsets_true;
     Array<int> blkoffsets;
     Array2D<HypreParMatrix*> hpmats;
     BlockOperator *CFOSLSop;
     Array2D<HypreParMatrix*> hpmats_nobnd;
     BlockOperator *CFOSLSop_nobnd;
+
     BlockVector * trueRhs;
     BlockVector * trueX;
     BlockVector * trueBnd;
     BlockVector * x; // inital condition (~bnd conditions)
-    BlockDiagonalPreconditioner *prec;
+    Solver *prec;
     IterativeSolver * solver;
 
     StopWatch chrono;
 
+    bool verbose;
+
 protected:
-    void InitFEColls(bool verbose);
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
     void InitSolver(bool verbose);
-    void InitPrec(int prec_option, bool verbose);
+    //void InitPrec(int prec_option, bool verbose);
+    void SetPrec(Solver & Prec)
+    {
+        MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
+        prec = &Prec;
+        solver->SetPreconditioner(*prec);
+    }
+
     BlockVector *  SetInitialCondition();
     BlockVector * SetTrueInitialCondition();
     void InitGrFuns();
     void DistributeSolution();
     void ComputeError(bool verbose, bool checkbnd);
 public:
-    CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
-                            int fe_order, bool verbose);
-    CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation& struct_formulation,
-                            int fe_order, int prec_option, bool verbose);
-    void BuildCFOSLSSystem(ParMesh& pmesh, bool verbose);
+    //FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_);
+    FOSLSProblem(ParMesh& pmesh, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
+    void BuildSystem(ParMesh& pmesh, bool verbose);
     void Solve(bool verbose);
     void Update();
-    // deletes everything which was related to a specific mesh
-    void Reset() {MFEM_ABORT("Not implemented \n");}
 };
-*/
 
 struct CFOSLSHyperbolicFormulation
 {
@@ -356,28 +392,6 @@ public:
             lfis[blkcount] = new DomainLFIntegrator(*Mytest.scalardivsigma);
     }
 
-};
-
-class BlockProblemForms
-{
-    friend class CFOSLSHyperbolicProblem;
-protected:
-    const int numblocks;
-    Array<ParBilinearForm*> diag_forms;
-    Array2D<ParMixedBilinearForm*> offd_forms;
-public:
-    BlockProblemForms(int num_blocks) : numblocks(num_blocks)
-    {
-        diag_forms.SetSize(num_blocks);
-        for (int i = 0; i < num_blocks; ++i)
-            diag_forms[i] = NULL;
-        offd_forms.SetSize(numblocks, num_blocks);
-        for (int i = 0; i < num_blocks; ++i)
-            for (int j = 0; j < num_blocks; ++j)
-                offd_forms(i,j) = NULL;
-    }
-    ParBilinearForm* & diag(int i) {return diag_forms[i];}
-    ParMixedBilinearForm* & offd(int i, int j) {return offd_forms(i,j);}
 };
 
 class CFOSLSHyperbolicProblem
