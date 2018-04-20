@@ -144,6 +144,62 @@ public:
                                        DenseMatrix &elmat);
 };
 
+/** Bilinear integrator for (curl u, v) for Nedelec and scalar finite element for v. If the trial and
+    test spaces are switched, assembles the form (u, curl v). */
+class VectorFECurlVQIntegrator: public BilinearFormIntegrator
+{
+private:
+    VectorCoefficient *VQ;
+#ifndef MFEM_THREAD_SAFE
+    Vector shape;
+    DenseMatrix curlshape;
+    DenseMatrix curlshape_dFT;
+    //old
+    DenseMatrix curlshapeTrial;
+    DenseMatrix vshapeTest;
+    DenseMatrix curlshapeTrial_dFT;
+#endif
+    void Init(VectorCoefficient *vq)
+    { VQ = vq; }
+public:
+    VectorFECurlVQIntegrator() { Init(NULL); }
+    VectorFECurlVQIntegrator(VectorCoefficient &vq) { Init(&vq); }
+    VectorFECurlVQIntegrator(VectorCoefficient *vq) { Init(vq); }
+    virtual void AssembleElementMatrix(const FiniteElement &el,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat) { }
+    virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
+                                        const FiniteElement &test_fe,
+                                        ElementTransformation &Trans,
+                                        DenseMatrix &elmat);
+};
+
+class VectorcurlDomainLFIntegrator : public LinearFormIntegrator
+{
+    DenseMatrix curlshape;
+    DenseMatrix curlshape_dFadj;
+    DenseMatrix curlshape_dFT;
+    DenseMatrix dF_curlshape;
+    VectorCoefficient &VQ;
+    int oa, ob;
+public:
+    /// Constructs a domain integrator with a given Coefficient
+    VectorcurlDomainLFIntegrator(VectorCoefficient &VQF, int a = 2, int b = 0)
+        : VQ(VQF), oa(a), ob(b) { }
+
+    /// Constructs a domain integrator with a given Coefficient
+    VectorcurlDomainLFIntegrator(VectorCoefficient &VQF, const IntegrationRule *ir)
+        : LinearFormIntegrator(ir), VQ(VQF), oa(1), ob(1) { }
+
+    /** Given a particular Finite Element and a transformation (Tr)
+       computes the element right hand side element vector, elvect. */
+    virtual void AssembleRHSElementVect(const FiniteElement &el,
+                                        ElementTransformation &Tr,
+                                        Vector &elvect);
+
+    using LinearFormIntegrator::AssembleRHSElementVect;
+};
+
 class VectordivDomainLFIntegrator : public LinearFormIntegrator
 {
    Vector divshape;

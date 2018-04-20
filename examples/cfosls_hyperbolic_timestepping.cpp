@@ -345,6 +345,21 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a one TimeCylHyper instance "
                     "created for the entire domain \n";
 
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
+
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
+
+   MPI_Finalize();
+   return 0;
+
+   CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
+   CFOSLSHyperbolicProblem problem(*pmesh, problem_structure, feorder, prec_option, verbose);
+   problem.Solve(verbose);
+
+   MPI_Finalize();
+   return 0;
+
+
   {
       int pref_lvls_tslab = 0;
       int solve_at_lvl = 0;
@@ -1226,7 +1241,7 @@ double testH1fun(Vector& xt)
     double z;
     if (xt.Size() == 4)
         z = xt(2);
-    double t = xt(xt.Size() - 1);
+    //double t = xt(xt.Size() - 1);
 
     if (xt.Size() == 3)
         return (x*x + y*y + 1.0);
@@ -1240,12 +1255,12 @@ void testHdivfun(const Vector& xt, Vector &res)
 {
     res.SetSize(xt.Size());
 
-    double x = xt(0);
-    double y = xt(1);
-    double z;
-    if (xt.Size() == 4)
-        z = xt(2);
-    double t = xt(xt.Size() - 1);
+    //double x = xt(0);
+    //double y = xt(1);
+    //double z;
+    //if (xt.Size() == 4)
+        //z = xt(2);
+    //double t = xt(xt.Size() - 1);
 
     res = 0.0;
 

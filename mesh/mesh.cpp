@@ -4142,7 +4142,7 @@ int Mesh::CheckBdrElementOrientation(bool fix_it)
    // TODO: Check this case
    if (Dim == 4)
    {
-      int el, *bv, *ev;
+      int el, *bv; // , *ev; (unused)
 
       for (i = 0; i < NumOfBdrElements; i++)
       {
@@ -4151,7 +4151,7 @@ int Mesh::CheckBdrElementOrientation(bool fix_it)
             // boundary face
             bv = boundary[i]->GetVertices();
             el = faces_info[be_to_face[i]].Elem1No;
-            ev = elements[el]->GetVertices();
+            //ev = elements[el]->GetVertices();
             switch (GetElementType(el))
             {
                case Element::PENTATOPE:

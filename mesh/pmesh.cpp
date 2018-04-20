@@ -8034,7 +8034,7 @@ void ParMeshCyl::TimeShift(double shift)
 
 void ParMeshCyl::PrintBotToTopBels() const
 {
-    for (int i = 0; i < bot_to_top_bels.size(); ++i)
+    for (unsigned int i = 0; i < bot_to_top_bels.size(); ++i)
     {
         std::cout << "i = " << i  << ": (" << bot_to_top_bels[i].first << ", " << bot_to_top_bels[i].second << ") \n";
     }

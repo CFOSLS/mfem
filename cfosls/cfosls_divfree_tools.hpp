@@ -14,11 +14,30 @@ namespace mfem
 
 #define MEMORY_OPTIMIZED
 
+#define CHECK_CONSTR
+
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 //#define CHECK_LOCALSOLVE
 
 // activates some additional checks
 //#define DEBUG_INFO
+
+#ifdef TIMING
+#undef CHECK_LOCALSOLVE
+#undef CHECK_CONSTR
+#undef CHECK_BNDCND
+#undef DEBUG_INFO
+#endif
+
+#ifndef MFEM_DEBUG
+#undef CHECK_LOCALSOLVE
+#undef CHECK_CONSTR
+#undef CHECK_BNDCND
+#undef DEBUG_INFO
+#endif
+
+// shouldn't be used anymore, we need a monolithic smoother
+//#define BLKDIAG_SMOOTHER
 
 
 // Checking routines used for debugging

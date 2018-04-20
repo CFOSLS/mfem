@@ -74,6 +74,138 @@ public:
     virtual void MultTranspose(const Vector &x, Vector &y) const;
 };
 
+// abstract structure for a (C)FOSLS formulation
+// CFOSLS is considered to be a FOSLS formulation with constraint
+struct FOSLSFormulation
+{
+protected:
+    const int dim;
+    const int numblocks;
+    const int unknowns_number;
+    const bool have_constraint;
+    Array2D<BilinearFormIntegrator*> blfis;
+    Array<LinearFormIntegrator*> lfis;
+public:
+    FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
+
+    virtual void foo() = 0; // to make the class pure abstract
+
+    int Dim() const {return dim;}
+    int Nblocks() const {return numblocks;}
+    int Numunknowns() const {return unknowns_number;}
+};
+
+struct CFOSLSFormulation_HdivL2Hyper : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Transport_test test;
+public:
+    CFOSLSFormulation_HdivL2Hyper(int dimension, int num_solution, bool verbose);
+
+    virtual void foo() override {}
+};
+
+struct FOSLSFEFormulation
+{
+protected:
+    FOSLSFormulation& formul;
+    Array<FiniteElementCollection*> fecolls;
+public:
+    FOSLSFEFormulation(FOSLSFormulation& formulation) : formul(formulation)
+    {
+        fecolls.SetSize(formul.Nblocks());
+        for (int i = 0; i < formul.Nblocks(); ++i)
+            fecolls[i] = NULL;
+    }
+
+    virtual void foo() = 0;
+};
+
+struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
+{
+protected:
+    const int feorder;
+public:
+    CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
+
+    int Feorder() const {return feorder;}
+
+    virtual void foo() override {}
+};
+
+/*
+// class for CFOSLS problem
+class CFOSLSProblem
+{
+protected:
+    FOSLSFormulation& struct_formul;
+    int feorder;
+    bool spaces_initialized;
+    bool forms_initialized;
+    bool solver_initialized;
+
+    FiniteElementCollection *hdiv_coll;
+    FiniteElementCollection *h1_coll;
+    FiniteElementCollection *l2_coll;
+    ParFiniteElementSpace * Hdiv_space;
+    ParFiniteElementSpace * H1_space;
+    ParFiniteElementSpace * H1vec_space;
+    ParFiniteElementSpace * L2_space;
+
+    // FIXME: to be removed in the abstract base class
+    ParFiniteElementSpace * Sigma_space;
+    ParFiniteElementSpace * S_space;
+
+    // all par grid functions which are relevant to the formulation
+    // e.g., solution components and right hand sides
+    Array<ParGridFunction*> grfuns;
+
+    Array<ParFiniteElementSpace*> pfes;
+    BlockProblemForms pbforms;
+    Array<ParLinearForm*> plforms;
+
+
+    Array<int> blkoffsets_true;
+    Array<int> blkoffsets;
+    Array2D<HypreParMatrix*> hpmats;
+    BlockOperator *CFOSLSop;
+    Array2D<HypreParMatrix*> hpmats_nobnd;
+    BlockOperator *CFOSLSop_nobnd;
+    BlockVector * trueRhs;
+    BlockVector * trueX;
+    BlockVector * trueBnd;
+    BlockVector * x; // inital condition (~bnd conditions)
+    BlockDiagonalPreconditioner *prec;
+    IterativeSolver * solver;
+
+    StopWatch chrono;
+
+protected:
+    void InitFEColls(bool verbose);
+    void InitSpaces(ParMesh& pmesh);
+    void InitForms();
+    void AssembleSystem(bool verbose);
+    void InitSolver(bool verbose);
+    void InitPrec(int prec_option, bool verbose);
+    BlockVector *  SetInitialCondition();
+    BlockVector * SetTrueInitialCondition();
+    void InitGrFuns();
+    void DistributeSolution();
+    void ComputeError(bool verbose, bool checkbnd);
+public:
+    CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation& struct_formulation,
+                            int fe_order, bool verbose);
+    CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperbolicFormulation& struct_formulation,
+                            int fe_order, int prec_option, bool verbose);
+    void BuildCFOSLSSystem(ParMesh& pmesh, bool verbose);
+    void Solve(bool verbose);
+    void Update();
+    // deletes everything which was related to a specific mesh
+    void Reset() {MFEM_ABORT("Not implemented \n");}
+};
+*/
+
 struct CFOSLSHyperbolicFormulation
 {
     friend class CFOSLSHyperbolicProblem;
@@ -248,8 +380,6 @@ public:
     ParMixedBilinearForm* & offd(int i, int j) {return offd_forms(i,j);}
 };
 
-
-
 class CFOSLSHyperbolicProblem
 {
 protected:
@@ -386,42 +516,11 @@ public:
     HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
 };
 
-/*
-class testA
-{
-protected:
-    int atr;
-public:
-    testA(int param) {atr = param;}
-    void fooA();
-};
-
-void testA::fooA()
-{
-    return 1;
-}
-
-class testB : public A
-{
-protected:
-    int atr2;
-public:
-    testB(int param1, int param2) : testA(param1) { atr2 = param2; }
-    void fooB();
-};
-
-void testB::fooB()
-{
-    return 2;
-}
-*/
-
 class GeneralCylHierarchy : public GeneralHierarchy
 {
 protected:
     std::vector<ParMeshCyl*> pmeshcyl_lvls;
 
-    //std::vector<int> init_cond_size_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
 
@@ -475,11 +574,9 @@ public:
     HypreParMatrix * GetRestrict_bot_H1 (int l) {return Restrict_bot_H1_lvls[l];}
     HypreParMatrix * GetRestrict_top_H1 (int l) {return Restrict_top_H1_lvls[l];}
 
-    //int GetInitCondSize(int l) const {return init_cond_size_lvls[l];}
     int GetLinksize_Hdiv(int l) const {return tdofs_link_Hdiv_lvls[l].size();}
     int GetLinksize_H1(int l) const {return tdofs_link_H1_lvls[l].size();}
 
-    //virtual void RefineAndCopy(int lvl, ParMesh* pmesh) override;
 };
 
 } // for namespace mfem

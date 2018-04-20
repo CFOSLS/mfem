@@ -49,10 +49,6 @@ protected:
 
     GeneralCylHierarchy * hierarchy;
 
-    //std::vector<ParMeshCyl*> pmeshtsl_lvls;
-    //std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
-    //std::vector<ParFiniteElementSpace* > H1_space_lvls;
-    //std::vector<ParFiniteElementSpace* > L2_space_lvls;
     std::vector<ParFiniteElementSpace* > Sigma_space_lvls; // shortcut (may be useful if consider vector H1 for sigma at some moment
     std::vector<ParFiniteElementSpace* > S_space_lvls;     // shortcut
 
@@ -65,26 +61,7 @@ protected:
     std::vector<BlockVector*> trueRhs_nobnd_lvls;
     std::vector<BlockVector*> trueX_lvls;
 
-    //std::vector<int> init_cond_size_lvls;
-    //std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
-    //std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
-
-    //std::vector<SparseMatrix*> P_H1_lvls;
-    //std::vector<SparseMatrix*> P_Hdiv_lvls;
-    //std::vector<SparseMatrix*> P_L2_lvls;
-    //std::vector<HypreParMatrix*> TrueP_H1_lvls;
-    //std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
-    //std::vector<HypreParMatrix*> TrueP_L2_lvls;
     std::vector<BlockOperator*> TrueP_lvls;
-
-    //std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
-    //std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
-    //std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
-    //std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
-    //std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
-    //std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
-    //std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
-    //std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
 
     bool visualization;
 public:
@@ -227,7 +204,7 @@ public:
 
     void SetInitialConditions(std::vector<Vector*> x_inits, int level)
     {
-        MFEM_ASSERT(x_inits.size() >= nslabs, "Number of initial vectors is less than number of time slabs! \n");
+        MFEM_ASSERT( (int) (x_inits.size()) >= nslabs, "Number of initial vectors is less than number of time slabs! \n");
         for (int tslab = 0; tslab < nslabs; ++tslab)
             *vec_ins_lvls[level][tslab] = *x_inits[tslab];
     }

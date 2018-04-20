@@ -332,6 +332,152 @@ void PAUVectorFEMassIntegrator2::AssembleElementMatrix2(
         ElementTransformation &Trans, DenseMatrix &elmat)
 {}
 
+void VectorFECurlVQIntegrator::AssembleElementMatrix2(
+        const FiniteElement &trial_fe, const FiniteElement &test_fe,
+        ElementTransformation &Trans, DenseMatrix &elmat)
+{
+    int trial_nd = trial_fe.GetDof(), test_nd = test_fe.GetDof(), i;
+    //int dim = trial_fe.GetDim();
+    //int dimc = (dim == 3) ? 3 : 1;
+    int dim;
+    int vector_dof, scalar_dof;
+
+    MFEM_ASSERT(trial_fe.GetMapType() == mfem::FiniteElement::H_CURL ||
+                test_fe.GetMapType() == mfem::FiniteElement::H_CURL,
+                "At least one of the finite elements must be in H(Curl)");
+
+    //int curl_nd;
+    int vec_nd;
+    if ( trial_fe.GetMapType() == mfem::FiniteElement::H_CURL )
+    {
+        //curl_nd = trial_nd;
+        vector_dof = trial_fe.GetDof();
+        vec_nd  = test_nd;
+        scalar_dof = test_fe.GetDof();
+        dim = trial_fe.GetDim();
+    }
+    else
+    {
+        //curl_nd = test_nd;
+        vector_dof = test_fe.GetDof();
+        vec_nd  = trial_nd;
+        scalar_dof = trial_fe.GetDof();
+        dim = test_fe.GetDim();
+    }
+
+    MFEM_ASSERT(dim == 3, "VectorFECurlVQIntegrator is working only in 3D currently \n");
+
+#ifdef MFEM_THREAD_SAFE
+    DenseMatrix curlshapeTrial(curl_nd, dimc);
+    DenseMatrix curlshapeTrial_dFT(curl_nd, dimc);
+    DenseMatrix vshapeTest(vec_nd, dimc);
+#else
+    //curlshapeTrial.SetSize(curl_nd, dimc);
+    //curlshapeTrial_dFT.SetSize(curl_nd, dimc);
+    //vshapeTest.SetSize(vec_nd, dimc);
+#endif
+    //Vector shapeTest(vshapeTest.GetData(), vec_nd);
+
+    curlshape.SetSize(vector_dof, dim);
+    curlshape_dFT.SetSize(vector_dof, dim);
+    shape.SetSize(scalar_dof);
+    Vector D(vec_nd);
+
+    elmat.SetSize(test_nd, trial_nd);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+        int order = trial_fe.GetOrder() + test_fe.GetOrder() - 1; // <--
+        ir = &IntRules.Get(trial_fe.GetGeomType(), order);
+    }
+
+    elmat = 0.0;
+    for (i = 0; i < ir->GetNPoints(); i++)
+    {
+        const IntegrationPoint &ip = ir->IntPoint(i);
+
+        Trans.SetIntPoint(&ip);
+
+        double w = ip.weight;
+        VQ->Eval(D, Trans, ip);
+        D *= w;
+
+        if (dim == 3)
+        {
+            if ( trial_fe.GetMapType() == mfem::FiniteElement::H_CURL )
+            {
+                trial_fe.CalcCurlShape(ip, curlshape);
+                test_fe.CalcShape(ip, shape);
+            }
+            else
+            {
+                test_fe.CalcCurlShape(ip, curlshape);
+                trial_fe.CalcShape(ip, shape);
+            }
+            MultABt(curlshape, Trans.Jacobian(), curlshape_dFT);
+
+            ///////////////////////////
+            for (int d = 0; d < dim; d++)
+            {
+                for (int j = 0; j < scalar_dof; j++)
+                {
+                    for (int k = 0; k < vector_dof; k++)
+                    {
+                        elmat(j, k) += D[d] * shape(j) * curlshape_dFT(k, d);
+                    }
+                }
+            }
+            ///////////////////////////
+        }
+    }
+}
+
+
+void VectorcurlDomainLFIntegrator::AssembleRHSElementVect(
+        const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)
+{
+    int dof = el.GetDof();
+
+    int dim = el.GetDim();
+    MFEM_ASSERT(dim == 3, "VectorcurlDomainLFIntegrator is working only in 3D currently \n");
+
+    curlshape.SetSize(dof,3);           // matrix of size dof x 3, works only in 3D
+    curlshape_dFadj.SetSize(dof,3);     // matrix of size dof x 3, works only in 3D
+    curlshape_dFT.SetSize(dof,3);       // matrix of size dof x 3, works only in 3D
+    dF_curlshape.SetSize(3,dof);        // matrix of size dof x 3, works only in 3D
+    Vector vecval(3);
+    //Vector vecval_new(3);
+    //DenseMatrix invdfdx(3,3);
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+        // ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob + Tr.OrderW());
+        ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
+        // int order = 2 * el.GetOrder() ; // <--- OK for RTk
+        // ir = &IntRules.Get(el.GetGeomType(), order);
+    }
+
+    elvect.SetSize(dof);
+    elvect = 0.0;
+
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+        const IntegrationPoint &ip = ir->IntPoint(i);
+        el.CalcCurlShape(ip, curlshape);
+
+        Tr.SetIntPoint (&ip);
+
+        VQ.Eval(vecval,Tr,ip);                  // plain evaluation
+
+        MultABt(curlshape, Tr.Jacobian(), curlshape_dFT);
+
+        curlshape_dFT.AddMult_a(ip.weight, vecval, elvect);
+    }
+
+}
+
 void VectordivDomainLFIntegrator::AssembleRHSElementVect(
    const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)//don't need the matrix but the vector
 {

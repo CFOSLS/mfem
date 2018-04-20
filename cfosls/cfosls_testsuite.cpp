@@ -458,6 +458,161 @@ Transport_test::Transport_test (int Dim, int NumSol)
     } // end of setting test coefficients in correct case
 }
 
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
+         void(*bvec)(const Vector & x, Vector & vec), double (*divbvec)(const Vector & xt), \
+         void(*divfreevec)(const Vector & x, Vector & vec), void(*opdivfreevec)(const Vector & x, Vector & vec)> \
+void Transport_test_divfree::SetTestCoeffs ()
+{
+    SetScalarSFun(S);
+    SetminbVec<bvec>();
+    SetbVec(bvec);
+    SetbfVec<S, dSdt, Sgradxvec, bvec, divbvec>();
+    SetbdivsigmaVec<S, dSdt, Sgradxvec, bvec, divbvec>();
+    SetSigmaVec<S,bvec>();
+    SetKtildaMat<bvec>();
+    SetScalarBtB<bvec>();
+    SetdivSigma<S, dSdt, Sgradxvec, bvec, divbvec>();
+    SetDivfreePart(divfreevec);
+    SetOpDivfreePart(opdivfreevec);
+    SetminKsigmahat<S, bvec, opdivfreevec>();
+    Setbsigmahat<S, bvec, opdivfreevec>();
+    Setsigmahat<S, bvec, opdivfreevec>();
+    Setminsigmahat<S, bvec, opdivfreevec>();
+    SetBBtMat<bvec>();
+    return;
+}
+
+
+bool Transport_test_divfree::CheckTestConfig()
+{
+    if (dim == 4 || dim == 3)
+    {
+        if ( numsol == 0 && dim >= 3 )
+            return true;
+        /*
+        if ( numsol == 1 && dim == 3 )
+            return true;
+        if ( numsol == 2 && dim == 3 )
+            return true;
+        if ( numsol == 4 && dim == 3 )
+            return true;
+        */
+        if ( numsol == -3 && dim == 3 )
+            return true;
+        if ( numsol == -4 && dim == 4 )
+            return true;
+        return false;
+    }
+    else
+        return false;
+
+}
+
+Transport_test_divfree::~Transport_test_divfree()
+{
+    delete scalarS;
+    delete scalardivsigma;
+    delete bTb;
+    delete bsigmahat;
+    delete sigma;
+    delete sigmahat;
+    delete b;
+    delete minb;
+    delete bf;
+    delete bdivsigma;
+    delete Ktilda;
+    delete bbT;
+    delete divfreepart;
+    delete opdivfreepart;
+    delete minKsigmahat;
+    delete minsigmahat;
+}
+
+Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl)
+{
+    dim = Dim;
+    numsol = NumSol;
+    numcurl = NumCurl;
+
+    if ( CheckTestConfig() == false )
+        std::cout << "Inconsistent dim = " << dim << " and numsol = " << numsol <<  std::endl << std::flush;
+    else
+    {
+        if (numsol == 0)
+        {
+            if (dim == 3)
+            {
+                if (numcurl == 1)
+                    SetTestCoeffs<&zero_ex, &zero_ex, &zerovecx_ex, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+                else if (numcurl == 2)
+                    SetTestCoeffs<&zero_ex, &zero_ex, &zerovecx_ex, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+                else
+                    SetTestCoeffs<&zero_ex, &zero_ex, &zerovecx_ex, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+            }
+            if (dim > 3)
+            {
+                if (numcurl == 1)
+                    SetTestCoeffs<&zero_ex, &zero_ex, &zerovecx_ex, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &DivmatFun4D_ex, &DivmatDivmatFun4D_ex>();
+                else
+                    SetTestCoeffs<&zero_ex, &zero_ex, &zerovecx_ex, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+            }
+        }
+        if (numsol == -3)
+        {
+            if (numcurl == 1)
+                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+            else if (numcurl == 2)
+                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+            else
+                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+        }
+        if (numsol == -4)
+        {
+            //if (numcurl == 1) // actually wrong div-free guy in 4D but it is not used when withDiv = true
+                //SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+            //else if (numcurl == 2)
+                //SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+            if (numcurl == 1 || numcurl == 2)
+            {
+                std::cout << "Critical error: Explicit analytic div-free guy is not implemented in 4D \n";
+            }
+            else
+                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &zerovecMat4D_ex, &zerovec_ex>();
+        }
+        /*
+        if (numsol == 1)
+        {
+            if (numcurl == 1)
+                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+            else if (numcurl == 2)
+                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+            else
+                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+        }
+        if (numsol == 2)
+        {
+            //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
+            if (numcurl == 1)
+                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+            else if (numcurl == 2)
+                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+            else
+                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+        }
+        if (numsol == 4)
+        {
+            //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
+            if (numcurl == 1)
+                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
+            else if (numcurl == 2)
+                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
+            else
+                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
+        }
+        */
+    } // end of setting test coefficients in correct case
+}
+
 template <void (*bvecfunc)(const Vector&, Vector& )> \
 void KtildaTemplate(const Vector& xt, DenseMatrix& Ktilda)
 {
@@ -562,6 +717,76 @@ void bdivsigmaTemplate(const Vector& xt, Vector& bdivsigma)
 
     for (int i = 0; i < bdivsigma.Size(); ++i)
         bdivsigma(i) = divsigma * b(i);
+}
+
+template <double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector& ),
+          void (*opdivfreevec)(const Vector&, Vector& )> \
+void minKsigmahatTemplate(const Vector& xt, Vector& minKsigmahatv)
+{
+    minKsigmahatv.SetSize(xt.Size());
+
+    Vector b;
+    bvecfunc(xt, b);
+
+    Vector sigmahatv;
+    sigmahatTemplate<S, bvecfunc, opdivfreevec>(xt, sigmahatv);
+
+    DenseMatrix Ktilda;
+    KtildaTemplate<bvecfunc>(xt, Ktilda);
+
+    Ktilda.Mult(sigmahatv, minKsigmahatv);
+
+    minKsigmahatv *= -1.0;
+    return;
+}
+
+template <double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector& ),
+          void (*opdivfreevec)(const Vector&, Vector& )> \
+double bsigmahatTemplate(const Vector& xt)
+{
+    Vector b;
+    bvecfunc(xt, b);
+
+    Vector sigmahatv;
+    sigmahatTemplate<S, bvecfunc, opdivfreevec>(xt, sigmahatv);
+
+    return b * sigmahatv;
+}
+
+template <double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector& ),
+          void (*opdivfreevec)(const Vector&, Vector& )> \
+void sigmahatTemplate(const Vector& xt, Vector& sigmahatv)
+{
+    sigmahatv.SetSize(xt.Size());
+
+    Vector b;
+    bvecfunc(xt, b);
+
+    Vector sigma(xt.Size());
+    sigma(xt.Size()-1) = S(xt);
+    for (int i = 0; i < xt.Size()-1; i++)
+        sigma(i) = b(i) * sigma(xt.Size()-1);
+
+    Vector opdivfree;
+    opdivfreevec(xt, opdivfree);
+
+    sigmahatv = 0.0;
+    sigmahatv -= opdivfree;
+#ifndef ONLY_DIVFREEPART
+    sigmahatv += sigma;
+#endif
+    return;
+}
+
+template <double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector& ),
+          void (*opdivfreevec)(const Vector&, Vector& )> \
+void minsigmahatTemplate(const Vector& xt, Vector& minsigmahatv)
+{
+    minsigmahatv.SetSize(xt.Size());
+    sigmahatTemplate<S, bvecfunc, opdivfreevec>(xt, minsigmahatv);
+    minsigmahatv *= -1;
+
+    return;
 }
 
 template<void(*bvec)(const Vector & x, Vector & vec)>
@@ -842,6 +1067,163 @@ void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
     */
 
 }
+
+void zerovecx_ex(const Vector& xt, Vector& zerovecx )
+{
+    zerovecx.SetSize(xt.Size() - 1);
+    zerovecx = 0.0;
+}
+
+void zerovec_ex(const Vector& xt, Vector& vecvalue)
+{
+    vecvalue.SetSize(xt.Size());
+    vecvalue = 0.0;
+    return;
+}
+
+void zerovecMat4D_ex(const Vector& xt, Vector& vecvalue)
+{
+    vecvalue.SetSize(6);
+    vecvalue = 0.0;
+    return;
+}
+
+double zero_ex(const Vector& xt)
+{
+    return 0.0;
+}
+
+////////////////
+void hcurlFun3D_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    double freq = 1.0;
+    double kappa = freq * M_PI;
+
+    vecvalue.SetSize(xt.Size());
+
+    //vecvalue(0) = -y * (1 - t);
+    //vecvalue(1) = x * (1 - t);
+    //vecvalue(2) = 0;
+    //vecvalue(0) = x * (1 - x);
+    //vecvalue(1) = y * (1 - y);
+    //vecvalue(2) = t * (1 - t);
+
+    // Martin's function
+    vecvalue(0) = sin(kappa * y);
+    vecvalue(1) = sin(kappa * t);
+    vecvalue(2) = sin(kappa * x);
+
+    return;
+}
+
+void curlhcurlFun3D_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    double freq = 1.0;
+    double kappa = freq * M_PI;
+
+    vecvalue.SetSize(xt.Size());
+
+    //vecvalue(0) = 0.0;
+    //vecvalue(1) = 0.0;
+    //vecvalue(2) = -2.0 * (1 - t);
+
+    // Martin's function's curl
+    vecvalue(0) = - kappa * cos(kappa * t);
+    vecvalue(1) = - kappa * cos(kappa * x);
+    vecvalue(2) = - kappa * cos(kappa * y);
+
+    return;
+}
+
+////////////////
+void DivmatFun4D_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double freq = 1.0;
+    double kappa = freq * M_PI;
+
+    vecvalue.SetSize(xt.Size());
+
+    // 4D counterpart of the Martin's 3D function
+    //std::cout << "Error: DivmatFun4D_ex is incorrect \n";
+    vecvalue(0) = sin(kappa * y);
+    vecvalue(1) = sin(kappa * z);
+    vecvalue(2) = sin(kappa * t);
+    vecvalue(3) = sin(kappa * x);
+
+    return;
+}
+
+void DivmatDivmatFun4D_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double freq = 1.0;
+    double kappa = freq * M_PI;
+
+    vecvalue.SetSize(xt.Size());
+
+    //vecvalue(0) = 0.0;
+    //vecvalue(1) = 0.0;
+    //vecvalue(2) = -2.0 * (1 - t);
+
+    // Divmat of the 4D counterpart of the Martin's 3D function
+    std::cout << "Error: DivmatDivmatFun4D_ex is incorrect \n";
+    vecvalue(0) = - kappa * cos(kappa * t);
+    vecvalue(1) = - kappa * cos(kappa * x);
+    vecvalue(2) = - kappa * cos(kappa * y);
+    vecvalue(3) = z;
+
+    return;
+}
+
+void hcurlFun3D_2_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    vecvalue.SetSize(xt.Size());
+
+    //
+    vecvalue(0) = 100.0 * x * x * (1-x) * (1-x) * y * y * (1-y) * (1-y) * t * t * (1-t) * (1-t);
+    vecvalue(1) = 0.0;
+    vecvalue(2) = 0.0;
+
+    return;
+}
+
+void curlhcurlFun3D_2_ex(const Vector& xt, Vector& vecvalue)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    vecvalue.SetSize(xt.Size());
+
+    //
+    vecvalue(0) = 0.0;
+    vecvalue(1) = 100.0 * ( 2.0) * t * (1-t) * (1.-2.*t) * x * x * (1-x) * (1-x) * y * y * (1-y) * (1-y);
+    vecvalue(2) = 100.0 * (-2.0) * y * (1-y) * (1.-2.*y) * x * x * (1-x) * (1-x) * t * t * (1-t) * (1-t);
+
+    return;
+}
+
 
 } // for namespace mfem
 

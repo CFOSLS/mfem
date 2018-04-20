@@ -225,6 +225,41 @@ void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
     }
 }
 
+FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint)
+    : dim(dimension),
+      numblocks(num_blocks), unknowns_number(num_unknowns),
+      have_constraint(do_have_constraint)
+{
+    blfis.SetSize(numblocks, numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            blfis(i,j) = NULL;
+    lfis.SetSize(numblocks);
+    for (int i = 0; i < numblocks; ++i)
+        lfis[i] = NULL;
+}
+
+CFOSLSFormulation_HdivL2Hyper::CFOSLSFormulation_HdivL2Hyper (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new VectorFEMassIntegrator(*test.Ktilda);
+    blfis(1,0) = new VectorFEDivergenceIntegrator;
+
+    lfis[1] = new DomainLFIntegrator(*test.scalardivsigma);
+}
+
+CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
+    : FOSLSFEFormulation(formulation), feorder (fe_order)
+{
+    int dim = formul.Dim();
+    if (dim == 4)
+        fecolls[0] = new RT0_4DFECollection;
+    else
+        fecolls[0] = new RT_FECollection(feorder, dim);
+
+    fecolls[1] = new L2_FECollection(feorder, dim);
+}
+
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
                                                  int fe_order, bool verbose)

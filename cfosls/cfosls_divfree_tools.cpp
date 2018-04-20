@@ -398,9 +398,6 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     {
         if (blk == 0)
         {
-            const Array<int> * temp;
-            temp = essbdrtruedofs_blocks[blk];
-
             /*
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
@@ -409,6 +406,9 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
             */
 
 #ifdef CHECK_BNDCND
+            const Array<int> * temp;
+            temp = essbdrtruedofs_blocks[blk];
+
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
                 if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )

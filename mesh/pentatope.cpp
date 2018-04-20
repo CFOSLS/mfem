@@ -224,7 +224,7 @@ Element *Pentatope::Duplicate(Mesh *m) const
 
 void Pentatope::MarkEdge(const DSTable &v_to_v, const int *length)
 {
-   int ind[5], i, j, l, L, type;
+   int ind[5], i, j, l, L; // (unused) type;
 
    // determine the longest edge
    L = length[v_to_v(indices[0], indices[1])]; j = 0;
