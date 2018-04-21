@@ -12,6 +12,9 @@ namespace mfem
 //HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 //HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
 
+template<typename T> void ConvertSTDvecToArray(std::vector<T>& stdvector, Array<int>& array_);
+
+
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
@@ -74,8 +77,119 @@ public:
     virtual void MultTranspose(const Vector &x, Vector &y) const;
 };
 
+/*
+// a structure to describe what are the unknowns in the block system,
+// i.e. which variables are functions, vectors or matrix functions, respectively,
+// and how to get those from the given FOSLS_test (which contains all the
+// functions, vectors and matrix functions relevant to the problem, i.e.,
+// not only solutions, but also coefficients)
+// blk_structure is a vector of size = nblocks which contains:
+// pairs <'a','b'> where, 'a' = 0,1,2 describes the type of the variable
+// and 'b' is the index in the test coefficient array (corresponding to 'a')
+// For example, <1,2> at place 3 means that the third equation corresponds
+// to a vector unknown ('a' = 1), for which we have a VectorFunctionCoefficient
+// stored at test.vec_coeffs[2]('b' = 2).
+struct BlksSolDescriptor
+{
+protected:
+    int nblocks;
+    int dimension;
+    std::vector<std::pair<int,int> > blk_structure;
+public:
+    BlksSolDescriptor(int Nblocks) : nblocks(Nblocks)
+    { blk_structure.resize(nblocks); }
+
+    virtual void Init() = 0;
+
+    std::pair<int,int> GetPair(int pair) {return blk_structure[pair];}
+};
+
+struct BlksSolDescriptor_CFOSLS_HdivL2_Hyper : BlksSolDescriptor
+{
+protected:
+    Hyper_test& test;
+public:
+    BlksSolDescriptor_CFOSLS_HdivL2_Hyper(CFOSLSFormulation_HdivL2Hyper& formulation, Hyper_test& analytical_test);
+    virtual void Init() override;
+};
+*/
+
+
+struct BdrConditions
+{
+protected:
+    int numblocks;
+    ParMesh& pmesh;
+    bool initialized;
+protected:
+    std::vector<std::vector<int> > bdr_attribs;
+
+public:
+    BdrConditions(ParMesh& pmesh_, int nblocks)
+    : numblocks(nblocks), pmesh(pmesh_), initialized(false)
+    {
+        bdr_attribs.resize(numblocks);
+        for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+        {
+            bdr_attribs[i].resize(pmesh.bdr_attributes.Max());
+            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
+                bdr_attribs[i][j] = -1;
+        }
+    }
+
+    std::vector<std::vector<int> >* GetAllBdrAttribs()
+    {
+        if (initialized)
+            return &bdr_attribs;
+        else
+            return NULL;
+    }
+
+    std::vector<int> * GetBdrAttribs(int blk)
+    {
+        MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
+        if (initialized)
+            return &(bdr_attribs[blk]);
+        else
+            return NULL;
+    }
+
+    bool Initialized() const {return initialized;}
+};
+
+struct BdrConditions_CFOSLS_HdivL2_Hyper : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_HdivL2_Hyper(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (unsigned int j = 0; j < bdr_attribs[0].size(); ++j)
+            bdr_attribs[0][j] = 0;
+        bdr_attribs[0][0] = 1;
+
+        for (unsigned int j = 0; j < bdr_attribs[1].size(); ++j)
+            bdr_attribs[1][j] = 0;
+
+        for (unsigned int j = 0; j < bdr_attribs[2].size(); ++j)
+            bdr_attribs[2][j] = 0;
+
+        initialized = true;
+    }
+
+};
+
+
 // abstract structure for a (C)FOSLS formulation
 // CFOSLS is considered to be a FOSLS formulation with constraint
+// blk_structure is a vector of size = nblocks which contains:
+// pairs <'a','b'> where, 'a' = 0,1,2 describes the type of the variable
+// and 'b' is the index in the test coefficient array (corresponding to 'a')
+// For example, <1,2> at place 3 means that the third equation corresponds
+// to a vector unknown ('a' = 1), for which we have in the FOSLS_test a
+// VectorFunctionCoefficient stored at test.vec_coeffs[2]('b' = 2).
+// If a variable is not present in the FOSLS test (e.g., it's a Lagrange multiplier)
+// then one must set 'a' = -1, 'b' = -1.
+
 struct FOSLSFormulation
 {
 protected:
@@ -85,27 +199,44 @@ protected:
     const bool have_constraint;
     Array2D<BilinearFormIntegrator*> blfis;
     Array<LinearFormIntegrator*> lfis;
+    std::vector<std::pair<int,int> > blk_structure;
+protected:
+    virtual void InitBlkStructure() = 0;
+
 public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
-    virtual void foo() = 0; // to make the class pure abstract
+    std::pair<int,int>& GetPair(int pair) {return blk_structure[pair];}
+    virtual FOSLS_test * GetTest() = 0;
 
     int Dim() const {return dim;}
     int Nblocks() const {return numblocks;}
-    int Numunknowns() const {return unknowns_number;}
+    int Nunknowns() const {return unknowns_number;}
 
-    BilinearFormIntegrator* GetBlfi(int i, int j) {return blfis(i,j);}
+    BilinearFormIntegrator* GetBlfi(int i, int j)
+    {
+        MFEM_ASSERT(i >=0 && i < blfis.NumRows()
+                    && j >=0 && j < blfis.NumCols(), "Index pair for blfis out of bounds \n");
+        return blfis(i,j);
+    }
+
+    LinearFormIntegrator* GetLfi(int i)
+    {
+        MFEM_ASSERT(i >=0 && i < lfis.Size(), "Index for lfis out of bounds \n");
+        return lfis[i];
+    }
 };
 
 struct CFOSLSFormulation_HdivL2Hyper : public FOSLSFormulation
 {
 protected:
     int numsol;
-    Transport_test test;
+    Hyper_test test;
 public:
     CFOSLSFormulation_HdivL2Hyper(int dimension, int num_solution, bool verbose);
 
-    virtual void foo() override {}
+    virtual FOSLS_test * GetTest() override {return &test;}
+    virtual void InitBlkStructure() override;
 };
 
 struct FOSLSFEFormulation
@@ -113,8 +244,10 @@ struct FOSLSFEFormulation
 protected:
     FOSLSFormulation& formul;
     Array<FiniteElementCollection*> fecolls;
+    int feorder;
 public:
-    FOSLSFEFormulation(FOSLSFormulation& formulation) : formul(formulation)
+    FOSLSFEFormulation(FOSLSFormulation& formulation) : FOSLSFEFormulation(formulation, 0) {}
+    FOSLSFEFormulation(FOSLSFormulation& formulation, int fe_order) : formul(formulation), feorder(fe_order)
     {
         fecolls.SetSize(formul.Nblocks());
         for (int i = 0; i < formul.Nblocks(); ++i)
@@ -123,24 +256,25 @@ public:
 
     virtual void foo() = 0;
 
+    FOSLSFormulation * GetFormulation() {return &formul;}
+
     BilinearFormIntegrator* GetBlfi(int i, int j) {return formul.GetBlfi(i,j);}
-    FiniteElementCollection* & GetFeColl(int i)
+    LinearFormIntegrator* GetLfi(int i) {return formul.GetLfi(i);}
+    FiniteElementCollection* GetFeColl(int i)
     {
         MFEM_ASSERT( i >= 0 && i < fecolls.Size(), "i < 0 or i > size fo fecolls \n");
         return fecolls[i];
     }
 
     int Nblocks() const {return formul.Nblocks();}
+    int Nunknowns() const {return formul.Nunknowns();}
+    int Feorder() const {return feorder;}
 };
 
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 {
-protected:
-    const int feorder;
 public:
     CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
-
-    int Feorder() const {return feorder;}
 
     virtual void foo() override {}
 };
@@ -184,7 +318,11 @@ public:
 class FOSLSProblem
 {
 protected:
+    ParMesh& pmesh;
+
     FOSLSFEFormulation& fe_formul;
+
+    BdrConditions& bdr_conds;
 
     bool spaces_initialized;
     bool forms_initialized;
@@ -229,15 +367,15 @@ protected:
         solver->SetPreconditioner(*prec);
     }
 
-    BlockVector *  SetInitialCondition();
+    BlockVector * SetInitialCondition();
     BlockVector * SetTrueInitialCondition();
     void InitGrFuns();
     void DistributeSolution();
     void ComputeError(bool verbose, bool checkbnd);
+    virtual void ComputeExtraError() {}
 public:
     //FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_);
-    FOSLSProblem(ParMesh& pmesh, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
-    void BuildSystem(ParMesh& pmesh, bool verbose);
+    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
     void Solve(bool verbose);
     void Update();
 };

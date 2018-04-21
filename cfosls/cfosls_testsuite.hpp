@@ -101,6 +101,121 @@ template<double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector&
          void (*opdivfreevec)(const Vector&, Vector& )>
 void minsigmahatTemplate(const Vector& xt, Vector& sigmahatv);
 
+class FOSLS_test
+{
+protected:
+    int dim;
+
+    int nfunc_coeffs;
+    int nvec_coeffs;
+    int nmat_coeffs;
+
+    Array<FunctionCoefficient*> func_coeffs;
+    Array<VectorFunctionCoefficient*> vec_coeffs;
+    Array<MatrixFunctionCoefficient*> mat_coeffs;
+
+public:
+    FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients);
+
+    int Dim() const {return dim;}
+
+    virtual FunctionCoefficient* GetU() = 0;
+    virtual VectorFunctionCoefficient* GetSigma() = 0;
+    virtual FunctionCoefficient* GetRhs() = 0;
+
+    FunctionCoefficient * GetFuncCoeff(int ind) {return func_coeffs[ind];}
+    VectorFunctionCoefficient * GetVecCoeff(int ind) {return vec_coeffs[ind];}
+    MatrixFunctionCoefficient * GetMatCoeff(int ind) {return mat_coeffs[ind];}
+};
+
+// TODO: After finishing, rename it to Transport_test and remove the older version of that from everywhere including examples
+// func_coeffs:
+// [0] = u, scalar unknown
+// [1] = f
+// [2] = bTb
+// vec_coeffs:
+// [0] = sigma, vector unknown
+// [1] = b
+// [2] = -b
+// [3] = b * f
+// mat_coeffs:
+// [0] = Ktilda
+// [1] = bbT
+
+class Hyper_test : public FOSLS_test
+{
+protected:
+    int numsol;
+protected:
+    void Init();
+    bool CheckTestConfig();
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
+             void(*bvec)(const Vector & x, Vector & vec), double (*divbvec)(const Vector & xt)> \
+    void SetTestCoeffs ( );
+
+    void SetScalarSFun( double (*S)(const Vector & xt))
+    { func_coeffs[0] = new FunctionCoefficient(S);}
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
+             void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
+    void SetDivSigma()
+    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>);}
+
+    template< void(*bvec)(const Vector & x, Vector & vec)>  \
+    void SetScalarBtB()
+    {
+        func_coeffs[2] = new FunctionCoefficient(bTbTemplate<bvec>);
+    }
+
+    template<double (*S)(const Vector & xt), void(*bvec)(const Vector & x, Vector & vec)> \
+    void SetSigmaVec()
+    {
+        vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate<S,bvec>);
+    }
+
+    void SetbVec( void(*bvec)(const Vector & x, Vector & vec))
+    { vec_coeffs[1] = new VectorFunctionCoefficient(dim, bvec);}
+
+    template<void(*bvec)(const Vector & x, Vector & vec)> \
+    void SetminbVec()
+    { vec_coeffs[2] = new VectorFunctionCoefficient(dim, minbTemplate<bvec>);}
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
+             void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
+    void SetbfVec()
+    { vec_coeffs[3] = new VectorFunctionCoefficient(dim, bfTemplate<S,dSdt,Sgradxvec,bvec,divbfunc>);}
+
+    template< void(*f2)(const Vector & x, Vector & vec)>  \
+    void SetKtildaMat()
+    {
+        mat_coeffs[0] = new MatrixFunctionCoefficient(dim, KtildaTemplate<f2>);
+    }
+
+    template< void(*bvec)(const Vector & x, Vector & vec)>  \
+    void SetBBtMat()
+    {
+        mat_coeffs[1] = new MatrixFunctionCoefficient(dim, bbTTemplate<bvec>);
+    }
+
+public:
+    Hyper_test(int dimension, int num_solution);
+
+    FunctionCoefficient* GetU() override {return func_coeffs[0];}
+    VectorFunctionCoefficient* GetSigma() override {return vec_coeffs[0];}
+    FunctionCoefficient* GetRhs() override {return func_coeffs[1];}
+
+    FunctionCoefficient* GetBtB() {return func_coeffs[2];}
+    VectorFunctionCoefficient * GetB() {return vec_coeffs[1];}
+    VectorFunctionCoefficient * GetMinB() {return vec_coeffs[2];}
+    VectorFunctionCoefficient * GetBf() {return vec_coeffs[3];}
+
+    MatrixFunctionCoefficient * GetKtilda() {return mat_coeffs[0];}
+    MatrixFunctionCoefficient * GetBBt() {return mat_coeffs[1];}
+
+    int Numsol() const {return numsol;}
+};
+
 
 class Transport_test
 {

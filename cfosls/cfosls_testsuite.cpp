@@ -387,6 +387,97 @@ void uFunTestLap_grad(const Vector& xt, Vector& grad )
     return;
 }
 
+FOSLS_test::FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients)
+    : dim(dimension), nfunc_coeffs(nfunc_coefficients), nvec_coeffs(nvec_coefficients), nmat_coeffs(nmat_coefficients)
+{
+    func_coeffs.SetSize(nfunc_coeffs);
+    for (int i = 0; i < func_coeffs.Size(); ++i)
+        func_coeffs[i] = NULL;
+
+    vec_coeffs.SetSize(nvec_coeffs);
+    for (int i = 0; i < vec_coeffs.Size(); ++i)
+        vec_coeffs[i] = NULL;
+
+    mat_coeffs.SetSize(nmat_coeffs);
+    for (int i = 0; i < mat_coeffs.Size(); ++i)
+        mat_coeffs[i] = NULL;
+}
+
+Hyper_test::Hyper_test(int dimension, int num_solution)
+    : FOSLS_test(dimension, 3, 4, 2), numsol(num_solution)
+{
+    Init();
+}
+
+void Hyper_test::Init()
+{
+    if ( CheckTestConfig() == false )
+        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    else
+    {
+        if (numsol == -3) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
+        }
+        if (numsol == -33) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
+        }
+        if (numsol == -4) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
+        }
+        if (numsol == -44) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
+        }
+        if (numsol == 8)
+        {
+            //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
+            SetTestCoeffs<&uFunCylinder_ex, &uFunCylinder_ex_dt, &uFunCylinder_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
+        }
+    } // end of setting test coefficients in correct case
+}
+
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx),  \
+         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
+void Hyper_test::SetTestCoeffs ()
+{
+    SetScalarSFun(S);
+    SetbVec(bvec);
+    SetminbVec<bvec>();
+    SetbfVec<S, dSdt, Sgradxvec, bvec, divbfunc>();
+    SetSigmaVec<S,bvec>();
+    SetKtildaMat<bvec>();
+    SetScalarBtB<bvec>();
+    SetDivSigma<S, dSdt, Sgradxvec, bvec, divbfunc>();
+    SetBBtMat<bvec>();
+    return;
+}
+
+bool Hyper_test::CheckTestConfig()
+{
+    if (dim == 4 || dim == 3)
+    {
+        if (numsol == -3 && dim == 3)
+            return true;
+        if (numsol == -4 && dim == 4)
+            return true;
+        if (numsol == -33 && dim == 3)
+            return true;
+        if (numsol == -44 && dim == 4)
+            return true;
+        if ( numsol == 8 && dim == 3 )
+            return true;
+        return false;
+    }
+    else
+        return false;
+}
+
+
+
+
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx),  \
          void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
 void Transport_test::SetTestCoeffs ()

@@ -349,12 +349,18 @@ int main(int argc, char *argv[])
 
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
 
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
+
+   FOSLSProblem * problem = new FOSLSProblem(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   problem->Solve(verbose);
+
    MPI_Finalize();
    return 0;
 
-   CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
-   CFOSLSHyperbolicProblem problem(*pmesh, problem_structure, feorder, prec_option, verbose);
-   problem.Solve(verbose);
+   //CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
+   //CFOSLSHyperbolicProblem problem(*pmesh, problem_structure, feorder, prec_option, verbose);
+   //problem.Solve(verbose);
 
    MPI_Finalize();
    return 0;
