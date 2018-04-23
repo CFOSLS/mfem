@@ -11,8 +11,10 @@ namespace mfem
 {
 
 // base class for a FOSLS problem in a time cylinder
-class FOSLSCylProblem : FOSLSProblem
+class FOSLSCylProblem : public FOSLSProblem
 {
+public:
+    using FOSLSProblem::Solve;
 protected:
     ParMeshCyl &pmeshcyl;
     GeneralCylHierarchy * cyl_hierarchy;
@@ -30,8 +32,8 @@ protected:
 
 public:
     FOSLSCylProblem (ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
-        : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, prec_option, verbose_),
+                    FOSLSFEFormulation& fe_formulation, bool verbose_)
+        : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           pmeshcyl(Pmeshcyl), cyl_hierarchy(NULL),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
@@ -41,8 +43,8 @@ public:
     }
 
     FOSLSCylProblem(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, prec_option, verbose_),
+                   FOSLSFEFormulation& fe_formulation, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
           pmeshcyl(*Hierarchy.GetPmeshcyl(level)), cyl_hierarchy(&Hierarchy),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
@@ -70,6 +72,32 @@ public:
 
     void CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
 
+};
+
+class FOSLSCylProblem_CFOSLS_HdivL2_Hyper : public FOSLSCylProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdatePrec();
+    }
+
+    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdatePrec();
+    }
+
+    void ComputeExtraError() const;
 };
 
 

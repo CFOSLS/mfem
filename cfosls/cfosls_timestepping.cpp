@@ -152,6 +152,126 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
     viewer_out = *trueX;
 }
 
+
+void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
+{
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+
+    ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
+    Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
+    Cblock->Assemble();
+    Cblock->Finalize();
+    HypreParMatrix * C = Cblock->ParallelAssemble();
+
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(Hdiv_space, L2_space);
+    Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*test->GetB()));
+    Bblock->Assemble();
+    Bblock->Finalize();
+    HypreParMatrix * B = Bblock->ParallelAssemble();
+
+    Vector bTsigma(C->Height());
+    B->Mult(trueX->GetBlock(0),bTsigma);
+
+    Vector trueS(C->Height());
+
+    CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+    ParGridFunction * S = new ParGridFunction(L2_space);
+    S->Distribute(trueS);
+
+    delete Cblock;
+    delete Bblock;
+    delete B;
+    delete C;
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    double err_S = S->ComputeL2Error(*test->GetU(), irs);
+    double norm_S = ComputeGlobalLpNorm(2, *test->GetU(), pmesh, irs);
+    if (verbose)
+    {
+        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                     err_S / norm_S << "\n";
+    }
+
+    ParGridFunction * S_exact = new ParGridFunction(L2_space);
+    S_exact->ProjectCoefficient(*test->GetU());
+
+    double projection_error_S = S_exact->ComputeL2Error(*test->GetU(), irs);
+
+    if (verbose)
+        std::cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
+                        << projection_error_S / norm_S << "\n";
+}
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
+void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        if (prec_option == 2)
+            std::cout << "ADS(A) for H(div) \n";
+        else
+             std::cout << "Diag(A) for H(div) or H1vec \n";
+
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
+
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver * invA;
+    if (prec_option == 2)
+        invA = new HypreADS(A, pfes[0]);
+    else // using Diag(A);
+        invA = new HypreDiagScale(A);
+
+    invA->iterative_mode = false;
+
+    Solver * invS = new HypreBoomerAMG(*Schur);
+    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
+
 //#######################################################################################################################
 
 TimeCyl::~TimeCyl()

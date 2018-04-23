@@ -351,7 +351,8 @@ int main(int argc, char *argv[])
 
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
 
-   FOSLSProblem * problem = new FOSLSProblem(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    problem->Solve(verbose);
 
@@ -362,16 +363,16 @@ int main(int argc, char *argv[])
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
-   Array<FOSLSProblem*> problems(nlevels);
+   Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> problems(nlevels);
    for (int l = 0; l < nlevels; ++l)
    {
-       problems[l] = new FOSLSProblem(*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
+       problems[l] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+               (*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
 
-   for (int l = 0; l < nlevels; ++l)
-   {
-       problems[l]->Solve(verbose);
-   }
+   //problems[0]->Solve(verbose);
+   //for (int l = 0; l < nlevels; ++l)
+       //problems[l]->Solve(verbose);
 
 
    //MPI_Finalize();
@@ -388,7 +389,9 @@ int main(int argc, char *argv[])
   {
       int pref_lvls_tslab = 0;
       int solve_at_lvl = 0;
-      TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
+      //TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
+                                                         //formulation, space_for_S, space_for_sigma);
+      TimeCylHyper * timeslab_test = new TimeCylHyper (*pmesh, pref_lvls_tslab,
                                                          formulation, space_for_S, space_for_sigma);
 
       int init_cond_size = timeslab_test->GetInitCondSize(solve_at_lvl);
@@ -422,7 +425,7 @@ int main(int argc, char *argv[])
 
       Vector Xout(init_cond_size);
 
-      timeslab_test->Solve(solve_at_lvl,Xinit, Xout);
+      timeslab_test->Solve(solve_at_lvl, Xinit, Xout);
 
       timeslab_test->ComputeError(solve_at_lvl, *timeslab_test->GetSol(solve_at_lvl));
 

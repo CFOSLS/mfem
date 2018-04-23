@@ -626,6 +626,7 @@ protected:
     BlockVector * trueX;
     BlockVector * trueBnd;
     BlockVector * x; // inital condition (~bnd conditions)
+    int prec_option;
     Solver *prec;
     IterativeSolver * solver;
 
@@ -639,13 +640,15 @@ protected:
     void InitForms();
     void AssembleSystem(bool verbose);
     void InitSolver(bool verbose);
-    //void InitPrec(int prec_option, bool verbose);
     void SetPrec(Solver & Prec)
     {
         MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
         prec = &Prec;
         solver->SetPreconditioner(*prec);
     }
+    virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) {}
+    void UpdatePrec() { solver->SetPreconditioner(*prec); }
+    void SetPrecOption(int option) { prec_option = option; }
 
     BlockVector * SetInitialCondition();
     BlockVector * SetTrueInitialCondition();
@@ -654,8 +657,8 @@ protected:
     void ComputeError(bool verbose, bool checkbnd) const;
     virtual void ComputeExtraError() const {}
 public:
-    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
-    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
+    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
+    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     void Solve(bool verbose) const;
     void Update(); // not implemented
 

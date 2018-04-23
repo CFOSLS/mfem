@@ -333,12 +333,12 @@ FOSLSProblem::FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_)
 */
 
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-             FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+             FOSLSFEFormulation& fe_formulation, bool verbose_)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(&Hierarchy), level_in_hierarchy(level),
       spaces_initialized(false), forms_initialized(false), solver_initialized(false),
       hierarchy_initialized(true),
-      pbforms(fe_formul.Nblocks()), verbose(verbose_)
+      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
     InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
     spaces_initialized = true;
@@ -346,7 +346,6 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     forms_initialized = true;
 
     AssembleSystem(verbose);
-    prec = NULL;
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
@@ -355,12 +354,12 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 
 
 FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
-                           FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+                           FOSLSFEFormulation& fe_formulation, bool verbose_)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(NULL), level_in_hierarchy(-1),
       spaces_initialized(false), forms_initialized(false), solver_initialized(false),
       hierarchy_initialized(true),
-      pbforms(fe_formul.Nblocks()), verbose(verbose_)
+      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
     InitSpaces(pmesh);
     spaces_initialized = true;
@@ -368,7 +367,6 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
     forms_initialized = true;
 
     AssembleSystem(verbose);
-    prec = NULL;
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
@@ -433,7 +431,7 @@ void FOSLSProblem::InitSolver(bool verbose)
     solver->SetRelTol(rtol);
     solver->SetMaxIter(max_iter);
     solver->SetOperator(*CFOSLSop);
-    if (prec)
+    if (prec_option)
          solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
 
@@ -800,26 +798,30 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
         if (verbose)
             cout << "component No. " << blk << ": || error || / || exact_sol || = " << err / norm_exsol << endl;
 
+        double projection_error = -1.0;
+
+        ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+        MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+        switch (fe_formul.GetFormulation()->GetPair(blk).first)
+        {
+        case 0: // function coefficient
+            exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+            projection_error = exsol_pgfun->ComputeL2Error(*test->GetFuncCoeff(coeff_index), irs);
+            break;
+        case 1: // vector function coefficient
+            exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+            projection_error = exsol_pgfun->ComputeL2Error(*test->GetVecCoeff(coeff_index), irs);
+            break;
+        default:
+            {
+                MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+            }
+            break;
+        }
+
         if (checkbnd)
         {
-            ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
-
-            MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
-            switch (fe_formul.GetFormulation()->GetPair(blk).first)
-            {
-            case 0: // function coefficient
-                exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
-                break;
-            case 1: // vector function coefficient
-                exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
-                break;
-            default:
-                {
-                    MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
-                }
-                break;
-            }
-
             Vector exsol_tdofs(pfes[blk]->TrueVSize());
             exsol_pgfun->ParallelProject(exsol_tdofs);
 
@@ -844,6 +846,12 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
             }
 
         }
+
+        if (verbose)
+            std::cout << "component No. " << blk << ": || exact - proj || / || exact || = "
+                            << projection_error / norm_exsol << "\n";
+
+        delete exsol_pgfun;
 
     }
 
