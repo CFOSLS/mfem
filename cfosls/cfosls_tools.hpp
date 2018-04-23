@@ -9,6 +9,7 @@ using namespace mfem;
 
 namespace mfem
 {
+
 //HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 //HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
 
@@ -178,6 +179,220 @@ public:
 
 };
 
+enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
+
+// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
+class GeneralHierarchy
+{
+protected:
+    int num_lvls;
+    std::vector<ParMesh*> pmesh_lvls;
+    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
+    std::vector<ParFiniteElementSpace* > Hcurl_space_lvls;
+    std::vector<ParFiniteElementSpace* > H1_space_lvls;
+    std::vector<ParFiniteElementSpace* > L2_space_lvls;
+    std::vector<ParFiniteElementSpace* > Hdivskew_space_lvls;
+
+    std::vector<SparseMatrix*> P_H1_lvls;
+    std::vector<SparseMatrix*> P_Hdiv_lvls;
+    std::vector<SparseMatrix*> P_L2_lvls;
+    std::vector<SparseMatrix*> P_Hcurl_lvls;
+    std::vector<SparseMatrix*> P_Hdivskew_lvls;
+
+    std::vector<HypreParMatrix*> TrueP_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
+    std::vector<HypreParMatrix*> TrueP_L2_lvls;
+    std::vector<HypreParMatrix*> TrueP_Hcurl_lvls;
+    std::vector<HypreParMatrix*> TrueP_Hdivskew_lvls;
+
+public:
+
+    GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
+
+    void RefineAndCopy(int lvl, ParMesh* pmesh)
+    {
+        //if (!dynamic_cast<ParMeshCyl*> (pmesh))
+            //std::cout << "Unsuccessful cast \n";
+        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
+
+        if (lvl == num_lvls - 1)
+            if (pmeshcyl_view)
+            {
+                //ParMesh * temp = new ParMeshCyl(*pmeshcyl_view);
+                //pmesh_lvls[lvl] = dynamic_cast<ParMesh*>(temp);
+                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
+            }
+            else
+                pmesh_lvls[lvl] = new ParMesh(*pmesh);
+        else
+        {
+            if (pmeshcyl_view)
+            {
+                pmeshcyl_view->Refine(1);
+                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
+            }
+            else
+            {
+                pmesh->UniformRefinement();
+                pmesh_lvls[lvl] = new ParMesh(*pmesh);
+            }
+            //pmesh->UniformRefinement();
+        }
+    }
+
+    ParMesh * GetPmesh(int l) {return pmesh_lvls[l];}
+
+    // probably should be all replaced by GetSpace()
+    ParFiniteElementSpace * GetHdiv_space(int l) {return Hdiv_space_lvls[l];}
+    ParFiniteElementSpace * GetH1_space(int l) {return H1_space_lvls[l];}
+    ParFiniteElementSpace * GetL2_space(int l) {return L2_space_lvls[l];}
+    ParFiniteElementSpace * GetHcurl_space(int l) {return Hcurl_space_lvls[l];}
+
+    SparseMatrix * GetP_Hdiv(int l) {return P_Hdiv_lvls[l];}
+    SparseMatrix * GetP_H1(int l) {return P_H1_lvls[l];}
+    SparseMatrix * GetP_L2(int l) {return P_L2_lvls[l];}
+    SparseMatrix * GetP_Hcurl(int l) {return P_Hcurl_lvls[l];}
+
+    HypreParMatrix * GetTrueP_Hdiv(int l) {return TrueP_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_H1(int l) {return TrueP_H1_lvls[l];}
+    HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
+    HypreParMatrix * GetTrueP_Hcurl(int l) {return TrueP_Hcurl_lvls[l];}
+
+    ParFiniteElementSpace * GetSpace(SpaceName space, int level)
+    {
+        switch(space)
+        {
+        case HDIV:
+            return Hdiv_space_lvls[level];
+        case H1:
+            return H1_space_lvls[level];
+        case L2:
+            return L2_space_lvls[level];
+        case HCURL:
+            return Hcurl_space_lvls[level];
+        case HDIVSKEW:
+            return Hdivskew_space_lvls[level];
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        return NULL;
+    }
+
+    HypreParMatrix * GetTruePspace(SpaceName space, int level)
+    {
+        switch(space)
+        {
+        case HDIV:
+            return TrueP_Hdiv_lvls[level];
+        case H1:
+            return TrueP_H1_lvls[level];
+        case L2:
+            return TrueP_L2_lvls[level];
+        case HCURL:
+            return TrueP_Hcurl_lvls[level];
+        case HDIVSKEW:
+            return TrueP_Hdivskew_lvls[level];
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        return NULL;
+    }
+
+    SparseMatrix * GetPspace(SpaceName space, int level)
+    {
+        switch(space)
+        {
+        case HDIV:
+            return P_Hdiv_lvls[level];
+        case H1:
+            return P_H1_lvls[level];
+        case L2:
+            return P_L2_lvls[level];
+        case HCURL:
+            return P_Hcurl_lvls[level];
+        case HDIVSKEW:
+            return P_Hdivskew_lvls[level];
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        return NULL;
+    }
+};
+
+class GeneralCylHierarchy : public GeneralHierarchy
+{
+protected:
+    std::vector<ParMeshCyl*> pmeshcyl_lvls;
+
+    std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
+    std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
+
+    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
+    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
+    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
+    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
+    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
+    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
+protected:
+    void ConstructRestrictions();
+    void ConstructInterpolations();
+    void ConstructTdofsLinks();
+
+public:
+    GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
+        : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
+    {
+        pmeshcyl_lvls.resize(num_lvls);
+        for (int l = 0; l < num_lvls; ++l)
+        {
+            ParMeshCyl * temp = dynamic_cast<ParMeshCyl*>(pmesh_lvls[l]);
+            if (temp)
+                pmeshcyl_lvls[l] = temp;
+            else
+            {
+                MFEM_ABORT ("Unsuccessful cast \n");
+            }
+        }
+
+        // don't change the order of these calls
+        ConstructTdofsLinks();
+        ConstructRestrictions();
+        ConstructInterpolations();
+    }
+
+    ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
+
+    std::vector<std::pair<int,int> > * GetTdofs_Hdiv_link(int l) {return &(tdofs_link_Hdiv_lvls[l]);}
+    std::vector<std::pair<int,int> > * GetTdofs_H1_link(int l) {return &(tdofs_link_H1_lvls[l]);}
+
+    HypreParMatrix * GetTrueP_bndbot_Hdiv (int l) {return TrueP_bndbot_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_bndtop_Hdiv (int l) {return TrueP_bndtop_Hdiv_lvls[l];}
+    HypreParMatrix * GetTrueP_bndbot_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
+    HypreParMatrix * GetTrueP_bndtop_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
+
+    HypreParMatrix * GetRestrict_bot_Hdiv (int l) {return Restrict_bot_Hdiv_lvls[l];}
+    HypreParMatrix * GetRestrict_top_Hdiv (int l) {return Restrict_top_Hdiv_lvls[l];}
+    HypreParMatrix * GetRestrict_bot_H1 (int l) {return Restrict_bot_H1_lvls[l];}
+    HypreParMatrix * GetRestrict_top_H1 (int l) {return Restrict_top_H1_lvls[l];}
+
+    int GetLinksize_Hdiv(int l) const {return tdofs_link_Hdiv_lvls[l].size();}
+    int GetLinksize_H1(int l) const {return tdofs_link_H1_lvls[l].size();}
+
+};
 
 // abstract structure for a (C)FOSLS formulation
 // CFOSLS is considered to be a FOSLS formulation with constraint
@@ -205,6 +420,8 @@ protected:
 
 public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
+
+    virtual Array<SpaceName>& GetSpacesDescriptor() = 0;
 
     std::pair<int,int>& GetPair(int pair) {return blk_structure[pair];}
     virtual FOSLS_test * GetTest() = 0;
@@ -237,6 +454,7 @@ public:
 
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
+    virtual Array<SpaceName>& GetSpacesDescriptor();
 };
 
 struct FOSLSFEFormulation
@@ -254,8 +472,6 @@ public:
             fecolls[i] = NULL;
     }
 
-    virtual void foo() = 0;
-
     FOSLSFormulation * GetFormulation() {return &formul;}
 
     BilinearFormIntegrator* GetBlfi(int i, int j) {return formul.GetBlfi(i,j);}
@@ -269,14 +485,13 @@ public:
     int Nblocks() const {return formul.Nblocks();}
     int Nunknowns() const {return formul.Nunknowns();}
     int Feorder() const {return feorder;}
+
 };
 
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 {
 public:
     CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
-
-    virtual void foo() override {}
 };
 
 class BlockProblemForms
@@ -311,6 +526,7 @@ public:
         MFEM_ASSERT(initialized_forms, "Calling offd() when forms were not initialized is forbidden");
         return offd_forms(i,j);
     }
+
 };
 
 
@@ -324,9 +540,12 @@ protected:
 
     BdrConditions& bdr_conds;
 
+    GeneralHierarchy * hierarchy; // (optional)
+
     bool spaces_initialized;
     bool forms_initialized;
     bool solver_initialized;
+    bool hierarchy_initialized;
 
     // all par grid functions which are relevant to the formulation
     // e.g., solution components and right hand sides
@@ -355,6 +574,7 @@ protected:
     bool verbose;
 
 protected:
+    void InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, Array<SpaceName> &spaces_descriptor);
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
@@ -376,6 +596,7 @@ protected:
 public:
     //FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_);
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
+    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
     void Solve(bool verbose);
     void Update();
 };
@@ -398,6 +619,7 @@ protected:
     Array2D<BilinearFormIntegrator*> blfis;
     Array<LinearFormIntegrator*> lfis;
     Array<Array<int>* > essbdr_attrs;
+
 public:
     CFOSLSHyperbolicFormulation(int dimension, int solution_number,
                             const char * S_space, const char * sigma_space,
@@ -601,135 +823,6 @@ public:
     void Reset() {MFEM_ABORT("Not implemented \n");}
 };
 
-
-// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
-class GeneralHierarchy
-{
-protected:
-    int num_lvls;
-    std::vector<ParMesh*> pmesh_lvls;
-    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
-    std::vector<ParFiniteElementSpace* > H1_space_lvls;
-    std::vector<ParFiniteElementSpace* > L2_space_lvls;
-
-    std::vector<SparseMatrix*> P_H1_lvls;
-    std::vector<SparseMatrix*> P_Hdiv_lvls;
-    std::vector<SparseMatrix*> P_L2_lvls;
-    std::vector<HypreParMatrix*> TrueP_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_L2_lvls;
-
-public:
-    GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
-
-    void RefineAndCopy(int lvl, ParMesh* pmesh)
-    {
-        //if (!dynamic_cast<ParMeshCyl*> (pmesh))
-            //std::cout << "Unsuccessful cast \n";
-        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
-
-        if (lvl == num_lvls - 1)
-            if (pmeshcyl_view)
-            {
-                //ParMesh * temp = new ParMeshCyl(*pmeshcyl_view);
-                //pmesh_lvls[lvl] = dynamic_cast<ParMesh*>(temp);
-                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
-            }
-            else
-                pmesh_lvls[lvl] = new ParMesh(*pmesh);
-        else
-        {
-            if (pmeshcyl_view)
-            {
-                pmeshcyl_view->Refine(1);
-                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
-            }
-            else
-            {
-                pmesh->UniformRefinement();
-                pmesh_lvls[lvl] = new ParMesh(*pmesh);
-            }
-            //pmesh->UniformRefinement();
-        }
-    }
-
-    ParMesh * GetPmesh(int l) {return pmesh_lvls[l];}
-
-    ParFiniteElementSpace * GetHdiv_space(int l) {return Hdiv_space_lvls[l];}
-    ParFiniteElementSpace * GetH1_space(int l) {return H1_space_lvls[l];}
-    ParFiniteElementSpace * GetL2_space(int l) {return L2_space_lvls[l];}
-
-    SparseMatrix * GetP_Hdiv(int l) {return P_Hdiv_lvls[l];}
-    SparseMatrix * GetP_H1(int l) {return P_H1_lvls[l];}
-    SparseMatrix * GetP_L2(int l) {return P_L2_lvls[l];}
-
-    HypreParMatrix * GetTrueP_Hdiv(int l) {return TrueP_Hdiv_lvls[l];}
-    HypreParMatrix * GetTrueP_H1(int l) {return TrueP_H1_lvls[l];}
-    HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
-};
-
-class GeneralCylHierarchy : public GeneralHierarchy
-{
-protected:
-    std::vector<ParMeshCyl*> pmeshcyl_lvls;
-
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
-    std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
-
-    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
-protected:
-    void ConstructRestrictions();
-    void ConstructInterpolations();
-    void ConstructTdofsLinks();
-
-public:
-    GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
-        : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
-    {
-        pmeshcyl_lvls.resize(num_lvls);
-        for (int l = 0; l < num_lvls; ++l)
-        {
-            ParMeshCyl * temp = dynamic_cast<ParMeshCyl*>(pmesh_lvls[l]);
-            if (temp)
-                pmeshcyl_lvls[l] = temp;
-            else
-            {
-                MFEM_ABORT ("Unsuccessful cast \n");
-            }
-        }
-
-        // don't change the order of these calls
-        ConstructTdofsLinks();
-        ConstructRestrictions();
-        ConstructInterpolations();
-    }
-
-    ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
-
-    std::vector<std::pair<int,int> > * GetTdofs_Hdiv_link(int l) {return &(tdofs_link_Hdiv_lvls[l]);}
-    std::vector<std::pair<int,int> > * GetTdofs_H1_link(int l) {return &(tdofs_link_H1_lvls[l]);}
-
-    HypreParMatrix * GetTrueP_bndbot_Hdiv (int l) {return TrueP_bndbot_Hdiv_lvls[l];}
-    HypreParMatrix * GetTrueP_bndtop_Hdiv (int l) {return TrueP_bndtop_Hdiv_lvls[l];}
-    HypreParMatrix * GetTrueP_bndbot_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
-    HypreParMatrix * GetTrueP_bndtop_H1 (int l) {return TrueP_bndtop_H1_lvls[l];}
-
-    HypreParMatrix * GetRestrict_bot_Hdiv (int l) {return Restrict_bot_Hdiv_lvls[l];}
-    HypreParMatrix * GetRestrict_top_Hdiv (int l) {return Restrict_top_Hdiv_lvls[l];}
-    HypreParMatrix * GetRestrict_bot_H1 (int l) {return Restrict_bot_H1_lvls[l];}
-    HypreParMatrix * GetRestrict_top_H1 (int l) {return Restrict_top_H1_lvls[l];}
-
-    int GetLinksize_Hdiv(int l) const {return tdofs_link_Hdiv_lvls[l].size();}
-    int GetLinksize_H1(int l) const {return tdofs_link_H1_lvls[l].size();}
-
-};
 
 } // for namespace mfem
 

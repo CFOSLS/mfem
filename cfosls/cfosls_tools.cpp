@@ -272,6 +272,16 @@ void CFOSLSFormulation_HdivL2Hyper::InitBlkStructure()
     blk_structure[1] = std::make_pair<int,int>(-1,-1);
 }
 
+Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor()
+{
+    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+
+    (*res)[0] = SpaceName::HDIV;
+    (*res)[1] = SpaceName::L2;
+
+    return *res;
+}
+
 
 CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
     : FOSLSFEFormulation(formulation, fe_order)
@@ -322,9 +332,33 @@ FOSLSProblem::FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_)
 }
 */
 
-FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+             FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+    : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
+      hierarchy(&Hierarchy),
+      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      hierarchy_initialized(true),
+      pbforms(fe_formul.Nblocks()), verbose(verbose_)
+{
+    InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    spaces_initialized = true;
+    InitForms();
+    forms_initialized = true;
+
+    AssembleSystem(verbose);
+    prec = NULL;
+    //InitPrec(prec_option, verbose);
+    InitSolver(verbose);
+    solver_initialized = true;
+    InitGrFuns();
+}
+
+
+FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
+                           FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      hierarchy_initialized(true),
       pbforms(fe_formul.Nblocks()), verbose(verbose_)
 {
     InitSpaces(pmesh);
@@ -358,6 +392,17 @@ void FOSLSProblem::InitForms()
         }
     }
 }
+
+void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, Array<SpaceName> &spaces_descriptor)
+{
+    pfes.SetSize(fe_formul.Nblocks());
+
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+    {
+        pfes[i] = hierarchy.GetSpace(spaces_descriptor[i], level);
+    }
+}
+
 
 void FOSLSProblem::InitSpaces(ParMesh &pmesh)
 {
@@ -1579,6 +1624,19 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
             MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
     }
 
+    FiniteElementCollection *hcurl_coll;
+    if (dim == 4)
+        hcurl_coll = new ND1_4DFECollection;
+    else
+        hcurl_coll = new ND_FECollection(feorder + 1, dim);
+
+    FiniteElementCollection *hdivskew_coll;
+    if (dim == 4)
+        hdivskew_coll = new DivSkew1_4DFECollection;
+    else
+        hdivskew_coll = NULL;
+
+
     ParFiniteElementSpace *Hdiv_space;
     Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
 
@@ -1588,20 +1646,38 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
     ParFiniteElementSpace *H1_space;
     H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
 
+    ParFiniteElementSpace *Hcurl_space;
+    Hcurl_space = new ParFiniteElementSpace(&pmesh, hcurl_coll);
+
+    ParFiniteElementSpace *Hdivskew_space;
+    if (dim == 4)
+        Hdivskew_space = new ParFiniteElementSpace(&pmesh, hdivskew_coll);
+
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
     const SparseMatrix* P_L2_local;
+    const SparseMatrix* P_Hcurl_local;
+    const SparseMatrix* P_Hdivskew_local;
 
     pmesh_lvls.resize(num_lvls);
     Hdiv_space_lvls.resize(num_lvls);
     H1_space_lvls.resize(num_lvls);
     L2_space_lvls.resize(num_lvls);
+    Hcurl_space_lvls.resize(num_lvls);
+    if (dim == 4)
+        Hdivskew_space_lvls.resize(num_lvls);
     P_Hdiv_lvls.resize(num_lvls - 1);
     P_H1_lvls.resize(num_lvls - 1);
     P_L2_lvls.resize(num_lvls - 1);
+    P_Hcurl_lvls.resize(num_lvls - 1);
+    if (dim == 4)
+        P_Hdivskew_lvls.resize(num_lvls - 1);
     TrueP_Hdiv_lvls.resize(num_lvls - 1);
     TrueP_H1_lvls.resize(num_lvls - 1);
     TrueP_L2_lvls.resize(num_lvls - 1);
+    TrueP_Hcurl_lvls.resize(num_lvls - 1);
+    if (dim == 4)
+        TrueP_Hdivskew_lvls.resize(num_lvls - 1);
 
     //std::cout << "Checking test for dynamic cast \n";
     //if (dynamic_cast<testB*> (testA))
@@ -1615,6 +1691,9 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
         Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
         L2_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
         H1_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
+        Hcurl_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hcurl_coll);
+        if (dim == 4)
+            Hdivskew_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivskew_coll);
 
         // for all but one levels we create projection matrices between levels
         // and projectors assembled on true dofs if MG preconditioner is used
@@ -1623,6 +1702,9 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
             Hdiv_space->Update();
             H1_space->Update();
             L2_space->Update();
+            Hcurl_space->Update();
+            if (dim == 4)
+                Hdivskew_space->Update();
 
             // TODO: Rewrite these computations
 
@@ -1637,7 +1719,6 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
             TrueP_Hdiv_lvls[l]->CopyRowStarts();
 
             delete RP_Hdiv_local;
-
 
             P_H1_local = (SparseMatrix *)H1_space->GetUpdateOperator();
             P_H1_lvls[l] = RemoveZeroEntries(*P_H1_local);
@@ -1662,6 +1743,33 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
             TrueP_L2_lvls[l]->CopyRowStarts();
 
             delete RP_L2_local;
+
+            P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
+            P_Hcurl_lvls[l] = RemoveZeroEntries(*P_Hcurl_local);
+
+            auto d_td_coarse_Hcurl = Hcurl_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[l]->GetRestrictionMatrix(), *P_Hcurl_lvls[l]);
+            TrueP_Hcurl_lvls[l] = d_td_coarse_Hcurl->LeftDiagMult(
+                        *RP_Hcurl_local, Hcurl_space_lvls[l]->GetTrueDofOffsets());
+            TrueP_Hcurl_lvls[l]->CopyColStarts();
+            TrueP_Hcurl_lvls[l]->CopyRowStarts();
+
+            delete RP_Hcurl_local;
+
+            if (dim == 4)
+            {
+                P_Hdivskew_local = (SparseMatrix *)Hdivskew_space->GetUpdateOperator();
+                P_Hdivskew_lvls[l] = RemoveZeroEntries(*P_Hdivskew_local);
+
+                auto d_td_coarse_Hdivskew = Hdivskew_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+                SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[l]->GetRestrictionMatrix(), *P_Hdivskew_lvls[l]);
+                TrueP_Hdivskew_lvls[l] = d_td_coarse_Hdivskew->LeftDiagMult(
+                            *RP_Hdivskew_local, Hdivskew_space_lvls[l]->GetTrueDofOffsets());
+                TrueP_Hdivskew_lvls[l]->CopyColStarts();
+                TrueP_Hdivskew_lvls[l]->CopyRowStarts();
+
+            }
+
         }
 
     } // end of loop over levels

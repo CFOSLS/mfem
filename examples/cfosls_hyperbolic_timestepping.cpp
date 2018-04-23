@@ -355,6 +355,25 @@ int main(int argc, char *argv[])
 
    problem->Solve(verbose);
 
+   if (verbose)
+      std::cout << "Checking a single solve from a hierarchy of problems "
+                    "created for the entire domain \n";
+
+   int nlevels = 2;
+   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
+
+   Array<FOSLSProblem*> problems(nlevels);
+   for (int l = 0; l < nlevels; ++l)
+   {
+       problems[l] = new FOSLSProblem(*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
+   }
+
+   for (int l = 0; l < nlevels; ++l)
+   {
+       problems[l]->Solve(verbose);
+   }
+
+
    MPI_Finalize();
    return 0;
 
