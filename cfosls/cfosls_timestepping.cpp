@@ -162,6 +162,38 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
     // aliases
     ParFiniteElementSpace * Hdiv_space = pfes[0];
     ParFiniteElementSpace * L2_space = pfes[1];
+    ParGridFunction * sigma = grfuns[0];
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(*sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+    }
+
+    /*
+    if (verbose)
+    {
+        cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
+        cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
+                  << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
+    }
+    */
 
     ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
     Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
@@ -189,13 +221,6 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
     delete Bblock;
     delete B;
     delete C;
-
-    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
-    const IntegrationRule *irs[Geometry::NumGeom];
-    for (int i = 0; i < Geometry::NumGeom; ++i)
-    {
-       irs[i] = &(IntRules.Get(i, order_quad));
-    }
 
     double err_S = S->ComputeL2Error(*test->GetU(), irs);
     double norm_S = ComputeGlobalLpNorm(2, *test->GetU(), pmesh, irs);

@@ -244,6 +244,7 @@ int main(int argc, char *argv[])
    */
 
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
+   //pmesh->Refine(1);
 
    //pmesh->PrintSlabsStruct();
 
@@ -429,8 +430,8 @@ int main(int argc, char *argv[])
 
       timeslab_test->ComputeError(solve_at_lvl, *timeslab_test->GetSol(solve_at_lvl));
 
-      MPI_Finalize();
-      return 0;
+      //MPI_Finalize();
+      //return 0;
 
       // checking the error at the top boundary
       Vector Xout_exact(init_cond_size);
@@ -504,8 +505,8 @@ int main(int argc, char *argv[])
       delete timeslab_test;
   }
 
-  MPI_Finalize();
-  return 0;
+  //MPI_Finalize();
+  //return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
@@ -612,6 +613,9 @@ int main(int argc, char *argv[])
           */
           //Xinit.Print();
           timeslabs[tslab]->Solve(solve_at_lvl, Xinit, Xout);
+
+          timeslabs[tslab]->ComputeError(solve_at_lvl, *timeslabs[tslab]->GetSol(solve_at_lvl));
+
           Xinit = Xout;
           if (strcmp(space_for_S,"L2") == 0)
               Xinit *= -1.0;
@@ -636,6 +640,9 @@ int main(int argc, char *argv[])
 
       }
   }
+
+  MPI_Finalize();
+  return 0;
 
   /*
 
