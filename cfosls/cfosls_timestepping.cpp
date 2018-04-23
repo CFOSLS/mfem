@@ -809,19 +809,23 @@ void TimeCylHyper::ComputeError(int lvl, Vector& sol) const
 
 
 TimeCylHyper::TimeCylHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
-                              const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
+                              const char *Formulation, const char *Space_for_S,
+                            const char *Space_for_sigma, int Numsol)
     : TimeCyl(Pmeshbase, T_init, Tau, Nt), ref_lvls(Ref_lvls),
-      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
+      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma),
+      numsol(Numsol)
 {
-    InitProblem();
+    InitProblem(numsol);
 }
 
 TimeCylHyper::TimeCylHyper (ParMeshCyl& Pmeshtsl, int Ref_Lvls,
-                              const char *Formulation, const char *Space_for_S, const char *Space_for_sigma)
+                              const char *Formulation, const char *Space_for_S,
+                            const char *Space_for_sigma, int Numsol)
     : TimeCyl(Pmeshtsl), ref_lvls(Ref_Lvls),
-      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma)
+      formulation(Formulation), space_for_S(Space_for_S), space_for_sigma(Space_for_sigma),
+      numsol(Numsol)
 {
-    InitProblem();
+    InitProblem(Numsol);
 }
 
 void TimeCylHyper::Solve(int lvl, const Vector& rhs, Vector& sol,
@@ -1131,12 +1135,16 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         gform_nobnd->Assemble();
     }
 
+    gform_nobnd->Print();
+
     BlockVector trueRhs_nobnd(block_trueOffsets);
     trueRhs_nobnd = 0.0;
 
     if (strcmp(space_for_S,"H1") == 0)
         qform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(1));
     gform_nobnd->ParallelAssemble(trueRhs_nobnd.GetBlock(numblocks - 1));
+
+    //trueRhs_nobnd.Print();
 
     *trueRhs_nobnd_lvls[lvl] = trueRhs_nobnd;
 
@@ -1184,6 +1192,8 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
     //SparseMatrix diag;
     //((HypreParMatrix&)(CFOSLSop->GetBlock(0,0))).GetDiag(diag);
     //diag.Print();
+
+    //trueRhs2.Print();
 
     solver->Mult(trueRhs2, *trueX_lvls[lvl]);
     chrono.Stop();
@@ -1617,7 +1627,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
 
 }
 
-void TimeCylHyper::InitProblem()
+void TimeCylHyper::InitProblem(int numsol)
 {
     dim = pmeshtsl->Dimension();
     comm = pmeshtsl->GetComm();
@@ -1628,18 +1638,6 @@ void TimeCylHyper::InitProblem()
     MPI_Comm_rank(comm, &myid);
 
     feorder = 0;
-
-#ifdef NONHOMO_TEST
-   if (dim == 3)
-       numsol = -33;
-   else // 4D case
-       numsol = -44;
-#else
-   if (dim == 3)
-       numsol = -3;
-   else // 4D case
-       numsol = -4;
-#endif
 
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
     bool use_ADS;

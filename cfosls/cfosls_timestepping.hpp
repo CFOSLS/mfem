@@ -159,14 +159,14 @@ public:
     bool verbose;
 
 protected:
-    void InitProblem();
+    void InitProblem(int numsol);
 
 public:
     ~TimeCylHyper();
     TimeCylHyper (ParMesh& Pmeshbase, double T_init, double Tau, int Nt, int Ref_lvls,
-                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
+                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma, int Numsol);
     TimeCylHyper (ParMeshCyl& Pmeshtsl, int Ref_Lvls,
-                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma);
+                   const char *Formulation, const char *Space_for_S, const char *Space_for_sigma, int Numsol);
 
     virtual void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const override
     { Solve(0, bnd_tdofs_bot, bnd_tdofs_top); }

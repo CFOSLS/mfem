@@ -361,6 +361,7 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a hierarchy of problems "
                     "created for the entire domain \n";
 
+   /*
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
@@ -370,6 +371,7 @@ int main(int argc, char *argv[])
        problems[l] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
                (*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
+   */
 
    //problems[0]->Solve(verbose);
    //for (int l = 0; l < nlevels; ++l)
@@ -393,7 +395,7 @@ int main(int argc, char *argv[])
       //TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          //formulation, space_for_S, space_for_sigma);
       TimeCylHyper * timeslab_test = new TimeCylHyper (*pmesh, pref_lvls_tslab,
-                                                         formulation, space_for_S, space_for_sigma);
+                                                         formulation, space_for_S, space_for_sigma, numsol);
 
       int init_cond_size = timeslab_test->GetInitCondSize(solve_at_lvl);
       std::vector<std::pair<int,int> > * tdofs_link = timeslab_test->GetTdofsLink(solve_at_lvl);
@@ -505,8 +507,8 @@ int main(int argc, char *argv[])
       delete timeslab_test;
   }
 
-  //MPI_Finalize();
-  //return 0;
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
@@ -535,7 +537,7 @@ int main(int argc, char *argv[])
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
           timeslabs[tslab] = new TimeCylHyper (*pmeshbase, tinit_tslab, slab_tau, slab_width, pref_lvls_tslab,
-                                                formulation, space_for_S, space_for_sigma);
+                                                formulation, space_for_S, space_for_sigma, numsol);
           tinit_tslab += slab_tau * slab_width;
       }
 
@@ -754,7 +756,7 @@ int main(int argc, char *argv[])
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
           timeslabs[tslab] = new TimeCylHyper (*pmeshbase, tinit_tslab, slab_tau, slab_width, pref_lvls_tslab,
-                                                formulation, space_for_S, space_for_sigma);
+                                                formulation, space_for_S, space_for_sigma, numsol);
           tinit_tslab += slab_tau * slab_width;
       }
 

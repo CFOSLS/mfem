@@ -562,6 +562,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
     for (int i = 0; i < numblocks; ++i)
         plforms[i]->Assemble();
 
+    plforms[1]->Print();
+
     hpmats_nobnd.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
@@ -869,6 +871,8 @@ void FOSLSProblem::Solve(bool verbose) const
     //SparseMatrix diag;
     //((HypreParMatrix&)(CFOSLSop->GetBlock(0,0))).GetDiag(diag);
     //diag.Print();
+
+    //trueRhs->Print();
 
     solver->Mult(*trueRhs, *trueX);
 
