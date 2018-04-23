@@ -78,44 +78,6 @@ public:
     virtual void MultTranspose(const Vector &x, Vector &y) const;
 };
 
-/*
-// a structure to describe what are the unknowns in the block system,
-// i.e. which variables are functions, vectors or matrix functions, respectively,
-// and how to get those from the given FOSLS_test (which contains all the
-// functions, vectors and matrix functions relevant to the problem, i.e.,
-// not only solutions, but also coefficients)
-// blk_structure is a vector of size = nblocks which contains:
-// pairs <'a','b'> where, 'a' = 0,1,2 describes the type of the variable
-// and 'b' is the index in the test coefficient array (corresponding to 'a')
-// For example, <1,2> at place 3 means that the third equation corresponds
-// to a vector unknown ('a' = 1), for which we have a VectorFunctionCoefficient
-// stored at test.vec_coeffs[2]('b' = 2).
-struct BlksSolDescriptor
-{
-protected:
-    int nblocks;
-    int dimension;
-    std::vector<std::pair<int,int> > blk_structure;
-public:
-    BlksSolDescriptor(int Nblocks) : nblocks(Nblocks)
-    { blk_structure.resize(nblocks); }
-
-    virtual void Init() = 0;
-
-    std::pair<int,int> GetPair(int pair) {return blk_structure[pair];}
-};
-
-struct BlksSolDescriptor_CFOSLS_HdivL2_Hyper : BlksSolDescriptor
-{
-protected:
-    Hyper_test& test;
-public:
-    BlksSolDescriptor_CFOSLS_HdivL2_Hyper(CFOSLSFormulation_HdivL2Hyper& formulation, Hyper_test& analytical_test);
-    virtual void Init() override;
-};
-*/
-
-
 struct BdrConditions
 {
 protected:
@@ -329,6 +291,8 @@ public:
 
         return NULL;
     }
+
+    int Nlevels() const {return num_lvls;}
 };
 
 class GeneralCylHierarchy : public GeneralHierarchy
@@ -392,6 +356,93 @@ public:
     int GetLinksize_Hdiv(int l) const {return tdofs_link_Hdiv_lvls[l].size();}
     int GetLinksize_H1(int l) const {return tdofs_link_H1_lvls[l].size();}
 
+    std::vector<std::pair<int,int> > * GetTdofsLink(int level, SpaceName space_name)
+    {
+        switch(space_name)
+        {
+        case HDIV:
+            return &(tdofs_link_Hdiv_lvls[level]);
+        case H1:
+            return &(tdofs_link_H1_lvls[level]);
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name in GetTdofsLink() \n");
+                break;
+            }
+        }
+
+        return NULL;
+    }
+
+    int GetTdofsLinkSize(int level, SpaceName space_name)
+    {
+        switch(space_name)
+        {
+        case HDIV:
+            return tdofs_link_Hdiv_lvls[level].size();
+        case H1:
+            return tdofs_link_H1_lvls[level].size();
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name in GetTdofsLinkSize() \n");
+                break;
+            }
+        }
+        return -1;
+    }
+
+    HypreParMatrix * GetRestrict_bnd(const char * top_or_bot, int level, SpaceName space_name)
+    {
+        MFEM_ASSERT(strcmp(top_or_bot,"top") == 0 || strcmp(top_or_bot,"bot") == 0,
+                    "top_or_bot must be either 'top' or 'bot'!");
+
+        switch(space_name)
+        {
+        case HDIV:
+            if (strcmp(top_or_bot,"top") == 0)
+                return Restrict_top_Hdiv_lvls[level];
+            else
+                return Restrict_bot_Hdiv_lvls[level];
+        case H1:
+            if (strcmp(top_or_bot,"top") == 0)
+                return Restrict_top_H1_lvls[level];
+            else
+                return Restrict_bot_H1_lvls[level];
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name in GetRestrict_bnd() \n");
+                break;
+            }
+        }
+        return NULL;
+    }
+
+    HypreParMatrix * GetTrueP_bnd(const char * top_or_bot, int level, SpaceName space_name)
+    {
+        MFEM_ASSERT(strcmp(top_or_bot,"top") == 0 || strcmp(top_or_bot,"bot") == 0,
+                    "top_or_bot must be either 'top' or 'bot'!");
+
+        switch(space_name)
+        {
+        case HDIV:
+            if (strcmp(top_or_bot,"top") == 0)
+                return TrueP_bndtop_Hdiv_lvls[level];
+            else
+                return TrueP_bndbot_Hdiv_lvls[level];
+        case H1:
+            if (strcmp(top_or_bot,"top") == 0)
+                return TrueP_bndtop_H1_lvls[level];
+            else
+                return TrueP_bndbot_H1_lvls[level];
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name in GetTrueP_bnd() \n");
+                break;
+            }
+        }
+
+        return NULL;
+    }
 };
 
 // abstract structure for a (C)FOSLS formulation
@@ -422,6 +473,12 @@ public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
     virtual Array<SpaceName>& GetSpacesDescriptor() = 0;
+
+    virtual int GetUnknownWithInitCnd() const
+    {
+        MFEM_ABORT("FOSLSFormulation::GetUnknownWithInitCnd() is not overriden! \n");
+        return -1;
+    }
 
     std::pair<int,int>& GetPair(int pair) {return blk_structure[pair];}
     virtual FOSLS_test * GetTest() = 0;
@@ -455,6 +512,8 @@ public:
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
     virtual Array<SpaceName>& GetSpacesDescriptor();
+
+    int GetUnknownWithInitCnd() const override {return 0;}
 };
 
 struct FOSLSFEFormulation
@@ -541,6 +600,7 @@ protected:
     BdrConditions& bdr_conds;
 
     GeneralHierarchy * hierarchy; // (optional)
+    int level_in_hierarchy;       // (optional)
 
     bool spaces_initialized;
     bool forms_initialized;
@@ -569,7 +629,7 @@ protected:
     Solver *prec;
     IterativeSolver * solver;
 
-    StopWatch chrono;
+    mutable StopWatch chrono;
 
     bool verbose;
 
@@ -590,15 +650,25 @@ protected:
     BlockVector * SetInitialCondition();
     BlockVector * SetTrueInitialCondition();
     void InitGrFuns();
-    void DistributeSolution();
-    void ComputeError(bool verbose, bool checkbnd);
-    virtual void ComputeExtraError() {}
+    void DistributeSolution() const;
+    void ComputeError(bool verbose, bool checkbnd) const;
+    virtual void ComputeExtraError() const {}
 public:
-    //FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_);
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_);
-    void Solve(bool verbose);
-    void Update();
+    void Solve(bool verbose) const;
+    void Update(); // not implemented
+
+    ParMesh * GetParMesh(int level = 0)
+    {
+        if (level == 0)
+            return &pmesh;
+        else
+        {
+            MFEM_ASSERT(hierarchy, "Hierarchy doesn't exist (hence, also coarser meshes) !");
+            return hierarchy->GetPmesh(level);
+        }
+    }
 };
 
 struct CFOSLSHyperbolicFormulation

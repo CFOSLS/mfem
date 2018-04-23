@@ -10,6 +10,69 @@ using namespace mfem;
 namespace mfem
 {
 
+// base class for a FOSLS problem in a time cylinder
+class FOSLSCylProblem : FOSLSProblem
+{
+protected:
+    ParMeshCyl &pmeshcyl;
+    GeneralCylHierarchy * cyl_hierarchy;
+
+    SpaceName init_cond_space;
+    int init_cond_block;
+
+    std::vector<std::pair<int,int> > tdofs_link;
+    HypreParMatrix* Restrict_bot;
+    HypreParMatrix* Restrict_top;
+
+protected:
+    void ConstructTdofLink();
+    void ConstructRestrictions();
+
+public:
+    FOSLSCylProblem (ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+        : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, prec_option, verbose_),
+          pmeshcyl(Pmeshcyl), cyl_hierarchy(NULL),
+          init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
+    {
+        Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        init_cond_space = spacenames[init_cond_block];
+        ConstructTdofLink();
+    }
+
+    FOSLSCylProblem(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, prec_option, verbose_),
+          pmeshcyl(*Hierarchy.GetPmeshcyl(level)), cyl_hierarchy(&Hierarchy),
+          init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
+    {
+        Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        init_cond_space = spacenames[init_cond_block];
+        tdofs_link = *cyl_hierarchy->GetTdofsLink(level, init_cond_space);
+    }
+
+    // (delete this?)
+    // interpretation of the input and output vectors depend on the implementation of Solve
+    // but they are related to the boundary conditions at the input and at he output
+    //virtual void Solve(const Vector& vec_in, Vector& vec_out) const = 0;
+
+    ParMeshCyl * GetParMeshCyl() {return &pmeshcyl;}
+
+    void Solve(const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+    void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+
+protected:
+    void ExtractTopTdofs(Vector& bnd_tdofs_top) const;
+    void ExtractBotTdofs(Vector& bnd_tdofs_bot) const;
+public:
+    void CorrectRhsFromInitCnd(const Vector& bnd_tdofs_bot) const
+    { CorrectRhsFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot);}
+
+    void CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
+
+};
+
+
 // abstract base class for a problem in a time cylinder
 class TimeCyl
 {

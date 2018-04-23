@@ -335,7 +335,7 @@ FOSLSProblem::FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_)
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
-      hierarchy(&Hierarchy),
+      hierarchy(&Hierarchy), level_in_hierarchy(level),
       spaces_initialized(false), forms_initialized(false), solver_initialized(false),
       hierarchy_initialized(true),
       pbforms(fe_formul.Nblocks()), verbose(verbose_)
@@ -357,6 +357,7 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
                            FOSLSFEFormulation& fe_formulation, int prec_option, bool verbose_)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
+      hierarchy(NULL), level_in_hierarchy(-1),
       spaces_initialized(false), forms_initialized(false), solver_initialized(false),
       hierarchy_initialized(true),
       pbforms(fe_formul.Nblocks()), verbose(verbose_)
@@ -751,13 +752,13 @@ void FOSLSProblem::AssembleSystem(bool verbose)
     MPI_Barrier(comm);
 }
 
-void FOSLSProblem::DistributeSolution()
+void FOSLSProblem::DistributeSolution() const
 {
     for (int i = 0; i < fe_formul.Nblocks(); ++i)
         grfuns[i]->Distribute(&(trueX->GetBlock(i)));
 }
 
-void FOSLSProblem::ComputeError(bool verbose, bool checkbnd)
+void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
 {
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
@@ -849,7 +850,7 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd)
     ComputeExtraError();
 }
 
-void FOSLSProblem::Solve(bool verbose)
+void FOSLSProblem::Solve(bool verbose) const
 {
     *trueX = 0;
 

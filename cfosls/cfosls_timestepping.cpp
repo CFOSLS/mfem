@@ -6,6 +6,154 @@ using namespace std;
 namespace mfem
 {
 
+void FOSLSCylProblem::ConstructRestrictions()
+{
+    Restrict_bot = CreateRestriction("bot", *pfes[init_cond_block], tdofs_link);
+    Restrict_top = CreateRestriction("top", *pfes[init_cond_block], tdofs_link);
+}
+
+void FOSLSCylProblem::ConstructTdofLink()
+{
+    std::vector<std::pair<int,int> > * dofs_link;
+
+    switch (init_cond_space)
+    {
+    case HDIV:
+    {
+        dofs_link = CreateBotToTopDofsLink("RT0", *pfes[init_cond_block], pmeshcyl.bot_to_top_bels);
+        break;
+    }
+    case H1:
+    {
+        dofs_link = CreateBotToTopDofsLink("linearH1", *pfes[init_cond_block], pmeshcyl.bot_to_top_bels);
+        break;
+    }
+    default:
+        MFEM_ABORT("Unsupported space name for initial condition variable");
+        return;
+    }
+
+    tdofs_link.reserve(dofs_link->size());
+
+    int count = 0;
+    for ( unsigned int i = 0; i < dofs_link->size(); ++i )
+    {
+        //std::cout << "<" << it->first << ", " << it->second << "> \n";
+        int dof1 = (*dofs_link)[i].first;
+        int dof2 = (*dofs_link)[i].second;
+        int tdof1 = pfes[init_cond_block]->GetLocalTDofNumber(dof1);
+        int tdof2 = pfes[init_cond_block]->GetLocalTDofNumber(dof2);
+        //std::cout << "corr. dof pair: <" << dof1 << "," << dof2 << ">\n";
+        //std::cout << "corr. tdof pair: <" << tdof1 << "," << tdof2 << ">\n";
+        if (tdof1 * tdof2 < 0)
+            MFEM_ABORT( "unsupported case: tdof1 and tdof2 belong to different processors! \n");
+
+        if (tdof1 > -1)
+        {
+            tdofs_link.push_back(std::pair<int,int>(tdof1, tdof2));
+            ++count;
+        }
+        else
+        { /*std::cout << "Ignored dofs pair which are not own tdofs \n";*/ }
+    }
+
+    delete dofs_link;
+}
+
+
+void FOSLSCylProblem::ExtractTopTdofs(Vector& bnd_tdofs_top) const
+{
+    for (unsigned int i = 0; i < tdofs_link.size(); ++i)
+    {
+        int tdof_top = tdofs_link[i].second;
+        bnd_tdofs_top[i] = trueX->GetBlock(init_cond_block)[tdof_top];
+    }
+}
+
+void FOSLSCylProblem::ExtractBotTdofs(Vector& bnd_tdofs_bot) const
+{
+    for (unsigned int i = 0; i < tdofs_link.size(); ++i)
+    {
+        int tdof_top = tdofs_link[i].first;
+        bnd_tdofs_bot[i] = trueX->GetBlock(init_cond_block)[tdof_top];
+    }
+}
+
+void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const
+{
+    int init_cond_size = tdofs_link.size();// init_cond_size_lvls[lvl];
+
+    if (bnd_tdofs_bot.Size() != init_cond_size)
+    {
+        std::cerr << "Error: sizes mismatch, input vector's size = " <<  bnd_tdofs_bot.Size()
+                  << ", expected: " << init_cond_size << "\n";
+        MFEM_ABORT("Wrong size of the input vector");
+    }
+
+    // using an alternative way of imposing boundary conditions on the right hand side
+    BlockVector trueBnd(blkoffsets_true);
+    trueBnd = 0.0;
+
+    for (unsigned int i = 0; i < tdofs_link.size(); ++i)
+    {
+        int tdof_bot = tdofs_link[i].first;
+        trueBnd.GetBlock(init_cond_block)[tdof_bot] = bnd_tdofs_bot[i];
+    }
+
+    BlockVector trueBndCor(blkoffsets_true);
+    trueBndCor = 0.0;
+
+    //trueBnd.Print();
+
+    op.Mult(trueBnd, trueBndCor);
+
+    // rhs := rhs - op * initial_condition
+    *trueRhs -= trueBndCor;
+
+    // correcting rhs entries for bdr tdofs
+    for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
+    {
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+
+        Array<int> ess_bnd_tdofs;
+        pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
+
+        for (int i = 0; i < ess_bnd_tdofs.Size(); ++i)
+        {
+            int tdof = ess_bnd_tdofs[i];
+            trueRhs->GetBlock(blk)[tdof] = trueBnd.GetBlock(blk)[tdof];
+        }
+    }
+
+}
+
+
+void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
+                         const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
+{
+    // copying righthand side
+    BlockVector rhs_viewer(rhs.GetData(), blkoffsets_true);
+
+    *trueRhs = rhs_viewer;
+
+    // correcting rhs with the given initial condition
+    CorrectRhsFromInitCnd(bnd_tdofs_bot);
+
+    // solving the system
+    FOSLSProblem::Solve(verbose);
+
+    // computing the outputs: full solution vector and tdofs
+    // (for the possible next cylinder's initial condition at the top interface)
+
+    ExtractTopTdofs(bnd_tdofs_top);
+
+    BlockVector viewer_out(sol.GetData(), blkoffsets_true);
+    viewer_out = *trueX;
+}
+
+//#######################################################################################################################
+
 TimeCyl::~TimeCyl()
 {
     if (own_pmeshtsl)

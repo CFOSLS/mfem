@@ -374,15 +374,15 @@ int main(int argc, char *argv[])
    }
 
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
    //CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
-   //CFOSLSHyperbolicProblem problem(*pmesh, problem_structure, feorder, prec_option, verbose);
-   //problem.Solve(verbose);
+   //CFOSLSHyperbolicProblem problem2(*pmesh, problem_structure, feorder, prec_option, verbose);
+   //problem2.Solve(verbose);
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
 
   {
@@ -423,6 +423,11 @@ int main(int argc, char *argv[])
       Vector Xout(init_cond_size);
 
       timeslab_test->Solve(solve_at_lvl,Xinit, Xout);
+
+      timeslab_test->ComputeError(solve_at_lvl, *timeslab_test->GetSol(solve_at_lvl));
+
+      MPI_Finalize();
+      return 0;
 
       // checking the error at the top boundary
       Vector Xout_exact(init_cond_size);
@@ -496,8 +501,8 @@ int main(int argc, char *argv[])
       delete timeslab_test;
   }
 
-  //MPI_Finalize();
-  //return 0;
+  MPI_Finalize();
+  return 0;
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
@@ -1243,60 +1248,4 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 }
-
-void testVectorFun(const Vector& xt, Vector& res)
-{
-    /*
-    double x = xt(0);
-    double y = xt(1);
-    double z;
-    if (xt.Size() > 3)
-        z = xt(2);
-    double t = xt(xt.Size() - 1);
-    */
-
-    res.SetSize(xt.Size());
-    res = 1.0;
-}
-
-double testH1fun(Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z;
-    if (xt.Size() == 4)
-        z = xt(2);
-    //double t = xt(xt.Size() - 1);
-
-    if (xt.Size() == 3)
-        return (x*x + y*y + 1.0);
-    if (xt.Size() == 4)
-        return (x*x + y*y + z*z + 1.0);
-    return 0.0;
-}
-
-
-void testHdivfun(const Vector& xt, Vector &res)
-{
-    res.SetSize(xt.Size());
-
-    //double x = xt(0);
-    //double y = xt(1);
-    //double z;
-    //if (xt.Size() == 4)
-        //z = xt(2);
-    //double t = xt(xt.Size() - 1);
-
-    res = 0.0;
-
-    if (xt.Size() == 3)
-    {
-        res(2) = 1.0;//(x*x + y*y + 1.0);
-    }
-    if (xt.Size() == 4)
-    {
-        res(3) = 1.0;//(x*x + y*y + z*z + 1.0);
-    }
-}
-
 
