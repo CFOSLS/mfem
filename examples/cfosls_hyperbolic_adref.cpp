@@ -46,240 +46,6 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
-// old implementation, now is a simplified form of the blocked case
-// here FOSLS functional is given as a bilinear form(sigma, sigma)
-double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Vector &error_estimates)
-{
-    FiniteElementSpace * fes = sigma.FESpace();
-    int ne = fes->GetNE();
-    error_estimates.SetSize(ne);
-
-    double total_error = 0.0;
-    for (int i = 0; i < ne; ++i)
-    {
-        const FiniteElement * fe = fes->GetFE(i);
-        ElementTransformation * eltrans = fes->GetElementTransformation(i);
-        DenseMatrix elmat;
-        blfi.AssembleElementMatrix(*fe, *eltrans, elmat);
-
-        Array<int> eldofs;
-        fes->GetElementDofs(i, eldofs);
-        Vector localv;
-        sigma.GetSubVector(eldofs, localv);
-
-        Vector localAv(localv.Size());
-        elmat.Mult(localv, localAv);
-
-        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-        //sigma.Print();
-        //eldofs.Print();
-        //localv.Print();
-        //localAv.Print();
-
-        double err = localAv * localv;
-
-
-        error_estimates(i) = std::sqrt(err);
-        total_error += err;
-    }
-
-    //std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
-
-    return std::sqrt(total_error);
-}
-
-// here FOSLS functional is given as a symmetric block matrix with bilinear forms for
-// different grid functions (each for all solution and rhs components)
-double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & grfuns, Vector &error_estimates)
-{
-    /*
-     * using a simpler version
-    if  (sols.Size() == 1)
-    {
-        return FOSLSErrorEstimator(*blfis(0,0), *grfuns[0], error_estimates);
-    }
-    */
-
-    Array<FiniteElementSpace*> fess(grfuns.Size());
-    for (int i = 0; i < grfuns.Size(); ++i)
-        fess[i] = grfuns[i]->FESpace();
-
-    int ne = fess[0]->GetNE();
-    error_estimates.SetSize(ne);
-
-    double total_error = 0.0;
-    for (int i = 0; i < ne; ++i)
-    {
-        double err = 0.0;
-        for (int rowblk = 0; rowblk < blfis.NumRows(); ++rowblk)
-        {
-            for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
-            {
-                if (rowblk == colblk)
-                {
-                    if (blfis(rowblk,colblk))
-                    {
-                        const FiniteElement * fe = fess[rowblk]->GetFE(i);
-                        ElementTransformation * eltrans = fess[rowblk]->GetElementTransformation(i);
-                        DenseMatrix elmat;
-                        blfis(rowblk,colblk)->AssembleElementMatrix(*fe, *eltrans, elmat);
-
-                        Array<int> eldofs;
-                        fess[rowblk]->GetElementDofs(i, eldofs);
-                        Vector localv;
-                        grfuns[rowblk]->GetSubVector(eldofs, localv);
-
-                        Vector localAv(localv.Size());
-                        elmat.Mult(localv, localAv);
-
-                        err += localAv * localv;
-                    }
-                }
-                else
-                // only using one of the off-diagonal integrators at symmetric places,
-                // since a FOSLS functional must be symmetric
-                {
-                    if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
-                    {
-                        int trial, test;
-                        if (blfis(rowblk,colblk))
-                        {
-                            trial = colblk;
-                            test = rowblk;
-                        }
-                        else // using an integrator for (colblk, rowblk) instead
-                        {
-                            trial = rowblk;
-                            test = colblk;
-                        }
-
-
-                        FiniteElementSpace * fes1 = fess[trial];
-                        FiniteElementSpace * fes2 = fess[test];
-                        const FiniteElement * fe1 = fes1->GetFE(i);
-                        const FiniteElement * fe2 = fes2->GetFE(i);
-                        ElementTransformation * eltrans = fes2->GetElementTransformation(i);
-                        DenseMatrix elmat;
-                        blfis(test,trial)->AssembleElementMatrix2(*fe1, *fe2, *eltrans, elmat);
-
-                        Vector localv1;
-                        Array<int> eldofs1;
-                        fes1->GetElementDofs(i, eldofs1);
-                        grfuns[trial]->GetSubVector(eldofs1, localv1);
-
-                        Vector localv2;
-                        Array<int> eldofs2;
-                        fes2->GetElementDofs(i, eldofs2);
-                        grfuns[test]->GetSubVector(eldofs2, localv2);
-
-                        Vector localAv1(localv2.Size());
-                        elmat.Mult(localv1, localAv1);
-
-                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-                        //sigma.Print();
-                        //eldofs.Print();
-                        //localv.Print();
-                        //localAv.Print();
-
-                        // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
-                        // bilinear forms in the functional
-                        err += 2.0 * (localAv1 * localv2);
-                    }
-                } // end of else for off-diagonal blocks
-            }
-        } // end of loop over blocks in the functional
-
-        error_estimates(i) = std::sqrt(err);
-        total_error += err;
-    }
-
-    //std::cout << "error estimates linf norm = " << error_estimates.Normlinf() << "\n";
-
-    return std::sqrt(total_error);
-}
-
-class FOSLSEstimator : public ErrorEstimator
-{
-protected:
-    MPI_Comm& comm;
-    const int numblocks;
-    long current_sequence;
-    Array<ParGridFunction*> grfuns;
-    Array2D<BilinearFormIntegrator*> integs;
-    Vector error_estimates;
-    double global_total_error;
-    bool verbose;
-
-    /// Check if the mesh of the solution was modified (copied from L2ZienkkiewiczZhuEstimator).
-    bool MeshIsModified();
-
-    /// Compute the element error estimates (copied from L2ZienkkiewiczZhuEstimator).
-    void ComputeEstimates();
-public:
-    ~FOSLSEstimator() {}
-    FOSLSEstimator(MPI_Comm& Comm, ParGridFunction &solution, BilinearFormIntegrator &integrator, bool Verbose = false);
-    FOSLSEstimator(MPI_Comm& Comm, Array<ParGridFunction*>& solutions, Array2D<BilinearFormIntegrator*>& integrators, bool Verbose = false);
-    virtual const Vector & GetLocalErrors () override;
-    double GetEstimate() {ComputeEstimates(); return global_total_error;}
-    virtual void Reset () override;
-};
-
-FOSLSEstimator::FOSLSEstimator(MPI_Comm& Comm, ParGridFunction &solution, BilinearFormIntegrator &integrator, bool Verbose)
-    : comm(Comm), numblocks(1), current_sequence(-1), global_total_error(0.0), verbose(Verbose)
-{
-    grfuns.SetSize(numblocks);
-    grfuns[0] = &solution;
-    integs.SetSize(numblocks, numblocks);
-    integs(0,0) = &integrator;
-}
-
-FOSLSEstimator::FOSLSEstimator(MPI_Comm& Comm, Array<ParGridFunction *> &solutions, Array2D<BilinearFormIntegrator *> &integrators, bool Verbose)
-    : comm(Comm), numblocks(solutions.Size()), current_sequence(-1), global_total_error(0.0), verbose(Verbose)
-{
-    grfuns.SetSize(numblocks);
-    for (int i = 0; i < numblocks; ++i)
-        grfuns[i] = solutions[i];
-    integs.SetSize(numblocks, numblocks);
-    for (int i = 0; i < numblocks; ++i)
-        for (int j = 0; j < numblocks; ++j)
-            integs(i,j) = integrators(i,j);
-}
-
-bool FOSLSEstimator::MeshIsModified()
-{
-   long mesh_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
-   MFEM_ASSERT(mesh_sequence >= current_sequence, "");
-   return (mesh_sequence > current_sequence);
-}
-
-const Vector & FOSLSEstimator::GetLocalErrors()
-{
-    if (MeshIsModified()) { ComputeEstimates(); }
-    return error_estimates;
-}
-
-void FOSLSEstimator::ComputeEstimates()
-{
-    double local_total_error = FOSLSErrorEstimator(integs, grfuns, error_estimates);
-    local_total_error *= local_total_error;
-
-    global_total_error = 0.0;
-    MPI_Allreduce(&local_total_error, &global_total_error, 1, MPI_DOUBLE, MPI_SUM, comm);
-    global_total_error = std::sqrt(global_total_error);
-
-    if (verbose)
-        std::cout << "global_total_error = " << global_total_error << "\n";
-
-    //error_estimates.Print();
-
-    current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
-}
-
-void FOSLSEstimator::Reset()
-{
-    current_sequence = -1;
-}
-
 double uFun_ex(const Vector& x); // Exact Solution
 double uFun_ex_dt(const Vector& xt);
 void uFun_ex_gradx(const Vector& xt, Vector& grad);
@@ -351,7 +117,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1516,6 +1282,126 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "Running AMR ... \n";
 
+#ifdef NEW_INTERFACE
+   //mfem::D * testtttt = new mfem::D(1,2,3);
+
+   // Hdiv-L2 formulation
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
+   FOSLSProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSProblem_CFOSLS_HdivL2_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   int numfoslsfuns = 1;
+
+   std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
+   // this works
+   grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
+
+   /*
+   // and this is a test for providing extra grfuns for the estimator
+   int n_extragrfuns = 1;
+   grfuns_descriptor[0] = std::make_pair<int,int>(-1,0);
+   Array<ParGridFunction*> extra_grfuns(n_extragrfuns);
+   extra_grfuns[0] = new ParGridFunction(problem->GetPfes(1));
+   extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
+   */
+
+   Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           integs(i,j) = NULL;
+
+   integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
+
+   // this works
+   FOSLSEstimator estimator(*problem, grfuns_descriptor, NULL, integs, verbose);
+   // and this is for testing the extra grfuns setup
+   //FOSLSEstimator estimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
+
+   // Hdiv-H1 formulation
+   /*
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
+
+   FOSLSProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSProblem_CFOSLS_HdivH1_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
+
+   //int estimator_option = 1;
+   //problem->CreateEstimator(estimator_option, verbose);
+   //FOSLSEstimator& estimator = problem->ExtractEstimator(0);
+   //FOSLSEstimator estimator(comm, grfuns, integs, verbose);
+
+   problem->AddEstimator(estimator);
+
+   ThresholdRefiner refiner(estimator);
+   refiner.SetTotalErrorFraction(0.5);
+
+   // 12. The main AMR loop. In each iteration we solve the problem on the
+   //     current mesh, visualize the solution, and refine the mesh.
+   const int max_dofs = 1600000;
+   for (int it = 0; ; it++)
+   {
+       HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
+
+       if (myid == 0)
+       {
+          cout << "\nAMR iteration " << it << endl;
+          cout << "Number of unknowns: " << global_dofs << endl;
+       }
+
+       problem->Solve(verbose);
+
+       // 17. Send the solution by socket to a GLVis server.
+       if (visualization)
+       {
+           char vishost[] = "localhost";
+           int  visport   = 19916;
+
+           socketstream sigma_sock(vishost, visport);
+           sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+           sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                  << it <<"'" << flush;
+
+           socketstream s_sock(vishost, visport);
+           s_sock << "parallel " << num_procs << " " << myid << "\n";
+           s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
+                  << it <<"'" << flush;
+       }
+
+       // 18. Call the refiner to modify the mesh. The refiner calls the error
+       //     estimator to obtain element errors, then it selects elements to be
+       //     refined and finally it modifies the mesh. The Stop() method can be
+       //     used to determine if a stopping criterion was met.
+       refiner.Apply(*problem->GetParMesh());
+       if (refiner.Stop())
+       {
+          if (myid == 0)
+          {
+             cout << "Stopping criterion satisfied. Stop." << endl;
+          }
+          break;
+       }
+
+       if (global_dofs > max_dofs)
+       {
+          if (myid == 0)
+          {
+             cout << "Reached the maximum number of dofs. Stop." << endl;
+          }
+          break;
+       }
+
+       problem->Update();
+
+       problem->BuildSystem(verbose);
+   }
+   //MPI_Finalize();
+   //return 0;
+#else
+
    ParGridFunction * f = new ParGridFunction(W_space);
    f->ProjectCoefficient(*Mytest.scalardivsigma);
 
@@ -1675,86 +1561,6 @@ int main(int argc, char *argv[])
            Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
    }
 
-#ifdef NEW_INTERFACE
-   // Hdiv-L2 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSProblem_CFOSLS_HdivL2_Hyper
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-
-   // Hdiv-H1 formulation
-   /*
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
-
-   FOSLSProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSProblem_CFOSLS_HdivH1_Hyper
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-   */
-
-   // 12. The main AMR loop. In each iteration we solve the problem on the
-   //     current mesh, visualize the solution, and refine the mesh.
-   const int max_dofs = 1600000;
-   for (int it = 0; ; it++)
-   {
-       HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
-
-       if (myid == 0)
-       {
-          cout << "\nAMR iteration " << it << endl;
-          cout << "Number of unknowns: " << global_dofs << endl;
-       }
-
-       problem->Solve(verbose);
-
-       // 17. Send the solution by socket to a GLVis server.
-       if (visualization)
-       {
-           char vishost[] = "localhost";
-           int  visport   = 19916;
-
-           socketstream sigma_sock(vishost, visport);
-           sigma_sock << "parallel " << num_procs << " " << myid << "\n";
-           sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
-                  << it <<"'" << flush;
-
-           socketstream s_sock(vishost, visport);
-           s_sock << "parallel " << num_procs << " " << myid << "\n";
-           s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
-                  << it <<"'" << flush;
-       }
-
-       // 18. Call the refiner to modify the mesh. The refiner calls the error
-       //     estimator to obtain element errors, then it selects elements to be
-       //     refined and finally it modifies the mesh. The Stop() method can be
-       //     used to determine if a stopping criterion was met.
-       refiner.Apply(problem->);
-       if (refiner.Stop())
-       {
-          if (myid == 0)
-          {
-             cout << "Stopping criterion satisfied. Stop." << endl;
-          }
-          break;
-       }
-
-       if (global_dofs > max_dofs)
-       {
-          if (myid == 0)
-          {
-             cout << "Reached the maximum number of dofs. Stop." << endl;
-          }
-          break;
-       }
-
-       problem->Update();
-
-       problem->BuildSystem();
-   }
-   MPI_Finalize();
-   return 0;
-#else
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 1600000;

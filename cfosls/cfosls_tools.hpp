@@ -10,6 +10,8 @@ using namespace mfem;
 namespace mfem
 {
 
+class FOSLSEstimator;
+
 //HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 //HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
 
@@ -474,6 +476,12 @@ public:
 // If a variable is not present in the FOSLS test (e.g., it's a Lagrange multiplier)
 // then one must set 'a' = -1, 'b' = -1.
 
+
+// It is implicitly assumed that first (unknowns_number) of equations
+// are related to the FOSLS functional and the rest (up to the total number
+// equal numblocks) are constrains.
+// Thus, in FOSLSEstimator the first block of (unknowns_number) x (unknowns_number)
+// of integrators is used as functional integrators(forms)
 struct FOSLSFormulation
 {
 protected:
@@ -626,6 +634,7 @@ public:
         return offd_forms(i,j);
     }
 
+    void Update();
 };
 
 
@@ -642,8 +651,11 @@ protected:
     GeneralHierarchy * hierarchy; // (optional)
     int level_in_hierarchy;       // (optional)
 
+    Array<FOSLSEstimator*> estimators; // (optional)
+
     bool spaces_initialized;
     bool forms_initialized;
+    bool system_assembled;
     bool solver_initialized;
     bool hierarchy_initialized;
 
@@ -687,7 +699,8 @@ protected:
         solver->SetPreconditioner(*prec);
     }
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) {}
-    void UpdatePrec() { solver->SetPreconditioner(*prec); }
+    void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
+    void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
     void SetPrecOption(int option) { prec_option = option; }
 
     BlockVector * SetInitialCondition();
@@ -700,7 +713,8 @@ public:
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     void Solve(bool verbose) const;
-    void Update(); // not implemented
+    void BuildSystem(bool verbose);
+    void Update();
 
     ParMesh * GetParMesh(int level = 0)
     {
@@ -713,7 +727,43 @@ public:
         }
     }
 
+    FOSLSFEFormulation& GetFEformulation() { return fe_formul; }
+
     int GlobalTrueProblemSize() const {return CFOSLSop->Height();}
+
+    MPI_Comm GetComm() {return pmesh.GetComm();}
+
+    /*
+    virtual FOSLSEstimator& ExtractEstimator(bool verbose)
+    {
+        MFEM_ABORT("Cannot construct FOSLSEstimator in the base class");
+    }
+    */
+
+    int GetNEstimators() const {return estimators.Size();}
+
+    int AddEstimator(FOSLSEstimator& estimator)
+    {
+        estimators.Append(&estimator);
+        return estimators.Size();
+    }
+
+    FOSLSEstimator* GetEstimator(int i)
+    {
+        MFEM_ASSERT(i >=0 && i < estimators.Size(), "Index for estimators out of bounds");
+        return estimators[i];
+    }
+
+    virtual void CreateEstimator(int option)
+    {
+        // TODO: Implement a default error estimator here, FOSLS block + constraints
+        MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
+    }
+
+    Array<ParGridFunction*> * GetGrFuns() {return &grfuns;}
+
+    ParFiniteElementSpace * GetPfes(int i) {return pfes[i];}
+
 };
 
 struct CFOSLSHyperbolicFormulation

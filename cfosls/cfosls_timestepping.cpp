@@ -152,8 +152,7 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
     viewer_out = *trueX;
 }
 
-
-void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
+void FOSLSProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
 
@@ -185,15 +184,6 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
         cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
                   << err_div/norm_div  << "\n";
     }
-
-    /*
-    if (verbose)
-    {
-        cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
-        cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
-                  << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
-    }
-    */
 
     ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
     Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
@@ -244,7 +234,7 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
-void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
@@ -296,11 +286,12 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec
 
 }
 
+
 // prec_option:
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
-void FOSLSCylProblem_CFOSLS_HdivH1_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_CFOSLS_HdivH1_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
@@ -349,7 +340,6 @@ void FOSLSCylProblem_CFOSLS_HdivH1_Hyper::CreatePrec(BlockOperator& op, int prec
             cout << "No preconditioner is used. \n";
 
 }
-
 
 //#######################################################################################################################
 

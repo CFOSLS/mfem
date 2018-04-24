@@ -346,23 +346,22 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a one TimeCylHyper instance "
                     "created for the entire domain \n";
 
-
    // Hdiv-L2 formulation
-   /*
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
    FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-   */
 
    // Hdiv-H1 formulation
+   /*
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
    FOSLSCylProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
 
    problem->Solve(verbose);
 

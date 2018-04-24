@@ -331,6 +331,19 @@ CFOSLSFEFormulation_HdivH1Hyper::CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulatio
     fecolls[2] = new L2_FECollection(feorder, dim);
 }
 
+void BlockProblemForms::Update()
+{
+    MFEM_ASSERT(initialized_forms, "Cannot update forms which were not initialized \n");
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+        {
+            if (i == j)
+                diag_forms[i]->Update();
+            else
+                offd_forms(i,j)->Update();
+        }
+}
 
 void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFiniteElementSpace*>& pfes)
 {
@@ -361,10 +374,12 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
              FOSLSFEFormulation& fe_formulation, bool verbose_)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(&Hierarchy), level_in_hierarchy(level),
-      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
       hierarchy_initialized(true),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
+    estimators.SetSize(0);
+
     InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
     spaces_initialized = true;
     InitForms();
@@ -382,20 +397,70 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
                            FOSLSFEFormulation& fe_formulation, bool verbose_)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(NULL), level_in_hierarchy(-1),
-      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
+      spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
       hierarchy_initialized(true),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
+    estimators.SetSize(0);
+
     InitSpaces(pmesh);
     spaces_initialized = true;
     InitForms();
     forms_initialized = true;
 
     AssembleSystem(verbose);
+
+    system_assembled = true;
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
     InitGrFuns();
+}
+
+void FOSLSProblem::Update()
+{
+    for (int i = 0; i < pfes.Size(); ++i)
+    {
+        pfes[i]->Update();
+        pfes[i]->Dof_TrueDof_Matrix();
+    }
+
+    for (int i = 0; i < grfuns.Size(); ++i)
+        grfuns[i]->Update();
+
+    pbforms.Update();
+
+    for (int i = 0; i < plforms.Size(); ++i)
+        plforms[i]->Update();
+
+    for (int i = 0; i < estimators.Size(); ++i)
+        estimators[i]->Update();
+
+    delete trueRhs;
+    delete trueX;
+    delete trueBnd;
+    delete x;
+
+    delete solver;
+
+    if (prec)
+        delete prec;
+
+    for (int i = 0; i < hpmats.NumRows(); ++i)
+        for (int j = 0; j < hpmats.NumCols(); ++j)
+            if (hpmats(i,j))
+                delete hpmats(i,j);
+
+    for (int i = 0; i < hpmats_nobnd.NumRows(); ++i)
+        for (int j = 0; j < hpmats_nobnd.NumCols(); ++j)
+            if (hpmats_nobnd(i,j))
+                delete hpmats_nobnd(i,j);
+
+    delete CFOSLSop;
+    delete CFOSLSop_nobnd;
+
+    system_assembled = false;
+    solver_initialized = false;
 }
 
 void FOSLSProblem::InitForms()
@@ -559,13 +624,36 @@ BlockVector * FOSLSProblem::SetInitialCondition()
     return init_cond;
 }
 
+void FOSLSProblem::BuildSystem(bool verbose)
+{
+    MFEM_ASSERT(spaces_initialized && forms_initialized, "Cannot build system if spaces or forms were not initialized");
+
+    AssembleSystem(verbose);
+    system_assembled = true;
+
+    InitSolver(verbose);
+    solver_initialized = true;
+
+    CreatePrec(*CFOSLSop, prec_option, verbose);
+    UpdateSolverPrec();
+}
+
+/*
+FOSLSEstimator& FOSLSProblem::ExtractEstimator(bool verbose)
+{
+    FOSLSEstimator * res = new FOSLSEstimator(MPI_Comm& Comm, Array<ParGridFunction*>& solutions, Array2D<BilinearFormIntegrator*>& integrators, bool Verbose = false);;
+    MFEM_ABORT("Not implemented");
+
+    return *res;
+}
+*/
 
 // works correctly only for problems with homogeneous initial conditions?
 // see the times-stepping branch, think of how boundary conditions for off-diagonal blocks are imposed
 // system is assumed to be symmetric
 void FOSLSProblem::AssembleSystem(bool verbose)
 {
-    int numblocks =fe_formul.Nblocks();
+    int numblocks = fe_formul.Nblocks();
 
     blkoffsets_true.SetSize(numblocks + 1);
     blkoffsets_true[0] = 0;
@@ -772,7 +860,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
    }
 
    if (verbose)
-        cout << "Final saddle point matrix assembled \n";
+        cout << "Final saddle point matrix and rhs assembled \n";
     MPI_Comm comm = pfes[0]->GetComm();
     MPI_Barrier(comm);
 }
@@ -887,6 +975,8 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
 
 void FOSLSProblem::Solve(bool verbose) const
 {
+    MFEM_ASSERT(solver_initialized && system_assembled, "Either solver is not initialized or system is not assembled \n");
+
     *trueX = 0;
 
     chrono.Clear();
