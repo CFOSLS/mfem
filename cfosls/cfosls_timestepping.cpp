@@ -296,6 +296,60 @@ void FOSLSCylProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec
 
 }
 
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
+void FOSLSCylProblem_CFOSLS_HdivH1_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        std::cout << "Diag(A) for H(div) \n";
+        std::cout << "BoomerAMG(C) for H1 \n";
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for the Lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver * invA;
+    invA = new HypreDiagScale(A);
+    invA->iterative_mode = false;
+
+    Solver * invC = new HypreBoomerAMG(C);
+    ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+    ((HypreBoomerAMG*)invC)->iterative_mode = false;
+
+    Solver * invS = new HypreBoomerAMG(*Schur);
+    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
 
 //#######################################################################################################################
 
@@ -1135,7 +1189,7 @@ void TimeCylHyper::Solve(int lvl, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs
         gform_nobnd->Assemble();
     }
 
-    gform_nobnd->Print();
+    //gform_nobnd->Print();
 
     BlockVector trueRhs_nobnd(block_trueOffsets);
     trueRhs_nobnd = 0.0;

@@ -225,20 +225,6 @@ void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
     }
 }
 
-/*
-BlksSolDescriptor_CFOSLS_HdivL2_Hyper::BlksSolDescriptor_CFOSLS_HdivL2_Hyper(CFOSLSFormulation_HdivL2Hyper& formulation, Hyper_test& analytical_test)
-    : BlksSolDescriptor(formulation, formul.Nblocks()), test(analytical_test)
-{
-    Init();
-}
-
-
-void BlksSolDescriptor_CFOSLS_HdivL2_Hyper::Init()
-{
-    MFEM_ABORT("Not implemented \n");
-}
-*/
-
 FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint)
     : dim(dimension),
       numblocks(num_blocks), unknowns_number(num_unknowns),
@@ -282,6 +268,39 @@ Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor()
     return *res;
 }
 
+CFOSLSFormulation_HdivH1Hyper::CFOSLSFormulation_HdivH1Hyper (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new VectorFEMassIntegrator();
+    blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
+    blfis(1,0) = new VectorFEMassIntegrator(*test.GetMinB());
+    blfis(2,0) = new VectorFEDivergenceIntegrator;
+
+    lfis[1] = new GradDomainLFIntegrator(*test.GetBf());
+    lfis[2] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_HdivH1Hyper::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(0,0);
+    blk_structure[2] = std::make_pair<int,int>(-1,-1);
+}
+
+Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor()
+{
+    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+
+    (*res)[0] = SpaceName::HDIV;
+    (*res)[1] = SpaceName::H1;
+    (*res)[2] = SpaceName::L2;
+
+    return *res;
+}
+
+
 
 CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
     : FOSLSFEFormulation(formulation, fe_order)
@@ -293,6 +312,23 @@ CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulatio
         fecolls[0] = new RT_FECollection(feorder, dim);
 
     fecolls[1] = new L2_FECollection(feorder, dim);
+}
+
+CFOSLSFEFormulation_HdivH1Hyper::CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order)
+    : FOSLSFEFormulation(formulation, fe_order)
+{
+    int dim = formul.Dim();
+    if (dim == 4)
+        fecolls[0] = new RT0_4DFECollection;
+    else
+        fecolls[0] = new RT_FECollection(feorder, dim);
+
+    if (dim == 4)
+        fecolls[1] = new LinearFECollection;
+    else
+        fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+    fecolls[2] = new L2_FECollection(feorder, dim);
 }
 
 
@@ -562,7 +598,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
     for (int i = 0; i < numblocks; ++i)
         plforms[i]->Assemble();
 
-    plforms[1]->Print();
+    //plforms[1]->Print();
 
     hpmats_nobnd.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)

@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-   const char *space_for_S = "L2";     // "H1" or "L2"
+   const char *space_for_S = "H1";     // "H1" or "L2"
    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -346,15 +346,25 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a one TimeCylHyper instance "
                     "created for the entire domain \n";
 
+
+   // Hdiv-L2 formulation
+   /*
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
-
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
-
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
+   FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
 
-   //FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
-           //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-   //problem->Solve(verbose);
+   // Hdiv-H1 formulation
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
+
+   FOSLSCylProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   problem->Solve(verbose);
 
    /*
    int nlevels = 2;
@@ -382,8 +392,8 @@ int main(int argc, char *argv[])
 
 //#if 0
   {
-      int pref_lvls_tslab = 1;
-      int solve_at_lvl = 1;
+      int pref_lvls_tslab = 0;
+      int solve_at_lvl = 0;
       //TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          //formulation, space_for_S, space_for_sigma);
       TimeCylHyper * timeslab_test = new TimeCylHyper (*pmesh, pref_lvls_tslab,

@@ -100,6 +100,31 @@ public:
     void ComputeExtraError() const;
 };
 
+class FOSLSCylProblem_CFOSLS_HdivH1_Hyper : public FOSLSCylProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdatePrec();
+    }
+
+    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdatePrec();
+    }
+
+};
+
 
 // abstract base class for a problem in a time cylinder
 class TimeCyl

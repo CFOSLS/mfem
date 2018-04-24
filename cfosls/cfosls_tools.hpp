@@ -124,7 +124,7 @@ struct BdrConditions_CFOSLS_HdivL2_Hyper : public BdrConditions
 {
 public:
     BdrConditions_CFOSLS_HdivL2_Hyper(ParMesh& pmesh_)
-        : BdrConditions(pmesh_, 3)
+        : BdrConditions(pmesh_, 2)
     {
         for (unsigned int j = 0; j < bdr_attribs[0].size(); ++j)
             bdr_attribs[0][j] = 0;
@@ -132,6 +132,24 @@ public:
 
         for (unsigned int j = 0; j < bdr_attribs[1].size(); ++j)
             bdr_attribs[1][j] = 0;
+
+        initialized = true;
+    }
+
+};
+
+struct BdrConditions_CFOSLS_HdivH1_Hyper : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_HdivH1_Hyper(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (unsigned int j = 0; j < bdr_attribs[0].size(); ++j)
+            bdr_attribs[0][j] = 0;
+
+        for (unsigned int j = 0; j < bdr_attribs[1].size(); ++j)
+            bdr_attribs[1][j] = 0;
+        bdr_attribs[1][0] = 1;
 
         for (unsigned int j = 0; j < bdr_attribs[2].size(); ++j)
             bdr_attribs[2][j] = 0;
@@ -516,6 +534,21 @@ public:
     int GetUnknownWithInitCnd() const override {return 0;}
 };
 
+struct CFOSLSFormulation_HdivH1Hyper : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Hyper_test test;
+public:
+    CFOSLSFormulation_HdivH1Hyper(int dimension, int num_solution, bool verbose);
+
+    virtual FOSLS_test * GetTest() override {return &test;}
+    virtual void InitBlkStructure() override;
+    virtual Array<SpaceName>& GetSpacesDescriptor();
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+};
+
 struct FOSLSFEFormulation
 {
 protected:
@@ -552,6 +585,13 @@ struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 public:
     CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
 };
+
+struct CFOSLSFEFormulation_HdivH1Hyper : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order);
+};
+
 
 class BlockProblemForms
 {
