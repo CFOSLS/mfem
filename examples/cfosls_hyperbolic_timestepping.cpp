@@ -352,14 +352,9 @@ int main(int argc, char *argv[])
 
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
 
-   FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-
-   problem->Solve(verbose);
-
-   if (verbose)
-      std::cout << "Checking a single solve from a hierarchy of problems "
-                    "created for the entire domain \n";
+   //FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+           //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   //problem->Solve(verbose);
 
    /*
    int nlevels = 2;
@@ -371,27 +366,24 @@ int main(int argc, char *argv[])
        problems[l] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
                (*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
-   */
 
    //problems[0]->Solve(verbose);
-   //for (int l = 0; l < nlevels; ++l)
-       //problems[l]->Solve(verbose);
+   for (int l = 0; l < nlevels; ++l)
+       problems[l]->Solve(verbose);
+
+   MPI_Finalize();
+   return 0;
+   */
 
 
-   //MPI_Finalize();
-   //return 0;
+   if (verbose)
+      std::cout << "Checking a single solve from a hierarchy of problems "
+                    "created for the entire domain \n";
 
-   //CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
-   //CFOSLSHyperbolicProblem problem2(*pmesh, problem_structure, feorder, prec_option, verbose);
-   //problem2.Solve(verbose);
-
-   //MPI_Finalize();
-   //return 0;
-
-
+//#if 0
   {
-      int pref_lvls_tslab = 0;
-      int solve_at_lvl = 0;
+      int pref_lvls_tslab = 1;
+      int solve_at_lvl = 1;
       //TimeCylHyper * timeslab_test = new TimeCylHyper (*pmeshbase, 0.0, tau, Nt, pref_lvls_tslab,
                                                          //formulation, space_for_S, space_for_sigma);
       TimeCylHyper * timeslab_test = new TimeCylHyper (*pmesh, pref_lvls_tslab,
@@ -454,7 +446,7 @@ int main(int argc, char *argv[])
       }
 
       // testing InterpolateAtBase()
-      if (solve_at_lvl == 1)
+      if (solve_at_lvl == 1 && strcmp(space_for_S,"H1") == 0)
       {
           Vector Xout_fine(timeslab_test->GetInitCondSize(0));
           timeslab_test->InterpolateAtBase("top", 0, Xout, Xout_fine);
@@ -506,9 +498,14 @@ int main(int argc, char *argv[])
 
       delete timeslab_test;
   }
+//#endif
 
-  MPI_Finalize();
-  return 0;
+   MPI_Finalize();
+   return 0;
+
+   //CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
+   //CFOSLSHyperbolicProblem problem2(*pmesh, problem_structure, feorder, prec_option, verbose);
+   //problem2.Solve(verbose);
 
   if (verbose)
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
