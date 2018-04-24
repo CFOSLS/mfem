@@ -357,17 +357,6 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
     initialized_forms = true;
 }
 
-
-/*
-FOSLSProblem::FOSLSProblem(FOSLSFEFormulation& fe_formulation, bool verbose_)
-    : fe_formul(fe_formulation),
-      spaces_initialized(false), forms_initialized(false), solver_initialized(false),
-      pbforms(fe_formul.Nblocks()), verbose(verbose_)
-{
-
-}
-*/
-
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, bool verbose_)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),

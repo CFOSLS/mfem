@@ -712,6 +712,8 @@ public:
             return hierarchy->GetPmesh(level);
         }
     }
+
+    int GlobalTrueProblemSize() const {return CFOSLSop->Height();}
 };
 
 struct CFOSLSHyperbolicFormulation

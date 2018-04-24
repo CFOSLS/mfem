@@ -37,6 +37,8 @@
 #define NEW_SETUP
 //#define REGULARIZE_A
 
+#define NEW_INTERFACE
+
 
 using namespace std;
 using namespace mfem;
@@ -577,6 +579,7 @@ int main(int argc, char *argv[])
     //    use the Raviart-Thomas finite elements of the specified order.
     int dim = nDimensions;
 
+    /*
 #ifdef NEW_SETUP
     CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
     CFOSLSHyperbolicProblem problem(*pmesh, problem_structure, feorder, prec_option, verbose);
@@ -588,6 +591,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+    */
 
     FiniteElementCollection *hdiv_coll;
     if ( dim == 4 )
@@ -1506,8 +1510,8 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh->GetComm());
    }
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
    if (verbose)
        std::cout << "Running AMR ... \n";
@@ -1671,6 +1675,86 @@ int main(int argc, char *argv[])
            Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
    }
 
+#ifdef NEW_INTERFACE
+   // Hdiv-L2 formulation
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
+   FOSLSProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSProblem_CFOSLS_HdivL2_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   // Hdiv-H1 formulation
+   /*
+   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
+
+   FOSLSProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSProblem_CFOSLS_HdivH1_Hyper
+           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
+
+   // 12. The main AMR loop. In each iteration we solve the problem on the
+   //     current mesh, visualize the solution, and refine the mesh.
+   const int max_dofs = 1600000;
+   for (int it = 0; ; it++)
+   {
+       HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
+
+       if (myid == 0)
+       {
+          cout << "\nAMR iteration " << it << endl;
+          cout << "Number of unknowns: " << global_dofs << endl;
+       }
+
+       problem->Solve(verbose);
+
+       // 17. Send the solution by socket to a GLVis server.
+       if (visualization)
+       {
+           char vishost[] = "localhost";
+           int  visport   = 19916;
+
+           socketstream sigma_sock(vishost, visport);
+           sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+           sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                  << it <<"'" << flush;
+
+           socketstream s_sock(vishost, visport);
+           s_sock << "parallel " << num_procs << " " << myid << "\n";
+           s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
+                  << it <<"'" << flush;
+       }
+
+       // 18. Call the refiner to modify the mesh. The refiner calls the error
+       //     estimator to obtain element errors, then it selects elements to be
+       //     refined and finally it modifies the mesh. The Stop() method can be
+       //     used to determine if a stopping criterion was met.
+       refiner.Apply(problem->);
+       if (refiner.Stop())
+       {
+          if (myid == 0)
+          {
+             cout << "Stopping criterion satisfied. Stop." << endl;
+          }
+          break;
+       }
+
+       if (global_dofs > max_dofs)
+       {
+          if (myid == 0)
+          {
+             cout << "Reached the maximum number of dofs. Stop." << endl;
+          }
+          break;
+       }
+
+       problem->Update();
+
+       problem->BuildSystem();
+   }
+   MPI_Finalize();
+   return 0;
+#else
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 1600000;
@@ -2074,6 +2158,7 @@ int main(int argc, char *argv[])
       }
       delete CFOSLSop;
    }
+#endif
 
    // 17. Free the used memory.
    //delete fform;
