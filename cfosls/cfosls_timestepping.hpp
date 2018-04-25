@@ -10,38 +10,6 @@ using namespace mfem;
 namespace mfem
 {
 
-class A
-{
-protected:
-    int a;
-    int * apt;
-public:
-    A(int aa) {a = aa; apt = new int[10]; apt[0] = 5; apt[1] = 1;}
-};
-
-class B: public virtual A
-{
-protected:
-    int b;
-public:
-    B(int aa, int bb) : A(aa) {b = bb;}
-};
-
-class C: public virtual A
-{
-protected:
-    int c;
-public:
-    C(int aa, int cc) : A(aa) {c = cc;}
-};
-
-
-class D : public B, public C
-{
-public:
-    D (int aa, int bb, int cc) : A(aa), B(aa,bb), C(aa, cc) {std::cout << apt[1] << "\n"; }
-};
-
 // base class for a FOSLS problem in a time cylinder
 class FOSLSCylProblem : virtual public FOSLSProblem
 {

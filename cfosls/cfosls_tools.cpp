@@ -1018,6 +1018,38 @@ void FOSLSProblem::Solve(bool verbose) const
     ComputeError(verbose, true);
 }
 
+FOSLSProblemHierarchy::FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
+                      BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, bool verbose_)
+    : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_), nlevels(nlevels_), hierarchy(hierarchy_), verbose(verbose_)
+{
+    problems_lvls.SetSize(nlevels);
+    TrueP_lvls.SetSize(nlevels - 1);
+    for (int l = 0; l < nlevels; ++l )
+    {
+        problems_lvls[l] = new T(hierarchy, l, bdr_conditions, fe_formulation, verbose);
+        if (l > 0)
+        {
+            Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
+            Array<int>& blkoffsets_true_col = problems_lvls[l]->GetTrueOffsets();
+
+            Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+
+            TrueP_lvls[l - 1] = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
+
+            int numblocks = fe_formulation.Nblocks(); // must be equal to the length of space_names
+
+            for (int blk = 0; blk < numblocks; ++blk)
+            {
+                HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], l - 1);
+                TrueP_lvls[l - 1]->SetBlock(blk, blk, TrueP_blk);
+            }
+        }
+    }
+}
+
+
+
+//##############################################################################################
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,
                                                  int fe_order, bool verbose)

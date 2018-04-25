@@ -10,6 +10,46 @@ using namespace mfem;
 namespace mfem
 {
 
+class A
+{
+protected:
+    int a;
+    int * apt;
+public:
+    A(int aa) {a = aa; apt = new int[10]; apt[0] = 5; apt[1] = 1;}
+};
+
+class B: public virtual A
+{
+protected:
+    int b;
+public:
+    B(int aa, int bb) : A(aa) {b = bb;}
+};
+
+class C: public virtual A
+{
+protected:
+    int c;
+public:
+    C(int aa, int cc) : A(aa) {c = cc;}
+};
+
+template <class T> class D
+{
+protected:
+    int length;
+    Array<T*> elements;
+public:
+    D (int aa, int bb, int length_) : length(length_)
+    {
+        elements.SetSize(length);
+        for (int i = 0; i < length; ++i)
+            elements[i] = new T(aa,bb);
+    }
+};
+
+
 class FOSLSEstimator;
 
 //HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
@@ -764,7 +804,36 @@ public:
 
     ParFiniteElementSpace * GetPfes(int i) {return pfes[i];}
 
+    Array<int>& GetTrueOffsets() { return blkoffsets_true;}
+
 };
+
+template <class T>
+class FOSLSProblemHierarchy
+{
+protected:
+    FOSLSFEFormulation& fe_formulation;
+    BdrConditions& bdr_conditions;
+    int nlevels;
+    GeneralHierarchy& hierarchy;
+    Array<T*> problems_lvls;
+    Array<BlockOperator*> TrueP_lvls;
+    bool verbose;
+public:
+    FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
+                          BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, bool verbose_);
+
+    T* GetProblem(int l)
+    {
+        MFEM_ASSERT(l >=0 && l < nlevels, "Index in GetProblem() is out of bounds");
+        return problems_lvls[l];
+    }
+
+    // here must be something related to construction of the coarsened operators
+
+};
+
+//#####################################################################################
 
 struct CFOSLSHyperbolicFormulation
 {

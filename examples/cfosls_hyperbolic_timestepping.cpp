@@ -363,12 +363,26 @@ int main(int argc, char *argv[])
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
    */
 
-   problem->Solve(verbose);
+   //problem->Solve(verbose);
 
-   /*
+   int length = 2;
+   mfem::D<C> * testtt = new mfem::D<C>(1,2, length);
+
+   MPI_Finalize();
+   return 0;
+
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
+   FOSLSProblemHierarchy * problems_hierarchy = new FOSLSProblemHierarchy(*hierarchy, nlevels, *bdr_conds, *fe_formulat, verbose);
+
+   for (int l = 0; l < nlevels; ++l)
+   {
+       FOSLSProblem* problem = problems_hierarchy->GetProblem(l);
+       problem->Solve(verbose);
+   }
+
+   /*
    Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> problems(nlevels);
    for (int l = 0; l < nlevels; ++l)
    {
@@ -379,10 +393,10 @@ int main(int argc, char *argv[])
    //problems[0]->Solve(verbose);
    for (int l = 0; l < nlevels; ++l)
        problems[l]->Solve(verbose);
+   */
 
    MPI_Finalize();
    return 0;
-   */
 
 
    if (verbose)
