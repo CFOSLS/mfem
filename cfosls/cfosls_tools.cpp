@@ -384,12 +384,12 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     spaces_initialized = true;
     InitForms();
     forms_initialized = true;
+    InitGrFuns();
 
     AssembleSystem(verbose);
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
-    InitGrFuns();
 }
 
 
@@ -407,6 +407,7 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
     spaces_initialized = true;
     InitForms();
     forms_initialized = true;
+    InitGrFuns();
 
     AssembleSystem(verbose);
 
@@ -414,7 +415,6 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
-    InitGrFuns();
 }
 
 void FOSLSProblem::Update()
@@ -503,9 +503,15 @@ void FOSLSProblem::InitSpaces(ParMesh &pmesh)
 
 void FOSLSProblem::InitGrFuns()
 {
-    grfuns.SetSize(fe_formul.Nblocks());
-    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+    int numblocks = fe_formul.Nblocks();
+    grfuns.SetSize(2 * numblocks);
+    for (int i = 0; i < numblocks; ++i)
+    {
+        // grfun for a solution component
         grfuns[i] = new ParGridFunction(pfes[i]);
+        // grfun for a rhs component
+        grfuns[i + numblocks] = new ParGridFunction(pfes[i]);
+    }
 }
 
 void FOSLSProblem::InitSolver(bool verbose)
@@ -674,6 +680,9 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
     for (int i = 0; i < numblocks; ++i)
         plforms[i]->Assemble();
+
+    for (int i = 0; i < numblocks; ++i)
+        *grfuns[i + numblocks] = *plforms[i];
 
     //plforms[1]->Print();
 

@@ -33,12 +33,10 @@
 //#include "cfosls_integrators.hpp"
 //#include "cfosls_tools.hpp"
 
-
 #define NEW_SETUP
 //#define REGULARIZE_A
 
 #define NEW_INTERFACE
-
 
 using namespace std;
 using namespace mfem;
@@ -111,13 +109,13 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -33;
+    int numsol          = -3;
 
     int ser_ref_levels  = 0;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1283,8 +1281,7 @@ int main(int argc, char *argv[])
        std::cout << "Running AMR ... \n";
 
 #ifdef NEW_INTERFACE
-   //mfem::D * testtttt = new mfem::D(1,2,3);
-
+    /*
    // Hdiv-L2 formulation
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
@@ -1298,15 +1295,6 @@ int main(int argc, char *argv[])
    // this works
    grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
 
-   /*
-   // and this is a test for providing extra grfuns for the estimator
-   int n_extragrfuns = 1;
-   grfuns_descriptor[0] = std::make_pair<int,int>(-1,0);
-   Array<ParGridFunction*> extra_grfuns(n_extragrfuns);
-   extra_grfuns[0] = new ParGridFunction(problem->GetPfes(1));
-   extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
-   */
-
    Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
    for (int i = 0; i < integs.NumRows(); ++i)
        for (int j = 0; j < integs.NumCols(); ++j)
@@ -1314,29 +1302,110 @@ int main(int argc, char *argv[])
 
    integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
 
-   // this works
-   FOSLSEstimator estimator(*problem, grfuns_descriptor, NULL, integs, verbose);
-   // and this is for testing the extra grfuns setup
-   //FOSLSEstimator estimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
+   FOSLSEstimator * estimator;
+
+   estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
+   */
 
    // Hdiv-H1 formulation
-   /*
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
    FOSLSProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSProblem_CFOSLS_HdivH1_Hyper
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-   */
 
-   //int estimator_option = 1;
-   //problem->CreateEstimator(estimator_option, verbose);
-   //FOSLSEstimator& estimator = problem->ExtractEstimator(0);
-   //FOSLSEstimator estimator(comm, grfuns, integs, verbose);
+   int numfoslsfuns = -1;
 
-   problem->AddEstimator(estimator);
+   int fosls_func_version = 2;
+   if (fosls_func_version == 1)
+       numfoslsfuns = 2;
+   else if (fosls_func_version == 2)
+       numfoslsfuns = 3;
 
-   ThresholdRefiner refiner(estimator);
+   Array<ParGridFunction*> extra_grfuns(0);
+   if (fosls_func_version == 2)
+   {
+       extra_grfuns.SetSize(1);
+   }
+
+
+   std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
+
+   Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           integs(i,j) = NULL;
+
+   //// and this is a test for providing extra grfuns for the estimator
+   //int n_extragrfuns = 1;
+   //grfuns_descriptor[0] = std::make_pair<int,int>(-1,0);
+   //Array<ParGridFunction*> extra_grfuns(n_extragrfuns);
+   //extra_grfuns[0] = new ParGridFunction(problem->GetPfes(1));
+   //extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
+   //FOSLSEstimator estimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
+
+   // version 1, only || sigma - b S ||^2, or || K sigma ||^2
+   if (fosls_func_version == 1)
+   {
+       // this works
+       grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
+       grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
+
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           integs(0,0) = new VectorFEMassIntegrator;
+       else // sigma is from H1vec
+           integs(0,0) = new ImproperVectorMassIntegrator;
+
+       integs(1,1) = new MassIntegrator(*Mytest.bTb);
+
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
+       else // sigma is from H1
+           integs(1,0) = new MixedVectorScalarIntegrator(*Mytest.minb);
+   }
+   else if (fosls_func_version == 2)
+   {
+       // version 2, only || sigma - b S ||^2 + || div bS - f ||^2
+       MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Version 2 works only if S is from H1 \n");
+
+       // this works
+       grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
+       grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
+       grfuns_descriptor[2] = std::make_pair<int,int>(-1, 0);
+
+       extra_grfuns[0] = new ParGridFunction(problem->GetPfes(numblocks - 1));
+       extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
+
+       if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+           integs(0,0) = new VectorFEMassIntegrator;
+       else // sigma is from H1vec
+           integs(0,0) = new ImproperVectorMassIntegrator;
+
+       integs(1,1) = new H1NormIntegrator(*Mytest.bbT, *Mytest.bTb);
+
+       integs(1,0) = new VectorFEMassIntegrator(*Mytest.minb);
+
+       // integrators related to f (rhs side)
+       integs(2,2) = new MassIntegrator;
+       integs(1,2) = new MixedDirectionalDerivativeIntegrator(*Mytest.minb);
+   }
+   else
+   {
+       MFEM_ABORT("Unsupported version of fosls functional \n");
+   }
+
+   FOSLSEstimator * estimator;
+
+   // this works
+   if (fosls_func_version == 2)
+       estimator = new FOSLSEstimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
+   else
+       estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
+
+   problem->AddEstimator(*estimator);
+
+   ThresholdRefiner refiner(*estimator);
    refiner.SetTotalErrorFraction(0.5);
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
@@ -1405,7 +1474,7 @@ int main(int argc, char *argv[])
    ParGridFunction * f = new ParGridFunction(W_space);
    f->ProjectCoefficient(*Mytest.scalardivsigma);
 
-   int fosls_func_version = 1;
+   int fosls_func_version = 2;
 
    int numfoslsfuns = -1;
    if (fosls_func_version == 1)

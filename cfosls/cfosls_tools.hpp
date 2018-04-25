@@ -660,7 +660,7 @@ protected:
     bool hierarchy_initialized;
 
     // all par grid functions which are relevant to the formulation
-    // e.g., solution components and right hand sides
+    // e.g., solution components and right hand sides (2 * numblocks)
     Array<ParGridFunction*> grfuns;
 
     Array<ParFiniteElementSpace*> pfes;
