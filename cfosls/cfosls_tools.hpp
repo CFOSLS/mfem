@@ -538,7 +538,13 @@ protected:
 public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
-    virtual Array<SpaceName>& GetSpacesDescriptor() = 0;
+    virtual Array<SpaceName>& GetSpacesDescriptor() const = 0;
+
+    SpaceName GetSpaceName(int i) const
+    {
+        Array<SpaceName>& space_names = GetSpacesDescriptor();
+        return space_names[i];
+    }
 
     virtual int GetUnknownWithInitCnd() const
     {
@@ -577,7 +583,7 @@ public:
 
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
-    virtual Array<SpaceName>& GetSpacesDescriptor();
+    virtual Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 0;}
 };
@@ -592,7 +598,7 @@ public:
 
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
-    virtual Array<SpaceName>& GetSpacesDescriptor();
+    virtual Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 };
@@ -676,7 +682,6 @@ public:
 
     void Update();
 };
-
 
 // class for general CFOSLS problem
 class FOSLSProblem
@@ -806,9 +811,17 @@ public:
 
     Array<int>& GetTrueOffsets() { return blkoffsets_true;}
 
+    BlockOperator* GetOp() { return CFOSLSop; }
+
+    BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
+
+    void ComputeAnalyticalRhs();
+
+    //Array<int> & GetEssTdofs(int i);
+
 };
 
-template <class T>
+template <class Problem>
 class FOSLSProblemHierarchy
 {
 protected:
@@ -816,22 +829,307 @@ protected:
     BdrConditions& bdr_conditions;
     int nlevels;
     GeneralHierarchy& hierarchy;
-    Array<T*> problems_lvls;
+    Array<Problem*> problems_lvls;
     Array<BlockOperator*> TrueP_lvls;
+    Array<BlockOperator*> CoarsenedOps_lvls;
+    Array<BlockOperator*> CoarsenedOps_nobnd_lvls;
     bool verbose;
 public:
-    FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
-                          BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, bool verbose_);
+    FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+                          FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
-    T* GetProblem(int l)
+    Problem* GetProblem(int l)
     {
         MFEM_ASSERT(l >=0 && l < nlevels, "Index in GetProblem() is out of bounds");
         return problems_lvls[l];
     }
 
-    // here must be something related to construction of the coarsened operators
+    // from coarser to finer
+    void Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out);
+
+    // from finer to coarser
+    void Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out);
+
+protected:
+    void ConstructCoarsenedOps();
+    HypreParMatrix& CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
 
 };
+
+template <class Problem>
+FOSLSProblemHierarchy<Problem>::FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
+                      BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_)
+    : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_), nlevels(nlevels_), hierarchy(hierarchy_), verbose(verbose_)
+{
+    problems_lvls.SetSize(nlevels);
+    TrueP_lvls.SetSize(nlevels - 1);
+    for (int l = 0; l < nlevels; ++l )
+    {
+        problems_lvls[l] = new Problem(hierarchy, l, bdr_conditions, fe_formulation, precond_option, verbose);
+        if (l > 0)
+        {
+            Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
+            Array<int>& blkoffsets_true_col = problems_lvls[l]->GetTrueOffsets();
+
+            Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+
+            TrueP_lvls[l - 1] = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
+
+            int numblocks = fe_formulation.Nblocks(); // must be equal to the length of space_names
+
+            for (int blk = 0; blk < numblocks; ++blk)
+            {
+                HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], l - 1);
+                TrueP_lvls[l - 1]->SetBlock(blk, blk, TrueP_blk);
+            }
+        }
+    }
+
+    CoarsenedOps_lvls.SetSize(nlevels);
+    for (int l = 0; l < nlevels; ++l )
+        CoarsenedOps_lvls[l] = NULL;
+    CoarsenedOps_lvls[0] = problems_lvls[0]->GetOp();
+
+    CoarsenedOps_nobnd_lvls.SetSize(nlevels);
+    for (int l = 0; l < nlevels; ++l )
+        CoarsenedOps_nobnd_lvls[l] = NULL;
+    CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
+
+    ConstructCoarsenedOps();
+}
+
+template <class Problem>
+void FOSLSProblemHierarchy<Problem>::Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out)
+{
+    MFEM_ASSERT(coarse_lvl == fine_lvl + 1, "Interpolate works only between the neighboring levels");
+    Array<int>& blkoffsets_true_fine = problems_lvls[fine_lvl]->GetTrueOffsets();
+    Array<int>& blkoffsets_true_coarse = problems_lvls[coarse_lvl]->GetTrueOffsets();
+
+    BlockVector viewer_in(vec_in.GetData(),  blkoffsets_true_coarse);
+    BlockVector viewer_out(vec_out.GetData(),  blkoffsets_true_fine);
+    TrueP_lvls[fine_lvl]->Mult(viewer_in, viewer_out);
+}
+
+template <class Problem>
+void FOSLSProblemHierarchy<Problem>::Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out)
+{
+    MFEM_ASSERT(coarse_lvl == fine_lvl + 1, "Interpolate works only between the neighboring levels");
+    Array<int>& blkoffsets_true_fine = problems_lvls[fine_lvl]->GetTrueOffsets();
+    Array<int>& blkoffsets_true_coarse = problems_lvls[coarse_lvl]->GetTrueOffsets();
+
+    BlockVector viewer_in(vec_in.GetData(), blkoffsets_true_fine);
+    BlockVector viewer_out(vec_out.GetData(), blkoffsets_true_coarse);
+    TrueP_lvls[fine_lvl]->MultTranspose(viewer_in, viewer_out);
+
+    // FIXME: Do we need to clear the boundary conditions on the coarse level after that?
+    // I guess, no.
+}
+
+
+// coarsens and restores boundary conditions
+// level l is the level where interpolation matrix should be taken
+// e.g., for coarsening from 0th level to the 1st level,
+// one should use interpolation matrix from level 0
+template <class Problem>
+HypreParMatrix& FOSLSProblemHierarchy<Problem>::CoarsenFineBlockWithBND
+(int l, int i, int j, HypreParMatrix& input)
+{
+    HypreParMatrix * res;
+
+    HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(i,i)));
+
+    Array<int> essbdr_attrs;
+    ConvertSTDvecToArray<int>(*(bdr_conditions.GetBdrAttribs(i)), essbdr_attrs);
+    Array<int> temp_i;
+    problems_lvls[l + 1]->GetPfes(i)->GetEssentialTrueDofs(essbdr_attrs, temp_i);
+
+    if (i == j) // we can use RAP for diagonal blocks
+    {
+        res = RAP(TrueP_i, &input, TrueP_i);
+        res->CopyRowStarts();
+        res->CopyRowStarts();
+
+        Eliminate_ib_block(*res, temp_i, temp_i );
+        HypreParMatrix * temphpmat = res->Transpose();
+        Eliminate_ib_block(*temphpmat, temp_i, temp_i );
+        res = temphpmat->Transpose();
+        Eliminate_bb_block(*res, temp_i);
+        SparseMatrix diag;
+        res->GetDiag(diag);
+        diag.MoveDiagonalFirst();
+
+        res->CopyRowStarts();
+        res->CopyColStarts();
+
+        delete temphpmat;
+    }
+    else
+    {
+        HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
+        HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
+
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conditions.GetBdrAttribs(j)), essbdr_attrs);
+        Array<int> temp_j;
+        problems_lvls[l + 1]->GetPfes(j)->GetEssentialTrueDofs(essbdr_attrs, temp_j);
+        //const Array<int> *temp_j = EssBdrTrueDofs_Funct_lvls[l][0];
+
+        HypreParMatrix * temp_prod = ParMult(&input, TrueP_j);
+        res = ParMult(TrueP_i_T, temp_prod);
+
+        Eliminate_ib_block(*res, temp_j, temp_i );
+        HypreParMatrix * temphpmat = res->Transpose();
+        Eliminate_ib_block(*temphpmat, temp_i, temp_j );
+        res = temphpmat->Transpose();
+        res->CopyRowStarts();
+        res->CopyColStarts();
+        delete temphpmat;
+
+        delete TrueP_i_T;
+        delete temp_prod;
+    }
+    return *res;
+}
+
+template <class Problem>
+void FOSLSProblemHierarchy<Problem>::ConstructCoarsenedOps()
+{
+    int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
+    for (int l = 1; l < nlevels; ++l )
+    {
+        Array2D<HypreParMatrix*> coarseop_lvl(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = i; j < numblocks; ++j)
+            {
+                coarseop_lvl(i,j) = NULL;
+
+                HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_lvls[l - 1]->GetBlock(i,j));
+
+                if (i == j)
+                    coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+                else
+                {
+                    coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+
+                    coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
+                    coarseop_lvl(j,i)->CopyRowStarts();
+                    coarseop_lvl(j,i)->CopyColStarts();
+                }
+
+            } // end of an iteration for fixed (i,j)
+        CoarsenedOps_lvls[l] = new BlockOperator(problems_lvls[l]->GetTrueOffsets());
+
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = i; j < numblocks; ++j)
+                CoarsenedOps_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+
+    } // end of loop over levels
+}
+
+template <class Problem> class FOSLSCylProblemHierarchy : public FOSLSProblemHierarchy<Problem>
+{
+protected:
+    GeneralCylHierarchy& cyl_hierarchy;
+
+    // additional routines and data members related to the cylinder structure go here
+public:
+    FOSLSCylProblemHierarchy(GeneralCylHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+                          FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
+
+public:
+    void InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
+    void RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
+    { MFEM_ABORT("RestrictAtBase has not been implemented properly \n"); }
+
+    // probably, there is no need of this
+    Vector *GetExactBase(const char * top_or_bot, int level)
+    { return FOSLSProblemHierarchy<Problem>::problems_lvls[level]->GetExactBase(top_or_bot); }
+};
+
+template <class Problem>
+FOSLSCylProblemHierarchy<Problem>::FOSLSCylProblemHierarchy
+                (GeneralCylHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+                      FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_)
+    : FOSLSProblemHierarchy<Problem>(hierarchy_, nlevels_, bdr_conditions_, fe_formulation_, precond_option, verbose_),
+      cyl_hierarchy(hierarchy_)
+{
+
+}
+
+template <class Problem>
+void FOSLSCylProblemHierarchy<Problem>::InterpolateAtBase(const char * top_or_bot,
+                                                          int lvl, const Vector& vec_in, Vector& vec_out)
+{
+    Problem * problem_lvl = FOSLSProblemHierarchy<Problem>::problems_lvls[lvl];
+
+    FOSLSFEFormulation * fe_formul = problem_lvl->GetFEformulation();
+
+    // index of the unknown with boundary condition
+    int index = fe_formul->GetFormulation()->GetUnknownWithInitCnd();
+
+    SpaceName space_name = fe_formul->GetFormulation()->GetSpaceName(index);
+
+    cyl_hierarchy.GetTrueP_bnd(top_or_bot, lvl, space_name)->Mult(vec_in, vec_out);
+}
+
+/*
+template <class Problem>
+Vector* FOSLSCylProblemHierarchy<Problem>::GetExactBase(const char * top_or_bot, int level)
+{
+    if (strcmp(top_or_bot,"bot") != 0 && strcmp(top_or_bot,"top") != 0 )
+    {
+        MFEM_ABORT("In GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+    }
+
+    Problem * problem_lvl = FOSLSProblemHierarchy<Problem>::problems_lvls[level];
+
+    FOSLSFEFormulation * fe_formul = problem_lvl->GetFEformulation();
+
+    // index of the unknown with boundary condition
+    int index = fe_formul->GetFormulation()->GetUnknownWithInitCnd();
+    FOSLS_test * test = fe_formul->GetFormulation()->GetTest();
+
+    ParFiniteElementSpace * pfes = problem_lvl->GetPfes(index);
+    ParGridFunction * exsol_pgfun = new ParGridFunction(pfes);
+
+    int coeff_index = fe_formul->GetFormulation()->GetPair(index).second;
+    MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+    switch (fe_formul->GetFormulation()->GetPair(index).first)
+    {
+    case 0: // function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+        break;
+    case 1: // vector function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+        break;
+    default:
+        {
+            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+        }
+        break;
+    }
+
+    Vector exsol_tdofs(pfes->TrueVSize());
+    exsol_pgfun->ParallelProject(exsol_tdofs);
+
+    int init_cond_size = problem_lvl->GetInitCondSize();
+
+    Vector * Xout_exact = new Vector(init_cond_size);
+
+    std::vector<std::pair<int,int> > * tdofs_link = problem_lvl->GetTdofsLink();
+
+    for (int i = 0; i < init_cond_size; ++i)
+    {
+        int tdof_top = ( strcmp(top_or_bot,"bot") == 0 ? (*tdofs_link)[i].first : (*tdofs_link)[i].second);
+        (*Xout_exact)[i] = exsol_tdofs[tdof_top];
+    }
+
+    delete exsol_pgfun;
+
+    return Xout_exact;
+}
+*/
+
 
 //#####################################################################################
 

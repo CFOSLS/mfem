@@ -258,7 +258,7 @@ void CFOSLSFormulation_HdivL2Hyper::InitBlkStructure()
     blk_structure[1] = std::make_pair<int,int>(-1,-1);
 }
 
-Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor()
+Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor() const
 {
     Array<SpaceName> * res = new Array<SpaceName>(numblocks);
 
@@ -289,7 +289,7 @@ void CFOSLSFormulation_HdivH1Hyper::InitBlkStructure()
     blk_structure[2] = std::make_pair<int,int>(-1,-1);
 }
 
-Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor()
+Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() const
 {
     Array<SpaceName> * res = new Array<SpaceName>(numblocks);
 
@@ -387,6 +387,8 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     InitGrFuns();
 
     AssembleSystem(verbose);
+    system_assembled = true;
+
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
@@ -410,8 +412,8 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
     InitGrFuns();
 
     AssembleSystem(verbose);
-
     system_assembled = true;
+
     //InitPrec(prec_option, verbose);
     InitSolver(verbose);
     solver_initialized = true;
@@ -982,6 +984,23 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
     ComputeExtraError();
 }
 
+void FOSLSProblem::ComputeAnalyticalRhs()
+{
+    int numblocks = fe_formul.Nblocks();
+
+    for (int i = 0; i < numblocks; ++i)
+        plforms[i]->Assemble();
+
+    for (int i = 0; i < numblocks; ++i)
+        *grfuns[i + numblocks] = *plforms[i];
+
+    // assembling rhs forms without boundary conditions
+    for (int i = 0; i < numblocks; ++i)
+    {
+        plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
+    }
+}
+
 void FOSLSProblem::Solve(bool verbose) const
 {
     MFEM_ASSERT(solver_initialized && system_assembled, "Either solver is not initialized or system is not assembled \n");
@@ -1017,37 +1036,6 @@ void FOSLSProblem::Solve(bool verbose) const
 
     ComputeError(verbose, true);
 }
-
-FOSLSProblemHierarchy::FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
-                      BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, bool verbose_)
-    : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_), nlevels(nlevels_), hierarchy(hierarchy_), verbose(verbose_)
-{
-    problems_lvls.SetSize(nlevels);
-    TrueP_lvls.SetSize(nlevels - 1);
-    for (int l = 0; l < nlevels; ++l )
-    {
-        problems_lvls[l] = new T(hierarchy, l, bdr_conditions, fe_formulation, verbose);
-        if (l > 0)
-        {
-            Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
-            Array<int>& blkoffsets_true_col = problems_lvls[l]->GetTrueOffsets();
-
-            Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
-
-            TrueP_lvls[l - 1] = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
-
-            int numblocks = fe_formulation.Nblocks(); // must be equal to the length of space_names
-
-            for (int blk = 0; blk < numblocks; ++blk)
-            {
-                HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], l - 1);
-                TrueP_lvls[l - 1]->SetBlock(blk, blk, TrueP_blk);
-            }
-        }
-    }
-}
-
-
 
 //##############################################################################################
 

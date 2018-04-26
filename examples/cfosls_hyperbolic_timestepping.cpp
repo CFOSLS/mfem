@@ -365,20 +365,21 @@ int main(int argc, char *argv[])
 
    //problem->Solve(verbose);
 
-   int length = 2;
-   mfem::D<C> * testtt = new mfem::D<C>(1,2, length);
+   //int length = 2;
+   //mfem::D<C> * testtt = new mfem::D<C>(1,2, length);
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
-   FOSLSProblemHierarchy * problems_hierarchy = new FOSLSProblemHierarchy(*hierarchy, nlevels, *bdr_conds, *fe_formulat, verbose);
+   FOSLSProblemHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper> * problems_hierarchy =
+           new FOSLSProblemHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    for (int l = 0; l < nlevels; ++l)
    {
-       FOSLSProblem* problem = problems_hierarchy->GetProblem(l);
+       FOSLSProblem_CFOSLS_HdivL2_Hyper* problem = problems_hierarchy->GetProblem(l);
        problem->Solve(verbose);
    }
 
@@ -394,6 +395,42 @@ int main(int argc, char *argv[])
    for (int l = 0; l < nlevels; ++l)
        problems[l]->Solve(verbose);
    */
+
+   int nslabs = 2;
+   Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
+   Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> timeslabs_problems(nslabs);
+   double slab_tau = 0.125;
+   int slab_width = 4; // in time steps (as time intervals) withing a single time slab
+
+   if (verbose)
+   {
+       std::cout << "Creating a sequence of time slabs: \n";
+       std::cout << "# of slabs: " << nslabs << "\n";
+       std::cout << "# of time intervals per slab: " << slab_width << "\n";
+       std::cout << "time step within a time slab: " << slab_tau << "\n";
+   }
+
+   double tinit_tslab = 0.0;
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+   {
+       timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
+
+       timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+
+       tinit_tslab += slab_tau * slab_width;
+   }
+
+   MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                 "[0,1] but the upper bound doesn't match \n");
+
+
+   TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(verbose);
+
+   time_stepping->SetProblems(timeslabs_problems);
+
+   Vector* init_vector = timeslabs_problems[0]->GetExactBase("bot");
+
+   time_stepping->SequentialSolve(*init_vector, verbose);
 
    MPI_Finalize();
    return 0;

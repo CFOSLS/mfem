@@ -128,6 +128,12 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
 
 }
 
+void FOSLSCylProblem::Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const
+{
+    MFEM_ABORT("This version of Solve() hasn't been implemented yet!");
+}
+
+
 
 void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
                          const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
@@ -151,6 +157,120 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
     BlockVector viewer_out(sol.GetData(), blkoffsets_true);
     viewer_out = *trueX;
 }
+
+
+void FOSLSCylProblem::ConvertInitCndToFullVector(const Vector& vec_in, Vector& vec_out)
+{
+    MFEM_ASSERT(vec_in.Size() == tdofs_link.size(), "Input vector size mismatch the link size \n");
+
+    BlockVector viewer(vec_out.GetData(), blkoffsets_true);
+    vec_out = 0.0;
+
+    int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
+
+    for (int i = 0; i < vec_in.Size(); ++i)
+    {
+        int tdof = tdofs_link[i].first;
+        viewer.GetBlock(index)[tdof] = vec_in[i];
+    }
+}
+
+// it is assumed that CFOSLSop_nobnd was already created
+// Takes the vector which stores inhomogeneous bdr values and zeros
+// and computes the new vector which has the same boundary values
+// but also a contribution from inhomog. bdr conditions (input) to the other rhs values
+void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out)
+{
+    vec_out = 0.0;
+    CFOSLSop_nobnd->Mult(vec_in, vec_out);
+
+    BlockVector viewer(vec_out.GetData(), blkoffsets_true);
+
+    for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
+    {
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+
+        Array<int> ess_tdofs;
+        pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
+
+        for (int i = 0; i < ess_tdofs.Size(); ++i)
+        {
+            int tdof = ess_tdofs[i];
+            viewer.GetBlock(blk)[tdof] = vec_in[tdof];
+        }
+
+    }
+}
+
+Vector* FOSLSCylProblem::GetExactBase(const char * top_or_bot)
+{
+    MFEM_ASSERT(strcmp(top_or_bot,"bot") == 0 || strcmp(top_or_bot,"top") == 0,
+                "In GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+
+    // index of the unknown with boundary condition
+    int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    ParFiniteElementSpace * pfespace = pfes[index];
+    ParGridFunction * exsol_pgfun = new ParGridFunction(pfespace);
+
+    int coeff_index = fe_formul.GetFormulation()->GetPair(index).second;
+    MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+    switch (fe_formul.GetFormulation()->GetPair(index).first)
+    {
+    case 0: // function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+        break;
+    case 1: // vector function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+        break;
+    default:
+        {
+            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+        }
+        break;
+    }
+
+    Vector exsol_tdofs(pfespace->TrueVSize());
+    exsol_pgfun->ParallelProject(exsol_tdofs);
+
+    int init_cond_size = tdofs_link.size();
+
+    Vector * Xout_exact = new Vector(init_cond_size);
+
+    for (int i = 0; i < init_cond_size; ++i)
+    {
+        int tdof_top = ( strcmp(top_or_bot,"bot") == 0 ? tdofs_link[i].first : tdofs_link[i].second);
+        (*Xout_exact)[i] = exsol_tdofs[tdof_top];
+    }
+
+    delete exsol_pgfun;
+
+    return Xout_exact;
+}
+
+void FOSLSCylProblem::ComputeErrorAtBase(const char * top_or_bot, const Vector& base_vec)
+{
+    MFEM_ASSERT(strcmp(top_or_bot,"bot") == 0 || strcmp(top_or_bot,"top") == 0,
+                "In GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+
+    int init_cond_size = tdofs_link.size();
+    MFEM_ASSERT(base_vec.Size() == init_cond_size, "Input vector size mismatch the length of tdofs link");
+
+    Vector * Xout_exact = GetExactBase("top");
+
+    Vector Xout_error(init_cond_size);
+    Xout_error = base_vec;
+    Xout_error -= *Xout_exact;
+
+    std::cout << "|| Xout  - Xout_exact || = " << Xout_error.Norml2() / sqrt (Xout_error.Size()) << "\n";
+    std::cout << "|| Xout  - Xout_exact || / || Xout_exact || = " << (Xout_error.Norml2() / sqrt (Xout_error.Size())) /
+                 (Xout_exact->Norml2() / sqrt (Xout_exact->Size()))<< "\n";
+
+    delete Xout_exact;
+}
+
 
 void FOSLSProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
 {

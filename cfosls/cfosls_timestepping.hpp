@@ -72,6 +72,21 @@ public:
 
     void CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
 
+    std::vector<std::pair<int,int> > * GetTdofsLink() {return &tdofs_link;}
+    int GetInitCondSize() const { return tdofs_link.size();}
+
+    // Takes a vector of values corresponding to the initial condition (at bottom boundary)
+    // and computes the corresponding change to the rhs side
+    void ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out);
+
+    // vec_in is considered as a vector of strictly values at the bottom boundary,
+    // vec_out is a full vector which coincides with vec_in at initial boundary and
+    // has 0's for all the rest entries
+    void ConvertInitCndToFullVector(const Vector& vec_in, Vector& vec_out);
+
+    void ComputeErrorAtBase(const char * top_or_bot, const Vector& base_vec);
+
+    Vector* GetExactBase(const char * top_or_bot);
 };
 
 class FOSLSProblem_CFOSLS_HdivL2_Hyper : virtual public FOSLSProblem
@@ -163,63 +178,101 @@ public:
 
 };
 
-
-
-
-
 /*
-class FOSLSCylProblem_CFOSLS_HdivL2_Hyper : public FOSLSCylProblem
+struct SlabStructure
 {
-protected:
-    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
-    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdatePrec();
-    }
-
-    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdatePrec();
-    }
-
-    void ComputeExtraError() const;
-};
-
-class FOSLSCylProblem_CFOSLS_HdivH1_Hyper : public FOSLSCylProblem
-{
-protected:
-    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
-public:
-    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdatePrec();
-    }
-
-    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdatePrec();
-    }
+    SlabStructure();
 
 };
 */
 
+template <class Problem> class TimeStepping
+{
+protected:
+    Array<Problem*> timeslabs_problems;
+    Array<Vector*>  base_inputs;
+    Array<Vector*>  base_outputs;
+    bool verbose;
+    bool problems_initialized;
+    int nslabs;
+public:
+    TimeStepping(bool verbose_)
+        : timeslabs_problems(0), base_inputs(0), base_outputs(0),
+          verbose(verbose_), problems_initialized(false)
+    {}
+
+    void SetProblems(Array<Problem*>& timeslabs_problems_);
+
+    void SequentialSolve(const Vector &init_vector, bool verbose);
+
+    bool NeedSignSwitch(SpaceName space_name) const
+    {
+        switch (space_name)
+        {
+        case HDIV:
+            return true;
+        case H1:
+            return false;
+        default:
+        {
+            MFEM_ABORT("Unsupported space name argument in NeedSignSwitch()");
+            break;
+        }
+        }
+        return false;
+    }
+};
+
+template <class Problem>
+void TimeStepping<Problem>::SetProblems(Array<Problem*> &timeslabs_problems_)
+{
+    nslabs = timeslabs_problems_.Size();
+    timeslabs_problems.SetSize(nslabs);
+    base_inputs.SetSize(nslabs);
+    base_outputs.SetSize(nslabs);
+    for (int i = 0; i < nslabs; ++i)
+    {
+        timeslabs_problems[i] = timeslabs_problems_[i];
+        int init_cond_size = timeslabs_problems[i]->GetInitCondSize();
+        base_inputs[i] = new Vector(init_cond_size);
+        base_outputs[i] = new Vector(init_cond_size);
+    }
+
+    problems_initialized = true;
+}
+
+template <class Problem>
+void  TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool verbose)
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+
+    MFEM_ASSERT(init_vector.Size() == base_inputs[0]->Size(), "Input vector length mismatch the length of the base_input");
+    *base_inputs[0] = init_vector;
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+        FOSLSFEFormulation& fe_formul = tslab_problem->GetFEformulation();
+        int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
+        SpaceName space_name = fe_formul.GetFormulation()->GetSpaceName(index);
+
+        tslab_problem->Solve(*base_inputs[tslab], *base_outputs[tslab]);
+
+        if (tslab < nslabs - 1)
+        {
+            *base_inputs[tslab + 1] = *base_outputs[tslab];
+            if (NeedSignSwitch(space_name))
+                *base_inputs[tslab + 1] *= -1;
+        }
+
+        tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+
+    } // end of loop over all time slab problems
+}
+
+
+//#####################################################################################################
 
 // abstract base class for a problem in a time cylinder
 class TimeCyl
