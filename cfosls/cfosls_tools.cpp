@@ -984,7 +984,7 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
     ComputeExtraError();
 }
 
-void FOSLSProblem::ComputeAnalyticalRhs()
+void FOSLSProblem::ComputeAnalyticalRhs() const
 {
     int numblocks = fe_formul.Nblocks();
 

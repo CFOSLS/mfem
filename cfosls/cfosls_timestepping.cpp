@@ -130,7 +130,20 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
 
 void FOSLSCylProblem::Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const
 {
-    MFEM_ABORT("This version of Solve() hasn't been implemented yet!");
+    // 1. compute trueRhs as assembled linear forms of the rhs
+    ComputeAnalyticalRhs();
+
+    // 2. correct rhs with the given initial condition
+    CorrectRhsFromInitCnd(bnd_tdofs_bot);
+
+    // solving the system
+    FOSLSProblem::Solve(verbose);
+
+    // computing the output, tdof values at the top boundary
+
+    ExtractTopTdofs(bnd_tdofs_top);
+
+    //MFEM_ABORT("This version of Solve() hasn't been implemented yet!");
 }
 
 

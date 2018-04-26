@@ -424,7 +424,7 @@ int main(int argc, char *argv[])
                                                  "[0,1] but the upper bound doesn't match \n");
 
 
-   TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(verbose);
+   TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(timeslabs_problems, verbose);
 
    time_stepping->SetProblems(timeslabs_problems);
 

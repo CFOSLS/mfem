@@ -815,7 +815,7 @@ public:
 
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
-    void ComputeAnalyticalRhs();
+    void ComputeAnalyticalRhs() const;
 
     //Array<int> & GetEssTdofs(int i);
 

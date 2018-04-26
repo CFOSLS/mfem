@@ -197,6 +197,13 @@ protected:
     bool problems_initialized;
     int nslabs;
 public:
+    TimeStepping(Array<Problem*>& timeslabs_problems_, bool verbose_)
+        : timeslabs_problems(0), base_inputs(0), base_outputs(0),
+          verbose(verbose_), problems_initialized(false)
+    {
+        SetProblems(timeslabs_problems_);
+    }
+
     TimeStepping(bool verbose_)
         : timeslabs_problems(0), base_inputs(0), base_outputs(0),
           verbose(verbose_), problems_initialized(false)
