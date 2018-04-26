@@ -271,7 +271,7 @@ void FOSLSCylProblem::ComputeErrorAtBase(const char * top_or_bot, const Vector& 
     int init_cond_size = tdofs_link.size();
     MFEM_ASSERT(base_vec.Size() == init_cond_size, "Input vector size mismatch the length of tdofs link");
 
-    Vector * Xout_exact = GetExactBase("top");
+    Vector * Xout_exact = GetExactBase(top_or_bot);
 
     Vector Xout_error(init_cond_size);
     Xout_error = base_vec;

@@ -1034,7 +1034,8 @@ void FOSLSProblem::Solve(bool verbose) const
 
     DistributeSolution();
 
-    ComputeError(verbose, true);
+    bool checkbnd = false;
+    ComputeError(verbose, checkbnd);
 }
 
 //##############################################################################################

@@ -346,22 +346,22 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a one TimeCylHyper instance "
                     "created for the entire domain \n";
 
+   /*
    // Hdiv-L2 formulation
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
    FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
 
    // Hdiv-H1 formulation
-   /*
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
    FOSLSCylProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-   */
 
    //problem->Solve(verbose);
 
@@ -371,6 +371,7 @@ int main(int argc, char *argv[])
    //MPI_Finalize();
    //return 0;
 
+   /*
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
@@ -382,6 +383,7 @@ int main(int argc, char *argv[])
        FOSLSProblem_CFOSLS_HdivL2_Hyper* problem = problems_hierarchy->GetProblem(l);
        problem->Solve(verbose);
    }
+   */
 
    /*
    Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> problems(nlevels);
@@ -398,7 +400,7 @@ int main(int argc, char *argv[])
 
    int nslabs = 2;
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
-   Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> timeslabs_problems(nslabs);
+   Array<FOSLSCylProblem_CFOSLS_HdivH1_Hyper*> timeslabs_problems(nslabs);
    double slab_tau = 0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
 
@@ -415,7 +417,8 @@ int main(int argc, char *argv[])
    {
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
 
-       timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       //timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
 
        tinit_tslab += slab_tau * slab_width;
    }
@@ -424,17 +427,16 @@ int main(int argc, char *argv[])
                                                  "[0,1] but the upper bound doesn't match \n");
 
 
-   TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(timeslabs_problems, verbose);
-
-   time_stepping->SetProblems(timeslabs_problems);
+   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(timeslabs_problems, verbose);
 
    Vector* init_vector = timeslabs_problems[0]->GetExactBase("bot");
 
    time_stepping->SequentialSolve(*init_vector, verbose);
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 
+   /*
 
    if (verbose)
       std::cout << "Checking a single solve from a hierarchy of problems "
@@ -563,6 +565,8 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 
+   */
+
    //CFOSLSHyperbolicFormulation problem_structure(dim, numsol, space_for_S, space_for_sigma, true, pmesh->bdr_attributes.Max(), verbose);
    //CFOSLSHyperbolicProblem problem2(*pmesh, problem_structure, feorder, prec_option, verbose);
    //problem2.Solve(verbose);
@@ -571,7 +575,7 @@ int main(int argc, char *argv[])
     std::cout << "Checking a sequential solve within several TimeCylHyper instances \n";
 
   {
-      int pref_lvls_tslab = 1;
+      int pref_lvls_tslab = 0;
       int solve_at_lvl = 0;
 
       int nslabs = 2;
@@ -638,38 +642,6 @@ int main(int argc, char *argv[])
 
       for (int tslab = 0; tslab < nslabs; ++tslab )
       {
-          /*
-           * only for debugging
-          if (tslab > 0)
-          {
-              if (strcmp(space_for_S,"H1") == 0) // S is present
-              {
-                  ParGridFunction * S_exact = new ParGridFunction(timeslabs[tslab]->Get_S_space());
-                  S_exact->ProjectCoefficient(*Mytest.scalarS);
-                  Vector S_exact_truedofs(timeslabs[tslab]->Get_S_space()->TrueVSize());
-                  S_exact->ParallelAssemble(S_exact_truedofs);
-
-                  for (int i = 0; i < init_cond_size; ++i)
-                  {
-                      int tdof_bot = (*tdofs_link)[i].first;
-                      Xinit[i] = S_exact_truedofs[tdof_bot];
-                  }
-              }
-              else
-              {
-                  ParGridFunction * sigma_exact = new ParGridFunction(timeslabs[tslab]->Get_Sigma_space());
-                  sigma_exact->ProjectCoefficient(*Mytest.sigma);
-                  Vector sigma_exact_truedofs(timeslabs[tslab]->Get_Sigma_space()->TrueVSize());
-                  sigma_exact->ParallelAssemble(sigma_exact_truedofs);
-
-                  for (int i = 0; i < init_cond_size; ++i)
-                  {
-                      int tdof_bot = (*tdofs_link)[i].first;
-                      Xinit[i] = sigma_exact_truedofs[tdof_bot];
-                  }
-              }
-          }
-          */
           //Xinit.Print();
           timeslabs[tslab]->Solve(solve_at_lvl, Xinit, Xout);
 
@@ -681,6 +653,28 @@ int main(int argc, char *argv[])
 
           // checking the error at the top boundary
           Vector Xout_exact(init_cond_size);
+          Vector sol_exact_truedofs;
+          {
+              ParFiniteElementSpace * testfespace;
+              ParGridFunction * sol_exact;
+
+              if (strcmp(space_for_S,"H1") == 0) // S is present
+              {
+                  testfespace = timeslabs[tslab]->Get_S_space(solve_at_lvl);
+                  sol_exact = new ParGridFunction(testfespace);
+                  sol_exact->ProjectCoefficient(*Mytest.scalarS);
+              }
+              else
+              {
+                  testfespace = timeslabs[tslab]->Get_Sigma_space(solve_at_lvl);
+                  sol_exact = new ParGridFunction(testfespace);
+                  sol_exact->ProjectCoefficient(*Mytest.sigma);
+              }
+
+              sol_exact_truedofs.SetSize(testfespace->TrueVSize());
+              sol_exact->ParallelProject(sol_exact_truedofs);
+          }
+
           for (int i = 0; i < init_cond_size; ++i)
           {
               int tdof_top = (*tdofs_link)[i].second;
