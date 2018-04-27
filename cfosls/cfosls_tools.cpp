@@ -1038,6 +1038,66 @@ void FOSLSProblem::Solve(bool verbose) const
     ComputeError(verbose, checkbnd);
 }
 
+void GeneralMultigrid::Mult(const Vector & x, Vector & y) const
+{
+    *residual.Last() = x;
+
+    correction.Last()->SetDataAndSize(y.GetData(), y.Size());
+    MG_Cycle();
+}
+
+void GeneralMultigrid::MG_Cycle() const
+{
+    // PreSmoothing
+    const Operator& Operator_l = *Op_lvls[current_level];
+    const Operator& PreSmoother_l = *PreSmoothers_lvls[current_level];
+    const Operator& PostSmoother_l = *PostSmoothers_lvls[current_level];
+
+    Vector& residual_l = *residual[current_level];
+    Vector& correction_l = *correction[current_level];
+
+    Vector help(residual_l.Size());
+    help = 0.0;
+
+    // PreSmoothing
+    if (current_level > 0)
+    {
+        PreSmoother_l.Mult(residual_l, correction_l);
+
+        Operator_l.Mult(correction_l, help);
+        residual_l -= help;
+    }
+
+    // Coarse grid correction
+    if (current_level > 0)
+    {
+        const Operator& P_l = *P_lvls[current_level-1];
+
+        P_l.MultTranspose(residual_l, *residual[current_level-1]);
+
+        current_level--;
+        MG_Cycle();
+        current_level++;
+
+        cor_cor.SetSize(residual_l.Size());
+        P_l.Mult(*correction[current_level-1], cor_cor);
+        correction_l += cor_cor;
+        Operator_l.Mult(cor_cor, help);
+        residual_l -= help;
+    }
+    else
+    {
+        CoarseOp.Mult(residual_l, correction_l);
+    }
+
+    // PostSmoothing
+    if (current_level > 0)
+    {
+        PostSmoother_l.Mult(residual_l, cor_cor);
+        correction_l += cor_cor;
+    }
+
+}
 //##############################################################################################
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,

@@ -817,6 +817,8 @@ public:
 
     void ComputeAnalyticalRhs() const;
 
+    Vector& GetSol() {return *trueX;}
+
     //Array<int> & GetEssTdofs(int i);
 
 };
@@ -849,6 +851,9 @@ public:
 
     // from finer to coarser
     void Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out);
+
+    int Nlevels() const {return hierarchy.Nlevels();}
+    GeneralHierarchy& GetHierarchy() const {return hierarchy;}
 
 protected:
     void ConstructCoarsenedOps();
@@ -1044,6 +1049,9 @@ public:
     // probably, there is no need of this
     Vector *GetExactBase(const char * top_or_bot, int level)
     { return FOSLSProblemHierarchy<Problem>::problems_lvls[level]->GetExactBase(top_or_bot); }
+
+    int Nlevels() const {return cyl_hierarchy.Nlevels();}
+    GeneralCylHierarchy& GetCylHierarchy() const {return cyl_hierarchy;}
 };
 
 template <class Problem>
@@ -1072,63 +1080,67 @@ void FOSLSCylProblemHierarchy<Problem>::InterpolateAtBase(const char * top_or_bo
     cyl_hierarchy.GetTrueP_bnd(top_or_bot, lvl, space_name)->Mult(vec_in, vec_out);
 }
 
-/*
-template <class Problem>
-Vector* FOSLSCylProblemHierarchy<Problem>::GetExactBase(const char * top_or_bot, int level)
+class GeneralMultigrid : Solver
 {
-    if (strcmp(top_or_bot,"bot") != 0 && strcmp(top_or_bot,"top") != 0 )
+protected:
+    int nlevels;
+    const Array<Operator*> &P_lvls;
+    const Array<Operator*> &Op_lvls;
+    const Operator& CoarseOp;
+    const Array<Operator*> &PreSmoothers_lvls;
+    const Array<Operator*> &PostSmoothers_lvls;
+
+    bool symmetric;
+
+    mutable Array<Vector*> correction;
+    mutable Array<Vector*> residual;
+
+    mutable Vector res_aux;
+    mutable Vector cor_cor;
+    mutable Vector cor_aux;
+
+    mutable int current_level;
+
+public:
+    GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
+                     const Operator& CoarseOp_, const Array<Operator*> &Smoothers_lvls_)
+        : GeneralMultigrid(P_lvls_, Op_lvls_, CoarseOp_, Smoothers_lvls_, Smoothers_lvls_)
     {
-        MFEM_ABORT("In GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+        symmetric = true;
     }
 
-    Problem * problem_lvl = FOSLSProblemHierarchy<Problem>::problems_lvls[level];
-
-    FOSLSFEFormulation * fe_formul = problem_lvl->GetFEformulation();
-
-    // index of the unknown with boundary condition
-    int index = fe_formul->GetFormulation()->GetUnknownWithInitCnd();
-    FOSLS_test * test = fe_formul->GetFormulation()->GetTest();
-
-    ParFiniteElementSpace * pfes = problem_lvl->GetPfes(index);
-    ParGridFunction * exsol_pgfun = new ParGridFunction(pfes);
-
-    int coeff_index = fe_formul->GetFormulation()->GetPair(index).second;
-    MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
-    switch (fe_formul->GetFormulation()->GetPair(index).first)
+    GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_, const Operator& CoarseOp_,
+                     const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
+        : nlevels(Op_lvls_.Size() + 1), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
+          PreSmoothers_lvls(PreSmoothers_lvls_), PostSmoothers_lvls(PostSmoothers_lvls_),
+          symmetric(false)
     {
-    case 0: // function coefficient
-        exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
-        break;
-    case 1: // vector function coefficient
-        exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
-        break;
-    default:
+        MFEM_ASSERT(nlevels == P_lvls.Size() + 1, "Number of interpolation matrices must equal number of levels - 1");
+        MFEM_ASSERT(nlevels == PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers must equal number of levels - 1");
+        MFEM_ASSERT(nlevels == PostSmoothers_lvls.Size() + 1, "Number of post-smoothers must equal number of levels - 1");
+
+        residual.SetSize(nlevels);
+        correction.SetSize(nlevels);
+        for (int l = 0; l < nlevels; l++)
         {
-            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+            residual[l] = new Vector(Op_lvls[l]->Height());
+            if (l < nlevels - 1)
+                correction[l] = new Vector(Op_lvls[l]->Width());
+            else // exist because of SetDataAndSize call to correction.Last() in GeneralMultigrid::Mult
+                 // which drops the  data (if allocated here, i.e. if no if-clause)
+                correction[l] = new Vector();
         }
-        break;
+
     }
 
-    Vector exsol_tdofs(pfes->TrueVSize());
-    exsol_pgfun->ParallelProject(exsol_tdofs);
+    void MG_Cycle() const;
 
-    int init_cond_size = problem_lvl->GetInitCondSize();
+    virtual void Mult(const Vector & x, Vector & y) const;
 
-    Vector * Xout_exact = new Vector(init_cond_size);
+    virtual void SetOperator(const Operator &op)
+    { MFEM_ABORT("SetOperator() not implemented in the GeneralMultigrid class"); }
 
-    std::vector<std::pair<int,int> > * tdofs_link = problem_lvl->GetTdofsLink();
-
-    for (int i = 0; i < init_cond_size; ++i)
-    {
-        int tdof_top = ( strcmp(top_or_bot,"bot") == 0 ? (*tdofs_link)[i].first : (*tdofs_link)[i].second);
-        (*Xout_exact)[i] = exsol_tdofs[tdof_top];
-    }
-
-    delete exsol_pgfun;
-
-    return Xout_exact;
-}
-*/
+};
 
 
 //#####################################################################################

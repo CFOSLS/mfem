@@ -60,22 +60,47 @@ void FOSLSCylProblem::ConstructTdofLink()
     delete dofs_link;
 }
 
-
-void FOSLSCylProblem::ExtractTopTdofs(Vector& bnd_tdofs_top) const
+void FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x, Vector& base_tdofs) const
 {
+    MFEM_ASSERT(strcmp(top_or_bot,"bot") == 0 || strcmp(top_or_bot,"top") == 0,
+                "In GetExactBase() top_or_bot must equal 'top' or 'bot'! \n");
+
+    BlockVector x_viewer(x.GetData(), blkoffsets_true);
     for (unsigned int i = 0; i < tdofs_link.size(); ++i)
     {
-        int tdof_top = tdofs_link[i].second;
-        bnd_tdofs_top[i] = trueX->GetBlock(init_cond_block)[tdof_top];
+        int tdof = ( strcmp(top_or_bot,"bot") == 0 ? tdofs_link[i].first : tdofs_link[i].second);
+        base_tdofs[i] = x_viewer.GetBlock(init_cond_block)[tdof];
     }
 }
 
-void FOSLSCylProblem::ExtractBotTdofs(Vector& bnd_tdofs_bot) const
+Vector& FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x) const
 {
+    Vector * res = new Vector(tdofs_link.size());
+
+    ExtractAtBase(top_or_bot, *res);
+
+    return *res;
+}
+
+
+void FOSLSCylProblem::ExtractTopTdofs(const Vector &x, Vector& bnd_tdofs_top) const
+{
+    BlockVector x_viewer(x.GetData(), blkoffsets_true);
+    for (unsigned int i = 0; i < tdofs_link.size(); ++i)
+    {
+        int tdof_top = tdofs_link[i].second;
+        bnd_tdofs_top[i] = x_viewer.GetBlock(init_cond_block)[tdof_top];
+    }
+}
+
+void FOSLSCylProblem::ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) const
+{
+    BlockVector x_viewer(x.GetData(), blkoffsets_true);
+
     for (unsigned int i = 0; i < tdofs_link.size(); ++i)
     {
         int tdof_top = tdofs_link[i].first;
-        bnd_tdofs_bot[i] = trueX->GetBlock(init_cond_block)[tdof_top];
+        bnd_tdofs_bot[i] = x_viewer.GetBlock(init_cond_block)[tdof_top];
     }
 }
 
@@ -141,7 +166,7 @@ void FOSLSCylProblem::Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) 
 
     // computing the output, tdof values at the top boundary
 
-    ExtractTopTdofs(bnd_tdofs_top);
+    ExtractTopTdofs(*trueX, bnd_tdofs_top);
 
     //MFEM_ABORT("This version of Solve() hasn't been implemented yet!");
 }
@@ -165,7 +190,7 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
     // computing the outputs: full solution vector and tdofs
     // (for the possible next cylinder's initial condition at the top interface)
 
-    ExtractTopTdofs(bnd_tdofs_top);
+    ExtractTopTdofs(*trueX, bnd_tdofs_top);
 
     BlockVector viewer_out(sol.GetData(), blkoffsets_true);
     viewer_out = *trueX;
@@ -174,7 +199,7 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
 
 void FOSLSCylProblem::ConvertInitCndToFullVector(const Vector& vec_in, Vector& vec_out)
 {
-    MFEM_ASSERT(vec_in.Size() == tdofs_link.size(), "Input vector size mismatch the link size \n");
+    MFEM_ASSERT(vec_in.Size() == (int)(tdofs_link.size()), "Input vector size mismatch the link size \n");
 
     BlockVector viewer(vec_out.GetData(), blkoffsets_true);
     vec_out = 0.0;
@@ -254,8 +279,8 @@ Vector* FOSLSCylProblem::GetExactBase(const char * top_or_bot)
 
     for (int i = 0; i < init_cond_size; ++i)
     {
-        int tdof_top = ( strcmp(top_or_bot,"bot") == 0 ? tdofs_link[i].first : tdofs_link[i].second);
-        (*Xout_exact)[i] = exsol_tdofs[tdof_top];
+        int tdof = ( strcmp(top_or_bot,"bot") == 0 ? tdofs_link[i].first : tdofs_link[i].second);
+        (*Xout_exact)[i] = exsol_tdofs[tdof];
     }
 
     delete exsol_pgfun;

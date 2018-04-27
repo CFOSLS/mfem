@@ -427,11 +427,57 @@ int main(int argc, char *argv[])
                                                  "[0,1] but the upper bound doesn't match \n");
 
 
+   int nlevels = 2;
+   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
+
+   FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * problems_hierarchy =
+           new FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   /*
    TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(timeslabs_problems, verbose);
 
    Vector* init_vector = timeslabs_problems[0]->GetExactBase("bot");
 
    time_stepping->SequentialSolve(*init_vector, verbose);
+   */
+
+   /*
+   // creating a set of problems hierarchies (a hierarchy per time slab)
+   int two_grid = 2;
+   Array<GeneralCylHierarchy*> cyl_hierarchies(nslabs);
+   Array<FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>* > cyl_probhierarchies(nslabs);
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+   {
+       cyl_hierarchies[tslab] = new GeneralCylHierarchy(two_grid, *timeslabs_pmeshcyls[tslab], feorder, verbose);
+       cyl_probhierarchies[tslab] = new FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>
+               (*cyl_hierarchies[tslab], 2, *bdr_conds, *fe_formulat, prec_option, verbose);
+   }
+   */
+
+   /*
+   TwoGridTimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> twogrid_tstp =
+           new TwoGridTimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(cyl_probhierarchies, verbose);
+
+   // creating fine and coarse time-stepping and interpolation operator between them
+   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
+   Array<Operator*> P_tstp(1);
+   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
+
+   // creating fine-level operator, smoother and coarse-level operator
+   Array<Operator*> Ops_tstp(1);
+   Array<Operator*> Smoo_tstp(1);
+   Operator* CoarseOp_tstp;
+
+   Ops_tstp[0] = new TimeSteppingSeqOp<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(*fine_timestepping, verbose);
+   Smoo_tstp[0] = new TimeSteppingSmoother<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> (*fine_timestepping, verbose);
+   CoarseOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(*coarse_timestepping, verbose);
+
+   // finally, creating general multigrid instance
+   GeneralMultigrid * spacetime_mg = new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, Smoo_tstp);
+   */
+
+   //spacetime_mg->Iterate();
 
    //MPI_Finalize();
    //return 0;
