@@ -986,6 +986,7 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
 
 void FOSLSProblem::ComputeAnalyticalRhs() const
 {
+    /*
     int numblocks = fe_formul.Nblocks();
 
     for (int i = 0; i < numblocks; ++i)
@@ -998,6 +999,26 @@ void FOSLSProblem::ComputeAnalyticalRhs() const
     for (int i = 0; i < numblocks; ++i)
     {
         plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
+    }
+    */
+    ComputeAnalyticalRhs(*trueRhs);
+}
+
+void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
+{
+    int numblocks = fe_formul.Nblocks();
+
+    for (int i = 0; i < numblocks; ++i)
+        plforms[i]->Assemble();
+
+    for (int i = 0; i < numblocks; ++i)
+        *grfuns[i + numblocks] = *plforms[i];
+
+    // assembling rhs forms without boundary conditions
+    BlockVector rhs_viewer(rhs.GetData(), blkoffsets_true);
+    for (int i = 0; i < numblocks; ++i)
+    {
+        plforms[i]->ParallelAssemble(rhs_viewer.GetBlock(i));
     }
 }
 
@@ -1038,6 +1059,36 @@ void FOSLSProblem::Solve(bool verbose) const
     ComputeError(verbose, checkbnd);
 }
 
+GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
+                                   const Operator& CoarseOp_,
+                 const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
+    : Solver(Op_lvls_[0]->Height()), nlevels(Op_lvls_.Size() + 1), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
+      PreSmoothers_lvls(PreSmoothers_lvls_), PostSmoothers_lvls(PostSmoothers_lvls_),
+      current_level(0), symmetric(false)
+{
+    MFEM_ASSERT(nlevels == P_lvls.Size() + 1, "Number of interpolation matrices must equal number of levels - 1");
+    MFEM_ASSERT(nlevels == PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers must equal number of levels - 1");
+    MFEM_ASSERT(nlevels == PostSmoothers_lvls.Size() + 1, "Number of post-smoothers must equal number of levels - 1");
+
+    residual.SetSize(nlevels);
+    correction.SetSize(nlevels);
+    for (int l = 0; l < nlevels; l++)
+    {
+        if (l < nlevels - 1)
+        {
+            residual[l] = new Vector(Op_lvls[l]->Height());
+            correction[l] = new Vector(Op_lvls[l]->Width());
+        }
+        else // exist because of SetDataAndSize call to correction.Last() in GeneralMultigrid::Mult
+             // which drops the  data (if allocated here, i.e. if no if-clause)
+        {
+            residual[l] = new Vector(CoarseOp.Height());
+            correction[l] = new Vector();
+        }
+    }
+
+}
+
 void GeneralMultigrid::Mult(const Vector & x, Vector & y) const
 {
     *residual.Last() = x;
@@ -1050,8 +1101,8 @@ void GeneralMultigrid::MG_Cycle() const
 {
     // PreSmoothing
     const Operator& Operator_l = *Op_lvls[current_level];
-    const Operator& PreSmoother_l = *PreSmoothers_lvls[current_level];
-    const Operator& PostSmoother_l = *PostSmoothers_lvls[current_level];
+    Operator* PreSmoother_l = PreSmoothers_lvls[current_level];
+    Operator* PostSmoother_l = PostSmoothers_lvls[current_level];
 
     Vector& residual_l = *residual[current_level];
     Vector& correction_l = *correction[current_level];
@@ -1060,9 +1111,9 @@ void GeneralMultigrid::MG_Cycle() const
     help = 0.0;
 
     // PreSmoothing
-    if (current_level > 0)
+    if (current_level > 0 && PreSmoother_l)
     {
-        PreSmoother_l.Mult(residual_l, correction_l);
+        PreSmoother_l->Mult(residual_l, correction_l);
 
         Operator_l.Mult(correction_l, help);
         residual_l -= help;
@@ -1091,9 +1142,9 @@ void GeneralMultigrid::MG_Cycle() const
     }
 
     // PostSmoothing
-    if (current_level > 0)
+    if (current_level > 0 && PostSmoother_l)
     {
-        PostSmoother_l.Mult(residual_l, cor_cor);
+        PostSmoother_l->Mult(residual_l, cor_cor);
         correction_l += cor_cor;
     }
 

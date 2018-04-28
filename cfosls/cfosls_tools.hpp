@@ -10,46 +10,6 @@ using namespace mfem;
 namespace mfem
 {
 
-class A
-{
-protected:
-    int a;
-    int * apt;
-public:
-    A(int aa) {a = aa; apt = new int[10]; apt[0] = 5; apt[1] = 1;}
-};
-
-class B: public virtual A
-{
-protected:
-    int b;
-public:
-    B(int aa, int bb) : A(aa) {b = bb;}
-};
-
-class C: public virtual A
-{
-protected:
-    int c;
-public:
-    C(int aa, int cc) : A(aa) {c = cc;}
-};
-
-template <class T> class D
-{
-protected:
-    int length;
-    Array<T*> elements;
-public:
-    D (int aa, int bb, int length_) : length(length_)
-    {
-        elements.SetSize(length);
-        for (int i = 0; i < length; ++i)
-            elements[i] = new T(aa,bb);
-    }
-};
-
-
 class FOSLSEstimator;
 
 //HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
@@ -817,27 +777,44 @@ public:
 
     void ComputeAnalyticalRhs() const;
 
+    void ComputeAnalyticalRhs(Vector& rhs) const;
+
     Vector& GetSol() {return *trueX;}
 
-    //Array<int> & GetEssTdofs(int i);
+    BdrConditions& GetBdrConditions() {return bdr_conds;}
+
+    //void ResetSolverOp(Operator& op) {solver->SetOperator(op);}
+
+    void ResetOp(BlockOperator& op)
+    {
+        MFEM_ASSERT(op.Height() == CFOSLSop->Height() && op.Width() == CFOSLSop->Width(),
+                    "Replacing operator sizes mismatch the existing's");
+        CFOSLSop = &op;
+    }
+    void ResetOp_nobnd(BlockOperator& op_nobnd)
+    {
+        MFEM_ASSERT(op_nobnd.Height() == CFOSLSop_nobnd->Height() && op_nobnd.Width() == CFOSLSop_nobnd->Width(),
+                    "Replacing operator sizes mismatch the existing's");
+        CFOSLSop_nobnd = &op_nobnd;
+    }
 
 };
 
-template <class Problem>
-class FOSLSProblemHierarchy
+template <class Problem, class Hierarchy>
+class FOSLSProblHierarchy
 {
 protected:
     FOSLSFEFormulation& fe_formulation;
     BdrConditions& bdr_conditions;
     int nlevels;
-    GeneralHierarchy& hierarchy;
+    Hierarchy& hierarchy;
     Array<Problem*> problems_lvls;
     Array<BlockOperator*> TrueP_lvls;
     Array<BlockOperator*> CoarsenedOps_lvls;
     Array<BlockOperator*> CoarsenedOps_nobnd_lvls;
     bool verbose;
 public:
-    FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+    FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
     Problem* GetProblem(int l)
@@ -853,16 +830,20 @@ public:
     void Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out);
 
     int Nlevels() const {return hierarchy.Nlevels();}
-    GeneralHierarchy& GetHierarchy() const {return hierarchy;}
+    Hierarchy& GetHierarchy() const {return hierarchy;}
+
+    BlockOperator * GetCoarsenedOp (int level) { return CoarsenedOps_lvls[level];}
+    BlockOperator * GetCoarsenedOp_nobnd (int level) { return CoarsenedOps_nobnd_lvls[level];}
+    BlockOperator * GetTrueP(int level) { return TrueP_lvls[level];}
 
 protected:
     void ConstructCoarsenedOps();
+    void ConstructCoarsenedOps_nobnd();
     HypreParMatrix& CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
-
 };
 
-template <class Problem>
-FOSLSProblemHierarchy<Problem>::FOSLSProblemHierarchy(GeneralHierarchy& hierarchy_, int nlevels_,
+template <class Problem, class Hierarchy>
+FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_,
                       BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_)
     : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_), nlevels(nlevels_), hierarchy(hierarchy_), verbose(verbose_)
 {
@@ -901,10 +882,14 @@ FOSLSProblemHierarchy<Problem>::FOSLSProblemHierarchy(GeneralHierarchy& hierarch
     CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
 
     ConstructCoarsenedOps();
+    ConstructCoarsenedOps_nobnd();
+
+    //std::cout << "CoarsenedOp[1] = " << CoarsenedOps_lvls[1] << "\n";
+    //std::cout << "CoarsenedO_nobnd[1] = " << CoarsenedOps_nobnd_lvls[1] << "\n";
 }
 
-template <class Problem>
-void FOSLSProblemHierarchy<Problem>::Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out)
+template <class Problem, class Hierarchy>
+void FOSLSProblHierarchy<Problem, Hierarchy>::Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out)
 {
     MFEM_ASSERT(coarse_lvl == fine_lvl + 1, "Interpolate works only between the neighboring levels");
     Array<int>& blkoffsets_true_fine = problems_lvls[fine_lvl]->GetTrueOffsets();
@@ -915,8 +900,8 @@ void FOSLSProblemHierarchy<Problem>::Interpolate(int coarse_lvl, int fine_lvl, c
     TrueP_lvls[fine_lvl]->Mult(viewer_in, viewer_out);
 }
 
-template <class Problem>
-void FOSLSProblemHierarchy<Problem>::Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out)
+template <class Problem, class Hierarchy>
+void FOSLSProblHierarchy<Problem, Hierarchy>::Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out)
 {
     MFEM_ASSERT(coarse_lvl == fine_lvl + 1, "Interpolate works only between the neighboring levels");
     Array<int>& blkoffsets_true_fine = problems_lvls[fine_lvl]->GetTrueOffsets();
@@ -935,8 +920,8 @@ void FOSLSProblemHierarchy<Problem>::Restrict(int fine_lvl, int coarse_lvl, cons
 // level l is the level where interpolation matrix should be taken
 // e.g., for coarsening from 0th level to the 1st level,
 // one should use interpolation matrix from level 0
-template <class Problem>
-HypreParMatrix& FOSLSProblemHierarchy<Problem>::CoarsenFineBlockWithBND
+template <class Problem, class Hierarchy>
+HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 (int l, int i, int j, HypreParMatrix& input)
 {
     HypreParMatrix * res;
@@ -996,8 +981,8 @@ HypreParMatrix& FOSLSProblemHierarchy<Problem>::CoarsenFineBlockWithBND
     return *res;
 }
 
-template <class Problem>
-void FOSLSProblemHierarchy<Problem>::ConstructCoarsenedOps()
+template <class Problem, class Hierarchy>
+void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
 {
     int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
     for (int l = 1; l < nlevels; ++l )
@@ -1031,14 +1016,58 @@ void FOSLSProblemHierarchy<Problem>::ConstructCoarsenedOps()
     } // end of loop over levels
 }
 
-template <class Problem> class FOSLSCylProblemHierarchy : public FOSLSProblemHierarchy<Problem>
+template <class Problem, class Hierarchy>
+void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
 {
-protected:
-    GeneralCylHierarchy& cyl_hierarchy;
+    int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
+    for (int l = 1; l < nlevels; ++l )
+    {
+        Array2D<HypreParMatrix*> coarseop_lvl(numblocks, numblocks);
+        for (int i = 0; i < numblocks; ++i)
+        {
+            HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l - 1]->GetBlock(i,i)));
 
+            for (int j = i; j < numblocks; ++j)
+            {
+                coarseop_lvl(i,j) = NULL;
+
+                HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_nobnd_lvls[l - 1]->GetBlock(i,j));
+
+                if (i == j)
+                {
+                    coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_i);
+                    coarseop_lvl(i,j)->CopyRowStarts();
+                    coarseop_lvl(i,j)->CopyRowStarts();
+                }
+                else
+                {
+                    HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l - 1]->GetBlock(j,j)));
+
+                    coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_j);
+                    coarseop_lvl(i,j)->CopyRowStarts();
+                    coarseop_lvl(i,j)->CopyRowStarts();
+
+                    coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
+                    coarseop_lvl(j,i)->CopyRowStarts();
+                    coarseop_lvl(j,i)->CopyColStarts();
+                }
+
+            }
+        } // end of an iteration for fixed (i,j)
+        CoarsenedOps_nobnd_lvls[l] = new BlockOperator(problems_lvls[l]->GetTrueOffsets());
+
+        for (int i = 0; i < numblocks; ++i)
+            for (int j = i; j < numblocks; ++j)
+                CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+
+    } // end of loop over levels
+}
+
+template <class Problem, class Hierarchy> class FOSLSCylProblHierarchy : public FOSLSProblHierarchy<Problem, Hierarchy>
+{
     // additional routines and data members related to the cylinder structure go here
 public:
-    FOSLSCylProblemHierarchy(GeneralCylHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+    FOSLSCylProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
 public:
@@ -1048,27 +1077,23 @@ public:
 
     // probably, there is no need of this
     Vector *GetExactBase(const char * top_or_bot, int level)
-    { return FOSLSProblemHierarchy<Problem>::problems_lvls[level]->GetExactBase(top_or_bot); }
-
-    int Nlevels() const {return cyl_hierarchy.Nlevels();}
-    GeneralCylHierarchy& GetCylHierarchy() const {return cyl_hierarchy;}
+    { return FOSLSProblHierarchy<Problem, Hierarchy>::problems_lvls[level]->GetExactBase(top_or_bot); }
 };
 
-template <class Problem>
-FOSLSCylProblemHierarchy<Problem>::FOSLSCylProblemHierarchy
-                (GeneralCylHierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
+template <class Problem, class Hierarchy>
+FOSLSCylProblHierarchy<Problem,Hierarchy>::FOSLSCylProblHierarchy
+                (Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                       FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_)
-    : FOSLSProblemHierarchy<Problem>(hierarchy_, nlevels_, bdr_conditions_, fe_formulation_, precond_option, verbose_),
-      cyl_hierarchy(hierarchy_)
+    : FOSLSProblHierarchy<Problem,Hierarchy>(hierarchy_, nlevels_, bdr_conditions_, fe_formulation_, precond_option, verbose_)
 {
 
 }
 
-template <class Problem>
-void FOSLSCylProblemHierarchy<Problem>::InterpolateAtBase(const char * top_or_bot,
+template <class Problem, class Hierarchy>
+void FOSLSCylProblHierarchy<Problem,Hierarchy>::InterpolateAtBase(const char * top_or_bot,
                                                           int lvl, const Vector& vec_in, Vector& vec_out)
 {
-    Problem * problem_lvl = FOSLSProblemHierarchy<Problem>::problems_lvls[lvl];
+    Problem * problem_lvl = FOSLSProblHierarchy<Problem, Hierarchy>::problems_lvls[lvl];
 
     FOSLSFEFormulation * fe_formul = problem_lvl->GetFEformulation();
 
@@ -1077,10 +1102,10 @@ void FOSLSCylProblemHierarchy<Problem>::InterpolateAtBase(const char * top_or_bo
 
     SpaceName space_name = fe_formul->GetFormulation()->GetSpaceName(index);
 
-    cyl_hierarchy.GetTrueP_bnd(top_or_bot, lvl, space_name)->Mult(vec_in, vec_out);
+    FOSLSProblHierarchy<Problem, Hierarchy>::hierarchy.GetTrueP_bnd(top_or_bot, lvl, space_name)->Mult(vec_in, vec_out);
 }
 
-class GeneralMultigrid : Solver
+class GeneralMultigrid : public Solver
 {
 protected:
     int nlevels;
@@ -1105,33 +1130,10 @@ public:
     GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
                      const Operator& CoarseOp_, const Array<Operator*> &Smoothers_lvls_)
         : GeneralMultigrid(P_lvls_, Op_lvls_, CoarseOp_, Smoothers_lvls_, Smoothers_lvls_)
-    {
-        symmetric = true;
-    }
+    { symmetric = true; }
 
     GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_, const Operator& CoarseOp_,
-                     const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
-        : nlevels(Op_lvls_.Size() + 1), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
-          PreSmoothers_lvls(PreSmoothers_lvls_), PostSmoothers_lvls(PostSmoothers_lvls_),
-          symmetric(false)
-    {
-        MFEM_ASSERT(nlevels == P_lvls.Size() + 1, "Number of interpolation matrices must equal number of levels - 1");
-        MFEM_ASSERT(nlevels == PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers must equal number of levels - 1");
-        MFEM_ASSERT(nlevels == PostSmoothers_lvls.Size() + 1, "Number of post-smoothers must equal number of levels - 1");
-
-        residual.SetSize(nlevels);
-        correction.SetSize(nlevels);
-        for (int l = 0; l < nlevels; l++)
-        {
-            residual[l] = new Vector(Op_lvls[l]->Height());
-            if (l < nlevels - 1)
-                correction[l] = new Vector(Op_lvls[l]->Width());
-            else // exist because of SetDataAndSize call to correction.Last() in GeneralMultigrid::Mult
-                 // which drops the  data (if allocated here, i.e. if no if-clause)
-                correction[l] = new Vector();
-        }
-
-    }
+                     const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_);
 
     void MG_Cycle() const;
 

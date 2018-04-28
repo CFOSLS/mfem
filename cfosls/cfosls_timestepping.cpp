@@ -153,28 +153,8 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
 
 }
 
-void FOSLSCylProblem::Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const
-{
-    // 1. compute trueRhs as assembled linear forms of the rhs
-    ComputeAnalyticalRhs();
-
-    // 2. correct rhs with the given initial condition
-    CorrectRhsFromInitCnd(bnd_tdofs_bot);
-
-    // solving the system
-    FOSLSProblem::Solve(verbose);
-
-    // computing the output, tdof values at the top boundary
-
-    ExtractTopTdofs(*trueX, bnd_tdofs_top);
-
-    //MFEM_ABORT("This version of Solve() hasn't been implemented yet!");
-}
-
-
-
-void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
-                         const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const
+void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, const Vector& rhs,
+                            Vector& bnd_tdofs_top) const
 {
     // copying righthand side
     BlockVector rhs_viewer(rhs.GetData(), blkoffsets_true);
@@ -191,6 +171,20 @@ void FOSLSCylProblem::Solve(const Vector& rhs, Vector& sol,
     // (for the possible next cylinder's initial condition at the top interface)
 
     ExtractTopTdofs(*trueX, bnd_tdofs_top);
+}
+
+void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) const
+{
+    // 1. compute trueRhs as assembled linear forms of the rhs
+    ComputeAnalyticalRhs();
+
+    Solve(*trueRhs, bnd_tdofs_bot, bnd_tdofs_top);
+}
+
+void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, const Vector& rhs,
+                            Vector& sol, Vector& bnd_tdofs_top) const
+{
+    Solve(rhs, bnd_tdofs_bot, bnd_tdofs_top);
 
     BlockVector viewer_out(sol.GetData(), blkoffsets_true);
     viewer_out = *trueX;
@@ -240,6 +234,24 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
 
     }
 }
+
+void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out)
+{
+    Vector * initcond_fullvec = new Vector(GlobalTrueProblemSize());
+
+    ConvertInitCndToFullVector(init_cond, *initcond_fullvec);
+
+    Vector * rhs_correction = new Vector(GlobalTrueProblemSize());
+
+    ConvertBdrCndIntoRhs(*initcond_fullvec, *rhs_correction);
+
+    vec_out -= *rhs_correction;
+
+    delete initcond_fullvec;
+    delete rhs_correction;
+
+}
+
 
 Vector* FOSLSCylProblem::GetExactBase(const char * top_or_bot)
 {
@@ -310,7 +322,7 @@ void FOSLSCylProblem::ComputeErrorAtBase(const char * top_or_bot, const Vector& 
 }
 
 
-void FOSLSProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
+void FOSLSProblem_HdivL2L2hyp::ComputeExtraError() const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
 
@@ -392,7 +404,7 @@ void FOSLSProblem_CFOSLS_HdivL2_Hyper::ComputeExtraError() const
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
-void FOSLSProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
@@ -449,7 +461,7 @@ void FOSLSProblem_CFOSLS_HdivL2_Hyper::CreatePrec(BlockOperator& op, int prec_op
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
-void FOSLSProblem_CFOSLS_HdivH1_Hyper::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 

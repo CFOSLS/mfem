@@ -60,8 +60,9 @@ public:
 
     ParMeshCyl * GetParMeshCyl() {return &pmeshcyl;}
 
-    void Solve(const Vector& rhs, Vector& sol, const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
-    void Solve(const Vector &bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+    void Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
+    void Solve(const Vector& bnd_tdofs_bot, const Vector& rhs, Vector& bnd_tdofs_top) const;
+    void Solve(const Vector& bnd_tdofs_bot, const Vector& rhs, Vector& sol, Vector& bnd_tdofs_top) const;
 
 protected:
     void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
@@ -79,6 +80,8 @@ public:
     // and computes the corresponding change to the rhs side
     void ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out);
 
+    void CorrectFromInitCond(const Vector& init_cond, Vector& vec_out);
+
     // vec_in is considered as a vector of strictly values at the bottom boundary,
     // vec_out is a full vector which coincides with vec_in at initial boundary and
     // has 0's for all the rest entries
@@ -94,12 +97,12 @@ public:
     //void ComputeRhsCorrectionFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
 };
 
-class FOSLSProblem_CFOSLS_HdivL2_Hyper : virtual public FOSLSProblem
+class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
 {
 protected:
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
-    FOSLSProblem_CFOSLS_HdivL2_Hyper(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivL2L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
     {
@@ -108,7 +111,7 @@ public:
         UpdateSolverPrec();
     }
 
-    FOSLSProblem_CFOSLS_HdivL2_Hyper(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
     {
@@ -121,12 +124,12 @@ public:
     //void CreateEstimator(int option); (not implemented)
 };
 
-class FOSLSProblem_CFOSLS_HdivH1_Hyper : virtual public FOSLSProblem
+class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
 {
 protected:
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
-    FOSLSProblem_CFOSLS_HdivH1_Hyper(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivH1L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
     {
@@ -135,7 +138,7 @@ public:
         UpdateSolverPrec();
     }
 
-    FOSLSProblem_CFOSLS_HdivH1_Hyper(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
     {
@@ -147,38 +150,38 @@ public:
 };
 
 
-class FOSLSCylProblem_CFOSLS_HdivL2_Hyper : public FOSLSCylProblem, public FOSLSProblem_CFOSLS_HdivL2_Hyper
+class FOSLSCylProblem_HdivL2L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
 {
 public:
-    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivL2L2hyp(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_CFOSLS_HdivL2_Hyper(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivL2L2hyp(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 
-    FOSLSCylProblem_CFOSLS_HdivL2_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivL2L2hyp(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_CFOSLS_HdivL2_Hyper(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivL2L2hyp(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 };
 
-class FOSLSCylProblem_CFOSLS_HdivH1_Hyper : public FOSLSCylProblem, public FOSLSProblem_CFOSLS_HdivH1_Hyper
+class FOSLSCylProblem_HdivH1L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivH1L2hyp
 {
 public:
-    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivH1L2hyp(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_CFOSLS_HdivH1_Hyper(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivH1L2hyp(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
-    FOSLSCylProblem_CFOSLS_HdivH1_Hyper(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivH1L2hyp(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_CFOSLS_HdivH1_Hyper(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivH1L2hyp(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 
 };
@@ -207,9 +210,13 @@ public:
 
     void SetProblems(Array<Problem*>& timeslabs_problems_);
 
-    void SequentialSolve(const Vector &init_vector, bool verbose);
+    void SequentialSolve(const Vector &init_vector, bool compute_error);
+    void SequentialSolve(const Vector &init_vector, const Vector& rhs, bool compute_error);
+    void SequentialSolve(const Vector &init_vector, const Vector& rhs, Vector& sol, bool compute_error);
 
-    void ParallelSolve(const Array<Vector*> &init_vectors, bool verbose);
+    void ParallelSolve(const Array<Vector*> &init_vectors, bool compute_error) const;
+    void ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, bool compute_error) const;
+    void ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, Vector& sol, bool compute_error) const;
 
     Array<Vector*>& GetSolutions();
 
@@ -245,9 +252,14 @@ public:
         return res;
     }
 
+    int GetInitCondSize() const
+    { return timeslabs_problems[0]->GetInitCondSize();}
+
     void SeqOp(const Vector& x, Vector& y) const;
 
     int Nslabs() const {return nslabs;}
+
+    void ComputeGlobalRhs(Vector& rhs);
 };
 
 template <class Problem>
@@ -269,12 +281,23 @@ void TimeStepping<Problem>::SetProblems(Array<Problem*> &timeslabs_problems_)
 }
 
 template <class Problem>
-void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool verbose)
+void TimeStepping<Problem>::ComputeGlobalRhs(Vector& rhs)
+{
+    BlockVector rhs_viewer(rhs.GetData(), GetGlobalOffsets());
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+        tslab_problem->ComputeAnalyticalRhs(rhs_viewer.GetBlock(tslab));
+    }
+}
+
+
+template <class Problem>
+void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool compute_error)
 {
     MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
-
     MFEM_ASSERT(init_vector.Size() == base_inputs[0]->Size(), "Input vector length mismatch the length of the base_input");
-    *base_inputs[0] = init_vector;
 
     for (int tslab = 0; tslab < nslabs; ++tslab )
     {
@@ -283,7 +306,10 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool verb
         int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
         SpaceName space_name = fe_formul.GetFormulation()->GetSpaceName(index);
 
-        tslab_problem->Solve(*base_inputs[tslab], *base_outputs[tslab]);
+        if (tslab == 0)
+            tslab_problem->Solve(init_vector, *base_outputs[tslab]);
+        else
+            tslab_problem->Solve(*base_inputs[tslab], *base_outputs[tslab]);
 
         if (tslab < nslabs - 1)
         {
@@ -292,30 +318,119 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool verb
                 *base_inputs[tslab + 1] *= -1;
         }
 
-        tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+        if (compute_error)
+            tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
 
     } // end of loop over all time slab problems
 }
 
+// rhs is a Vector of size of full time-stepping problem
 template <class Problem>
-void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, bool verbose)
+void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vector& rhs, bool compute_error)
 {
     MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+    MFEM_ASSERT(init_vector.Size() == base_inputs[0]->Size(), "Input vector length mismatch the length of the base_input");
 
-    MFEM_ASSERT(init_vectors.Size() == nslabs, "Number of input vectors must equal number of time slabs");
 
-    for (int tslab = 0; tslab < nslabs; ++tslab )
-        *base_inputs[tslab] = init_vectors[tslab];
+    //Array<Vector*> &  timeslabs_rhss = ConvertFullvecIntoArray(x);
+
+    Problem * tslab_startproblem = timeslabs_problems[0];
+    FOSLSFEFormulation& fe_formul = tslab_startproblem->GetFEformulation();
+    int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
+    SpaceName space_name = fe_formul.GetFormulation()->GetSpaceName(index);
+
+    const BlockVector rhs_viewer(rhs.GetData(), GetGlobalOffsets());
 
     for (int tslab = 0; tslab < nslabs; ++tslab )
     {
         Problem * tslab_problem = timeslabs_problems[tslab];
 
-        tslab_problem->Solve(*base_inputs[tslab], *base_outputs[tslab]);
+        if (tslab == 0)
+            tslab_problem->Solve(init_vector, rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
+        else
+            tslab_problem->Solve(*base_inputs[tslab], rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
 
-        //tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+        if (tslab < nslabs - 1)
+        {
+            *base_inputs[tslab + 1] = *base_outputs[tslab];
+            if (NeedSignSwitch(space_name))
+                *base_inputs[tslab + 1] *= -1;
+        }
+
+        if (compute_error)
+            tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+
     } // end of loop over all time slab problems
 }
+
+// rhs is a Vector of size of full time-stepping problem
+template <class Problem>
+void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vector& rhs, Vector& sol, bool compute_error)
+{
+    SequentialSolve(init_vector, rhs, compute_error);
+
+    BlockVector sol_viewer(sol.GetData(), GetGlobalOffsets());
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+        sol_viewer.GetBlock(tslab) = timeslabs_problems[tslab]->GetSol();
+}
+
+template <class Problem>
+void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, bool compute_error) const
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+
+    MFEM_ASSERT(init_vectors.Size() == nslabs, "Number of input vectors must equal number of time slabs");
+
+    // renaming init_vectors into internal base_inputs
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+        base_inputs[tslab] = init_vectors[tslab];
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+
+        tslab_problem->Solve(*init_vectors[tslab], *base_outputs[tslab]);
+
+        if (compute_error)
+            tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+    } // end of loop over all time slab problems
+}
+
+// rhs is a Vector of size of full time-stepping problem
+template <class Problem>
+void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, bool compute_error) const
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+    MFEM_ASSERT(init_vectors.Size() == nslabs, "Number of input vectors (for initial "
+                                               "conditions) must eqyual the number of time slabs");
+
+    const BlockVector rhs_viewer(rhs.GetData(), GetGlobalOffsets());
+
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        MFEM_ASSERT(init_vectors[tslab]->Size() == GetInitCondSize(),
+                    "For the given timeslab initcond vector size mismatch the problem");
+        Problem * tslab_problem = timeslabs_problems[tslab];
+
+        tslab_problem->Solve(*init_vectors[tslab], rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
+
+        if (compute_error)
+            tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
+
+    } // end of loop over all time slab problems
+}
+
+// rhs is a Vector of size of full time-stepping problem
+template <class Problem>
+void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, Vector& sol, bool compute_error) const
+{
+    ParallelSolve(init_vectors, rhs, compute_error);
+
+    BlockVector sol_viewer(sol.GetData(), GetGlobalOffsets());
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+        sol_viewer.GetBlock(tslab) = timeslabs_problems[tslab]->GetSol();
+}
+
 
 template <class Problem>
 Array<Vector*>& TimeStepping<Problem>::GetSolutions()
@@ -349,6 +464,75 @@ Array<int>& TimeStepping<Problem>::GetGlobalOffsets() const
     return *res;
 }
 
+/*
+// FIXME: Why not converting into a BlockVector?
+template <class Problem>
+Array<Vector*> & TimeStepping<Problem>::ConvertFullVecIntoInitConds(const Vector& x)
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+    MFEM_ASSERT(x.Size() == GetGlobalProblemSize(), "Input vector size mismatch the global problem size!");
+
+    Array<Vector*> * res = new Array<Vector*>(nslabs);
+
+    BlockVector x_viewer(x.GetData(), GetGlobalOffsets());
+
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+
+        res[tslab] = tslab_problem->ExtractAtBase("bot")
+
+        res[tslab] = new Vector(tslab_problem->GlobalTrueProblemSize());
+
+        *(*res)[tslab] = x_viewer.GetBlock(tslab);
+    }
+
+    return *res;
+}
+*/
+
+/*
+template <class Problem>
+void TimeStepping<Problem>::ConvertFullVecIntoInitConds(const Vector& x)
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+    MFEM_ASSERT(x.Size() == GetGlobalProblemSize(), "Input vector size mismatch the global problem size!");
+
+    BlockVector x_viewer(x.GetData(), GetGlobalOffsets());
+
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+
+        *base_inputs[tslab] =
+
+
+        res[tslab] = tslab_problem->ExtractAtBase("bot")
+
+        res[tslab] = new Vector(tslab_problem->GlobalTrueProblemSize());
+
+        *(*res)[tslab] = x_viewer.GetBlock(tslab);
+    }
+
+}
+*/
+
+
+// FIXME: Do we really need that?
+template <class Problem>
+void TimeStepping<Problem>::ConvertArrayIntoFullvec(const Array<Vector*>& vec_inputs, Vector& out)
+{
+    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
+    MFEM_ASSERT(out.Size() == GetGlobalProblemSize(), "Output vector size mismatch the global problem size!");
+
+    BlockVector out_viewer(out.GetData(), GetGlobalOffsets());
+
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        out_viewer.GetBlock(tslab) = *vec_inputs[tslab];
+    }
+}
+
 // FIXME: Why not converting into a BlockVector?
 template <class Problem>
 Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
@@ -372,21 +556,6 @@ Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
     return *res;
 }
 
-// FIXME: Do we really need that?
-template <class Problem>
-void TimeStepping<Problem>::ConvertArrayIntoFullvec(const Array<Vector*>& vec_inputs, Vector& out)
-{
-    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
-    MFEM_ASSERT(out.Size() == GetGlobalProblemSize(), "Output vector size mismatch the global problem size!");
-
-    BlockVector out_viewer(out.GetData(), GetGlobalOffsets());
-
-    for (int tslab = 0; tslab < nslabs; ++tslab)
-    {
-        out_viewer.GetBlock(tslab) = vec_inputs[tslab];
-    }
-}
-
 template <class Problem>
 void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
 {
@@ -408,9 +577,11 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
         if (tslab > 0)
         {
             Problem * prevtslab_problem = timeslabs_problems[tslab - 1];
+            // FIXME: Memory allocation every time
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
 
+            // FIXME: Memory allocation inside the correction function happens every time
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab));
             delete prev_initcond;
         }
@@ -421,59 +592,124 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
 
 // classes for time-stepping related operators used as components for constructing GeneralMultigrid instance
 
-/*
 template <class Problem> class TwoGridTimeStepping
 {
 protected:
     int nslabs;
-    Array<FOSLSCylProblemHierarchy<Problem>* >& cyl_probhierarchies;
+    Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies;
+
     Array<Problem*> fine_problems;
+    Array<int> fine_global_offsets;
     TimeStepping<Problem> * fine_timestepping;
+
     Array<Problem*> coarse_problems;
+    Array<int> coarse_global_offsets;
     TimeStepping<Problem> * coarse_timestepping;
-    Array<int> global_offsets;
-    BlockOperator * interpol_op;
+
+    BlockOperator * interpolation_op;
     bool verbose;
 protected:
     void ConstructFineTimeStp();
     void ConstructCoarseTimeStp();
+    void ConstructGlobalInterpolation();
 public:
-    TwoGridTimeStepping(Array<FOSLSCylProblemHierarchy<Problem>* >& cyl_probhierarchies_, bool verbose_)
+    TwoGridTimeStepping(Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies_, bool verbose_)
         : nslabs(cyl_probhierarchies_.Size()), cyl_probhierarchies(cyl_probhierarchies_),
           verbose(verbose_)
     {
         ConstructFineTimeStp();
+        fine_global_offsets.SetSize(nslabs + 1);
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+            fine_global_offsets[tslab + 1] = fine_global_offsets[tslab] + fine_problems[tslab]->GlobalTrueProblemSize();
+
         ConstructCoarseTimeStp();
+        coarse_global_offsets.SetSize(nslabs + 1);
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+            coarse_global_offsets[tslab + 1] = coarse_global_offsets[tslab] + coarse_problems[tslab]->GlobalTrueProblemSize();
+
+        ConstructGlobalInterpolation();
     }
 
     TimeStepping<Problem> * GetFineTimeStp() { return fine_timestepping;}
     TimeStepping<Problem> * GetCoarseTimeStp() { return coarse_timestepping;}
-    BlockOperator * GetGlobalInterpolationOp() { return interpol_op;}
-    Array<int>& GetGlobalOffsets() {return global_offsets;}
+    BlockOperator * GetGlobalInterpolationOp() { return interpolation_op;}
+    Array<int>& GetFineOffsets() {return fine_global_offsets;}
+    Array<int>& GetCoarseOffsets() {return coarse_global_offsets;}
 };
 
 template <class Problem>
 void TwoGridTimeStepping<Problem>::ConstructFineTimeStp()
 {
+    int fine_level = 0;
     fine_problems.SetSize(nslabs);
     for (int tslab = 0; tslab < nslabs; ++tslab)
     {
-        FOSLSCylProblemHierarchy<Problem>* cyl_hierarchy = cyl_probhierarchies[tslab];
-        fine_problems[tslab] = new Problem(cyl_hierarchy, 0);
+        FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* cyl_probhierarchy = cyl_probhierarchies[tslab];
+
+        fine_problems[tslab] = cyl_probhierarchy->GetProblem(fine_level);
+
+        //BdrConditions& bdr_conds = cyl_probhierarchy->GetProblem(0)->GetBdrConditions();
+        //FOSLSFEFormulation & fe_formulation = cyl_probhierarchy->GetProblem(0)->GetFEformulation();
+        //fine_problems[tslab] = new Problem(cyl_hierarchy, 0, bdr_conds, fe_formulation, verbose);
+
+        //(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                           //FOSLSFEFormulation& fe_formulation, bool verbose_)
     }
-    fine_timestepping = new TimeStepping<Problem>(timeslabs_problems, verbose);
+    fine_timestepping = new TimeStepping<Problem>(fine_problems, verbose);
 }
-*/
+
+template <class Problem>
+void TwoGridTimeStepping<Problem>::ConstructCoarseTimeStp()
+{
+    int coarse_level = 1;
+    coarse_problems.SetSize(nslabs);
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* cyl_probhierarchy = cyl_probhierarchies[tslab];
+
+        coarse_problems[tslab] = cyl_probhierarchy->GetProblem(coarse_level);
+
+        // replacing the native coarse problem operators by the coarsened versions
+        BlockOperator * coarsened_solveop = cyl_probhierarchy->GetCoarsenedOp(coarse_level);
+        coarse_problems[tslab]->ResetOp(*coarsened_solveop);
+        BlockOperator * coarsened_solveop_nobnd = cyl_probhierarchy->GetCoarsenedOp_nobnd(coarse_level);
+        coarse_problems[tslab]->ResetOp_nobnd(*coarsened_solveop_nobnd);
+
+    }
+    coarse_timestepping = new TimeStepping<Problem>(coarse_problems, verbose);
+}
+
+
+template <class Problem>
+void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolation()
+{
+    int fine_level = 0;
+    interpolation_op = new BlockOperator(fine_global_offsets, coarse_global_offsets);
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* cyl_probhierarchy = cyl_probhierarchies[tslab];
+        interpolation_op->SetDiagonalBlock(tslab, cyl_probhierarchy->GetTrueP(fine_level));
+    }
+}
 
 template <class Problem> class TimeSteppingSmoother : public Operator
 {
     int nslabs;
     TimeStepping<Problem> &time_stepping;
+    Array<Vector*> initvec_inputs; // always 0's
     bool verbose;
 public:
     TimeSteppingSmoother(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : Operator(time_stepping_.GetGlobalProblemSize()),
-          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_), verbose(verbose_) {}
+          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_), verbose(verbose_)
+    {
+        initvec_inputs.SetSize(nslabs);
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+        {
+            initvec_inputs[tslab] = new Vector(time_stepping.GetInitCondSize());
+            *initvec_inputs[tslab] = 0.0;
+        }
+    }
 
     void Mult(const Vector &x, Vector &y) const override;
 };
@@ -481,28 +717,27 @@ public:
 template <class Problem>
 void TimeSteppingSmoother<Problem>::Mult(const Vector &x, Vector &y) const
 {
-    Array<Vector*>& vec_inputs = time_stepping.ConvertFullvecIntoArray(x);
-
-    Array<Vector*>& initvec_inputs = time_stepping.ConvertIntoInitialCOnditions(vec_inputs);
-
-    time_stepping.ParallelSolve(initvec_inputs, verbose);
-
-    Array<Vector*>& vec_outputs = time_stepping.GetSolutions();
-
-    time_stepping.ConvertArrayIntoFullvec(vec_outputs, y);
+    bool compute_error = false;
+    time_stepping.ParallelSolve(initvec_inputs, x, y, compute_error);
 }
 
 template <class Problem> class TimeSteppingSolveOp : public BlockOperator
 {
+protected:
     int nslabs;
     TimeStepping<Problem> &time_stepping;
     Array<int>& global_offsets;
     bool verbose;
+    Vector init_vec;
 public:
     TimeSteppingSolveOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : BlockOperator(time_stepping_.GetGlobalOffsets()),
-          global_offsets(time_stepping_.GetGlobalOffsets()),
-          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_), verbose(verbose_) {}
+          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
+          global_offsets(time_stepping_.GetGlobalOffsets()), verbose(verbose_)
+    {
+        init_vec.SetSize(time_stepping.GetInitCondSize());
+        init_vec = 0.0;
+    }
 
     void Mult(const Vector &x, Vector &y) const override;
 };
@@ -510,15 +745,12 @@ public:
 template <class Problem>
 void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
 {
-    Array<Vector*>& vec_inputs = time_stepping.ConvertFullvecIntoArray(x);
+    //Array<Vector*>& vec_inputs = time_stepping.ConvertFullvecIntoArray(x);
+    //Array<Vector*>& initvec_inputs = time_stepping.ConvertIntoInitialConditions(vec_inputs);
 
-    Array<Vector*>& initvec_inputs = time_stepping.ConvertIntoInitialConditions(vec_inputs);
-
-    time_stepping.SequentialSolve(initvec_inputs[0], verbose);
-
-    Array<Vector*>& vec_outputs = time_stepping.GetSolutions();
-
-    time_stepping.ConvertArrayIntoFullvec(vec_outputs, y);
+    // init_vec is actually always 0 in this call
+    bool compute_error = false;
+    time_stepping.SequentialSolve(init_vec, x, y, compute_error);
 }
 
 template <class Problem> class TimeSteppingSeqOp : public BlockOperator
@@ -530,8 +762,9 @@ template <class Problem> class TimeSteppingSeqOp : public BlockOperator
 public:
     TimeSteppingSeqOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : BlockOperator(time_stepping_.GetGlobalOffsets()),
+          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
           global_offsets(time_stepping_.GetGlobalOffsets()),
-          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_), verbose(verbose_) {}
+          verbose(verbose_) {}
 
     void Mult(const Vector &x, Vector &y) const override
     { time_stepping.SeqOp(x,y); }
@@ -542,7 +775,7 @@ template <class Problem> class TwoGridTimeST
 {
 protected:
     int nslabs;
-    Array<FOSLSCylProblemHierarchy<Problem> *>& cylproblems_hierarchies;
+    Array<FOSLSCylProblHierarchy<Problem> *>& cylproblems_hierarchies;
     Array<Problem*> timeslabs_fineproblems;
     TimeStepping<Problem> * fine_timestepping;
     std::vector<Vector*> timeslabs_fineresiduals;
@@ -551,7 +784,7 @@ protected:
     std::vector<Vector*> timeslabs_coarseresiduals;
     bool verbose;
 public:
-    TwoGridTimeST(Array<FOSLSCylProblemHierarchy<Problem> *>& tslabs_probl_hierarchy, bool verbose_)
+    TwoGridTimeST(Array<FOSLSCylProblHierarchy<Problem> *>& tslabs_probl_hierarchy, bool verbose_)
         : nslabs(tslabs_probl_hierarchy.Size()), cylproblems_hierarchies(tslabs_probl_hierarchy), verbose(verbose_)
     {
         timeslabs_fineproblems.SetSize(nslabs);

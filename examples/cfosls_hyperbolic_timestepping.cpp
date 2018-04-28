@@ -351,7 +351,7 @@ int main(int argc, char *argv[])
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSCylProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+   FOSLSCylProblem_HdivL2L2hyp * problem = new FOSLSCylProblem_HdivL2L2hyp
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
    */
 
@@ -360,7 +360,7 @@ int main(int argc, char *argv[])
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
-   FOSLSCylProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper
+   FOSLSCylProblem_HdivH1L2hyp * problem = new FOSLSCylProblem_HdivH1L2hyp
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    //problem->Solve(verbose);
@@ -375,8 +375,8 @@ int main(int argc, char *argv[])
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
 
-   FOSLSProblemHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper> * problems_hierarchy =
-           new FOSLSProblemHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+   FOSLSProblHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper, GeneralHierarchy> * problems_hierarchy =
+           new FOSLSProblHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    for (int l = 0; l < nlevels; ++l)
    {
@@ -386,10 +386,10 @@ int main(int argc, char *argv[])
    */
 
    /*
-   Array<FOSLSCylProblem_CFOSLS_HdivL2_Hyper*> problems(nlevels);
+   Array<FOSLSCylProblem_HdivL2L2hyp*> problems(nlevels);
    for (int l = 0; l < nlevels; ++l)
    {
-       problems[l] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper
+       problems[l] = new FOSLSCylProblem_HdivL2L2hyp
                (*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
 
@@ -400,7 +400,7 @@ int main(int argc, char *argv[])
 
    int nslabs = 2;
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
-   Array<FOSLSCylProblem_CFOSLS_HdivH1_Hyper*> timeslabs_problems(nslabs);
+   Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
    double slab_tau = 0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
 
@@ -417,8 +417,8 @@ int main(int argc, char *argv[])
    {
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
 
-       //timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivL2_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
-       timeslabs_problems[tslab] = new FOSLSCylProblem_CFOSLS_HdivH1_Hyper(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       //timeslabs_problems[tslab] = new FOSLSCylProblem_HdivL2L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       timeslabs_problems[tslab] = new FOSLSCylProblem_HdivH1L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
 
        tinit_tslab += slab_tau * slab_width;
    }
@@ -426,61 +426,71 @@ int main(int argc, char *argv[])
    MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
                                                  "[0,1] but the upper bound doesn't match \n");
 
-
-   int nlevels = 2;
-   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
-
-   FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivL2_Hyper> * problems_hierarchy =
-           new FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivL2_Hyper>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
-
    /*
-   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * time_stepping = new TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(timeslabs_problems, verbose);
+   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * time_stepping = new TimeStepping<FOSLSCylProblem_HdivH1L2hyp>(timeslabs_problems, verbose);
 
    Vector* init_vector = timeslabs_problems[0]->GetExactBase("bot");
 
-   time_stepping->SequentialSolve(*init_vector, verbose);
+   bool compute_error = true;
+   time_stepping->SequentialSolve(*init_vector, compute_error);
+
+   MPI_Finalize();
+   return 0;
    */
 
    /*
+   int nlevels = 2;
+   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
+
+   FOSLSCylProblHierarchy<FOSLSCylProblem_HdivL2L2hyp, GeneralCylHierarchy> * problems_hierarchy =
+           new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivL2L2hyp, GeneralCylHierarchy>
+           (*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+   */
+
    // creating a set of problems hierarchies (a hierarchy per time slab)
    int two_grid = 2;
    Array<GeneralCylHierarchy*> cyl_hierarchies(nslabs);
-   Array<FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>* > cyl_probhierarchies(nslabs);
+   Array<FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>* > cyl_probhierarchies(nslabs);
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
        cyl_hierarchies[tslab] = new GeneralCylHierarchy(two_grid, *timeslabs_pmeshcyls[tslab], feorder, verbose);
-       cyl_probhierarchies[tslab] = new FOSLSCylProblemHierarchy<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>
+       cyl_probhierarchies[tslab] = new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>
                (*cyl_hierarchies[tslab], 2, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
-   */
 
-   /*
-   TwoGridTimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> twogrid_tstp =
-           new TwoGridTimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(cyl_probhierarchies, verbose);
+   TwoGridTimeStepping<FOSLSCylProblem_HdivH1L2hyp> * twogrid_tstp =
+           new TwoGridTimeStepping<FOSLSCylProblem_HdivH1L2hyp>(cyl_probhierarchies, verbose);
 
    // creating fine and coarse time-stepping and interpolation operator between them
-   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
-   TimeStepping<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
+   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
+
    Array<Operator*> P_tstp(1);
    P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
 
    // creating fine-level operator, smoother and coarse-level operator
    Array<Operator*> Ops_tstp(1);
    Array<Operator*> Smoo_tstp(1);
+   Array<Operator*> NullSmoo_tstp(1);
    Operator* CoarseOp_tstp;
 
-   Ops_tstp[0] = new TimeSteppingSeqOp<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(*fine_timestepping, verbose);
-   Smoo_tstp[0] = new TimeSteppingSmoother<FOSLSCylProblem_CFOSLS_HdivH1_Hyper> (*fine_timestepping, verbose);
-   CoarseOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_CFOSLS_HdivH1_Hyper>(*coarse_timestepping, verbose);
+   Ops_tstp[0] = new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+   Smoo_tstp[0] = new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
+   CoarseOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
+   NullSmoo_tstp[0] = NULL;
 
    // finally, creating general multigrid instance
-   GeneralMultigrid * spacetime_mg = new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, Smoo_tstp);
-   */
+   GeneralMultigrid * spacetime_mg = new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
-   //spacetime_mg->Iterate();
+   Vector mg_x(spacetime_mg->Width());
+   mg_x = 0.0;
+   Vector mg_rhs(spacetime_mg->Width());
+   fine_timestepping->ComputeGlobalRhs(mg_rhs);
 
-   //MPI_Finalize();
-   //return 0;
+   spacetime_mg->Mult(mg_rhs, mg_x);
+
+   MPI_Finalize();
+   return 0;
 
    /*
 

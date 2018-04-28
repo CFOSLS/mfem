@@ -1286,7 +1286,7 @@ int main(int argc, char *argv[])
    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSProblem_CFOSLS_HdivL2_Hyper * problem = new FOSLSProblem_CFOSLS_HdivL2_Hyper
+   FOSLSProblem_HdivL2L2hyp * problem = new FOSLSProblem_HdivL2L2hyp
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    int numfoslsfuns = 1;
@@ -1312,7 +1312,7 @@ int main(int argc, char *argv[])
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
-   FOSLSProblem_CFOSLS_HdivH1_Hyper * problem = new FOSLSProblem_CFOSLS_HdivH1_Hyper
+   FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    int numfoslsfuns = -1;
