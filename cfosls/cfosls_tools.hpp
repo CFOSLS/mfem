@@ -708,13 +708,14 @@ protected:
     void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
     void SetPrecOption(int option) { prec_option = option; }
 
-    BlockVector * SetInitialCondition();
-    BlockVector * SetTrueInitialCondition();
     void InitGrFuns();
     void DistributeSolution() const;
     void ComputeError(bool verbose, bool checkbnd) const;
     virtual void ComputeExtraError() const {}
 public:
+    BlockVector * GetInitialCondition();
+    BlockVector * GetTrueInitialCondition();
+
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     void Solve(bool verbose) const;

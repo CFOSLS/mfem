@@ -537,7 +537,7 @@ void FOSLSProblem::InitSolver(bool verbose)
         std::cout << "Here you should print out parameters of the linear solver \n";
 }
 
-BlockVector * FOSLSProblem::SetTrueInitialCondition()
+BlockVector * FOSLSProblem::GetTrueInitialCondition()
 {
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
@@ -593,7 +593,7 @@ BlockVector * FOSLSProblem::SetTrueInitialCondition()
     return truebnd;
 }
 
-BlockVector * FOSLSProblem::SetInitialCondition()
+BlockVector * FOSLSProblem::GetInitialCondition()
 {
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
@@ -675,7 +675,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
         blkoffsets[i + 1] = pfes[i]->GetVSize();
     blkoffsets.PartialSum();
 
-    x = SetInitialCondition();
+    x = GetInitialCondition();
 
     trueRhs = new BlockVector(blkoffsets_true);
     trueX = new BlockVector(blkoffsets_true);
@@ -839,7 +839,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
    //trueRhs->Print();
 
-   trueBnd = SetTrueInitialCondition();
+   trueBnd = GetTrueInitialCondition();
 
    // moving the contribution from inhomogenous bnd conditions
    // from the rhs
@@ -1064,7 +1064,7 @@ GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<
                  const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
     : Solver(Op_lvls_[0]->Height()), nlevels(Op_lvls_.Size() + 1), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
       PreSmoothers_lvls(PreSmoothers_lvls_), PostSmoothers_lvls(PostSmoothers_lvls_),
-      current_level(0), symmetric(false)
+      symmetric(false), current_level(0)
 {
     MFEM_ASSERT(nlevels == P_lvls.Size() + 1, "Number of interpolation matrices must equal number of levels - 1");
     MFEM_ASSERT(nlevels == PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers must equal number of levels - 1");

@@ -453,8 +453,10 @@ int main(int argc, char *argv[])
    Array<FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>* > cyl_probhierarchies(nslabs);
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
-       cyl_hierarchies[tslab] = new GeneralCylHierarchy(two_grid, *timeslabs_pmeshcyls[tslab], feorder, verbose);
-       cyl_probhierarchies[tslab] = new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>
+       cyl_hierarchies[tslab] =
+               new GeneralCylHierarchy(two_grid, *timeslabs_pmeshcyls[tslab], feorder, verbose);
+       cyl_probhierarchies[tslab] =
+               new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>
                (*cyl_hierarchies[tslab], 2, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
 
@@ -468,24 +470,43 @@ int main(int argc, char *argv[])
    Array<Operator*> P_tstp(1);
    P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
 
+   // testing SolveOp class
+   //Operator * FineOp_tstp =
+           //new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+
    // creating fine-level operator, smoother and coarse-level operator
    Array<Operator*> Ops_tstp(1);
    Array<Operator*> Smoo_tstp(1);
    Array<Operator*> NullSmoo_tstp(1);
    Operator* CoarseOp_tstp;
 
-   Ops_tstp[0] = new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
-   Smoo_tstp[0] = new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
-   CoarseOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
+   Ops_tstp[0] =
+           new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+   Smoo_tstp[0] =
+           new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
+   CoarseOp_tstp =
+           new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
    NullSmoo_tstp[0] = NULL;
 
    // finally, creating general multigrid instance
-   GeneralMultigrid * spacetime_mg = new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
+   GeneralMultigrid * spacetime_mg =
+           new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
    Vector mg_x(spacetime_mg->Width());
    mg_x = 0.0;
+
+   FOSLSCylProblem_HdivH1L2hyp * problem0 = fine_timestepping->GetProblem(0);
+   BlockVector mg_x_viewer(fine_timestepping->GetGlobalOffsets());
+   BlockVector * exact_initcond0 = problem0->GetTrueInitialCondition();
+   mg_x_viewer.GetBlock(0) = *exact_initcond0;
+
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
+
+   Vector Ax0(spacetime_mg->Width());
+   Ops_tstp[0]->Mult(mg_x, Ax0);
+
+   mg_rhs -= Ax0;
 
    spacetime_mg->Mult(mg_rhs, mg_x);
 
