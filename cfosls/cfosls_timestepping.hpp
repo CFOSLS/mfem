@@ -80,7 +80,7 @@ public:
     // and computes the corresponding change to the rhs side
     void ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out);
 
-    void CorrectFromInitCond(const Vector& init_cond, Vector& vec_out);
+    void CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff);
 
     // vec_in is considered as a vector of strictly values at the bottom boundary,
     // vec_out is a full vector which coincides with vec_in at initial boundary and
@@ -584,13 +584,17 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
         // 1. y_block = CFOSLSop * x_block
         //x_viewer.GetBlock(tslab).Print();
         tslab_problem->GetOp()->Mult(x_viewer.GetBlock(tslab), y_viewer.GetBlock(tslab));
-        std::cout << "before \n";
-        y_viewer.GetBlock(tslab).Print();
+        tslab_problem->ZeroBndValues(y_viewer.GetBlock(tslab));
+
+        //std::cout << "before \n";
+        //y_viewer.GetBlock(tslab).Print();
 
         // 2. yblock := yblock - InitCondOp_prevblock * x_prevblock
         if (tslab > 0)
         {
             Problem * prevtslab_problem = timeslabs_problems[tslab - 1];
+            //prevtslab_problem->ZeroBndValues(y_viewer.GetBlock(tslab));
+
             // FIXME: Memory allocation every time
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
@@ -599,7 +603,7 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
             //prev_initcond->Print();
 
             // FIXME: Memory allocation inside the correction function happens every time
-            tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab));
+            tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab), 1.0);
             delete prev_initcond;
         }
 

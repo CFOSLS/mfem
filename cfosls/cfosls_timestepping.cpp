@@ -244,7 +244,7 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
     }
 }
 
-void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out)
+void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff)
 {
     Vector * initcond_fullvec = new Vector(GlobalTrueProblemSize());
 
@@ -254,7 +254,9 @@ void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_o
 
     ConvertBdrCndIntoRhs(*initcond_fullvec, *rhs_correction);
 
-    vec_out -= *rhs_correction;
+    *rhs_correction *= coeff;
+
+    vec_out += *rhs_correction;
 
     delete initcond_fullvec;
     delete rhs_correction;
