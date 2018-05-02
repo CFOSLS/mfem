@@ -465,6 +465,56 @@ int main(int argc, char *argv[])
 
    // creating fine and coarse time-stepping and interpolation operator between them
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+
+   /*
+   // testing parallel solve vs separate subdomain solves
+   Array<Vector*> exact_inputs(nslabs);
+   for (int tslab = 0; tslab < fine_timestepping->Nslabs(); ++tslab)
+       exact_inputs[tslab] = fine_timestepping->GetProblem(tslab)->GetExactBase("bot");
+   if (verbose)
+       std::cout << "\n Parallel solve with exact inputs: \n";
+   fine_timestepping->ParallelSolve(exact_inputs, true);
+
+   if (verbose)
+       std::cout << "\n Separate problem sovles: \n";
+
+   Array<Vector*> some_outputs(nslabs);
+   for (int tslab = 0; tslab < fine_timestepping->Nslabs(); ++tslab)
+   {
+       some_outputs[tslab] = new Vector(fine_timestepping->GetInitCondSize());
+       exact_inputs[tslab] = fine_timestepping->GetProblem(tslab)->GetExactBase("bot");
+       fine_timestepping->GetProblem(tslab)->Solve(*exact_inputs[tslab], *some_outputs[tslab]);
+   }
+
+   MPI_Finalize();
+   return 0;
+   */
+
+   /*
+   // testing parallel solve vs sequential solves
+   if (verbose)
+       std::cout << "\n Sequential solve: \n";
+
+   Array<Vector*> seq_outputs(nslabs);
+   Vector * exact_input = fine_timestepping->GetProblem(0)->GetExactBase("bot");
+
+   fine_timestepping->SequentialSolve(*exact_input, true);
+
+   seq_outputs[0] = exact_input;
+   for (int tslab = 0; tslab < fine_timestepping->Nslabs() - 1; ++tslab)
+   {
+       seq_outputs[tslab + 1] = &fine_timestepping->GetProblem(tslab)
+               ->ExtractAtBase("top", fine_timestepping->GetProblem(tslab)->GetSol());
+   }
+
+   if (verbose)
+       std::cout << "\n Parallel solve with inputs from seq. solve: \n";
+   fine_timestepping->ParallelSolve(seq_outputs, true);
+
+   MPI_Finalize();
+   return 0;
+   */
+
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
 
    Array<Operator*> P_tstp(1);
@@ -482,6 +532,85 @@ int main(int argc, char *argv[])
 
    Ops_tstp[0] =
            new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+
+   // checking SeqOp
+   if (verbose)
+       std::cout << "\n Sequential solve: \n";
+
+   Vector input_tslab0(fine_timestepping->GetInitCondSize());
+   input_tslab0 = 0.0;
+
+   Vector testsol(fine_timestepping->GetGlobalProblemSize());
+   Vector testAsol(fine_timestepping->GetGlobalProblemSize());
+   Vector testrhs(fine_timestepping->GetGlobalProblemSize());
+   testrhs = 2.0;
+   fine_timestepping->ZeroBndValues(testrhs);
+   fine_timestepping->SequentialSolve(testrhs, input_tslab0, testsol, true);
+
+   BlockVector sol_viewer(testsol.GetData(), fine_timestepping->GetGlobalOffsets());
+
+   Ops_tstp[0]->Mult(testsol, testAsol);
+
+   testAsol -= testrhs;
+
+   BlockVector diff_viewer(testAsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   for (int tslab = 0; tslab < fine_timestepping->Nslabs() ; ++tslab)
+   {
+       std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
+                    / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
+       for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
+           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-9)
+               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
+   }
+
+   if (verbose)
+       std::cout << "|| f - A * sol through SeqOp || = " <<
+                    testAsol.Norml2() / sqrt (testAsol.Size()) << "\n";
+
+   MPI_Finalize();
+   return 0;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
    Smoo_tstp[0] =
            new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
    CoarseOp_tstp =

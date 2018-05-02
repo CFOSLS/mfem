@@ -776,7 +776,7 @@ public:
 
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
-    void ComputeAnalyticalRhs() const;
+    void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
 
     void ComputeAnalyticalRhs(Vector& rhs) const;
 
@@ -799,6 +799,7 @@ public:
         CFOSLSop_nobnd = &op_nobnd;
     }
 
+    void ZeroBndValues(Vector& vec) const;
 };
 
 template <class Problem, class Hierarchy>

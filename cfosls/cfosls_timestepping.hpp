@@ -61,8 +61,8 @@ public:
     ParMeshCyl * GetParMeshCyl() {return &pmeshcyl;}
 
     void Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
-    void Solve(const Vector& bnd_tdofs_bot, const Vector& rhs, Vector& bnd_tdofs_top) const;
-    void Solve(const Vector& bnd_tdofs_bot, const Vector& rhs, Vector& sol, Vector& bnd_tdofs_top) const;
+    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const;
+    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top) const;
 
 protected:
     void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
@@ -211,12 +211,12 @@ public:
     void SetProblems(Array<Problem*>& timeslabs_problems_);
 
     void SequentialSolve(const Vector &init_vector, bool compute_error);
-    void SequentialSolve(const Vector &init_vector, const Vector& rhs, bool compute_error);
-    void SequentialSolve(const Vector &init_vector, const Vector& rhs, Vector& sol, bool compute_error);
+    void SequentialSolve(const Vector& rhs, const Vector &init_vector, bool compute_error);
+    void SequentialSolve(const Vector& rhs, const Vector &init_vector, Vector& sol, bool compute_error);
 
     void ParallelSolve(const Array<Vector*> &init_vectors, bool compute_error) const;
-    void ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, bool compute_error) const;
-    void ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, Vector& sol, bool compute_error) const;
+    void ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, bool compute_error) const;
+    void ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, Vector& sol, bool compute_error) const;
 
     Array<Vector*>& GetSolutions();
 
@@ -260,6 +260,8 @@ public:
     int Nslabs() const {return nslabs;}
 
     void ComputeGlobalRhs(Vector& rhs);
+
+    void ZeroBndValues(Vector& vec);
 };
 
 template <class Problem>
@@ -289,6 +291,17 @@ void TimeStepping<Problem>::ComputeGlobalRhs(Vector& rhs)
     {
         Problem * tslab_problem = timeslabs_problems[tslab];
         tslab_problem->ComputeAnalyticalRhs(rhs_viewer.GetBlock(tslab));
+    }
+}
+
+template <class Problem>
+void TimeStepping<Problem>::ZeroBndValues(Vector& vec)
+{
+    BlockVector vec_viewer(vec.GetData(), GetGlobalOffsets());
+    for (int tslab = 0; tslab < nslabs; ++tslab )
+    {
+        Problem * tslab_problem = timeslabs_problems[tslab];
+        tslab_problem->ZeroBndValues(vec_viewer.GetBlock(tslab));
     }
 }
 
@@ -326,13 +339,10 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, bool comp
 
 // rhs is a Vector of size of full time-stepping problem
 template <class Problem>
-void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vector& rhs, bool compute_error)
+void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& init_vector, bool compute_error)
 {
     MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
     MFEM_ASSERT(init_vector.Size() == base_inputs[0]->Size(), "Input vector length mismatch the length of the base_input");
-
-
-    //Array<Vector*> &  timeslabs_rhss = ConvertFullvecIntoArray(x);
 
     Problem * tslab_startproblem = timeslabs_problems[0];
     FOSLSFEFormulation& fe_formul = tslab_startproblem->GetFEformulation();
@@ -346,9 +356,9 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vec
         Problem * tslab_problem = timeslabs_problems[tslab];
 
         if (tslab == 0)
-            tslab_problem->Solve(init_vector, rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
+            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), init_vector, *base_outputs[tslab]);
         else
-            tslab_problem->Solve(*base_inputs[tslab], rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
+            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *base_inputs[tslab], *base_outputs[tslab]);
 
         if (tslab < nslabs - 1)
         {
@@ -365,9 +375,9 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vec
 
 // rhs is a Vector of size of full time-stepping problem
 template <class Problem>
-void TimeStepping<Problem>::SequentialSolve(const Vector& init_vector, const Vector& rhs, Vector& sol, bool compute_error)
+void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& init_vector, Vector& sol, bool compute_error)
 {
-    SequentialSolve(init_vector, rhs, compute_error);
+    SequentialSolve(rhs, init_vector, compute_error);
 
     BlockVector sol_viewer(sol.GetData(), GetGlobalOffsets());
     for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -383,7 +393,7 @@ void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, bo
 
     // renaming init_vectors into internal base_inputs
     for (int tslab = 0; tslab < nslabs; ++tslab )
-        base_inputs[tslab] = init_vectors[tslab];
+        *base_inputs[tslab] = *init_vectors[tslab];
 
     for (int tslab = 0; tslab < nslabs; ++tslab )
     {
@@ -398,11 +408,11 @@ void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, bo
 
 // rhs is a Vector of size of full time-stepping problem
 template <class Problem>
-void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, bool compute_error) const
+void TimeStepping<Problem>::ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, bool compute_error) const
 {
     MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
     MFEM_ASSERT(init_vectors.Size() == nslabs, "Number of input vectors (for initial "
-                                               "conditions) must eqyual the number of time slabs");
+                                               "conditions) must equal the number of time slabs");
 
     const BlockVector rhs_viewer(rhs.GetData(), GetGlobalOffsets());
 
@@ -412,7 +422,7 @@ void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, co
                     "For the given timeslab initcond vector size mismatch the problem");
         Problem * tslab_problem = timeslabs_problems[tslab];
 
-        tslab_problem->Solve(*init_vectors[tslab], rhs_viewer.GetBlock(tslab), *base_outputs[tslab]);
+        tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *init_vectors[tslab], *base_outputs[tslab]);
 
         if (compute_error)
             tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
@@ -422,9 +432,9 @@ void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, co
 
 // rhs is a Vector of size of full time-stepping problem
 template <class Problem>
-void TimeStepping<Problem>::ParallelSolve(const Array<Vector*> &init_vectors, const Vector& rhs, Vector& sol, bool compute_error) const
+void TimeStepping<Problem>::ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, Vector& sol, bool compute_error) const
 {
-    ParallelSolve(init_vectors, rhs, compute_error);
+    ParallelSolve(rhs, init_vectors, compute_error);
 
     BlockVector sol_viewer(sol.GetData(), GetGlobalOffsets());
     for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -556,6 +566,7 @@ Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
     return *res;
 }
 
+// implicitly assumes that the init condition for the zeroth timeslab is exactly 0
 template <class Problem>
 void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
 {
@@ -571,7 +582,10 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
         Problem * tslab_problem = timeslabs_problems[tslab];
 
         // 1. y_block = CFOSLSop * x_block
+        //x_viewer.GetBlock(tslab).Print();
         tslab_problem->GetOp()->Mult(x_viewer.GetBlock(tslab), y_viewer.GetBlock(tslab));
+        std::cout << "before \n";
+        y_viewer.GetBlock(tslab).Print();
 
         // 2. yblock := yblock - InitCondOp_prevblock * x_prevblock
         if (tslab > 0)
@@ -581,10 +595,17 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
 
+            //std::cout << "prev_initcond \n";
+            //prev_initcond->Print();
+
             // FIXME: Memory allocation inside the correction function happens every time
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab));
             delete prev_initcond;
         }
+
+        //std::cout << "after \n";
+        //y_viewer.GetBlock(tslab).Print();
+        //std::cout << "do you see? \n";
     }
 
 }
@@ -718,7 +739,14 @@ template <class Problem>
 void TimeSteppingSmoother<Problem>::Mult(const Vector &x, Vector &y) const
 {
     bool compute_error = false;
-    time_stepping.ParallelSolve(initvec_inputs, x, y, compute_error);
+    // initvec_inputs should be 0 in this call
+#ifdef MFEM_DEBUG
+    for (int i = 0; i < initvec_inputs.Size(); ++i)
+    {
+        MFEM_ASSERT(initvec_inputs[i]->Normlinf() > MYZEROTOL, "Initvec must be 0 here but it is not!");
+    }
+#endif
+    time_stepping.ParallelSolve(x, initvec_inputs, y, compute_error);
 }
 
 template <class Problem> class TimeSteppingSolveOp : public BlockOperator

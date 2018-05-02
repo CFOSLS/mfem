@@ -984,25 +984,28 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
     ComputeExtraError();
 }
 
-void FOSLSProblem::ComputeAnalyticalRhs() const
+void FOSLSProblem::ZeroBndValues(Vector& vec) const
 {
-    /*
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
     int numblocks = fe_formul.Nblocks();
-
-    for (int i = 0; i < numblocks; ++i)
-        plforms[i]->Assemble();
-
-    for (int i = 0; i < numblocks; ++i)
-        *grfuns[i + numblocks] = *plforms[i];
-
-    // assembling rhs forms without boundary conditions
     for (int i = 0; i < numblocks; ++i)
     {
-        plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(i)), essbdr_attrs);
+
+        Array<int> ess_bnd_tdofs;
+        pfes[i]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
+
+        for (int j = 0; j < ess_bnd_tdofs.Size(); ++j)
+        {
+            int tdof = ess_bnd_tdofs[j];
+            vec_viewer.GetBlock(i)[tdof] = 0.0;
+        }
     }
-    */
-    ComputeAnalyticalRhs(*trueRhs);
+
 }
+
 
 void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
 {

@@ -77,7 +77,7 @@ Vector& FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x)
 {
     Vector * res = new Vector(tdofs_link.size());
 
-    ExtractAtBase(top_or_bot, *res);
+    ExtractAtBase(top_or_bot, x, *res);
 
     return *res;
 }
@@ -153,7 +153,7 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
 
 }
 
-void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, const Vector& rhs,
+void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
                             Vector& bnd_tdofs_top) const
 {
     // copying righthand side
@@ -161,8 +161,17 @@ void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, const Vector& rhs,
 
     *trueRhs = rhs_viewer;
 
+    //std::cout << "before \n";
+    //trueRhs->Print();
+
+    //std::cout << "bnd_tdofs_bot \n";
+    //bnd_tdofs_bot.Print();
+
     // correcting rhs with the given initial condition
     CorrectRhsFromInitCnd(bnd_tdofs_bot);
+
+    //std::cout << "after \n";
+    //trueRhs->Print();
 
     // solving the system
     FOSLSProblem::Solve(verbose);
@@ -181,7 +190,7 @@ void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) 
     Solve(*trueRhs, bnd_tdofs_bot, bnd_tdofs_top);
 }
 
-void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, const Vector& rhs,
+void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
                             Vector& sol, Vector& bnd_tdofs_top) const
 {
     Solve(rhs, bnd_tdofs_bot, bnd_tdofs_top);
