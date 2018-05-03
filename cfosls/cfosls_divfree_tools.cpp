@@ -3754,6 +3754,10 @@ void MonolithicMultigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level-1]);
 
+        std::cout << "residual after projecting onto coarser level\n";
+        residual[current_level-1]->Print();
+
+
 #ifdef BND_FOR_MULTIGRID
         block_viewers[current_level-1]->Update((*residual[current_level-1]).GetData(), *block_offsets[current_level-1]);
         for (int blk = 0; blk < block_offsets[current_level-1]->Size() - 1; ++blk)

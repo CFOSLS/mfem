@@ -1080,13 +1080,16 @@ GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<
         if (l < nlevels - 1)
         {
             residual[l] = new Vector(Op_lvls[l]->Height());
-            correction[l] = new Vector(Op_lvls[l]->Width());
+            if (l > 0)
+                correction[l] = new Vector(Op_lvls[l]->Width());
+            else
+                correction[l] = new Vector();
         }
         else // exist because of SetDataAndSize call to correction.Last() in GeneralMultigrid::Mult
              // which drops the  data (if allocated here, i.e. if no if-clause)
         {
             residual[l] = new Vector(CoarseOp.Height());
-            correction[l] = new Vector();
+            correction[l] = new Vector(CoarseOp.Height());
         }
     }
 
@@ -1094,18 +1097,21 @@ GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<
 
 void GeneralMultigrid::Mult(const Vector & x, Vector & y) const
 {
-    *residual.Last() = x;
+    *residual[0] = x;
 
-    correction.Last()->SetDataAndSize(y.GetData(), y.Size());
+    correction[0]->SetDataAndSize(y.GetData(), y.Size());
     MG_Cycle();
 }
 
 void GeneralMultigrid::MG_Cycle() const
 {
-    // PreSmoothing
-    const Operator& Operator_l = *Op_lvls[current_level];
-    Operator* PreSmoother_l = PreSmoothers_lvls[current_level];
-    Operator* PostSmoother_l = PostSmoothers_lvls[current_level];
+    Operator * Operator_l, *PreSmoother_l, *PostSmoother_l;
+    if (current_level < nlevels - 1)
+    {
+        Operator_l = Op_lvls[current_level];
+        PreSmoother_l = PreSmoothers_lvls[current_level];
+        PostSmoother_l = PostSmoothers_lvls[current_level];
+    }
 
     Vector& residual_l = *residual[current_level];
     Vector& correction_l = *correction[current_level];
@@ -1114,29 +1120,44 @@ void GeneralMultigrid::MG_Cycle() const
     help = 0.0;
 
     // PreSmoothing
-    if (current_level > 0 && PreSmoother_l)
+    if (current_level < nlevels - 1 && PreSmoother_l)
     {
+        //std::cout << "residual before presmoothing, new MG \n";
+        //residual_l.Print();
+
         PreSmoother_l->Mult(residual_l, correction_l);
 
-        Operator_l.Mult(correction_l, help);
+        //std::cout << "correction after presmoothing, new MG \n";
+        //correction_l.Print();
+
+        Operator_l->Mult(correction_l, help);
         residual_l -= help;
+
+        //std::cout << "new residual after presmoothing, new MG \n";
+        //residual_l.Print();
     }
 
     // Coarse grid correction
-    if (current_level > 0)
+    if (current_level < nlevels - 1)
     {
-        const Operator& P_l = *P_lvls[current_level-1];
+        const Operator& P_l = *P_lvls[current_level];
 
-        P_l.MultTranspose(residual_l, *residual[current_level-1]);
+        P_l.MultTranspose(residual_l, *residual[current_level + 1]);
 
-        current_level--;
-        MG_Cycle();
+        std::cout << "residual after projecting onto coarser level, new MG \n";
+        residual[current_level + 1]->Print();
+
         current_level++;
+        MG_Cycle();
+        current_level--;
 
         cor_cor.SetSize(residual_l.Size());
-        P_l.Mult(*correction[current_level-1], cor_cor);
+        P_l.Mult(*correction[current_level + 1], cor_cor);
+
+        //cor_cor.Print();
+
         correction_l += cor_cor;
-        Operator_l.Mult(cor_cor, help);
+        Operator_l->Mult(cor_cor, help);
         residual_l -= help;
     }
     else
@@ -1145,13 +1166,34 @@ void GeneralMultigrid::MG_Cycle() const
     }
 
     // PostSmoothing
-    if (current_level > 0 && PostSmoother_l)
+    if (current_level < nlevels - 1)
     {
-        PostSmoother_l->Mult(residual_l, cor_cor);
+        if (symmetric)
+        {
+            if (PreSmoother_l)
+                PreSmoother_l->MultTranspose(residual_l, cor_cor);
+        }
+        else // nonsymmetric
+            if (PostSmoother_l)
+                PostSmoother_l->Mult(residual_l, cor_cor);
         correction_l += cor_cor;
     }
 
 }
+
+void InterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y) const
+{
+    P.MultTranspose(x, y);
+
+    //bnd_indices.Print();
+
+    for (int i = 0; i < bnd_indices.Size(); ++i)
+    {
+        int index = bnd_indices[i];
+        y[index] = 0.0;
+    }
+}
+
 //##############################################################################################
 
 CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(CFOSLSHyperbolicFormulation &struct_formulation,

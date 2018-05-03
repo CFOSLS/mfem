@@ -231,7 +231,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2539,27 +2539,117 @@ int main(int argc, char *argv[])
     int nlevels = ref_levels + 1;
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
 
-    FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy> * problems_hierarchy =
-            new FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+    //FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy> * problems_hierarchy =
+            //new FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+    std::vector< Array<int>* > coarse_bnd_indices_lvls(num_levels);
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        int ncoarse_bndtdofs = 0;
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            ncoarse_bndtdofs += EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk]->Size();
+        }
+
+        coarse_bnd_indices_lvls[l] = new Array<int>(ncoarse_bndtdofs);
+
+        int shift_bnd_indices = 0;
+        int shift_tdofs_indices = 0;
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            for (int j = 0; j < EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk]->Size(); ++j)
+                (*coarse_bnd_indices_lvls[l])[j + shift_bnd_indices] =
+                    (*EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk])[j] + shift_tdofs_indices;
+
+            shift_bnd_indices += EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk]->Size();
+            shift_tdofs_indices += P[l]->GetBlock(blk,blk).Width();
+        }
+
+    }
+
+    EssBdrTrueDofs_HcurlFunct_lvls[1][0]->Print();
+    EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
+
+    coarse_bnd_indices_lvls[0]->Print();
 
     Array<Operator*> P_mg(nlevels - 1);
     Array<Operator*> Ops_mg(nlevels - 1);
     Array<Operator*> Smoo_mg(nlevels - 1);
     Operator* CoarseSolver_mg;
 
-    /*
     // setting multigrid components from the older parts of the code
     CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
     for (int l = 0; l < num_levels - 1; ++l)
     {
-        P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
-        Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(l);
-        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(l);
+        //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
+        P_mg = new InterpolationWithBNDforTranspose(
+                    *((MonolithicMultigrid*)prec)->GetInterpolation(l), *coarse_bnd_indices_lvls[l]);
+        Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
+        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
     }
 
-    GeneralMultigrid * spacetime_mg =
+    GeneralMultigrid * GeneralMGprec =
             new GeneralMultigrid(P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
-    */
+
+    // comparing the new class with the older one
+    if (verbose)
+        std::cout << "\nComparing geometric MG with old and new interfaces \n";
+
+    Array<int> offsets_new(numblocks_funct + 1);
+    offsets_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        offsets_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_new.PartialSum();
+
+    BlockVector inFunctvec(offsets_new);
+    inFunctvec.GetBlock(0) = sigma_exact_truedofs;
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        inFunctvec.GetBlock(1) = S_exact_truedofs;
+
+    Array<int> offsets_hcurlfunct_new(numblocks_funct + 1);
+    offsets_hcurlfunct_new = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            offsets_hcurlfunct_new[blk + 1] = Divfree_hpmat_mod_lvls[0]->Width();
+        else
+            offsets_hcurlfunct_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
+    offsets_hcurlfunct_new.PartialSum();
+
+
+    BlockVector inFunctHcurlvec(offsets_hcurlfunct_new);
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        if (blk == 0)
+            Divfree_hpmat_mod_lvls[0]->MultTranspose(inFunctvec.GetBlock(0), inFunctHcurlvec.GetBlock(0));
+        else
+            inFunctHcurlvec.GetBlock(blk) = inFunctvec.GetBlock(blk);
+
+
+    BlockVector outFunctHcurlvec(offsets_hcurlfunct_new);
+    outFunctHcurlvec = 0.0;
+    if (verbose)
+        std::cout << "Computing action for the old geometric MG ... \n";
+    prec->Mult(inFunctHcurlvec, outFunctHcurlvec);
+
+    BlockVector out2FunctHcurlvec(offsets_hcurlfunct_new);
+    out2FunctHcurlvec = 0.0;
+    if (verbose)
+        std::cout << "Computing action for the new geometric MG ... \n";
+    GeneralMGprec->Mult(inFunctHcurlvec, out2FunctHcurlvec);
+
+    BlockVector diff(offsets_hcurlfunct_new);
+    diff = outFunctHcurlvec;
+    diff -= out2FunctHcurlvec;
+
+    double diff_norm = diff.Norml2() / sqrt (diff.Size());
+    double geommg_norm = outFunctHcurlvec.Norml2() / sqrt(outFunctHcurlvec.Size());
+    if (verbose)
+    {
+        std::cout << "|| NewMG * vec - OldMG * vec || = " << diff_norm << "\n";
+        std::cout << "|| NewMG * vec - OldMG * vec || / || OldMG * vec || = " << diff_norm / geommg_norm << "\n";
+    }
+
+    MPI_Finalize();
+    return 0;
 
 #endif // for #ifdef NEW_INTERFACE
 
@@ -2574,8 +2664,19 @@ int main(int argc, char *argv[])
     solver.SetMaxIter(max_num_iter);
     solver.SetOperator(*MainOp);
 
+    /*
+#ifdef NEW_INTERFACE
+    if (with_prec)
+        solver.SetPreconditioner(*GeneralMGprec);
+#else
     if (with_prec)
         solver.SetPreconditioner(*prec);
+#endif
+    */
+
+    if (with_prec)
+        solver.SetPreconditioner(*prec);
+
     solver.SetPrintLevel(1);
     trueX = 0.0;
 

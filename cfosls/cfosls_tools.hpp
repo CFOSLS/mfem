@@ -1139,13 +1139,26 @@ public:
 
     void MG_Cycle() const;
 
-    virtual void Mult(const Vector & x, Vector & y) const;
+    virtual void Mult(const Vector & x, Vector & y) const override;
 
-    virtual void SetOperator(const Operator &op)
+    virtual void SetOperator(const Operator &op) override
     { MFEM_ABORT("SetOperator() not implemented in the GeneralMultigrid class"); }
 
 };
 
+class InterpolationWithBNDforTranspose : public Operator
+{
+protected:
+    Operator& P;
+    Array<int>& bnd_indices;
+public:
+    InterpolationWithBNDforTranspose(Operator& P_, Array<int>& BndIndices_)
+        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(BndIndices_) {}
+
+    void Mult(const Vector &x, Vector &y) const override {P.Mult(x,y);}
+
+    void MultTranspose(const Vector &x, Vector &y) const override;
+};
 
 //#####################################################################################
 

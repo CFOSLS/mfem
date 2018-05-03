@@ -1445,85 +1445,84 @@ public:
 
 };
 
+class BlockSmoother : public BlockOperator
+{
+public:
+    BlockSmoother(BlockOperator &Op)
+        :
+          BlockOperator(Op.RowOffsets()),
+          A01((HypreParMatrix&)Op.GetBlock(0,1)),
+          A10((HypreParMatrix&)Op.GetBlock(1,0)),
+          offsets(Op.RowOffsets())
+    {
+        HypreParMatrix &A00 = (HypreParMatrix&)Op.GetBlock(0,0);
+        HypreParMatrix &A11 = (HypreParMatrix&)Op.GetBlock(1,1);
+
+        B00 = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
+        B11 = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
+
+        tmp01.SetSize(A00.Width());
+        tmp02.SetSize(A00.Width());
+        tmp1.SetSize(A11.Width());
+    }
+
+    virtual void Mult(const Vector & x, Vector & y) const
+    {
+        yblock.Update(y.GetData(), offsets);
+        xblock.Update(x.GetData(), offsets);
+
+        yblock.GetBlock(0) = 0.0;
+        B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+#ifdef BLKDIAG_SMOOTHER
+        B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
+#else
+        tmp1 = xblock.GetBlock(1);
+        A10.Mult(-1.0, yblock.GetBlock(0), 1.0, tmp1);
+        B11->Mult(tmp1, yblock.GetBlock(1));
+#endif
+    }
+
+    virtual void MultTranspose(const Vector & x, Vector & y) const
+    {
+        yblock.Update(y.GetData(), offsets);
+        xblock.Update(x.GetData(), offsets);
+
+        yblock.GetBlock(1) = 0.0;
+        B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
+
+#ifdef BLKDIAG_SMOOTHER
+        B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+#else
+        tmp01 = xblock.GetBlock(0);
+        A01.Mult(-1.0, yblock.GetBlock(1), 1.0, tmp01);
+        B00->Mult(tmp01, yblock.GetBlock(0));
+#endif
+    }
+
+    virtual void SetOperator(const Operator &op) { }
+
+    ~BlockSmoother()
+    {
+        delete B00;
+        delete B11;
+    }
+
+private:
+    HypreSmoother *B00;
+    HypreSmoother *B11;
+    HypreParMatrix &A01;
+    HypreParMatrix &A10;
+
+    const Array<int> &offsets;
+    mutable BlockVector xblock;
+    mutable BlockVector yblock;
+    mutable Vector tmp01;
+    mutable Vector tmp02;
+    mutable Vector tmp1;
+};
+
 class MonolithicMultigrid : public Solver
 {
-private:
-    class BlockSmoother : public BlockOperator
-    {
-    public:
-        BlockSmoother(BlockOperator &Op)
-            :
-              BlockOperator(Op.RowOffsets()),
-              A01((HypreParMatrix&)Op.GetBlock(0,1)),
-              A10((HypreParMatrix&)Op.GetBlock(1,0)),
-              offsets(Op.RowOffsets())
-        {
-            HypreParMatrix &A00 = (HypreParMatrix&)Op.GetBlock(0,0);
-            HypreParMatrix &A11 = (HypreParMatrix&)Op.GetBlock(1,1);
-
-            B00 = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
-            B11 = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
-
-            tmp01.SetSize(A00.Width());
-            tmp02.SetSize(A00.Width());
-            tmp1.SetSize(A11.Width());
-        }
-
-        virtual void Mult(const Vector & x, Vector & y) const
-        {
-            yblock.Update(y.GetData(), offsets);
-            xblock.Update(x.GetData(), offsets);
-
-            yblock.GetBlock(0) = 0.0;
-            B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
-#ifdef BLKDIAG_SMOOTHER
-            B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
-#else
-            tmp1 = xblock.GetBlock(1);
-            A10.Mult(-1.0, yblock.GetBlock(0), 1.0, tmp1);
-            B11->Mult(tmp1, yblock.GetBlock(1));
-#endif
-        }
-
-        virtual void MultTranspose(const Vector & x, Vector & y) const
-        {
-            yblock.Update(y.GetData(), offsets);
-            xblock.Update(x.GetData(), offsets);
-
-            yblock.GetBlock(1) = 0.0;
-            B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
-
-#ifdef BLKDIAG_SMOOTHER
-            B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
-#else
-            tmp01 = xblock.GetBlock(0);
-            A01.Mult(-1.0, yblock.GetBlock(1), 1.0, tmp01);
-            B00->Mult(tmp01, yblock.GetBlock(0));
-#endif
-        }
-
-        virtual void SetOperator(const Operator &op) { }
-
-        ~BlockSmoother()
-        {
-            delete B00;
-            delete B11;
-        }
-
-    private:
-        HypreSmoother *B00;
-        HypreSmoother *B11;
-        HypreParMatrix &A01;
-        HypreParMatrix &A10;
-
-        const Array<int> &offsets;
-        mutable BlockVector xblock;
-        mutable BlockVector yblock;
-        mutable Vector tmp01;
-        mutable Vector tmp02;
-        mutable Vector tmp1;
-    };
-
 public:
     MonolithicMultigrid(BlockOperator &Op,
                         const Array<BlockOperator*> &P,
@@ -1734,6 +1733,12 @@ private:
     Solver *CoarsePrec_;
 
     mutable bool built_prec;
+
+public:
+    Operator* GetCoarsestSolver() {return CoarseSolver;}
+    BlockOperator* GetInterpolation(int l) { return P_[l];}
+    Operator* GetOp(int l) { return Operators_[l];}
+    Operator* GetSmoother(int l) { return Smoothers_[l];}
 };
 
 class Multigrid : public Solver
