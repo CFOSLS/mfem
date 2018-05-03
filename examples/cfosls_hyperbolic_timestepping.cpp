@@ -533,6 +533,7 @@ int main(int argc, char *argv[])
    Ops_tstp[0] =
            new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
 
+   /*
    // checking SeqOp
    if (verbose)
        std::cout << "\n Sequential solve: \n";
@@ -566,49 +567,48 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "|| f - A * sol through SeqOp || = " <<
                     testAsol.Norml2() / sqrt (testAsol.Size()) << "\n";
-
    MPI_Finalize();
    return 0;
 
+   */
 
+   // checking SolveOp for the finest level (no coarsening)
+   Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
 
+   Vector input_tslab0(fine_timestepping->GetInitCondSize());
+   input_tslab0 = 0.0;
 
+   Vector testrhs(fine_timestepping->GetGlobalProblemSize());
+   testrhs = 2.0;
+   fine_timestepping->ZeroBndValues(testrhs);
 
+   Vector testsol(fine_timestepping->GetGlobalProblemSize());
+   fine_timestepping->SequentialSolve(testrhs, input_tslab0, testsol, true);
 
+   Vector Atestsol(fine_timestepping->GetGlobalProblemSize());
+   Ops_tstp[0]->Mult(testsol, Atestsol);
 
+   Vector check_testsol(fine_timestepping->GetGlobalProblemSize());
+   FineOp_tstp->Mult(Atestsol, check_testsol);
 
+   check_testsol -= testsol;
 
+   BlockVector diff_viewer(check_testsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   for (int tslab = 0; tslab < fine_timestepping->Nslabs() ; ++tslab)
+   {
+       std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
+                    / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
+       for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
+           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-9)
+               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
+   }
 
+   if (verbose)
+       std::cout << "|| testsol - A^(-1) * A * testsol through SeqOp and SolveOp || = " <<
+                    check_testsol.Norml2() / sqrt (check_testsol.Size()) << "\n";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+   MPI_Finalize();
+   return 0;
 
 
    Smoo_tstp[0] =

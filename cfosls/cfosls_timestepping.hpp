@@ -747,7 +747,8 @@ void TimeSteppingSmoother<Problem>::Mult(const Vector &x, Vector &y) const
 #ifdef MFEM_DEBUG
     for (int i = 0; i < initvec_inputs.Size(); ++i)
     {
-        MFEM_ASSERT(initvec_inputs[i]->Normlinf() > MYZEROTOL, "Initvec must be 0 here but it is not!");
+        MFEM_ASSERT(initvec_inputs[i]->Normlinf() < MYZEROTOL,
+                    "Initvec_inputs must be 0 here but they are not!");
     }
 #endif
     time_stepping.ParallelSolve(x, initvec_inputs, y, compute_error);
@@ -774,6 +775,7 @@ public:
     void Mult(const Vector &x, Vector &y) const override;
 };
 
+// it is implicitly assumed that the problem is solved with zero initial condition for the first time slab
 template <class Problem>
 void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
 {
@@ -781,8 +783,11 @@ void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
     //Array<Vector*>& initvec_inputs = time_stepping.ConvertIntoInitialConditions(vec_inputs);
 
     // init_vec is actually always 0 in this call
+    //init_vec.Print();
+    MFEM_ASSERT(init_vec.Normlinf() < MYZEROTOL, "Initvec must be 0 here but it is not!");
+
     bool compute_error = false;
-    time_stepping.SequentialSolve(init_vec, x, y, compute_error);
+    time_stepping.SequentialSolve(x, init_vec, y, compute_error);
 }
 
 template <class Problem> class TimeSteppingSeqOp : public BlockOperator
