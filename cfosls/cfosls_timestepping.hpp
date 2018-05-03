@@ -632,11 +632,13 @@ protected:
     TimeStepping<Problem> * coarse_timestepping;
 
     BlockOperator * interpolation_op;
+    BlockOperator * interpolation_op_withbnd;
     bool verbose;
 protected:
     void ConstructFineTimeStp();
     void ConstructCoarseTimeStp();
     void ConstructGlobalInterpolation();
+    void ConstructGlobalInterpolationWithBnd();
 public:
     TwoGridTimeStepping(Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies_, bool verbose_)
         : nslabs(cyl_probhierarchies_.Size()), cyl_probhierarchies(cyl_probhierarchies_),
@@ -644,20 +646,24 @@ public:
     {
         ConstructFineTimeStp();
         fine_global_offsets.SetSize(nslabs + 1);
+        fine_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
             fine_global_offsets[tslab + 1] = fine_global_offsets[tslab] + fine_problems[tslab]->GlobalTrueProblemSize();
 
         ConstructCoarseTimeStp();
         coarse_global_offsets.SetSize(nslabs + 1);
+        coarse_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
             coarse_global_offsets[tslab + 1] = coarse_global_offsets[tslab] + coarse_problems[tslab]->GlobalTrueProblemSize();
 
         ConstructGlobalInterpolation();
+        ConstructGlobalInterpolationWithBnd();
     }
 
     TimeStepping<Problem> * GetFineTimeStp() { return fine_timestepping;}
     TimeStepping<Problem> * GetCoarseTimeStp() { return coarse_timestepping;}
     BlockOperator * GetGlobalInterpolationOp() { return interpolation_op;}
+    BlockOperator * GetGlobalInterpolationOpWithBnd() { return interpolation_op_withbnd;}
     Array<int>& GetFineOffsets() {return fine_global_offsets;}
     Array<int>& GetCoarseOffsets() {return coarse_global_offsets;}
 };
@@ -716,6 +722,26 @@ void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolation()
         interpolation_op->SetDiagonalBlock(tslab, cyl_probhierarchy->GetTrueP(fine_level));
     }
 }
+
+template <class Problem>
+void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolationWithBnd()
+{
+    int fine_level = 0;
+    int coarse_level = 1;
+    //fine_global_offsets.Print();
+    //coarse_global_offsets.Print();
+    interpolation_op_withbnd = new BlockOperator(fine_global_offsets, coarse_global_offsets);
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* cyl_probhierarchy = cyl_probhierarchies[tslab];
+        Array<int>* coarser_bnd_indices = cyl_probhierarchy->ConstructBndIndices(coarse_level);
+        Operator * InterpolationOpWithBnd = new InterpolationWithBNDforTranspose(
+                    *cyl_probhierarchy->GetTrueP(fine_level), coarser_bnd_indices);
+
+        interpolation_op_withbnd->SetDiagonalBlock(tslab, InterpolationOpWithBnd);
+    }
+}
+
 
 template <class Problem> class TimeSteppingSmoother : public Operator
 {

@@ -838,6 +838,8 @@ public:
     BlockOperator * GetCoarsenedOp_nobnd (int level) { return CoarsenedOps_nobnd_lvls[level];}
     BlockOperator * GetTrueP(int level) { return TrueP_lvls[level];}
 
+    Array<int>* ConstructBndIndices(int level);
+
 protected:
     void ConstructCoarsenedOps();
     void ConstructCoarsenedOps_nobnd();
@@ -901,6 +903,59 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Interpolate(int coarse_lvl, int fi
     BlockVector viewer_out(vec_out.GetData(),  blkoffsets_true_fine);
     TrueP_lvls[fine_lvl]->Mult(viewer_in, viewer_out);
 }
+
+template <class Problem, class Hierarchy>
+Array<int>* FOSLSProblHierarchy<Problem, Hierarchy>::ConstructBndIndices(int level)
+{
+    int numblocks = problems_lvls[level]->GetFEformulation().Nblocks();
+    BdrConditions& bdr_conds = problems_lvls[level]->GetBdrConditions();
+
+    int nbnd_indices = 0;
+    for (int blk= 0; blk < numblocks; ++blk)
+    {
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+
+        Array<int> ess_bnd_tdofs;
+        problems_lvls[level]->GetPfes(blk)->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
+
+        nbnd_indices += ess_bnd_tdofs.Size();
+    }
+
+    Array<int> * res = new Array<int>(nbnd_indices);
+
+    int blk_shift = 0;
+    int count = 0;
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+
+        //essbdr_attrs.Print();
+
+        Array<int> ess_bnd_tdofs;
+        problems_lvls[level]->GetPfes(blk)->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
+
+        //ess_bnd_tdofs.Print();
+
+        for (int j = 0; j < ess_bnd_tdofs.Size(); ++j)
+        {
+            (*res)[count] = ess_bnd_tdofs[j] + blk_shift;
+            ++count;
+        }
+
+        blk_shift += problems_lvls[level]->GetTrueOffsets()[blk + 1];
+    }
+
+    //res->Print();
+
+
+    MFEM_ASSERT(count == nbnd_indices, "An error in counting bnd indices occured!");
+
+
+    return res;
+}
+
 
 template <class Problem, class Hierarchy>
 void FOSLSProblHierarchy<Problem, Hierarchy>::Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out)
@@ -1150,10 +1205,19 @@ class InterpolationWithBNDforTranspose : public Operator
 {
 protected:
     Operator& P;
-    Array<int>& bnd_indices;
+    Array<int> * bnd_indices;
 public:
     InterpolationWithBNDforTranspose(Operator& P_, Array<int>& BndIndices_)
-        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(BndIndices_) {}
+        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(&BndIndices_) {}
+
+    InterpolationWithBNDforTranspose(Operator& P_, Array<int>* BndIndices_)
+        : Operator(P_.Height(), P_.Width()), P(P_)
+    {
+        MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
+        bnd_indices = new Array<int>(BndIndices_->Size());
+        for (int i = 0; i < bnd_indices->Size(); ++i)
+            (*bnd_indices)[i] = (*BndIndices_)[i];
+    }
 
     void Mult(const Vector &x, Vector &y) const override {P.Mult(x,y);}
 

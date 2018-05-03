@@ -1185,11 +1185,11 @@ void InterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y)
 {
     P.MultTranspose(x, y);
 
-    //bnd_indices.Print();
+    //bnd_indices->Print();
 
-    for (int i = 0; i < bnd_indices.Size(); ++i)
+    for (int i = 0; i < bnd_indices->Size(); ++i)
     {
-        int index = bnd_indices[i];
+        int index = (*bnd_indices)[i];
         y[index] = 0.0;
     }
 }

@@ -520,11 +520,8 @@ int main(int argc, char *argv[])
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
 
    Array<Operator*> P_tstp(1);
-   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
-
-   // testing SolveOp class
-   //Operator * FineOp_tstp =
-           //new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+   //P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
+   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOpWithBnd();
 
    // creating fine-level operator, smoother and coarse-level operator
    Array<Operator*> Ops_tstp(1);
