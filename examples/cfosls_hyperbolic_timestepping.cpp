@@ -466,6 +466,7 @@ int main(int argc, char *argv[])
    // creating fine and coarse time-stepping and interpolation operator between them
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
 
+#if 0
    /*
    // testing parallel solve vs separate subdomain solves
    Array<Vector*> exact_inputs(nslabs);
@@ -514,6 +515,7 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
    */
+#endif
 
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
 
@@ -572,6 +574,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+#if 0
    // checking SolveOp for the finest level (no coarsening)
    Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
 
@@ -625,8 +628,11 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 
+#endif
+
    Smoo_tstp[0] =
            new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
+
    CoarseOp_tstp =
            new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
    NullSmoo_tstp[0] = NULL;

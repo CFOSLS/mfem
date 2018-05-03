@@ -10,6 +10,9 @@
 #include <list>
 #include <unistd.h>
 
+#define NEW_INTERFACE
+
+
 //#include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
@@ -2513,6 +2516,53 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
 
+
+#ifdef NEW_INTERFACE
+
+    /*
+    // Hdiv-L2 formulation
+    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
+    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
+    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
+    //FOSLSCylProblem_HdivL2L2hyp * problem = new FOSLSCylProblem_HdivL2L2hyp
+            //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+    */
+
+    // Hdiv-H1 formulation
+    FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
+    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
+    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh_lvls[num_levels - 1]);
+
+    //FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
+            //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+    int nlevels = ref_levels + 1;
+    GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
+
+    FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy> * problems_hierarchy =
+            new FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+    Array<Operator*> P_mg(nlevels - 1);
+    Array<Operator*> Ops_mg(nlevels - 1);
+    Array<Operator*> Smoo_mg(nlevels - 1);
+    Operator* CoarseSolver_mg;
+
+    /*
+    // setting multigrid components from the older parts of the code
+    CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
+        Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(l);
+        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(l);
+    }
+
+    GeneralMultigrid * spacetime_mg =
+            new GeneralMultigrid(P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
+    */
+
+#endif // for #ifdef NEW_INTERFACE
+
 #ifndef COMPARE_MG
 
     CGSolver solver(comm);
@@ -2959,8 +3009,8 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
 
-    //MPI_Finalize();
-    //return 0;
+    MPI_Finalize();
+    return 0;
 #endif // for #ifndef COMPARE_MG
 
 #endif // for #ifdef OLD_CODE
