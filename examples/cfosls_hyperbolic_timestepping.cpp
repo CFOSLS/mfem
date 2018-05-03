@@ -533,7 +533,7 @@ int main(int argc, char *argv[])
    Ops_tstp[0] =
            new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
 
-   /*
+#if 0
    // checking SeqOp
    if (verbose)
        std::cout << "\n Sequential solve: \n";
@@ -560,7 +560,7 @@ int main(int argc, char *argv[])
        std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
                     / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
        for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
-           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-9)
+           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-8)
                std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
    }
 
@@ -570,11 +570,14 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 
-   */
+#endif
 
    // checking SolveOp for the finest level (no coarsening)
    Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
 
+   Vector testsol(fine_timestepping->GetGlobalProblemSize());
+
+   /*
    Vector input_tslab0(fine_timestepping->GetInitCondSize());
    input_tslab0 = 0.0;
 
@@ -582,8 +585,12 @@ int main(int argc, char *argv[])
    testrhs = 2.0;
    fine_timestepping->ZeroBndValues(testrhs);
 
-   Vector testsol(fine_timestepping->GetGlobalProblemSize());
    fine_timestepping->SequentialSolve(testrhs, input_tslab0, testsol, true);
+   */
+
+   testsol = 2.0;
+   BlockVector testsol_viewer(testsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   fine_timestepping->GetProblem(0)->ZeroBndValues(testsol_viewer.GetBlock(0));
 
    Vector Atestsol(fine_timestepping->GetGlobalProblemSize());
    Ops_tstp[0]->Mult(testsol, Atestsol);
@@ -591,25 +598,32 @@ int main(int argc, char *argv[])
    Vector check_testsol(fine_timestepping->GetGlobalProblemSize());
    FineOp_tstp->Mult(Atestsol, check_testsol);
 
-   check_testsol -= testsol;
+   Vector diff(fine_timestepping->GetGlobalProblemSize());
+   diff = check_testsol;
+   diff -= testsol;
 
-   BlockVector diff_viewer(check_testsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   BlockVector Atestsol_viewer(Atestsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   BlockVector check_testsol_viewer(check_testsol.GetData(), fine_timestepping->GetGlobalOffsets());
+   BlockVector diff_viewer(diff.GetData(), fine_timestepping->GetGlobalOffsets());
    for (int tslab = 0; tslab < fine_timestepping->Nslabs() ; ++tslab)
    {
        std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
                     / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
        for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
-           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-9)
-               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
+           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-8)
+               //std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
+               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j]
+                            << " val1 = " << testsol_viewer.GetBlock(tslab)[j]
+                            << ", val2 = " << check_testsol_viewer.GetBlock(tslab)[j]
+                            << ", Atestsol =  " << Atestsol_viewer.GetBlock(tslab)[j] << "\n";
    }
 
    if (verbose)
        std::cout << "|| testsol - A^(-1) * A * testsol through SeqOp and SolveOp || = " <<
-                    check_testsol.Norml2() / sqrt (check_testsol.Size()) << "\n";
+                    diff.Norml2() / sqrt (diff.Size()) << "\n";
 
    MPI_Finalize();
    return 0;
-
 
    Smoo_tstp[0] =
            new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);

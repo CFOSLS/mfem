@@ -589,7 +589,7 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
         //std::cout << "before \n";
         //y_viewer.GetBlock(tslab).Print();
 
-        // 2. yblock := yblock - InitCondOp_prevblock * x_prevblock
+        // 2. yblock := yblock + InitCondOp_prevblock * x_prevblock
         if (tslab > 0)
         {
             Problem * prevtslab_problem = timeslabs_problems[tslab - 1];
