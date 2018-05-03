@@ -231,7 +231,7 @@ int main(int argc, char *argv[])
     int numcurl         = 0;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 2;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -2562,15 +2562,14 @@ int main(int argc, char *argv[])
                     (*EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk])[j] + shift_tdofs_indices;
 
             shift_bnd_indices += EssBdrTrueDofs_HcurlFunct_lvls[l + 1][blk]->Size();
-            shift_tdofs_indices += P[l]->GetBlock(blk,blk).Width();
+            shift_tdofs_indices += P[num_levels - 1 - 1 - l]->GetBlock(blk,blk).Width();
         }
 
     }
 
-    EssBdrTrueDofs_HcurlFunct_lvls[1][0]->Print();
-    EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
-
-    coarse_bnd_indices_lvls[0]->Print();
+    //EssBdrTrueDofs_HcurlFunct_lvls[1][0]->Print();
+    //EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
+    //coarse_bnd_indices_lvls[0]->Print();
 
     Array<Operator*> P_mg(nlevels - 1);
     Array<Operator*> Ops_mg(nlevels - 1);
@@ -2582,8 +2581,8 @@ int main(int argc, char *argv[])
     for (int l = 0; l < num_levels - 1; ++l)
     {
         //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
-        P_mg = new InterpolationWithBNDforTranspose(
-                    *((MonolithicMultigrid*)prec)->GetInterpolation(l), *coarse_bnd_indices_lvls[l]);
+        P_mg[l] = new InterpolationWithBNDforTranspose(
+                    *((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
         Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
         Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
     }

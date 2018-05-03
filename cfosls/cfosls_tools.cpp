@@ -1144,8 +1144,8 @@ void GeneralMultigrid::MG_Cycle() const
 
         P_l.MultTranspose(residual_l, *residual[current_level + 1]);
 
-        std::cout << "residual after projecting onto coarser level, new MG \n";
-        residual[current_level + 1]->Print();
+        //std::cout << "residual after projecting onto coarser level, new MG \n";
+        //residual[current_level + 1]->Print();
 
         current_level++;
         MG_Cycle();
