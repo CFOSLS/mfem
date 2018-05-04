@@ -650,15 +650,15 @@ int main(int argc, char *argv[])
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
 
-#if 0
+   Vector input_tslab0(fine_timestepping->GetInitCondSize());
+   input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
+
 
    // first, to check, we solve with seq. solve on the finest level and compute the error
 
    if (verbose)
        std::cout << "Solving with sequential solve and checking the error \n";
 
-   Vector input_tslab0(fine_timestepping->GetInitCondSize());
-   input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
 
    //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
    //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(input_tslab0, temp_vec);
@@ -676,7 +676,6 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
    */
-#endif
 
    BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
@@ -714,16 +713,11 @@ int main(int argc, char *argv[])
    return 0;
 #endif
 
-   //implement bdr conditions check as a separate function and call it for mg_x0 and checksol to understand what is happening there
+#if 0
+   if (verbose)
+       std::cout << "Solving for a correction with 1 MG cycle \n";
 
-   fine_timestepping->ComputeBndError(checksol);
-
-   //fine_timestepping->ComputeError(checksol);
-
-   MPI_Finalize();
-   return 0;
-
-   // solving for the correction
+   // solving for the correction, only one MG cycle
    Vector mg_sol(spacetime_mg->Width());
    mg_sol = 0.0;
 
@@ -734,6 +728,76 @@ int main(int argc, char *argv[])
    mg_finalsol += mg_sol;
 
    fine_timestepping->ComputeError(mg_finalsol);
+
+   MPI_Finalize();
+   return 0;
+#endif
+
+   if (verbose)
+       std::cout << "Solving for a correction with multiple MG cycles \n";
+
+   double eps = 1.0e-6;
+
+   Vector mg_res(spacetime_mg->Width());
+   mg_res = mg_rhs;
+   double res0_norm = mg_res.Norml2() / sqrt (mg_res.Size());
+   if (verbose)
+       std::cout << "res0 norm = " << res0_norm << "\n";
+
+   Vector mg_finalsol(spacetime_mg->Width());
+   mg_finalsol = mg_x0;
+
+   // solving for the correction, only one MG cycle
+   Vector mg_sol(spacetime_mg->Width());
+   mg_sol = 0.0;
+
+   Vector mg_temp(spacetime_mg->Width());
+
+   bool converged = false;
+
+   double res_norm;
+   int iter = 0;
+   while (!converged && iter < 4)
+   {
+       ++iter;
+       // solve for a correction with a current residual
+       mg_sol = 0.0;
+       spacetime_mg->Mult(mg_res, mg_sol);
+
+       if (verbose)
+           std::cout << "Iteration " << iter << ": correction norm = " <<
+                        mg_sol.Norml2() / sqrt(mg_sol.Size()) << "\n";
+
+       // update the solution
+       mg_finalsol += mg_sol;
+
+       // update the residual
+       fine_timestepping->SeqOp(mg_sol, mg_temp);
+       mg_temp -= mg_res;
+       mg_temp *= -1;
+       fine_timestepping->ZeroBndValues(mg_temp);
+       //mg_temp.Print();
+
+       mg_res = mg_temp;
+
+       res_norm = mg_res.Norml2() / sqrt (mg_res.Size());
+
+       // check convergence
+       if (res_norm < eps * res0_norm)
+           converged = true;
+
+       // output convergence status
+       if (verbose)
+           std::cout << "Iteration " << iter << ": res_norm = " << res_norm << "\n";
+   }
+
+   if (verbose)
+       std::cout << "Convergence's been reached within " << iter << " iterations. \n";
+
+   fine_timestepping->ComputeError(mg_finalsol);
+
+   fine_timestepping->ComputeBndError(mg_finalsol);
+
 
    MPI_Finalize();
    return 0;

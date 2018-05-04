@@ -477,7 +477,7 @@ void TimeStepping<Problem>::ParallelSolve(const Vector& rhs, const Array<Vector*
                     "For the given timeslab initcond vector size mismatch the problem");
         Problem * tslab_problem = timeslabs_problems[tslab];
 
-        tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *init_vectors[tslab], *base_outputs[tslab]);
+        tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *init_vectors[tslab], *base_outputs[tslab], compute_error);
 
         if (compute_error)
             tslab_problem->ComputeErrorAtBase("top", *base_outputs[tslab]);
