@@ -638,23 +638,69 @@ int main(int argc, char *argv[])
    GeneralMultigrid * spacetime_mg =
            new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
-   Vector mg_x(spacetime_mg->Width());
-   mg_x = 0.0;
-
+   // creating initial guess which satisfies given initial condition for the starting time slab
+   Vector mg_x0(spacetime_mg->Width());
+   mg_x0 = 0.0;
    FOSLSCylProblem_HdivH1L2hyp * problem0 = fine_timestepping->GetProblem(0);
-   BlockVector mg_x_viewer(fine_timestepping->GetGlobalOffsets());
+   BlockVector mg_x0_viewer(mg_x0.GetData(), fine_timestepping->GetGlobalOffsets());
    BlockVector * exact_initcond0 = problem0->GetTrueInitialCondition();
-   mg_x_viewer.GetBlock(0) = *exact_initcond0;
+   mg_x0_viewer.GetBlock(0) = *exact_initcond0;
 
+   // creating rhs and computing the residual for the mg_x0
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
 
    Vector Ax0(spacetime_mg->Width());
-   Ops_tstp[0]->Mult(mg_x, Ax0);
+   Ops_tstp[0]->Mult(mg_x0, Ax0);
+
+   // first, to check, we solve with seq. solve on the finest level and compute the error
+   Vector input_tslab0(fine_timestepping->GetInitCondSize());
+   input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
+   //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
+   //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(input_tslab0, temp_vec);
+
+   Vector checksol(spacetime_mg->Width());
+   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
+
+   BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
+   checksol_viewer.GetBlock(0).Print();
+
+   fine_timestepping->ComputeBndError(checksol);
+
+   MPI_Finalize();
+   return 0;
+
+   // second, to check, we solve with seq. solve on the finest level for the correction
+   // and compute the error
 
    mg_rhs -= Ax0;
 
-   spacetime_mg->Mult(mg_rhs, mg_x);
+   //Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
+   input_tslab0 = 0.0;
+
+   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
+   checksol += mg_x0;
+
+   //implement bdr conditions check as a separate function and call it for mg_x0 and checksol to understand what is happening there
+
+   fine_timestepping->ComputeBndError(checksol);
+
+   //fine_timestepping->ComputeError(checksol);
+
+   MPI_Finalize();
+   return 0;
+
+   // solving for the correction
+   Vector mg_sol(spacetime_mg->Width());
+   mg_sol = 0.0;
+
+   spacetime_mg->Mult(mg_rhs, mg_sol);
+
+   Vector mg_finalsol(spacetime_mg->Width());
+   mg_finalsol = mg_x0;
+   mg_finalsol += mg_sol;
+
+   fine_timestepping->ComputeError(mg_finalsol);
 
    MPI_Finalize();
    return 0;

@@ -882,10 +882,72 @@ void FOSLSProblem::DistributeSolution() const
         grfuns[i]->Distribute(&(trueX->GetBlock(i)));
 }
 
-void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
+void FOSLSProblem::ComputeBndError(const Vector& vec) const
+{
+    const BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    for (int blk = 0; blk < fe_formul.Nunknowns(); ++blk)
+    {
+        ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+        int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+
+        MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+        switch (fe_formul.GetFormulation()->GetPair(blk).first)
+        {
+        case 0: // function coefficient
+            exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+            break;
+        case 1: // vector function coefficient
+            exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+            break;
+        default:
+            {
+                MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+            }
+            break;
+        }
+
+        Vector exsol_tdofs(pfes[blk]->TrueVSize());
+        exsol_pgfun->ParallelProject(exsol_tdofs);
+
+        Array<int> essbdr_attrs;
+        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+
+        Array<int> essbnd_tdofs;
+        pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
+        for (int i = 0; i < essbnd_tdofs.Size(); ++i)
+        {
+            int tdof = essbnd_tdofs[i];
+
+            double value_ex = exsol_tdofs[tdof];
+            double value_com = vec_viewer.GetBlock(blk)[tdof];
+
+            if (fabs(value_ex - value_com) > MYZEROTOL)
+            {
+                std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                          << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(blk)[tdof] << "\n";
+            }
+        }
+
+        delete exsol_pgfun;
+    }
+}
+
+
+void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd) const
 {
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    const BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+        grfuns[i]->Distribute(&(vec_viewer.GetBlock(i)));
 
     for (int blk = 0; blk < fe_formul.Nunknowns(); ++blk)
     {
@@ -947,31 +1009,7 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
         }
 
         if (checkbnd)
-        {
-            Vector exsol_tdofs(pfes[blk]->TrueVSize());
-            exsol_pgfun->ParallelProject(exsol_tdofs);
-
-            Array<int> essbdr_attrs;
-            ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
-
-            Array<int> essbnd_tdofs;
-            pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
-            for (int i = 0; i < essbnd_tdofs.Size(); ++i)
-            {
-                int tdof = essbnd_tdofs[i];
-
-                double value_ex = exsol_tdofs[tdof];
-                double value_com = trueX->GetBlock(blk)[tdof];
-
-                if (fabs(value_ex - value_com) > MYZEROTOL)
-                {
-                    std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
-                              << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
-                    std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(blk)[tdof] << "\n";
-                }
-            }
-
-        }
+            ComputeBndError(vec);
 
         if (verbose)
             std::cout << "component No. " << blk << ": || exact - proj || / || exact || = "
@@ -981,7 +1019,7 @@ void FOSLSProblem::ComputeError(bool verbose, bool checkbnd) const
 
     }
 
-    ComputeExtraError();
+    ComputeExtraError(vec);
 }
 
 void FOSLSProblem::ZeroBndValues(Vector& vec) const

@@ -26,6 +26,10 @@ protected:
     HypreParMatrix* Restrict_bot;
     HypreParMatrix* Restrict_top;
 
+    // used in CorrectFromInitCond
+    Vector* temp_vec1;
+    Vector* temp_vec2;
+
 protected:
     void ConstructTdofLink();
     void ConstructRestrictions();
@@ -40,6 +44,9 @@ public:
         Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
         init_cond_space = spacenames[init_cond_block];
         ConstructTdofLink();
+
+        temp_vec1 = new Vector(GlobalTrueProblemSize());
+        temp_vec2 = new Vector(GlobalTrueProblemSize());
     }
 
     FOSLSCylProblem(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
@@ -51,6 +58,9 @@ public:
         Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
         init_cond_space = spacenames[init_cond_block];
         tdofs_link = *cyl_hierarchy->GetTdofsLink(level, init_cond_space);
+
+        temp_vec1 = new Vector(GlobalTrueProblemSize());
+        temp_vec2 = new Vector(GlobalTrueProblemSize());
     }
 
     // (delete this?)
@@ -120,7 +130,7 @@ public:
         UpdateSolverPrec();
     }
 
-    void ComputeExtraError() const;
+    void ComputeExtraError(const Vector& vec) const override;
     //void CreateEstimator(int option); (not implemented)
 };
 
@@ -185,6 +195,9 @@ public:
     {}
 
 };
+
+// TODO: Add global_offsets as a member
+// TODO: This will avoid repeating computation for the global size and offsets
 
 template <class Problem> class TimeStepping
 {
@@ -262,7 +275,45 @@ public:
     void ComputeGlobalRhs(Vector& rhs);
 
     void ZeroBndValues(Vector& vec);
+
+    void ComputeError(const Vector& vec) const;
+
+    void ComputeBndError(const Vector& vec) const;
 };
+
+template <class Problem>
+void TimeStepping<Problem>::ComputeError(const Vector& vec) const
+{
+    const BlockVector vec_viewer(vec.GetData(), GetGlobalOffsets());
+    bool checkbnd;
+
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        Problem * prob = timeslabs_problems[tslab];
+        if (tslab == 0)
+            checkbnd = true;
+        else
+            checkbnd = false;
+        prob->ComputeError(vec_viewer.GetBlock(tslab), verbose, checkbnd);
+    }
+}
+
+template <class Problem>
+void TimeStepping<Problem>::ComputeBndError(const Vector& vec) const
+{
+    const BlockVector vec_viewer(vec.GetData(), GetGlobalOffsets());
+    timeslabs_problems[0]->ComputeBndError(vec_viewer.GetBlock(0));
+    /*
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        Problem * prob = timeslabs_problems[tslab];
+
+        prob->ComputeBndError(vec_viewer.GetBlock(tslab));
+    }
+    */
+}
+
+
 
 template <class Problem>
 void TimeStepping<Problem>::SetProblems(Array<Problem*> &timeslabs_problems_)
@@ -356,9 +407,14 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& ini
         Problem * tslab_problem = timeslabs_problems[tslab];
 
         if (tslab == 0)
+        {
             tslab_problem->Solve(rhs_viewer.GetBlock(tslab), init_vector, *base_outputs[tslab]);
+            tslab_problem->ComputeBndError(tslab_problem->GetSol());
+            tslab_problem->GetSol().Print();
+        }
         else
             tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *base_inputs[tslab], *base_outputs[tslab]);
+
 
         if (tslab < nslabs - 1)
         {
@@ -582,12 +638,10 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
         Problem * tslab_problem = timeslabs_problems[tslab];
 
         // 1. y_block = CFOSLSop * x_block
-        //x_viewer.GetBlock(tslab).Print();
         tslab_problem->GetOp()->Mult(x_viewer.GetBlock(tslab), y_viewer.GetBlock(tslab));
+        // zeroing bnd values is required here since the correct bnd values will be added
+        // afterwards from the "correction from the initial condition"
         tslab_problem->ZeroBndValues(y_viewer.GetBlock(tslab));
-
-        //std::cout << "before \n";
-        //y_viewer.GetBlock(tslab).Print();
 
         // 2. yblock := yblock + InitCondOp_prevblock * x_prevblock
         if (tslab > 0)
@@ -599,10 +653,6 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
 
-            //std::cout << "prev_initcond \n";
-            //prev_initcond->Print();
-
-            // FIXME: Memory allocation inside the correction function happens every time
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab), 1.0);
             delete prev_initcond;
         }

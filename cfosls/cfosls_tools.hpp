@@ -710,8 +710,11 @@ protected:
 
     void InitGrFuns();
     void DistributeSolution() const;
-    void ComputeError(bool verbose, bool checkbnd) const;
-    virtual void ComputeExtraError() const {}
+    void ComputeError(bool verbose, bool checkbnd) const
+    { ComputeError(*trueX, verbose, checkbnd);}
+    void ComputeExtraError() const
+    { ComputeExtraError(*trueX); }
+
 public:
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
@@ -800,6 +803,11 @@ public:
     }
 
     void ZeroBndValues(Vector& vec) const;
+
+    void ComputeError(const Vector& vec, bool verbose, bool checkbnd) const;
+    virtual void ComputeExtraError(const Vector& vec) const {}
+
+    void ComputeBndError(const Vector& vec) const;
 };
 
 template <class Problem, class Hierarchy>

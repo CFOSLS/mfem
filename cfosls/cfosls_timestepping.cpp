@@ -247,21 +247,25 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
 
 void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff)
 {
-    Vector * initcond_fullvec = new Vector(GlobalTrueProblemSize());
+    //Vector * initcond_fullvec = new Vector(GlobalTrueProblemSize());
+    //ConvertInitCndToFullVector(init_cond, *initcond_fullvec);
 
-    ConvertInitCndToFullVector(init_cond, *initcond_fullvec);
 
-    Vector * rhs_correction = new Vector(GlobalTrueProblemSize());
+    //Vector * rhs_correction = new Vector(GlobalTrueProblemSize());
+    //ConvertBdrCndIntoRhs(*initcond_fullvec, *rhs_correction);
 
-    ConvertBdrCndIntoRhs(*initcond_fullvec, *rhs_correction);
+    //*rhs_correction *= coeff;
+    //vec_out += *rhs_correction;
 
-    *rhs_correction *= coeff;
+    ConvertInitCndToFullVector(init_cond, *temp_vec1);
 
-    vec_out += *rhs_correction;
+    ConvertBdrCndIntoRhs(*temp_vec1, *temp_vec2);
 
-    delete initcond_fullvec;
-    delete rhs_correction;
+    *temp_vec2 *= coeff;
+    vec_out += *temp_vec2;
 
+    //delete initcond_fullvec;
+    //delete rhs_correction;
 }
 
 
@@ -334,7 +338,7 @@ void FOSLSCylProblem::ComputeErrorAtBase(const char * top_or_bot, const Vector& 
 }
 
 
-void FOSLSProblem_HdivL2L2hyp::ComputeExtraError() const
+void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
 
@@ -410,6 +414,8 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError() const
     if (verbose)
         std::cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                         << projection_error_S / norm_S << "\n";
+
+    delete S;
 }
 
 // prec_option:
