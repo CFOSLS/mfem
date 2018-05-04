@@ -104,7 +104,8 @@ void FOSLSCylProblem::ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) co
     }
 }
 
-void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const
+void FOSLSCylProblem::CorrectFromInitCnd(const Operator& op,
+                                            const Vector& bnd_tdofs_bot, Vector& vec) const
 {
     int init_cond_size = tdofs_link.size();// init_cond_size_lvls[lvl];
 
@@ -132,10 +133,12 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
 
     op.Mult(trueBnd, trueBndCor);
 
-    // rhs := rhs - op * initial_condition
-    *trueRhs -= trueBndCor;
+    // vec := vec - op * initial_condition
+    vec -= trueBndCor;
 
-    // correcting rhs entries for bdr tdofs
+    // correcting vec entries for bdr tdofs
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
     for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
     {
         Array<int> essbdr_attrs;
@@ -147,14 +150,14 @@ void FOSLSCylProblem::CorrectRhsFromInitCnd(const Operator& op, const Vector& bn
         for (int i = 0; i < ess_bnd_tdofs.Size(); ++i)
         {
             int tdof = ess_bnd_tdofs[i];
-            trueRhs->GetBlock(blk)[tdof] = trueBnd.GetBlock(blk)[tdof];
+            vec_viewer.GetBlock(blk)[tdof] = trueBnd.GetBlock(blk)[tdof];
         }
     }
 
 }
 
 void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
-                            Vector& bnd_tdofs_top) const
+                            Vector& bnd_tdofs_top, bool compute_error) const
 {
     // copying righthand side
     BlockVector rhs_viewer(rhs.GetData(), blkoffsets_true);
@@ -168,13 +171,13 @@ void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
     //bnd_tdofs_bot.Print();
 
     // correcting rhs with the given initial condition
-    CorrectRhsFromInitCnd(bnd_tdofs_bot);
+    CorrectFromInitCnd(bnd_tdofs_bot, *trueRhs);
 
     //std::cout << "after \n";
     //trueRhs->Print();
 
     // solving the system
-    FOSLSProblem::Solve(verbose);
+    FOSLSProblem::Solve(verbose, compute_error);
 
     // computing the outputs: full solution vector and tdofs
     // (for the possible next cylinder's initial condition at the top interface)
@@ -182,18 +185,18 @@ void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
     ExtractTopTdofs(*trueX, bnd_tdofs_top);
 }
 
-void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) const
+void FOSLSCylProblem::Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top, bool compute_error) const
 {
     // 1. compute trueRhs as assembled linear forms of the rhs
     ComputeAnalyticalRhs();
 
-    Solve(*trueRhs, bnd_tdofs_bot, bnd_tdofs_top);
+    Solve(*trueRhs, bnd_tdofs_bot, bnd_tdofs_top, compute_error);
 }
 
 void FOSLSCylProblem::Solve(const Vector& rhs, const Vector& bnd_tdofs_bot,
-                            Vector& sol, Vector& bnd_tdofs_top) const
+                            Vector& sol, Vector& bnd_tdofs_top, bool compute_error) const
 {
-    Solve(rhs, bnd_tdofs_bot, bnd_tdofs_top);
+    Solve(rhs, bnd_tdofs_bot, bnd_tdofs_top, compute_error);
 
     BlockVector viewer_out(sol.GetData(), blkoffsets_true);
     viewer_out = *trueX;

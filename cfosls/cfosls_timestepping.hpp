@@ -70,18 +70,18 @@ public:
 
     ParMeshCyl * GetParMeshCyl() {return &pmeshcyl;}
 
-    void Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top) const;
-    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top) const;
-    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top) const;
+    void Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top, bool compute_error) const;
+    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top, bool compute_error) const;
+    void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top, bool compute_error) const;
 
 protected:
     void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
     void ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) const;
 public:
-    void CorrectRhsFromInitCnd(const Vector& bnd_tdofs_bot) const
-    { CorrectRhsFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot);}
+    void CorrectFromInitCnd(const Vector& bnd_tdofs_bot, Vector& vec) const
+    { CorrectFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot, vec);}
 
-    void CorrectRhsFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
+    void CorrectFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot, Vector& vec) const;
 
     std::vector<std::pair<int,int> > * GetTdofsLink() {return &tdofs_link;}
     int GetInitCondSize() const { return tdofs_link.size();}
@@ -104,7 +104,6 @@ public:
     void ExtractAtBase(const char * top_or_bot, const Vector &x, Vector& base_tdofs) const;
     Vector& ExtractAtBase(const char * top_or_bot, const Vector &x) const;
 
-    //void ComputeRhsCorrectionFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot) const;
 };
 
 class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
@@ -408,12 +407,12 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& ini
 
         if (tslab == 0)
         {
-            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), init_vector, *base_outputs[tslab]);
-            tslab_problem->ComputeBndError(tslab_problem->GetSol());
-            tslab_problem->GetSol().Print();
+            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), init_vector, *base_outputs[tslab], compute_error);
+            //tslab_problem->ComputeBndError(tslab_problem->GetSol());
+            //tslab_problem->GetSol().Print();
         }
         else
-            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *base_inputs[tslab], *base_outputs[tslab]);
+            tslab_problem->Solve(rhs_viewer.GetBlock(tslab), *base_inputs[tslab], *base_outputs[tslab], compute_error);
 
 
         if (tslab < nslabs - 1)

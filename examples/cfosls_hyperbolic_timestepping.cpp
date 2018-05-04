@@ -650,36 +650,69 @@ int main(int argc, char *argv[])
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
 
-   Vector Ax0(spacetime_mg->Width());
-   Ops_tstp[0]->Mult(mg_x0, Ax0);
+#if 0
 
    // first, to check, we solve with seq. solve on the finest level and compute the error
+
+   if (verbose)
+       std::cout << "Solving with sequential solve and checking the error \n";
+
    Vector input_tslab0(fine_timestepping->GetInitCondSize());
    input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
+
    //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
    //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(input_tslab0, temp_vec);
 
    Vector checksol(spacetime_mg->Width());
+   BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
 
+   /*
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
-   checksol_viewer.GetBlock(0).Print();
+   //checksol_viewer.GetBlock(0).Print();
 
    fine_timestepping->ComputeBndError(checksol);
 
    MPI_Finalize();
    return 0;
+   */
+#endif
 
+   BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
+   fine_timestepping->ComputeGlobalRhs(mg_rhs);
+   fine_timestepping->GetProblem(0)->CorrectFromInitCnd(input_tslab0, mg_rhs_viewer.GetBlock(0));
+   fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
+
+#if 0
    // second, to check, we solve with seq. solve on the finest level for the correction
    // and compute the error
 
-   mg_rhs -= Ax0;
+   if (verbose)
+       std::cout << "Solving for a correction with sequential solve and checking the final error \n";
+
 
    //Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
    input_tslab0 = 0.0;
 
-   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
-   checksol += mg_x0;
+   Vector checksol2(spacetime_mg->Width());
+   BlockVector checksol2_viewer(checksol2.GetData(), fine_timestepping->GetGlobalOffsets());
+   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol2, false);
+   checksol2 += mg_x0;
+
+   fine_timestepping->ComputeBndError(checksol2);
+
+   fine_timestepping->ComputeError(checksol2);
+
+   Vector diff(checksol2_viewer.GetBlock(0).Size());
+   diff = checksol2_viewer.GetBlock(0);
+   diff -= checksol_viewer.GetBlock(0);
+   if (verbose)
+       std::cout << "|| diff of checksols || = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
+   //diff.Print();
+
+   MPI_Finalize();
+   return 0;
+#endif
 
    //implement bdr conditions check as a separate function and call it for mg_x0 and checksol to understand what is happening there
 

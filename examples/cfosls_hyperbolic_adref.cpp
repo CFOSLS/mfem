@@ -1421,7 +1421,7 @@ int main(int argc, char *argv[])
           cout << "Number of unknowns: " << global_dofs << endl;
        }
 
-       problem->Solve(verbose);
+       problem->Solve(verbose, true);
 
        // 17. Send the solution by socket to a GLVis server.
        if (visualization)

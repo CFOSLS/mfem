@@ -721,7 +721,7 @@ public:
 
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
-    void Solve(bool verbose) const;
+    void Solve(bool verbose, bool compute_error) const;
     void BuildSystem(bool verbose);
     void Update();
 

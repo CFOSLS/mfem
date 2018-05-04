@@ -1063,7 +1063,7 @@ void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
     }
 }
 
-void FOSLSProblem::Solve(bool verbose) const
+void FOSLSProblem::Solve(bool verbose, bool compute_error) const
 {
     MFEM_ASSERT(solver_initialized && system_assembled, "Either solver is not initialized or system is not assembled \n");
 
@@ -1097,7 +1097,7 @@ void FOSLSProblem::Solve(bool verbose) const
     DistributeSolution();
 
     bool checkbnd = false;
-    ComputeError(verbose, checkbnd);
+    ComputeError(compute_error, checkbnd);
 }
 
 GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
