@@ -35,6 +35,14 @@ protected:
     void ConstructRestrictions();
 
 public:
+    ~FOSLSCylProblem()
+    {
+        delete Restrict_bot;
+        delete Restrict_top;
+        delete temp_vec1;
+        delete temp_vec2;
+    }
+
     FOSLSCylProblem (ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, bool verbose_)
         : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
@@ -195,32 +203,42 @@ public:
 
 };
 
-// TODO: Add global_offsets as a member
-// TODO: This will avoid repeating computation for the global size and offsets
-
 template <class Problem> class TimeStepping
 {
 protected:
+    Array<int> global_offsets;
     Array<Problem*> timeslabs_problems;
     Array<Vector*>  base_inputs;
     Array<Vector*>  base_outputs;
     bool verbose;
     bool problems_initialized;
     int nslabs;
+
+protected:
+    void SetProblems(Array<Problem*>& timeslabs_problems_);
+
 public:
+    ~TimeStepping()
+    {
+        for (int i = 0; i < base_inputs.Size(); ++i)
+            delete base_inputs[i];
+        for (int i = 0; i < base_outputs.Size(); ++i)
+            delete base_outputs[i];
+    }
+
     TimeStepping(Array<Problem*>& timeslabs_problems_, bool verbose_)
         : timeslabs_problems(0), base_inputs(0), base_outputs(0),
           verbose(verbose_), problems_initialized(false)
     {
         SetProblems(timeslabs_problems_);
+        global_offsets.SetSize(nslabs + 1);
+
+        global_offsets[0] = 0;
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+            global_offsets[tslab + 1] = timeslabs_problems[tslab]->GlobalTrueProblemSize();
+        global_offsets.PartialSum();
     }
 
-    TimeStepping(bool verbose_)
-        : timeslabs_problems(0), base_inputs(0), base_outputs(0),
-          verbose(verbose_), problems_initialized(false)
-    {}
-
-    void SetProblems(Array<Problem*>& timeslabs_problems_);
 
     void SequentialSolve(const Vector &init_vector, bool compute_error);
     void SequentialSolve(const Vector& rhs, const Vector &init_vector, bool compute_error);
@@ -249,20 +267,14 @@ public:
         return false;
     }
 
-    Array<int>& GetGlobalOffsets() const;
+    const Array<int>& GetGlobalOffsets() const {return global_offsets;}
 
     Problem * GetProblem(int i) {return timeslabs_problems[i];}
 
     Array<Vector*> & ConvertFullvecIntoArray(const Vector& x);
     void ConvertArrayIntoFullvec(const Array<Vector*>& vec_inputs, Vector& out);
 
-    int GetGlobalProblemSize() const
-    {
-        int res = 0;
-        for (int tslab = 0; tslab < nslabs; ++tslab )
-            res += timeslabs_problems[tslab]->GlobalTrueProblemSize();
-        return res;
-    }
+    int GetGlobalProblemSize() const { return global_offsets[nslabs]; }
 
     int GetInitCondSize() const
     { return timeslabs_problems[0]->GetInitCondSize();}
@@ -513,6 +525,7 @@ Array<Vector*>& TimeStepping<Problem>::GetSolutions()
     return *res;
 }
 
+/*
 template <class Problem>
 Array<int>& TimeStepping<Problem>::GetGlobalOffsets() const
 {
@@ -528,6 +541,7 @@ Array<int>& TimeStepping<Problem>::GetGlobalOffsets() const
 
     return *res;
 }
+*/
 
 /*
 // FIXME: Why not converting into a BlockVector?
@@ -834,7 +848,7 @@ template <class Problem> class TimeSteppingSolveOp : public BlockOperator
 protected:
     int nslabs;
     TimeStepping<Problem> &time_stepping;
-    Array<int>& global_offsets;
+    const Array<int>& global_offsets;
     bool verbose;
     Vector init_vec;
 public:
@@ -869,7 +883,7 @@ template <class Problem> class TimeSteppingSeqOp : public BlockOperator
 {
     int nslabs;
     TimeStepping<Problem> &time_stepping;
-    Array<int>& global_offsets;
+    const Array<int>& global_offsets;
     bool verbose;
 public:
     TimeSteppingSeqOp(TimeStepping<Problem> &time_stepping_, bool verbose_)

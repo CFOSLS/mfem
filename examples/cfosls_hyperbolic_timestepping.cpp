@@ -398,11 +398,11 @@ int main(int argc, char *argv[])
        problems[l]->Solve(verbose);
    */
 
-   int nslabs = 2;
+   int nslabs = 4;//2;
+   double slab_tau = 1.0/16;//0.125;
+   int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
    Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
-   double slab_tau = 0.125;
-   int slab_width = 4; // in time steps (as time intervals) withing a single time slab
 
    if (verbose)
    {
