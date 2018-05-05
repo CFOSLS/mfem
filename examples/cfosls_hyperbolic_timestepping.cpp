@@ -798,6 +798,31 @@ int main(int argc, char *argv[])
 
    fine_timestepping->ComputeBndError(mg_finalsol);
 
+   Vector diff(spacetime_mg->Width());
+   diff = mg_finalsol;
+   diff -= checksol;
+
+   BlockVector diff_viewer(diff.GetData(), fine_timestepping->GetGlobalOffsets());
+
+   for (int tslab = 0; tslab < nslabs; ++tslab)
+   {
+       if (verbose)
+           std::cout << "tslab = " << tslab << "\n";
+
+       BlockVector diff_blk_viewer(diff_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
+       for (int blk = 0; blk < 2; ++blk)
+       {
+           if (verbose)
+           {
+               std::cout << "|| diff of checksol and mg sol ||, blk = " << blk << ") = " <<
+                            diff_blk_viewer.GetBlock(blk).Norml2() / sqrt(diff_blk_viewer.GetBlock(blk).Size()) << "\n";
+           }
+
+       }
+       //if (verbose)
+           //std::cout << "|| diff of checksol and mg sol ||(tslab = " << tslab << ") = " <<
+                        //diff_viewer.GetBlock(tslab).Norml2() / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
+   }
 
    MPI_Finalize();
    return 0;
