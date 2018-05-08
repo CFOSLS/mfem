@@ -398,8 +398,8 @@ int main(int argc, char *argv[])
        problems[l]->Solve(verbose);
    */
 
-   int nslabs = 4;//2;
-   double slab_tau = 1.0/16;//0.125;
+   int nslabs = 2;//4;//2;
+   double slab_tau = 0.125;//1.0/16;//0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
    Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
@@ -520,8 +520,8 @@ int main(int argc, char *argv[])
    TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
 
    Array<Operator*> P_tstp(1);
-   //P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
-   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOpWithBnd();
+   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
+   //P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOpWithBnd();
 
    // creating fine-level operator, smoother and coarse-level operator
    Array<Operator*> Ops_tstp(1);
@@ -667,6 +667,15 @@ int main(int argc, char *argv[])
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
 
+   Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", checksol);
+   std::cout << "botbases of output from seq,. solve outside mg \n";
+   for (int tslab = 0; tslab < nslabs; ++tslab)
+   {
+       std::cout << "tslab = " << tslab << "\n";
+       debug_botbases[tslab]->Print();
+   }
+
+
    /*
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
    //checksol_viewer.GetBlock(0).Print();
@@ -745,6 +754,8 @@ int main(int argc, char *argv[])
        std::cout << "res0 norm = " << res0_norm << "\n";
 
    Vector mg_finalsol(spacetime_mg->Width());
+   BlockVector mg_finalsol_viewer(mg_finalsol.GetData(), fine_timestepping->GetGlobalOffsets());
+
    mg_finalsol = mg_x0;
 
    // solving for the correction, only one MG cycle
@@ -760,6 +771,16 @@ int main(int argc, char *argv[])
    while (!converged && iter < 4)
    {
        ++iter;
+
+       Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", mg_res);
+       std::cout << "botbases of input residual for MG Mult \n";
+       for (int tslab = 0; tslab < nslabs; ++tslab)
+       {
+           std::cout << "tslab = " << tslab << "\n";
+           debug_botbases[tslab]->Print();
+       }
+
+
        // solve for a correction with a current residual
        mg_sol = 0.0;
        spacetime_mg->Mult(mg_res, mg_sol);
@@ -810,13 +831,23 @@ int main(int argc, char *argv[])
            std::cout << "tslab = " << tslab << "\n";
 
        BlockVector diff_blk_viewer(diff_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
-       for (int blk = 0; blk < 2; ++blk)
+       BlockVector checksol_blk_viewer(checksol_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
+       BlockVector finalsol_blk_viewer(mg_finalsol_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
+       for (int blk = 0; blk < fe_formulat->Nunknowns(); ++blk)
        {
            if (verbose)
            {
-               std::cout << "|| diff of checksol and mg sol ||, blk = " << blk << ") = " <<
+               std::cout << "|| diff of checksol and mg sol ||, blk = " << blk << " = " <<
                             diff_blk_viewer.GetBlock(blk).Norml2() / sqrt(diff_blk_viewer.GetBlock(blk).Size()) << "\n";
            }
+
+           for (int i = 0; i < diff_blk_viewer.GetBlock(blk).Size(); ++i)
+               if (fabs(diff_blk_viewer.GetBlock(blk)[i]) > 1.0e-9)
+               {
+                   std::cout << "entry " << i << ": checksol = " << checksol_blk_viewer.GetBlock(blk)[i] << ", "
+                             << "finalsol = " << finalsol_blk_viewer.GetBlock(blk)[i] << ", "
+                             << "diff = " << diff_blk_viewer.GetBlock(blk)[i] << "\n";
+               }
 
        }
        //if (verbose)
