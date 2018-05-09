@@ -73,6 +73,23 @@ void FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x, Ve
     }
 }
 
+void FOSLSCylProblem::SetAtBase(const char * top_or_bot, const Vector &base_tdofs, Vector& vec) const
+{
+    MFEM_ASSERT(strcmp(top_or_bot,"bot") == 0 || strcmp(top_or_bot,"top") == 0,
+                "In SetAtBase() top_or_bot must equal 'top' or 'bot'! \n");
+
+    MFEM_ASSERT(base_tdofs.Size() == GetInitCondSize(), "Incorrect input size in SetAtBase()");
+
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+    for (unsigned int i = 0; i < tdofs_link.size(); ++i)
+    {
+        int tdof = ( strcmp(top_or_bot,"bot") == 0 ? tdofs_link[i].first : tdofs_link[i].second);
+        vec_viewer.GetBlock(init_cond_block)[tdof] = base_tdofs[i];
+    }
+
+}
+
+
 Vector& FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x) const
 {
     Vector * res = new Vector(tdofs_link.size());

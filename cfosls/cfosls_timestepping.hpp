@@ -112,6 +112,8 @@ public:
     void ExtractAtBase(const char * top_or_bot, const Vector &x, Vector& base_tdofs) const;
     Vector& ExtractAtBase(const char * top_or_bot, const Vector &x) const;
 
+    void SetAtBase(const char * top_or_bot, const Vector &base_tdofs, Vector& vec) const;
+
 };
 
 class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
@@ -214,6 +216,8 @@ protected:
     bool problems_initialized;
     int nslabs;
 
+    Vector * vecbase_temp;
+
 protected:
     void SetProblems(Array<Problem*>& timeslabs_problems_);
 
@@ -224,6 +228,8 @@ public:
             delete base_inputs[i];
         for (int i = 0; i < base_outputs.Size(); ++i)
             delete base_outputs[i];
+
+        delete vecbase_temp;
     }
 
     TimeStepping(Array<Problem*>& timeslabs_problems_, bool verbose_)
@@ -237,6 +243,8 @@ public:
         for (int tslab = 0; tslab < nslabs; ++tslab)
             global_offsets[tslab + 1] = timeslabs_problems[tslab]->GlobalTrueProblemSize();
         global_offsets.PartialSum();
+
+        vecbase_temp = new Vector(timeslabs_problems[0]->GetInitCondSize());
     }
 
 
@@ -279,7 +287,8 @@ public:
     int GetInitCondSize() const
     { return timeslabs_problems[0]->GetInitCondSize();}
 
-    void SeqOp(const Vector& x, Vector& y) const;
+    void SeqOp(const Vector& x, Vector& y) const { SeqOp(x, NULL, y);}
+    void SeqOp(const Vector& x, const Vector* init_bot, Vector& y) const;
 
     int Nslabs() const {return nslabs;}
 
@@ -292,6 +301,8 @@ public:
     void ComputeBndError(const Vector& vec) const;
 
     Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const;
+
+    void UpdateInterfaceFromPrev(Vector& vec) const;
 };
 
 template <class Problem>
@@ -309,6 +320,23 @@ Array<Vector*>& TimeStepping<Problem>::ExtractAtBases(const char * top_or_bot, c
     }
 
     return *res;
+}
+
+template <class Problem>
+void TimeStepping<Problem>::UpdateInterfaceFromPrev(Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), global_offsets);
+
+    for (int tslab = 1; tslab < nslabs; ++tslab)
+    {
+        Problem * prev_problem = timeslabs_problems[tslab - 1];
+        Problem * problem = timeslabs_problems[tslab];
+
+        *vecbase_temp = prev_problem->ExtractAtBase("top", vec_viewer.GetBlock(tslab - 1));
+
+        problem->SetAtBase("bot", *vecbase_temp, vec_viewer.GetBlock(tslab));
+    }
+
 }
 
 
@@ -681,9 +709,8 @@ Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
     return *res;
 }
 
-// implicitly assumes that the init condition for the zeroth timeslab is exactly 0
 template <class Problem>
-void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
+void TimeStepping<Problem>::SeqOp(const Vector& x, const Vector *init_bot, Vector& y) const
 {
     MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
     MFEM_ASSERT(x.Size() == GetGlobalProblemSize(), "Input vector size mismatch the global problem size!");
@@ -718,6 +745,9 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab), 1.0);
             delete prev_initcond;
         }
+        else
+            if (init_bot)
+                tslab_problem->CorrectFromInitCond(*init_bot, y_viewer.GetBlock(tslab), 1.0);
 
         //std::cout << "after \n";
         //y_viewer.GetBlock(tslab).Print();
@@ -725,7 +755,6 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
     }
 
 }
-
 
 // classes for time-stepping related operators used as components for constructing GeneralMultigrid instance
 
@@ -998,21 +1027,25 @@ public:
         }
         */
 
+        /*
         const BlockVector x_viewer(x.GetData(), global_offsets);
         for (int tslab = 0; tslab < nslabs; ++tslab)
         {
             std::cout << "input x in SeqOp, tslab = " << tslab << ": norm = " <<
                          x_viewer.GetBlock(tslab).Norml2() / sqrt (x_viewer.GetBlock(tslab).Size()) << "\n";
         }
+        */
 
         time_stepping.SeqOp(x,y);
 
+        /*
         BlockVector y_viewer(y.GetData(), global_offsets);
         for (int tslab = 0; tslab < nslabs; ++tslab)
         {
             std::cout << "output x in SeqOp, tslab = " << tslab << ": norm = " <<
                          y_viewer.GetBlock(tslab).Norml2() / sqrt (y_viewer.GetBlock(tslab).Size()) << "\n";
         }
+        */
 
         /*
         Array<Vector*> & debug_botbases2 = time_stepping.ExtractAtBases("bot", y);

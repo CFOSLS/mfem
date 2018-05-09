@@ -398,8 +398,8 @@ int main(int argc, char *argv[])
        problems[l]->Solve(verbose);
    */
 
-   int nslabs = 2;//4;//2;
-   double slab_tau = 0.125;//1.0/16;//0.125;
+   int nslabs = 4;//4;//2;
+   double slab_tau = 1.0/16;//1.0/16;//0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
    Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
@@ -651,10 +651,12 @@ int main(int argc, char *argv[])
    // creating rhs and computing the residual for the mg_x0
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
+   BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
+   fine_timestepping->ZeroBndValues(mg_rhs);
 
    Vector input_tslab0(fine_timestepping->GetInitCondSize());
    input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
-
+   //fine_timestepping->GetProblem(0)->SetAtBase("bot", input_tslab0, mg_rhs_viewer.GetBlock(0));
 
    // first, to check, we solve with seq. solve on the finest level and compute the error
 
@@ -668,6 +670,38 @@ int main(int argc, char *argv[])
    Vector checksol(spacetime_mg->Width());
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
+
+   Vector checkres(spacetime_mg->Width());
+   BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
+
+   fine_timestepping->SeqOp(checksol, &input_tslab0, checkres);
+   checkres -= mg_rhs;
+   checkres *= -1;
+
+   for (int tslab = 0; tslab < nslabs; ++tslab)
+   {
+       std::cout << "checkres, tslab = " << tslab << "\n";
+       std::cout << "norm = " << checkres_viewer.GetBlock(tslab).Norml2() /
+                    sqrt (checkres_viewer.GetBlock(tslab).Size()) << "\n";
+
+       //for (int i = 0; i < checkres_viewer.GetBlock(tslab).Size(); ++i)
+           //if (fabs(checkres_viewer.GetBlock(tslab)[i]) > 1.0e-10)
+               //std::cout << "entry " << i << ": res value = " << checkres_viewer.GetBlock(tslab)[i] << "\n";
+
+       //std::cout << "values of res at bottom interface: \n";
+       //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", checkres_viewer.GetBlock(tslab));
+       //vec.Print();
+   }
+
+   fine_timestepping->ComputeError(checksol);
+   fine_timestepping->ComputeBndError(checksol);
+
+   //double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
+   //if (verbose)
+       //std::cout << "checkres norm = " << checkres_norm << "\n";
+
+   //MPI_Finalize();
+   //return 0;
 
    /*
    Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", checksol);
@@ -690,7 +724,6 @@ int main(int argc, char *argv[])
    return 0;
    */
 
-   BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
    fine_timestepping->GetProblem(0)->CorrectFromInitCnd(input_tslab0, mg_rhs_viewer.GetBlock(0));
    fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
@@ -777,6 +810,7 @@ int main(int argc, char *argv[])
    {
        ++iter;
 
+       /*
        Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", mg_res);
        std::cout << "botbases of input residual for MG Mult \n";
        for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -784,6 +818,7 @@ int main(int argc, char *argv[])
            std::cout << "tslab = " << tslab << "\n";
            debug_botbases[tslab]->Print();
        }
+       */
 
        if (iter > 1)
            for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -803,9 +838,13 @@ int main(int argc, char *argv[])
            std::cout << "Iteration " << iter << ": correction norm = " <<
                         mg_sol.Norml2() / sqrt(mg_sol.Size()) << "\n";
 
+       // removing discrepancy at the interfaces between time slabs (taking values from below)
+       fine_timestepping->UpdateInterfaceFromPrev(mg_sol);
+
        // update the solution
        mg_finalsol += mg_sol;
 
+       /*
        std::cout << "Checking jump on the interface between time slabs \n";
 
        Vector& vec1 = fine_timestepping->GetProblem(0)->ExtractAtBase("top", mg_finalsol_viewer.GetBlock(0));
@@ -816,15 +855,32 @@ int main(int argc, char *argv[])
        diff -= vec2;
 
        std::cout << "Discrepancy at the interface, norm = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
+       */
 
        // update the residual
        fine_timestepping->SeqOp(mg_sol, mg_temp);
        mg_temp -= mg_res;
        mg_temp *= -1;
-       //fine_timestepping->ZeroBndValues(mg_temp);
+       // FIXME: This zeroing is too much on paper, but without it error at the boundary is reported
+       fine_timestepping->ZeroBndValues(mg_temp);
        //mg_temp.Print();
 
        mg_res = mg_temp;
+
+       for (int tslab = 0; tslab < nslabs; ++tslab)
+       {
+           std::cout << "mg_res after iterate, tslab = " << tslab << "\n";
+           std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
+                        sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
+
+           //for (int i = 0; i < mg_res_viewer.GetBlock(tslab).Size(); ++i)
+               //if (fabs(mg_res_viewer.GetBlock(tslab)[i]) > 1.0e-10)
+                   //std::cout << "entry " << i << ": res value = " << mg_res_viewer.GetBlock(tslab)[i] << "\n";
+
+           //std::cout << "values of res at bottom interface: \n";
+           //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", mg_res_viewer.GetBlock(tslab));
+           //vec.Print();
+       }
 
        res_norm = mg_res.Norml2() / sqrt (mg_res.Size());
 
@@ -837,11 +893,17 @@ int main(int argc, char *argv[])
        {
            std::cout << "Iteration " << iter << ": res_norm = " << res_norm << "\n";
            fine_timestepping->ComputeError(mg_finalsol);
+           fine_timestepping->ComputeBndError(mg_finalsol);
        }
    }
 
    if (verbose)
-       std::cout << "Convergence's been reached within " << iter << " iterations. \n";
+   {
+       if (converged)
+            std::cout << "Convergence's been reached within " << iter << " iterations. \n";
+       else
+           std::cout << "Convergence has not been reached within " << iter << " iterations. \n";
+   }
 
    fine_timestepping->ComputeError(mg_finalsol);
 
