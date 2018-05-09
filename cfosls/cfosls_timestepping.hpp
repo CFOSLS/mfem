@@ -739,8 +739,8 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, const Vector *init_bot, Vecto
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
 
-            std::cout << "prev_initcond norm = " <<
-                         prev_initcond->Norml2() / sqrt(prev_initcond->Size()) << "\n";
+            //std::cout << "prev_initcond norm = " <<
+                         //prev_initcond->Norml2() / sqrt(prev_initcond->Size()) << "\n";
 
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab), 1.0);
             delete prev_initcond;

@@ -542,7 +542,7 @@ BlockVector * FOSLSProblem::GetTrueInitialCondition()
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
 
-    blkoffsets_true.Print();
+    //blkoffsets_true.Print();
 
     BlockVector * truebnd = new BlockVector(blkoffsets_true);
     *truebnd = 0.0;
@@ -870,10 +870,10 @@ void FOSLSProblem::AssembleSystem(bool verbose)
        }
    }
 
-   if (verbose)
-        cout << "Final saddle point matrix and rhs assembled \n";
-    MPI_Comm comm = pfes[0]->GetComm();
-    MPI_Barrier(comm);
+   //if (verbose)
+       //cout << "Final saddle point matrix and rhs assembled \n";
+   MPI_Comm comm = pfes[0]->GetComm();
+   MPI_Barrier(comm);
 }
 
 void FOSLSProblem::DistributeSolution() const
@@ -1097,7 +1097,8 @@ void FOSLSProblem::Solve(bool verbose, bool compute_error) const
     DistributeSolution();
 
     bool checkbnd = false;
-    ComputeError(compute_error, checkbnd);
+    if (compute_error)
+        ComputeError(verbose, checkbnd);
 }
 
 GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,

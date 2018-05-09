@@ -360,8 +360,8 @@ int main(int argc, char *argv[])
    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
 
-   FOSLSCylProblem_HdivH1L2hyp * problem = new FOSLSCylProblem_HdivH1L2hyp
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   //FOSLSCylProblem_HdivH1L2hyp * problem = new FOSLSCylProblem_HdivH1L2hyp
+           //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    //problem->Solve(verbose);
 
@@ -398,11 +398,11 @@ int main(int argc, char *argv[])
        problems[l]->Solve(verbose);
    */
 
-   int nslabs = 4;//4;//2;
-   double slab_tau = 1.0/16;//1.0/16;//0.125;
+   int nslabs = 2;//4;//2;
+   double slab_tau = 0.125;//1.0/16;//0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
-   Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
+   //Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
 
    if (verbose)
    {
@@ -418,7 +418,7 @@ int main(int argc, char *argv[])
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
 
        //timeslabs_problems[tslab] = new FOSLSCylProblem_HdivL2L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
-       timeslabs_problems[tslab] = new FOSLSCylProblem_HdivH1L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       //timeslabs_problems[tslab] = new FOSLSCylProblem_HdivH1L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
 
        tinit_tslab += slab_tau * slab_width;
    }
@@ -661,7 +661,7 @@ int main(int argc, char *argv[])
    // first, to check, we solve with seq. solve on the finest level and compute the error
 
    if (verbose)
-       std::cout << "Solving with sequential solve and checking the error \n";
+       std::cout << "\n\nSolving with sequential solve and checking the error \n";
 
 
    //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
@@ -680,7 +680,12 @@ int main(int argc, char *argv[])
 
    for (int tslab = 0; tslab < nslabs; ++tslab)
    {
-       std::cout << "checkres, tslab = " << tslab << "\n";
+       if (verbose)
+       {
+           std::cout << "checkres, tslab = " << tslab << "\n";
+       }
+
+       // FIXME: This is correct only in serial
        std::cout << "norm = " << checkres_viewer.GetBlock(tslab).Norml2() /
                     sqrt (checkres_viewer.GetBlock(tslab).Size()) << "\n";
 
@@ -787,9 +792,18 @@ int main(int argc, char *argv[])
    Vector mg_res(spacetime_mg->Width());
    BlockVector mg_res_viewer(mg_res.GetData(), fine_timestepping->GetGlobalOffsets());
    mg_res = mg_rhs;
-   double res0_norm = mg_res.Norml2() / sqrt (mg_res.Size());
+
+   int local_size = mg_res.Size();
+   int global_size = 0;
+   MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+   double local_res0_norm_sq = mg_res.Norml2() * mg_res.Norml2();
+   double global_res0_norm = 0.0;
+   MPI_Allreduce(&local_res0_norm_sq, &global_res0_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+   global_res0_norm = sqrt (global_res0_norm / global_size);
+
    if (verbose)
-       std::cout << "res0 norm = " << res0_norm << "\n";
+       std::cout << "res0 norm = " << global_res0_norm << "\n";
 
    Vector mg_finalsol(spacetime_mg->Width());
    BlockVector mg_finalsol_viewer(mg_finalsol.GetData(), fine_timestepping->GetGlobalOffsets());
@@ -804,9 +818,9 @@ int main(int argc, char *argv[])
 
    bool converged = false;
 
-   double res_norm;
    int iter = 0;
-   while (!converged && iter < 4)
+   int mg_max_iter = 10;
+   while (!converged && iter < mg_max_iter)
    {
        ++iter;
 
@@ -834,9 +848,17 @@ int main(int argc, char *argv[])
        mg_sol = 0.0;
        spacetime_mg->Mult(mg_res, mg_sol);
 
+
+       double local_corr_norm_sq = mg_sol.Norml2() * mg_sol.Norml2();
+       double global_corr_norm = 0;
+
+       MPI_Allreduce(&local_corr_norm_sq, &global_corr_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+       global_corr_norm = sqrt (global_corr_norm / global_size);
+
        if (verbose)
            std::cout << "Iteration " << iter << ": correction norm = " <<
-                        mg_sol.Norml2() / sqrt(mg_sol.Size()) << "\n";
+                        global_corr_norm << "\n";
 
        // removing discrepancy at the interfaces between time slabs (taking values from below)
        fine_timestepping->UpdateInterfaceFromPrev(mg_sol);
@@ -869,7 +891,9 @@ int main(int argc, char *argv[])
 
        for (int tslab = 0; tslab < nslabs; ++tslab)
        {
-           std::cout << "mg_res after iterate, tslab = " << tslab << "\n";
+           if (verbose)
+                std::cout << "mg_res after iterate, tslab = " << tslab << "\n";
+           // FIXME: Works only in serial correctly, but it's only a debuggint print
            std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
                         sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
 
@@ -882,20 +906,27 @@ int main(int argc, char *argv[])
            //vec.Print();
        }
 
-       res_norm = mg_res.Norml2() / sqrt (mg_res.Size());
+       double local_res_norm_sq = mg_res.Norml2() * mg_res.Norml2();
+       double global_res_norm = 0.0;
+
+       MPI_Allreduce(&local_res_norm_sq, &global_res_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+       global_res_norm = sqrt (global_res_norm / global_size);
 
        // check convergence
-       if (res_norm < eps * res0_norm)
+       if (global_res_norm < eps * global_res0_norm)
            converged = true;
 
        // output convergence status
        if (verbose)
        {
-           std::cout << "Iteration " << iter << ": res_norm = " << res_norm << "\n";
-           fine_timestepping->ComputeError(mg_finalsol);
-           fine_timestepping->ComputeBndError(mg_finalsol);
+           std::cout << "Iteration " << iter << ": res_norm = " << global_res_norm << "\n";
        }
+
+       //fine_timestepping->ComputeError(mg_finalsol);
+       //fine_timestepping->ComputeBndError(mg_finalsol);
    }
+
+   std::cout << "Got outside of the loop \n";
 
    if (verbose)
    {
@@ -906,7 +937,6 @@ int main(int argc, char *argv[])
    }
 
    fine_timestepping->ComputeError(mg_finalsol);
-
    fine_timestepping->ComputeBndError(mg_finalsol);
 
    Vector diff(spacetime_mg->Width());

@@ -863,7 +863,9 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     TrueP_lvls.SetSize(nlevels - 1);
     for (int l = 0; l < nlevels; ++l )
     {
+        //std::cout << "I am here, verbose = " << verbose << "\n";
         problems_lvls[l] = new Problem(hierarchy, l, bdr_conditions, fe_formulation, precond_option, verbose);
+        //std::cout << "I created a problem, l = " << l << "\n";
         if (l > 0)
         {
             Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
