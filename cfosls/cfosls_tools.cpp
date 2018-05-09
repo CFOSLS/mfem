@@ -1171,7 +1171,8 @@ void GeneralMultigrid::MG_Cycle() const
         Operator_l->Mult(correction_l, help);
         residual_l -= help;
 
-        //std::cout << "new residual after presmoothing, new MG \n";
+        std::cout << "new residual after presmoothing, new MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
 

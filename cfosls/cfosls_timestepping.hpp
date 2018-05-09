@@ -433,6 +433,7 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& ini
 
     const BlockVector rhs_viewer(rhs.GetData(), GetGlobalOffsets());
 
+    /*
     std::cout << "rhs, block 0 in the call to SequentialSolve \n";
     rhs_viewer.GetBlock(0).Print();
 
@@ -446,22 +447,25 @@ void TimeStepping<Problem>::SequentialSolve(const Vector& rhs, const Vector& ini
         std::cout << "tslab = " << tslab << "\n";
         debug_botbases2[tslab]->Print();
     }
+    */
 
 
     for (int tslab = 0; tslab < nslabs; ++tslab )
     {
         Problem * tslab_problem = timeslabs_problems[tslab];
 
+        /*
         if (tslab == 0)
             init_vector.Print();
         else
             base_inputs[tslab]->Print();
+        */
 
         if (tslab == 0)
         {
             tslab_problem->Solve(rhs_viewer.GetBlock(tslab), init_vector, *base_outputs[tslab], compute_error);
 
-            base_outputs[tslab]->Print();
+            //base_outputs[tslab]->Print();
             //tslab_problem->ComputeBndError(tslab_problem->GetSol());
             //tslab_problem->GetSol().Print();
         }
@@ -708,6 +712,9 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, Vector& y) const
             Vector * prev_initcond = new Vector(prevtslab_problem->GetInitCondSize());
             prevtslab_problem->ExtractAtBase("top",x_viewer.GetBlock(tslab - 1), *prev_initcond);
 
+            std::cout << "prev_initcond norm = " <<
+                         prev_initcond->Norml2() / sqrt(prev_initcond->Size()) << "\n";
+
             tslab_problem->CorrectFromInitCond(*prev_initcond, y_viewer.GetBlock(tslab), 1.0);
             delete prev_initcond;
         }
@@ -923,6 +930,7 @@ void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
     //init_vec.Print();
     MFEM_ASSERT(init_vec.Normlinf() < MYZEROTOL, "Initvec must be 0 here but it is not!");
 
+    /*
     Array<Vector*> & debug_botbases = time_stepping.ExtractAtBases("bot", x);
     std::cout << "botbases of input x in SolveOp Mult \n";
     for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -930,10 +938,31 @@ void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
         std::cout << "tslab = " << tslab << "\n";
         debug_botbases[tslab]->Print();
     }
+    */
 
     bool compute_error = false;
+
+    /*
+    const BlockVector x_viewer(x.GetData(), global_offsets);
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        std::cout << "input x in SolveOp, tslab = " << tslab << ": norm =  " <<
+                     x_viewer.GetBlock(tslab).Norml2() / sqrt (x_viewer.GetBlock(tslab).Size()) << "\n";
+    }
+    */
+
     time_stepping.SequentialSolve(x, init_vec, y, compute_error);
 
+    /*
+    BlockVector y_viewer(y.GetData(), global_offsets);
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        std::cout << "output y in SolveOp, tslab = " << tslab << ": norm =  " <<
+                     y_viewer.GetBlock(tslab).Norml2() / sqrt (y_viewer.GetBlock(tslab).Size()) << "\n";
+    }
+    */
+
+    /*
     Array<Vector*> & debug_botbases2 = time_stepping.ExtractAtBases("bot", y);
     std::cout << "botbases of output y in SolveOp Mult \n";
     for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -941,7 +970,7 @@ void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
         std::cout << "tslab = " << tslab << "\n";
         debug_botbases2[tslab]->Print();
     }
-
+    */
 }
 
 template <class Problem> class TimeSteppingSeqOp : public BlockOperator
@@ -959,6 +988,7 @@ public:
 
     void Mult(const Vector &x, Vector &y) const override
     {
+        /*
         Array<Vector*> & debug_botbases = time_stepping.ExtractAtBases("bot", x);
         std::cout << "botbases of input x in SeqOp Mult \n";
         for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -966,7 +996,25 @@ public:
             std::cout << "tslab = " << tslab << "\n";
             debug_botbases[tslab]->Print();
         }
+        */
+
+        const BlockVector x_viewer(x.GetData(), global_offsets);
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+        {
+            std::cout << "input x in SeqOp, tslab = " << tslab << ": norm = " <<
+                         x_viewer.GetBlock(tslab).Norml2() / sqrt (x_viewer.GetBlock(tslab).Size()) << "\n";
+        }
+
         time_stepping.SeqOp(x,y);
+
+        BlockVector y_viewer(y.GetData(), global_offsets);
+        for (int tslab = 0; tslab < nslabs; ++tslab)
+        {
+            std::cout << "output x in SeqOp, tslab = " << tslab << ": norm = " <<
+                         y_viewer.GetBlock(tslab).Norml2() / sqrt (y_viewer.GetBlock(tslab).Size()) << "\n";
+        }
+
+        /*
         Array<Vector*> & debug_botbases2 = time_stepping.ExtractAtBases("bot", y);
         std::cout << "botbases of output y in SeqOp Mult \n";
         for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -974,12 +1022,112 @@ public:
             std::cout << "tslab = " << tslab << "\n";
             debug_botbases2[tslab]->Print();
         }
+        */
     }
 
     Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const
     { return time_stepping.ExtractAtBases(top_or_bot, fullvec); }
 
 };
+
+template <class Problem> class TSTSpecialSolveOp : public BlockOperator
+{
+protected:
+    int nslabs;
+    TimeStepping<Problem> &time_stepping;
+    const Array<int>& global_offsets;
+    bool verbose;
+    Vector * init_vec;
+    Vector * init_vec2;
+public:
+    TSTSpecialSolveOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
+        : BlockOperator(time_stepping_.GetGlobalOffsets()),
+          nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
+          global_offsets(time_stepping_.GetGlobalOffsets()), verbose(verbose_)
+    {
+        init_vec = new Vector(time_stepping.GetInitCondSize());
+        *init_vec = 0.0;
+
+        init_vec2 = new Vector(time_stepping.GetInitCondSize());
+        *init_vec2 = 0.0;
+    }
+
+    void Mult(const Vector &x, Vector &y) const override;
+
+    Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const
+    { return time_stepping.ExtractAtBases(top_or_bot, fullvec); }
+};
+
+// it is implicitly assumed that the problem is solved with zero initial condition for the first time slab
+template <class Problem>
+void TSTSpecialSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
+{
+    // init_vec is actually always 0 in this call
+    MFEM_ASSERT(init_vec->Normlinf() < MYZEROTOL, "Initvec must be 0 here but it is not!");
+
+    bool compute_error = false;
+
+    const BlockVector x_viewer(x.GetData(), global_offsets);
+    BlockVector y_viewer(y.GetData(), global_offsets);
+
+    /*
+    Array<Vector*> & debug_botbases = ExtractAtBases("bot", x);
+    std::cout << "botbases of x in the call to TSTSpecialSolveOp Mult \n";
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        std::cout << "tslab = " << tslab << "\n";
+        debug_botbases[tslab]->Print();
+    }
+    */
+
+
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        Problem * problem = time_stepping.GetProblem(tslab);
+
+        FOSLSFEFormulation& fe_formul = problem->GetFEformulation();
+        int index = fe_formul.GetFormulation()->GetUnknownWithInitCnd();
+        SpaceName space_name = fe_formul.GetFormulation()->GetSpaceName(index);
+
+        if (tslab > 0)
+        {
+            problem->ExtractAtBase("bot", x_viewer.GetBlock(tslab), *init_vec);
+        }
+
+        //std::cout << "init_vec for tslab = " << tslab << "\n";
+        //init_vec->Print();
+
+        problem->Solve(x_viewer.GetBlock(tslab), *init_vec,
+                       y_viewer.GetBlock(tslab), *init_vec2, compute_error);
+
+        if (time_stepping.NeedSignSwitch(space_name))
+            *init_vec2 *= -1;
+
+        if (tslab > 0)
+        {
+            problem->ExtractAtBase("bot", x_viewer.GetBlock(tslab), *init_vec);
+
+            *init_vec += *init_vec2;
+        }
+    }
+
+    /*
+
+    Array<Vector*> & debug_botbases2 = ExtractAtBases("bot", y);
+    std::cout << "botbases of y in the call to TSTSpecialSolveOp Mult \n";
+    for (int tslab = 0; tslab < nslabs; ++tslab)
+    {
+        std::cout << "tslab = " << tslab << "\n";
+        debug_botbases2[tslab]->Print();
+    }
+    */
+
+
+
+    *init_vec = 0.0;
+}
+
+
 
 /*
 template <class Problem> class TwoGridTimeST

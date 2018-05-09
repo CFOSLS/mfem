@@ -632,6 +632,8 @@ int main(int argc, char *argv[])
 
    CoarseOp_tstp =
            new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
+   //CoarseOp_tstp =
+           //new TSTSpecialSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
    NullSmoo_tstp[0] = NULL;
 
    // finally, creating general multigrid instance
@@ -667,6 +669,7 @@ int main(int argc, char *argv[])
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
 
+   /*
    Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", checksol);
    std::cout << "botbases of output from seq,. solve outside mg \n";
    for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -674,6 +677,7 @@ int main(int argc, char *argv[])
        std::cout << "tslab = " << tslab << "\n";
        debug_botbases[tslab]->Print();
    }
+   */
 
 
    /*
@@ -748,6 +752,7 @@ int main(int argc, char *argv[])
    double eps = 1.0e-6;
 
    Vector mg_res(spacetime_mg->Width());
+   BlockVector mg_res_viewer(mg_res.GetData(), fine_timestepping->GetGlobalOffsets());
    mg_res = mg_rhs;
    double res0_norm = mg_res.Norml2() / sqrt (mg_res.Size());
    if (verbose)
@@ -780,6 +785,15 @@ int main(int argc, char *argv[])
            debug_botbases[tslab]->Print();
        }
 
+       if (iter > 1)
+           for (int tslab = 0; tslab < nslabs; ++tslab)
+           {
+               std::cout << "mg_res full tslab = " << tslab << "\n";
+               std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
+                            sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
+               //mg_res_viewer.GetBlock(tslab).Print();
+           }
+
 
        // solve for a correction with a current residual
        mg_sol = 0.0;
@@ -792,11 +806,22 @@ int main(int argc, char *argv[])
        // update the solution
        mg_finalsol += mg_sol;
 
+       std::cout << "Checking jump on the interface between time slabs \n";
+
+       Vector& vec1 = fine_timestepping->GetProblem(0)->ExtractAtBase("top", mg_finalsol_viewer.GetBlock(0));
+       Vector& vec2 = fine_timestepping->GetProblem(1)->ExtractAtBase("bot", mg_finalsol_viewer.GetBlock(1));
+
+       Vector diff(vec1.Size());
+       diff = vec1;
+       diff -= vec2;
+
+       std::cout << "Discrepancy at the interface, norm = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
+
        // update the residual
        fine_timestepping->SeqOp(mg_sol, mg_temp);
        mg_temp -= mg_res;
        mg_temp *= -1;
-       fine_timestepping->ZeroBndValues(mg_temp);
+       //fine_timestepping->ZeroBndValues(mg_temp);
        //mg_temp.Print();
 
        mg_res = mg_temp;
@@ -809,7 +834,10 @@ int main(int argc, char *argv[])
 
        // output convergence status
        if (verbose)
+       {
            std::cout << "Iteration " << iter << ": res_norm = " << res_norm << "\n";
+           fine_timestepping->ComputeError(mg_finalsol);
+       }
    }
 
    if (verbose)
