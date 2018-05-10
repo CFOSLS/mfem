@@ -163,6 +163,8 @@ public:
 
 enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
 
+class FOSLSFormulation;
+
 // a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
 class GeneralHierarchy
 {
@@ -313,6 +315,12 @@ public:
     }
 
     int Nlevels() const {return num_lvls;}
+
+    const Array<int>& ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    BlockOperator* ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
+                                           const Array<int>& row_offsets, const Array<int> &col_offsets);
+    BlockOperator* ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
+                                           const Array<int>& row_offsets, const Array<int> &col_offsets);
 };
 
 class GeneralCylHierarchy : public GeneralHierarchy
@@ -498,11 +506,11 @@ protected:
 public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
-    virtual Array<SpaceName>& GetSpacesDescriptor() const = 0;
+    virtual const Array<SpaceName>& GetSpacesDescriptor() const = 0;
 
     SpaceName GetSpaceName(int i) const
     {
-        Array<SpaceName>& space_names = GetSpacesDescriptor();
+        const Array<SpaceName>& space_names = GetSpacesDescriptor();
         return space_names[i];
     }
 
@@ -543,7 +551,7 @@ public:
 
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
-    virtual Array<SpaceName>& GetSpacesDescriptor() const override;
+    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 0;}
 };
@@ -558,7 +566,7 @@ public:
 
     virtual FOSLS_test * GetTest() override {return &test;}
     virtual void InitBlkStructure() override;
-    virtual Array<SpaceName>& GetSpacesDescriptor() const override;
+    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 };
@@ -692,7 +700,7 @@ protected:
     bool verbose;
 
 protected:
-    void InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, Array<SpaceName> &spaces_descriptor);
+    void InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, const Array<SpaceName> &spaces_descriptor);
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
@@ -810,6 +818,86 @@ public:
     void ComputeBndError(const Vector& vec) const;
 };
 
+
+class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_HdivL2L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+    //void CreateEstimator(int option); (not implemented)
+};
+
+class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_HdivH1L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+};
+
+/*
+class FOSLSProblem_HcurlH1hyp : virtual public FOSLSProblem
+{
+protected:
+public:
+    FOSLSProblem_HcurlH1hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HcurlH1hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+};
+*/
+
+
 template <class Problem, class Hierarchy>
 class FOSLSProblHierarchy
 {
@@ -871,7 +959,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
             Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
             Array<int>& blkoffsets_true_col = problems_lvls[l]->GetTrueOffsets();
 
-            Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+            const Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
 
             TrueP_lvls[l - 1] = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
 

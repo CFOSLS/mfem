@@ -926,8 +926,6 @@ int main(int argc, char *argv[])
        //fine_timestepping->ComputeBndError(mg_finalsol);
    }
 
-   std::cout << "Got outside of the loop \n";
-
    if (verbose)
    {
        if (converged)

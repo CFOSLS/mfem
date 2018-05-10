@@ -258,7 +258,7 @@ void CFOSLSFormulation_HdivL2Hyper::InitBlkStructure()
     blk_structure[1] = std::make_pair<int,int>(-1,-1);
 }
 
-Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor() const
+const Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor() const
 {
     Array<SpaceName> * res = new Array<SpaceName>(numblocks);
 
@@ -289,7 +289,7 @@ void CFOSLSFormulation_HdivH1Hyper::InitBlkStructure()
     blk_structure[2] = std::make_pair<int,int>(-1,-1);
 }
 
-Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() const
+const Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() const
 {
     Array<SpaceName> * res = new Array<SpaceName>(numblocks);
 
@@ -299,8 +299,6 @@ Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() const
 
     return *res;
 }
-
-
 
 CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
     : FOSLSFEFormulation(formulation, fe_order)
@@ -484,7 +482,7 @@ void FOSLSProblem::InitForms()
     }
 }
 
-void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, Array<SpaceName> &spaces_descriptor)
+void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, const Array<SpaceName> &spaces_descriptor)
 {
     pfes.SetSize(fe_formul.Nblocks());
 
@@ -1099,6 +1097,197 @@ void FOSLSProblem::Solve(bool verbose, bool compute_error) const
     bool checkbnd = false;
     if (compute_error)
         ComputeError(verbose, checkbnd);
+}
+
+void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
+{
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+    ParGridFunction * sigma = grfuns[0];
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(*sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+    }
+
+    ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
+    Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
+    Cblock->Assemble();
+    Cblock->Finalize();
+    HypreParMatrix * C = Cblock->ParallelAssemble();
+
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(Hdiv_space, L2_space);
+    Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*test->GetB()));
+    Bblock->Assemble();
+    Bblock->Finalize();
+    HypreParMatrix * B = Bblock->ParallelAssemble();
+
+    Vector bTsigma(C->Height());
+    B->Mult(trueX->GetBlock(0),bTsigma);
+
+    Vector trueS(C->Height());
+
+    CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+    ParGridFunction * S = new ParGridFunction(L2_space);
+    S->Distribute(trueS);
+
+    delete Cblock;
+    delete Bblock;
+    delete B;
+    delete C;
+
+    double err_S = S->ComputeL2Error(*test->GetU(), irs);
+    double norm_S = ComputeGlobalLpNorm(2, *test->GetU(), pmesh, irs);
+    if (verbose)
+    {
+        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
+                     err_S / norm_S << "\n";
+    }
+
+    ParGridFunction * S_exact = new ParGridFunction(L2_space);
+    S_exact->ProjectCoefficient(*test->GetU());
+
+    double projection_error_S = S_exact->ComputeL2Error(*test->GetU(), irs);
+
+    if (verbose)
+        std::cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
+                        << projection_error_S / norm_S << "\n";
+
+    delete S;
+}
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
+void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        if (prec_option == 2)
+            std::cout << "ADS(A) for H(div) \n";
+        else
+             std::cout << "Diag(A) for H(div) or H1vec \n";
+
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
+
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver * invA;
+    if (prec_option == 2)
+        invA = new HypreADS(A, pfes[0]);
+    else // using Diag(A);
+        invA = new HypreDiagScale(A);
+
+    invA->iterative_mode = false;
+
+    Solver * invS = new HypreBoomerAMG(*Schur);
+    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
+void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        std::cout << "Diag(A) for H(div) \n";
+        std::cout << "BoomerAMG(C) for H1 \n";
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for the Lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver * invA;
+    invA = new HypreDiagScale(A);
+    invA->iterative_mode = false;
+
+    Solver * invC = new HypreBoomerAMG(C);
+    ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+    ((HypreBoomerAMG*)invC)->iterative_mode = false;
+
+    Solver * invS = new HypreBoomerAMG(*Schur);
+    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
 }
 
 GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
@@ -2129,6 +2318,40 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
     } // end of loop over levels
 
 }
+
+const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+{
+    Array<int> * res = new Array<int>(space_names.Size() + 1);
+
+    (*res)[0] = 0;
+    for (int i = 0; i < space_names.Size(); ++i)
+        (*res)[i + 1] = GetSpace(space_names[i], level)->TrueVSize();
+    res->PartialSum();
+
+    return *res;
+}
+
+
+BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
+                                                         const Array<int>& row_offsets, const Array<int>& col_offsets)
+{
+    BlockOperator * res = new BlockOperator(row_offsets, col_offsets);
+
+    for (int i = 0; i < space_names.Size(); ++i)
+        res->SetDiagonalBlock(i, GetTruePspace(space_names[i], level), 1.0);
+
+    return res;
+}
+
+
+
+BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
+                                                         const Array<int>& row_offsets, const Array<int>& col_offsets)
+{
+    const Array<SpaceName> & space_names  = formul.GetSpacesDescriptor();
+    return ConstructTruePforFormul(level, space_names, row_offsets, col_offsets);
+}
+
 
 /*
 void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)

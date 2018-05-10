@@ -12,7 +12,6 @@
 
 #define NEW_INTERFACE
 
-
 //#include "cfosls_testsuite.hpp"
 
 // (de)activates solving of the discrete global problem
@@ -2533,14 +2532,28 @@ int main(int argc, char *argv[])
     FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
     BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh_lvls[num_levels - 1]);
 
+    /*
+    // Hcurl-H1 formulation (no prec really)
+    NOT IMPLEMENTED
+    FOSLSFormulation * formulat = new CFOSLSFormulation_HcurlH1Hyper (dim, numsol, verbose);
+    FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HcurlH1Hyper(*formulat, feorder);
+    BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HcurlH1_Hyper(*pmesh_lvls[num_levels - 1]);
+    */
+
     //FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
             //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
     int nlevels = ref_levels + 1;
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
 
-    //FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy> * problems_hierarchy =
-            //new FOSLSProblHierarchy<FOSLSProblem_HdivH1L2hyp, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
+    Array<SpaceName> space_names_hcurlh1(2);
+    space_names_hcurlh1[0] = SpaceName::HCURL;
+    space_names_hcurlh1[1] = SpaceName::H1;
+
+    //typedef FOSLSProblem FOSLSProblem_HcurlH1hyp;
+    //MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "NEW_INTERFACE works only when S is from H1");
+    //FOSLSProblHierarchy<FOSLSProblem_HcurlH1hyp, GeneralHierarchy> * problems_hierarchy =
+            //new FOSLSProblHierarchy<FOSLSProblem_HcurlH1hyp, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
 
     std::vector< Array<int>* > coarse_bnd_indices_lvls(num_levels);
     for (int l = 0; l < num_levels - 1; ++l)
@@ -2576,13 +2589,22 @@ int main(int argc, char *argv[])
     Array<Operator*> Smoo_mg(nlevels - 1);
     Operator* CoarseSolver_mg;
 
+    std::vector<const Array<int> *> offsets(nlevels);
+    offsets[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hcurlh1);
+
     // setting multigrid components from the older parts of the code
     CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
     for (int l = 0; l < num_levels - 1; ++l)
     {
         //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
+        //P_mg[l] = new InterpolationWithBNDforTranspose(
+                    //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
+        offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l, space_names_hcurlh1);
+        offsets[l]->Print();
+        offsets[l + 1]->Print();
         P_mg[l] = new InterpolationWithBNDforTranspose(
-                    *((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
+                    *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]),
+                *coarse_bnd_indices_lvls[l]);
         Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
         Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
     }
@@ -2590,6 +2612,7 @@ int main(int argc, char *argv[])
     GeneralMultigrid * GeneralMGprec =
             new GeneralMultigrid(P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
 
+    /*
     // comparing the new class with the older one
     if (verbose)
         std::cout << "\nComparing geometric MG with old and new interfaces \n";
@@ -2649,6 +2672,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+    */
 
 #endif // for #ifdef NEW_INTERFACE
 
@@ -2663,7 +2687,6 @@ int main(int argc, char *argv[])
     solver.SetMaxIter(max_num_iter);
     solver.SetOperator(*MainOp);
 
-    /*
 #ifdef NEW_INTERFACE
     if (with_prec)
         solver.SetPreconditioner(*GeneralMGprec);
@@ -2671,7 +2694,6 @@ int main(int argc, char *argv[])
     if (with_prec)
         solver.SetPreconditioner(*prec);
 #endif
-    */
 
     if (with_prec)
         solver.SetPreconditioner(*prec);

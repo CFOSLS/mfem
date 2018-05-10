@@ -49,7 +49,7 @@ public:
           pmeshcyl(Pmeshcyl), cyl_hierarchy(NULL),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
-        Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        const Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
         init_cond_space = spacenames[init_cond_block];
         ConstructTdofLink();
 
@@ -63,7 +63,7 @@ public:
           pmeshcyl(*Hierarchy.GetPmeshcyl(level)), cyl_hierarchy(&Hierarchy),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
-        Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        const Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
         init_cond_space = spacenames[init_cond_block];
         tdofs_link = *cyl_hierarchy->GetTdofsLink(level, init_cond_space);
 
@@ -115,59 +115,6 @@ public:
     void SetAtBase(const char * top_or_bot, const Vector &base_tdofs, Vector& vec) const;
 
 };
-
-class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
-{
-protected:
-    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
-public:
-    FOSLSProblem_HdivL2L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-    FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-    void ComputeExtraError(const Vector& vec) const override;
-    //void CreateEstimator(int option); (not implemented)
-};
-
-class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
-{
-protected:
-    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
-public:
-    FOSLSProblem_HdivH1L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-    FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-};
-
 
 class FOSLSCylProblem_HdivL2L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
 {
