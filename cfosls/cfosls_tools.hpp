@@ -189,9 +189,15 @@ protected:
     std::vector<HypreParMatrix*> TrueP_Hcurl_lvls;
     std::vector<HypreParMatrix*> TrueP_Hdivskew_lvls;
 
+    std::vector<const HypreParMatrix*> DivfreeDops_lvls;
+
+    bool divfreedops_constructed;
+
 public:
 
     GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
+
+    void ConstructDivfreeDops();
 
     void RefineAndCopy(int lvl, ParMesh* pmesh)
     {
@@ -312,6 +318,12 @@ public:
         }
 
         return NULL;
+    }
+
+    const HypreParMatrix * GetDivfreeDop(int level)
+    {
+        MFEM_ASSERT(divfreedops_constructed, "Divfree discrete operators were not constructed!");
+        return DivfreeDops_lvls[level];
     }
 
     int Nlevels() const {return num_lvls;}
@@ -1299,6 +1311,75 @@ public:
 
 };
 
+/// The operator x -> R*A*P*x.
+class RAPBlockHypreOperator : public BlockOperator
+{
+protected:
+   int nblocks;
+   Array2D<HypreParMatrix*> op_blocks;
+   // Cannot declare them as const because GetBlock is non-const in MFEM
+   BlockOperator & Rt;
+   BlockOperator & A;
+   BlockOperator & P;
+   const Array<int>& offsets;
+   mutable Vector Px;
+   mutable Vector APx;
+
+public:
+   /// Construct the RAP operator given R^T, A and P as a block operators
+   /// with each block being a HypreParMatrix
+   RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_, const Array<int>& Offsets);
+
+   /// Operator application.
+   virtual void Mult(const Vector & x, Vector & y) const
+   { P.Mult(x, Px); A.Mult(Px, APx); Rt.MultTranspose(APx, y); }
+
+   /// Application of the transpose.
+   virtual void MultTranspose(const Vector & x, Vector & y) const
+   { Rt.Mult(x, APx); A.MultTranspose(APx, Px); P.MultTranspose(Px, y); }
+};
+
+class BlkInterpolationWithBNDforTranspose : public BlockOperator
+{
+protected:
+    int nblocks;
+    BlockOperator& P;
+    const Array<int>& row_offsets;
+    const Array<int>& col_offsets;
+    Array<int> * bnd_indices;
+public:
+    BlkInterpolationWithBNDforTranspose(BlockOperator& P_, Array<int>& BndIndices_,
+                                        const Array<int>& Row_offsets, const Array<int>& Col_offsets)
+        : BlockOperator(Row_offsets, Col_offsets),
+          nblocks(P_.NumRowBlocks()), P(P_),
+          row_offsets(Row_offsets), col_offsets(Col_offsets),
+          bnd_indices(&BndIndices_)
+    {
+        for (int i = 0; i < nblocks; ++i)
+            SetBlock(i,i, &(P.GetBlock(i,i)));
+    }
+
+    BlkInterpolationWithBNDforTranspose(BlockOperator& P_, Array<int>* BndIndices_,
+                                        const Array<int>& Row_offsets, const Array<int>& Col_offsets)
+        : BlockOperator(Row_offsets, Col_offsets),
+          nblocks(P_.NumRowBlocks()), P(P_),
+          row_offsets(Row_offsets), col_offsets(Col_offsets)
+    {
+        for (int i = 0; i < nblocks; ++i)
+            SetBlock(i,i, &(P.GetBlock(i,i)));
+
+        MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
+        bnd_indices = new Array<int>(BndIndices_->Size());
+        for (int i = 0; i < bnd_indices->Size(); ++i)
+            (*bnd_indices)[i] = (*BndIndices_)[i];
+    }
+
+    void Mult(const Vector &x, Vector &y) const override {P.Mult(x,y);}
+
+    void MultTranspose(const Vector &x, Vector &y) const override;
+};
+
+
 class InterpolationWithBNDforTranspose : public Operator
 {
 protected:
@@ -1546,6 +1627,7 @@ public:
     void Reset() {MFEM_ABORT("Not implemented \n");}
 };
 
+HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop);
 
 } // for namespace mfem
 

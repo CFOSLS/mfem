@@ -212,6 +212,8 @@ double divsigmaTemplate(const Vector& xt);
 
 template<double (*S)(const Vector & xt) > double SnonhomoTemplate(const Vector& xt);
 
+//BlockOperator * Convert(const BlockOperator& orig_op, const HypreParMatrix& divfree_dop, const Array<int> &offsets);
+
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -2239,6 +2241,8 @@ int main(int argc, char *argv[])
     A->CopyRowStarts();
     A->CopyColStarts();
 
+    /*
+    // I think since we use a modified divfree operator, we don't need this anymore
     Eliminate_ib_block(*A, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Hcurl[0] );
     HypreParMatrix * temphpmat = A->Transpose();
     Eliminate_ib_block(*temphpmat, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Hcurl[0] );
@@ -2250,6 +2254,15 @@ int main(int argc, char *argv[])
     diag.MoveDiagonalFirst();
     delete temphpmat;
     Eliminate_bb_block(*A, *EssBdrTrueDofs_Hcurl[0]);
+
+    {
+        SparseMatrix diag;
+        A->GetDiag(diag);
+        diag.MoveDiagonalFirst();
+        diag.Print();
+    }
+
+    */
 
     /*
     ParBilinearForm *Checkblock(new ParBilinearForm(C_space_lvls[0]));
@@ -2532,6 +2545,9 @@ int main(int argc, char *argv[])
     FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
     BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh_lvls[num_levels - 1]);
 
+    FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
+            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
     /*
     // Hcurl-H1 formulation (no prec really)
     NOT IMPLEMENTED
@@ -2545,6 +2561,7 @@ int main(int argc, char *argv[])
 
     int nlevels = ref_levels + 1;
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
+    hierarchy->ConstructDivfreeDops();
 
     Array<SpaceName> space_names_hcurlh1(2);
     space_names_hcurlh1[0] = SpaceName::HCURL;
@@ -2594,6 +2611,41 @@ int main(int argc, char *argv[])
     std::vector<const Array<int> *> offsets(nlevels);
     offsets[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hcurlh1);
 
+    BlockOperator * orig_op = problem->GetOp();
+    const HypreParMatrix * divfree_dop = hierarchy->GetDivfreeDop(0);
+
+    HypreParMatrix * divfree_dop_mod = CopyHypreParMatrix(*divfree_dop);
+    Eliminate_ib_block(*divfree_dop_mod, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Funct_lvls[0][0]);
+
+    BlockOperator * hcurlh1_op = new BlockOperator(*offsets[0]);
+
+    HypreParMatrix * op_00 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,0)));
+    HypreParMatrix * A00 = RAP(divfree_dop_mod, op_00, divfree_dop_mod);
+    A00->CopyRowStarts();
+    A00->CopyColStarts();
+
+    HypreParMatrix * op_11 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,1)));
+
+    HypreParMatrix * op_10 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,0)));
+    HypreParMatrix * A10 = ParMult(op_10, divfree_dop_mod);
+    A10->CopyRowStarts();
+    A10->CopyColStarts();
+
+    HypreParMatrix * A01 = A10->Transpose();
+    A01->CopyRowStarts();
+    A01->CopyColStarts();
+
+    hcurlh1_op->SetBlock(0,0, A00);
+    hcurlh1_op->SetBlock(1,0, A10);
+    hcurlh1_op->SetBlock(0,1, A01);
+    hcurlh1_op->SetBlock(1,1, op_11);
+
+
+    // definition of Convert is problem dependent
+    // here it converts first equation (originally in hdiv) into Hcurl
+    // and throws away the constraint
+    //BlockOperator * hcurlh1_op = Convert(orig_op, divfree_dop); not implemented
+
     // setting multigrid components from the older parts of the code
     CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
     for (int l = 0; l < num_levels - 1; ++l)
@@ -2602,17 +2654,18 @@ int main(int argc, char *argv[])
         //P_mg[l] = new InterpolationWithBNDforTranspose(
                     //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
         offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
-        offsets[l]->Print();
-        offsets[l + 1]->Print();
-        P_mg[l] = new InterpolationWithBNDforTranspose(
-                    *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]),
-                *coarse_bnd_indices_lvls[l]);
+        //offsets[l]->Print();
+        //offsets[l + 1]->Print();
+        BlockP_mg[l] = new BlkInterpolationWithBNDforTranspose(
+                    *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]), *coarse_bnd_indices_lvls[l],
+                *offsets[l], *offsets[l + 1]);
+        P_mg[l] = BlockP_mg[l];
         Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
 
         if (l == 0)
-            BlockOps_mg[l] = MainOp;
+            BlockOps_mg[l] = MainOp;//hcurlh1_op;
         else
-            BlockOps_mg[l] = new RAPBlockOperator(*P_mg[l - 1], *BlockOps_mg[l - 1], *P_mg[l - 1], *offsets[l]);
+            BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg[l - 1], *BlockOps_mg[l - 1], *BlockP_mg[l - 1], *offsets[l]);
         Ops_mg[l] = BlockOps_mg[l];
         //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
         Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
@@ -6330,19 +6383,21 @@ void uFun1_ex_gradx(const Vector& xt, Vector& gradx )
     gradx = 0.0;
 }
 
-
 /*
-int ipow(int base, int exp)
+/// Assumes that Hdiv variable (to be converted) is the first one and cuts off the last equation
+/// which is in CFOSLS the divergence constraint
+BlockOperator * Convert(BlockOperator& orig_op, const HypreParMatrix& divfree_dop, const Array<int>& offsets)
 {
-    int result = 1;
-    while (exp)
-    {
-        if (exp & 1)
-            result *= base;
-        exp >>= 1;
-        base *= base;
-    }
+    BlockOperator * res = new BlockOperator(offsets);
 
-    return result;
+    int nblocks = orig_op.NumRowBlocks();
+
+    for (int i = 0; i < nblocks - 1; ++i)
+        for (int j = 0; j < nblocks - 1; ++j)
+        {
+            if (i == j && i == 0)
+        }
+
+    return res;
 }
 */

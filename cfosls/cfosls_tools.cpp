@@ -1410,6 +1410,46 @@ void GeneralMultigrid::MG_Cycle() const
 
 }
 
+RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_,
+                                             const Array<int>& Offsets)
+   : BlockOperator(Offsets),
+     nblocks(A_.NumRowBlocks()),
+     Rt(Rt_), A(A_), P(P_),
+     offsets(Offsets),
+     Px(P.Height()), APx(A.Height())
+{
+    op_blocks.SetSize(nblocks, nblocks);
+
+    for (int i = 0; i < nblocks; ++i)
+        for (int j = 0; j < nblocks; ++j)
+        {
+            //Operator& Rt_blk_i = Rt.GetBlock(i,i);
+            //Operator& P_blk_j = P.GetBlock(j,j);
+            //Operator& A_blk_ij = A.GetBlock(i,j);
+
+            HypreParMatrix* Rt_blk_i = dynamic_cast<HypreParMatrix*>(&(Rt.GetBlock(i,i)));
+            HypreParMatrix* P_blk_j = dynamic_cast<HypreParMatrix*>(&(Rt.GetBlock(j,j)));
+            HypreParMatrix* A_blk_ij = dynamic_cast<HypreParMatrix*>(&(A.GetBlock(i,j)));
+            op_blocks(i,j) = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
+
+            SetBlock(i,j, op_blocks(i,j));
+        }
+
+}
+
+void BlkInterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y) const
+{
+    P.MultTranspose(x, y);
+
+    //bnd_indices->Print();
+
+    for (int i = 0; i < bnd_indices->Size(); ++i)
+    {
+        int index = (*bnd_indices)[i];
+        y[index] = 0.0;
+    }
+}
+
 void InterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y) const
 {
     P.MultTranspose(x, y);
@@ -2136,7 +2176,7 @@ void CFOSLSHyperbolicProblem::Update()
 }
 
 GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose)
-    : num_lvls (num_levels)
+    : num_lvls(num_levels), divfreedops_constructed (false)
 {
     int dim = pmesh.Dimension();
 
@@ -2318,6 +2358,35 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
     } // end of loop over levels
 
 }
+
+void GeneralHierarchy::ConstructDivfreeDops()
+{
+    int dim = pmesh_lvls[0]->Dimension();
+
+    DivfreeDops_lvls.resize(num_lvls);
+
+    for (int l = 0; l < num_lvls; ++l)
+    {
+        ParDiscreteLinearOperator * Divfree_op;
+        if (dim == 3)
+        {
+            Divfree_op = new ParDiscreteLinearOperator(Hcurl_space_lvls[l], Hdiv_space_lvls[l]);
+            Divfree_op->AddDomainInterpolator(new CurlInterpolator);
+        }
+        else
+        {
+            Divfree_op = new ParDiscreteLinearOperator(Hdivskew_space_lvls[l], Hdiv_space_lvls[l]);
+            Divfree_op->AddDomainInterpolator(new DivSkewInterpolator);
+        }
+
+        Divfree_op->Assemble();
+        Divfree_op->Finalize();
+        DivfreeDops_lvls[l] = Divfree_op->ParallelAssemble();
+    }
+
+    divfreedops_constructed = true;
+}
+
 
 const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {
@@ -3242,5 +3311,21 @@ HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
     return RAP(&inputmat,id);
 }
 */
+
+HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop)
+{
+    HypreParMatrix * temp = divfree_dop.Transpose();
+    temp->CopyColStarts();
+    temp->CopyRowStarts();
+
+    HypreParMatrix * res = temp->Transpose();
+    res->CopyColStarts();
+    res->CopyRowStarts();
+
+    delete temp;
+
+    return res;
+}
+
 
 } // for namespace mfem
