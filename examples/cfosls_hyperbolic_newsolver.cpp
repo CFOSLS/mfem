@@ -2584,7 +2584,9 @@ int main(int argc, char *argv[])
     //EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
     //coarse_bnd_indices_lvls[0]->Print();
 
+    Array<BlockOperator*> BlockP_mg(nlevels - 1);
     Array<Operator*> P_mg(nlevels - 1);
+    Array<BlockOperator*> BlockOps_mg(nlevels - 1);
     Array<Operator*> Ops_mg(nlevels - 1);
     Array<Operator*> Smoo_mg(nlevels - 1);
     Operator* CoarseSolver_mg;
@@ -2606,8 +2608,14 @@ int main(int argc, char *argv[])
                     *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]),
                 *coarse_bnd_indices_lvls[l]);
         Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
+
+        if (l == 0)
+            BlockOps_mg[l] = MainOp;
+        else
+            BlockOps_mg[l] = new RAPBlockOperator(*P_mg[l - 1], *BlockOps_mg[l - 1], *P_mg[l - 1], *offsets[l]);
+        Ops_mg[l] = BlockOps_mg[l];
         //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
-        Smoo_mg[l] = new MonolithicGSBlockSmoother( *(dynamic_cast<BlockOperator*>(Ops_mg[l])), *offsets[l], false, HypreSmoother::Type::l1GS, 1);
+        Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
     }
 
     GeneralMultigrid * GeneralMGprec =
