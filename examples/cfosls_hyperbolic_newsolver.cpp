@@ -2606,7 +2606,8 @@ int main(int argc, char *argv[])
                     *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]),
                 *coarse_bnd_indices_lvls[l]);
         Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
-        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
+        //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
+        Smoo_mg[l] = new MonolithicGSBlockSmoother( *(dynamic_cast<BlockOperator*>(Ops_mg[l])), *offsets[l], false, HypreSmoother::Type::l1GS, 1);
     }
 
     GeneralMultigrid * GeneralMGprec =

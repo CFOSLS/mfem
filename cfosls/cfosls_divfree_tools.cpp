@@ -3682,6 +3682,114 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     return;
 }
 
+MonolithicGSBlockSmoother::MonolithicGSBlockSmoother(BlockOperator &Op, const Array<int>& Offsets, bool IsDiagonal,
+                                                     HypreSmoother::Type type, int nsweeps)
+    : BlockOperator(Offsets), nblocks(Op.NumRowBlocks()), op(Op), offsets(Offsets), is_diagonal(IsDiagonal)
+{
+    op_blocks.SetSize(nblocks, nblocks);
+    for (int i = 0; i < nblocks; ++i)
+        for (int j = 0; j < nblocks; ++j)
+            if ( (i != j && !is_diagonal) || i == j)
+            {
+                op_blocks(i,j) = dynamic_cast<HypreParMatrix*>(&op.GetBlock(i,j));
+                if (!op_blocks(i,j))
+                {
+                    MFEM_ABORT ("Unsuccessful cast \n");
+                }
+            }
+            else
+                op_blocks(i,j) = NULL;
+
+    diag_smoothers.SetSize(nblocks);
+    for (int i = 0; i < nblocks; ++i)
+        diag_smoothers[i] = new HypreSmoother(*op_blocks(i,i), type, nsweeps);
+}
+
+void MonolithicGSBlockSmoother::Mult(const Vector & x, Vector & y) const
+{
+    yblock.Update(y.GetData(), offsets);
+    xblock.Update(x.GetData(), offsets);
+
+    for (int i = 0; i < nblocks; ++i)
+    {
+        tmp1 = xblock.GetBlock(i);
+        if (!is_diagonal)
+            for (int j = 0; j < i; ++j)
+            {
+                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp1);
+            }
+        diag_smoothers[i]->Mult(tmp1, yblock.GetBlock(i));
+    }
+}
+
+void MonolithicGSBlockSmoother::MultTranspose(const Vector & x, Vector & y) const
+{
+    yblock.Update(y.GetData(), offsets);
+    xblock.Update(x.GetData(), offsets);
+
+    for (int i = nblocks - 1; i >=0; --i)
+    {
+        tmp1 = xblock.GetBlock(i);
+        if (!is_diagonal)
+            for (int j = i + 1; j < nblocks; ++j)
+            {
+                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp1);
+            }
+        diag_smoothers[i]->Mult(tmp1, yblock.GetBlock(i));
+    }
+}
+
+
+BlockSmoother::BlockSmoother(BlockOperator &Op)
+    : BlockOperator(Op.RowOffsets()),
+      A01((HypreParMatrix&)Op.GetBlock(0,1)),
+      A10((HypreParMatrix&)Op.GetBlock(1,0)),
+      offsets(Op.RowOffsets())
+{
+    HypreParMatrix &A00 = (HypreParMatrix&)Op.GetBlock(0,0);
+    HypreParMatrix &A11 = (HypreParMatrix&)Op.GetBlock(1,1);
+
+    B00 = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
+    B11 = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
+
+    tmp01.SetSize(A00.Width());
+    tmp02.SetSize(A00.Width());
+    tmp1.SetSize(A11.Width());
+}
+
+void BlockSmoother::Mult(const Vector & x, Vector & y) const
+{
+    yblock.Update(y.GetData(), offsets);
+    xblock.Update(x.GetData(), offsets);
+
+    yblock.GetBlock(0) = 0.0;
+    B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+#ifdef BLKDIAG_SMOOTHER
+    B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
+#else
+    tmp1 = xblock.GetBlock(1);
+    A10.Mult(-1.0, yblock.GetBlock(0), 1.0, tmp1);
+    B11->Mult(tmp1, yblock.GetBlock(1));
+#endif
+}
+
+void BlockSmoother::MultTranspose(const Vector & x, Vector & y) const
+{
+    yblock.Update(y.GetData(), offsets);
+    xblock.Update(x.GetData(), offsets);
+
+    yblock.GetBlock(1) = 0.0;
+    B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
+
+#ifdef BLKDIAG_SMOOTHER
+    B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+#else
+    tmp01 = xblock.GetBlock(0);
+    A01.Mult(-1.0, yblock.GetBlock(1), 1.0, tmp01);
+    B00->Mult(tmp01, yblock.GetBlock(0));
+#endif
+}
+
 // Computes prerequisites required for solving local problems at level l
 // such as relation tables between AEs and internal fine-grid dofs
 // and maybe smth else ... ?
@@ -3691,6 +3799,167 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     truetempvec2_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
     truesolupdate_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
     trueresfunc_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+}
+
+MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOperator*> &P,
+#ifdef BND_FOR_MULTIGRID
+                    const std::vector<std::vector<Array<int>*> > & EssBdrTDofs_lvls,
+#endif
+                    Solver* Coarse_Prec)
+    :
+      Solver(Op.RowOffsets().Last()),
+      P_(P),
+#ifdef BND_FOR_MULTIGRID
+      essbdrtdofs_lvls(EssBdrTDofs_lvls),
+#endif
+      Operators_(P.Size()+1),
+      Smoothers_(Operators_.Size()),
+      current_level(Operators_.Size()-1),
+      correction(Operators_.Size()),
+      residual(Operators_.Size()),
+      CoarsePrec_(Coarse_Prec),
+      built_prec(false)
+{
+    Operators_.Last() = &Op;
+
+#ifdef BND_FOR_MULTIGRID
+    block_offsets.resize(Operators_.Size());
+    block_viewers.resize(Operators_.Size());
+#endif
+
+    for (int l = Operators_.Size()-1; l >= 0; l--)
+    {
+        Array<int>& Offsets = Operators_[l]->RowOffsets();
+#ifdef BND_FOR_MULTIGRID
+        block_viewers[l] = new BlockVector;
+        block_offsets[l] = new Array<int>(Offsets.Size());
+        for (int i = 0; i < Offsets.Size(); ++i)
+            (*block_offsets[l])[i] = Offsets[i];
+#endif
+
+        if (l < Operators_.Size() - 1)
+            correction[l] = new Vector(Offsets.Last());
+        else // exist because of SetDataAndSize call to correction.Last()
+             //in MonolithicMultigrid::Mult which drops the data (= memory leak)
+             // (if allocated here, i.e. if no if-clause)
+            correction[l] = new Vector();
+
+        residual[l] = new Vector(Offsets.Last());
+
+
+        HypreParMatrix &A00 = (HypreParMatrix&)Operators_[l]->GetBlock(0,0);
+        HypreParMatrix &A11 = (HypreParMatrix&)Operators_[l]->GetBlock(1,1);
+        HypreParMatrix &A01 = (HypreParMatrix&)Operators_[l]->GetBlock(0,1);
+
+        // Define smoothers
+        Smoothers_[l] = new BlockSmoother(*Operators_[l]);
+
+        // Define coarser level operators - two steps RAP (or P^T A P)
+        if (l > 0)
+        {
+            HypreParMatrix& P0 = (HypreParMatrix&)P[l-1]->GetBlock(0,0);
+            HypreParMatrix& P1 = (HypreParMatrix&)P[l-1]->GetBlock(1,1);
+
+            /*
+            unique_ptr<HypreParMatrix> P0T(P0.Transpose());
+            unique_ptr<HypreParMatrix> P1T(P1.Transpose());
+
+            unique_ptr<HypreParMatrix> A00P0( ParMult(&A00, &P0) );
+            unique_ptr<HypreParMatrix> A11P1( ParMult(&A11, &P1) );
+            unique_ptr<HypreParMatrix> A01P1( ParMult(&A01, &P1) );
+
+            HypreParMatrix *A00_c(ParMult(P0T.get(), A00P0.get()));
+            A00_c->CopyRowStarts();
+            HypreParMatrix *A11_c(ParMult(P1T.get(), A11P1.get()));
+            A11_c->CopyRowStarts();
+            HypreParMatrix *A01_c(ParMult(P0T.get(), A01P1.get()));
+            A01_c->CopyRowStarts();
+            HypreParMatrix *A10_c(A01_c->Transpose());
+            */
+
+            HypreParMatrix * A00_c = RAP(&P0, &A00, &P0);
+            {
+                Eliminate_ib_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                HypreParMatrix * temphpmat = A00_c->Transpose();
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                A00_c = temphpmat->Transpose();
+                A00_c->CopyColStarts();
+                A00_c->CopyRowStarts();
+                SparseMatrix diag;
+                A00_c->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+                delete temphpmat;
+                //Eliminate_bb_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l]);
+            }
+
+            HypreParMatrix * A11_c = RAP(&P1, &A11, &P1);
+            {
+                Eliminate_ib_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                HypreParMatrix * temphpmat = A11_c->Transpose();
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                A11_c = temphpmat->Transpose();
+                A11_c->CopyColStarts();
+                A11_c->CopyRowStarts();
+                SparseMatrix diag;
+                A11_c->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+                delete temphpmat;
+                //Eliminate_bb_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1]);
+            }
+
+            HypreParMatrix * A01_c = RAP(&P0, &A01, &P1);
+            {
+                Eliminate_ib_block(*A01_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                HypreParMatrix * temphpmat = A01_c->Transpose();
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                A01_c = temphpmat->Transpose();
+                A01_c->CopyColStarts();
+                A01_c->CopyRowStarts();
+                delete temphpmat;
+            }
+
+            HypreParMatrix * A10_c = A01_c->Transpose();
+
+
+            Operators_[l-1] = new BlockOperator(P[l-1]->ColOffsets());
+            Operators_[l-1]->SetBlock(0, 0, A00_c);
+            Operators_[l-1]->SetBlock(0, 1, A01_c);
+            Operators_[l-1]->SetBlock(1, 0, A10_c);
+            Operators_[l-1]->SetBlock(1, 1, A11_c);
+            Operators_[l-1]->owns_blocks = 1;
+
+        }
+    }
+
+    CoarseSolver = new CGSolver(((HypreParMatrix&)Op.GetBlock(0,0)).GetComm() );
+    CoarseSolver->SetAbsTol(sqrt(1e-32));
+    CoarseSolver->SetRelTol(sqrt(1e-12));
+#ifdef COMPARE_MG
+    CoarseSolver->SetMaxIter(NCOARSEITER);
+#else
+    CoarseSolver->SetMaxIter(100);
+#endif
+    CoarseSolver->SetPrintLevel(0);
+    CoarseSolver->SetOperator(*Operators_[0]);
+    CoarseSolver->iterative_mode = false;
+
+    if (!CoarsePrec_)
+    {
+        built_prec = true;
+
+        CoarsePrec_ = new BlockDiagonalPreconditioner(Operators_[0]->ColOffsets());
+
+        HypreParMatrix &A00 = (HypreParMatrix&)Operators_[0]->GetBlock(0,0);
+        HypreParMatrix &A11 = (HypreParMatrix&)Operators_[0]->GetBlock(1,1);
+
+        HypreSmoother * precU = new HypreSmoother(A00, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * precS = new HypreSmoother(A11, HypreSmoother::Type::l1GS, 1);
+
+        ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(0, precU);
+        ((BlockDiagonalPreconditioner*)CoarsePrec_)->SetDiagonalBlock(1, precS);
+    }
+
+    CoarseSolver->SetPreconditioner(*CoarsePrec_);
 }
 
 void MonolithicMultigrid::Mult(const Vector & x, Vector & y) const
