@@ -2599,7 +2599,7 @@ int main(int argc, char *argv[])
         //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
         //P_mg[l] = new InterpolationWithBNDforTranspose(
                     //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
-        offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l, space_names_hcurlh1);
+        offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
         offsets[l]->Print();
         offsets[l + 1]->Print();
         P_mg[l] = new InterpolationWithBNDforTranspose(
