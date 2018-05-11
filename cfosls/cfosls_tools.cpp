@@ -1353,13 +1353,13 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing, new MG \n";
         //residual_l.Print();
 
-        std::cout << "residual before smoothing, new MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        //std::cout << "residual before smoothing, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
 
         PreSmoother_l->Mult(residual_l, correction_l);
 
-        std::cout << "correction after smoothing, new MG, "
-                     "norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
+        //std::cout << "correction after smoothing, new MG, "
+                     //"norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
 
         //std::cout << "correction after presmoothing, new MG \n";
         //correction_l.Print();
@@ -1367,14 +1367,14 @@ void GeneralMultigrid::MG_Cycle() const
         Operator_l->Mult(correction_l, help);
         residual_l -= help;
 
-        std::cout << "help, new MG, "
-                     "norm = " << help.Norml2() / sqrt (help.Size()) << "\n";
+        //std::cout << "help, new MG, "
+                     //"norm = " << help.Norml2() / sqrt (help.Size()) << "\n";
 
         //std::cout << "help, new MG \n";
         //help.Print();
 
-        std::cout << "new residual after presmoothing, new MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        //std::cout << "new residual after presmoothing, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
 
@@ -1426,12 +1426,8 @@ RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &
                                              const Array<int>& Offsets)
    : BlockOperator(Offsets),
      nblocks(A_.NumRowBlocks()),
-     Rt(Rt_), A(A_), P(P_),
-     offsets(Offsets),
-     Px(P.Height()), APx(A.Height())
+     offsets(Offsets)
 {
-    op_blocks.SetSize(nblocks, nblocks);
-
     for (int i = 0; i < nblocks; ++i)
         for (int j = 0; j < nblocks; ++j)
         {
@@ -1439,12 +1435,12 @@ RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &
             //Operator& P_blk_j = P.GetBlock(j,j);
             //Operator& A_blk_ij = A.GetBlock(i,j);
 
-            HypreParMatrix* Rt_blk_i = dynamic_cast<HypreParMatrix*>(&(Rt.GetBlock(i,i)));
-            HypreParMatrix* P_blk_j = dynamic_cast<HypreParMatrix*>(&(Rt.GetBlock(j,j)));
-            HypreParMatrix* A_blk_ij = dynamic_cast<HypreParMatrix*>(&(A.GetBlock(i,j)));
-            op_blocks(i,j) = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
+            HypreParMatrix* Rt_blk_i = dynamic_cast<HypreParMatrix*>(&(Rt_.GetBlock(i,i)));
+            HypreParMatrix* P_blk_j = dynamic_cast<HypreParMatrix*>(&(P_.GetBlock(j,j)));
+            HypreParMatrix* A_blk_ij = dynamic_cast<HypreParMatrix*>(&(A_.GetBlock(i,j)));
+            HypreParMatrix * op_block = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
 
-            SetBlock(i,j, op_blocks(i,j));
+            SetBlock(i,j, op_block);
         }
 
 }

@@ -2617,6 +2617,12 @@ int main(int argc, char *argv[])
     HypreParMatrix * divfree_dop_mod = CopyHypreParMatrix(*divfree_dop);
     Eliminate_ib_block(*divfree_dop_mod, *EssBdrTrueDofs_Hcurl[0], *EssBdrTrueDofs_Funct_lvls[0][0]);
 
+    // definition of Convert is problem dependent
+    // here it converts first equation (originally in hdiv) into Hcurl
+    // and throws away the constraint
+    //BlockOperator * hcurlh1_op = Convert(orig_op, divfree_dop); not implemented
+
+    // converting the operator into hcurl-h1 manually
     BlockOperator * hcurlh1_op = new BlockOperator(*offsets[0]);
 
     HypreParMatrix * op_00 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,0)));
@@ -2640,12 +2646,6 @@ int main(int argc, char *argv[])
     hcurlh1_op->SetBlock(0,1, A01);
     hcurlh1_op->SetBlock(1,1, op_11);
 
-
-    // definition of Convert is problem dependent
-    // here it converts first equation (originally in hdiv) into Hcurl
-    // and throws away the constraint
-    //BlockOperator * hcurlh1_op = Convert(orig_op, divfree_dop); not implemented
-
     // setting multigrid components from the older parts of the code
     CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
     for (int l = 0; l < num_levels - 1; ++l)
@@ -2665,9 +2665,6 @@ int main(int argc, char *argv[])
             BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd[l - 1],
                     *BlockOps_mg[l - 1], *BlockP_mg_nobnd[l - 1], *offsets[l]);
         }
-
-        I think the error is that BlockOps_mg in Mult is using its blocks in a wrong way.
-        But quick check didn't confirm that
 
         if (l > 0)
         {
