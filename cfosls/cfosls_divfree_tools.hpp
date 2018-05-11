@@ -1459,9 +1459,8 @@ protected:
     // viewers
     mutable BlockVector xblock;
     mutable BlockVector yblock;
-    mutable Vector tmp01;
-    mutable Vector tmp02;
-    mutable Vector tmp1;
+
+    BlockVector * tmp;
 
 public:
     MonolithicGSBlockSmoother(BlockOperator &Op, const Array<int>& Offsets, bool IsDiagonal, HypreSmoother::Type diag_type, int nsweeps);
@@ -1478,6 +1477,8 @@ public:
     {
         for (int i = 0; i < diag_smoothers.Size(); ++i)
             delete diag_smoothers[i];
+
+        delete tmp;
     }
 };
 

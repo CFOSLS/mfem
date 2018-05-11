@@ -3703,6 +3703,8 @@ MonolithicGSBlockSmoother::MonolithicGSBlockSmoother(BlockOperator &Op, const Ar
     diag_smoothers.SetSize(nblocks);
     for (int i = 0; i < nblocks; ++i)
         diag_smoothers[i] = new HypreSmoother(*op_blocks(i,i), type, nsweeps);
+
+    tmp = new BlockVector(offsets);
 }
 
 void MonolithicGSBlockSmoother::Mult(const Vector & x, Vector & y) const
@@ -3712,13 +3714,17 @@ void MonolithicGSBlockSmoother::Mult(const Vector & x, Vector & y) const
 
     for (int i = 0; i < nblocks; ++i)
     {
-        tmp1 = xblock.GetBlock(i);
+        tmp->GetBlock(i) = xblock.GetBlock(i);
+
         if (!is_diagonal)
+        {
             for (int j = 0; j < i; ++j)
             {
-                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp1);
+                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp->GetBlock(i));
             }
-        diag_smoothers[i]->Mult(tmp1, yblock.GetBlock(i));
+        }
+        diag_smoothers[i]->Mult(tmp->GetBlock(i), yblock.GetBlock(i));
+
     }
 }
 
@@ -3729,13 +3735,13 @@ void MonolithicGSBlockSmoother::MultTranspose(const Vector & x, Vector & y) cons
 
     for (int i = nblocks - 1; i >=0; --i)
     {
-        tmp1 = xblock.GetBlock(i);
+        tmp->GetBlock(i) = xblock.GetBlock(i);
         if (!is_diagonal)
             for (int j = i + 1; j < nblocks; ++j)
             {
-                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp1);
+                op_blocks(i,j)->Mult(-1.0, yblock.GetBlock(j), 1.0, tmp->GetBlock(i));
             }
-        diag_smoothers[i]->Mult(tmp1, yblock.GetBlock(i));
+        diag_smoothers[i]->Mult(tmp->GetBlock(i), yblock.GetBlock(i));
     }
 }
 
@@ -3764,11 +3770,14 @@ void BlockSmoother::Mult(const Vector & x, Vector & y) const
 
     yblock.GetBlock(0) = 0.0;
     B00->Mult(xblock.GetBlock(0), yblock.GetBlock(0));
+
 #ifdef BLKDIAG_SMOOTHER
     B11->Mult(xblock.GetBlock(1), yblock.GetBlock(1));
 #else
     tmp1 = xblock.GetBlock(1);
+
     A10.Mult(-1.0, yblock.GetBlock(0), 1.0, tmp1);
+
     B11->Mult(tmp1, yblock.GetBlock(1));
 #endif
 }
@@ -3893,17 +3902,82 @@ MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOpe
             }
 
             HypreParMatrix * A11_c = RAP(&P1, &A11, &P1);
+
+            /*
+            if (l == 2)
+            {
+                std::cout << "A11_c size = " << A11_c->Height() << "\n";
+
+                SparseMatrix diag;
+                A11_c->GetDiag(diag);
+                std::cout << "diag of 11 block in MonolithicMultigrid = " << diag.MaxNorm() << "\n";
+
+                //diag.Print();
+
+                essbdrtdofs_lvls[Operators_.Size() - l][1]->Print();
+
+                //SparseMatrix diag_P1;
+                //P1->GetDiag(diag_P1);
+                //std::cout << "diag of 11 block in MonolithicMultigrid = " << diag.MaxNorm() << "\n";
+            }
+            */
+
             {
                 Eliminate_ib_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+
+                /*
+                if (l == 2)
+                {
+                    std::cout << "A11_c size = " << A11_c->Height() << "\n";
+
+                    essbdrtdofs_lvls[Operators_.Size() - l][1]->Print();
+
+                    SparseMatrix diag;
+                    A11_c->GetDiag(diag);
+
+                    std::cout << "diag in A11_c \n";
+                    diag.Print();
+                }
+                */
+
                 HypreParMatrix * temphpmat = A11_c->Transpose();
                 Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+
+                /*
+                if (l == 2)
+                {
+                    SparseMatrix diag;
+                    temphpmat->GetDiag(diag);
+
+                    std::cout << "diag in temphpmat in monolithic multigrid \n";
+                    diag.Print();
+                }
+                */
+
                 A11_c = temphpmat->Transpose();
                 A11_c->CopyColStarts();
                 A11_c->CopyRowStarts();
+
                 SparseMatrix diag;
                 A11_c->GetDiag(diag);
                 diag.MoveDiagonalFirst();
+
                 delete temphpmat;
+#if 0
+
+                /*
+                if (l == 2)
+                {
+                    SparseMatrix diag;
+                    temphpmat->GetDiag(diag);
+
+                    std::cout << "diag in A11_c afterwards in monolithic multigrid \n";
+                    diag.Print();
+                }
+                */
+
+
+#endif
                 //Eliminate_bb_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1]);
             }
 
@@ -4008,10 +4082,14 @@ void MonolithicMultigrid::MG_Cycle() const
         //std::cout << "correction after presmoothing \n";
         //correction_l.Print();
 
+        std::cout << "residual before smoothing, old MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+
         Operator_l.Mult(correction_l, help);
         residual_l -= help;
 
-        //std::cout << "new residual after presmoothing \n";
+        std::cout << "new residual after presmoothing, old MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
 #endif

@@ -1353,6 +1353,9 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing, new MG \n";
         //residual_l.Print();
 
+        std::cout << "residual before smoothing, new MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+
         PreSmoother_l->Mult(residual_l, correction_l);
 
         //std::cout << "correction after presmoothing, new MG \n";
@@ -3312,6 +3315,8 @@ HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 }
 */
 
+/// simple copy by using Transpose (and temporarily allocating
+/// additional memory of size = size of the inpt matrix)
 HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop)
 {
     HypreParMatrix * temp = divfree_dop.Transpose();
@@ -3326,6 +3331,117 @@ HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop)
 
     return res;
 }
+
+void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks)
+{
+    int nblocks = BlockOp.NumRowBlocks();
+
+    for (int i = 0; i < nblocks; ++i)
+        for (int j = 0; j < nblocks; ++j)
+        {
+            const Array<int> *temp_range = esstdofs_blks[i];
+            const Array<int> *temp_dom = esstdofs_blks[j];
+
+            HypreParMatrix * op_blk = dynamic_cast<HypreParMatrix*>(&(BlockOp.GetBlock(i,j)));
+
+#if 0
+            /*
+            if (i == j && i == 1)
+            {
+                std::cout << "op_blk size = " << op_blk->Height() << "\n";
+
+                SparseMatrix diag;
+                op_blk->GetDiag(diag);
+                std::cout << "diag of 11 block in EliminateBoundaryBlocks = " << diag.MaxNorm() << "\n";
+
+                //diag.Print();
+
+                temp_dom->Print();
+            }
+            */
+
+            if (i == 1 && i == j)
+            {
+                Eliminate_ib_block(*op_blk, *temp_dom, *temp_range );
+
+                {
+                    std::cout << "op_blk size = " << op_blk->Height() << "\n";
+
+                    temp_dom->Print();
+
+                    //SparseMatrix diag;
+                    //op_blk->GetDiag(diag);
+
+                    //std::cout << "diag in op_blk, elim bnd blocks \n";
+                    //diag.Print();
+                }
+
+                HypreParMatrix * temphpmat = op_blk->Transpose();
+                Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+
+                /*
+                //if (l == 2)
+                {
+                    SparseMatrix diag;
+                    temphpmat->GetDiag(diag);
+
+                    std::cout << "diag in temphpma, elim bnd blocks \n";
+                    diag.Print();
+                }
+                */
+
+                op_blk = temphpmat->Transpose();
+
+                /*
+                {
+                    SparseMatrix diag;
+                    op_blk->GetDiag(diag);
+
+                    std::cout << "diag in op_blk afterwards, elim bnd blocks \n";
+                    diag.Print();
+
+                }
+                */
+
+                /*
+                if (i == j)
+                {
+                    Eliminate_bb_block(*op_blk, *temp_dom);
+                    SparseMatrix diag;
+                    op_blk->GetDiag(diag);
+                    diag.MoveDiagonalFirst();
+                }
+
+                op_blk->CopyColStarts();
+                op_blk->CopyRowStarts();
+                delete temphpmat;
+                */
+            }
+#endif
+
+            Eliminate_ib_block(*op_blk, *temp_dom, *temp_range );
+
+            HypreParMatrix * temphpmat = op_blk->Transpose();
+            Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
+            op_blk = temphpmat->Transpose();
+
+            if (i == j)
+            {
+                //Eliminate_bb_block(*op_blk, *temp_dom);
+                SparseMatrix diag;
+                op_blk->GetDiag(diag);
+                diag.MoveDiagonalFirst();
+            }
+
+            op_blk->CopyColStarts();
+            op_blk->CopyRowStarts();
+            delete temphpmat;
+
+            BlockOp.SetBlock(i,j, op_blk);
+
+        }
+}
+
 
 
 } // for namespace mfem

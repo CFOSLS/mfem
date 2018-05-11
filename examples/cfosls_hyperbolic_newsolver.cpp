@@ -10,7 +10,7 @@
 #include <list>
 #include <unistd.h>
 
-#define NEW_INTERFACE
+//#define NEW_INTERFACE
 
 //#include "cfosls_testsuite.hpp"
 
@@ -2601,7 +2601,7 @@ int main(int argc, char *argv[])
     //EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
     //coarse_bnd_indices_lvls[0]->Print();
 
-    Array<BlockOperator*> BlockP_mg(nlevels - 1);
+    Array<BlockOperator*> BlockP_mg_nobnd(nlevels - 1);
     Array<Operator*> P_mg(nlevels - 1);
     Array<BlockOperator*> BlockOps_mg(nlevels - 1);
     Array<Operator*> Ops_mg(nlevels - 1);
@@ -2650,29 +2650,118 @@ int main(int argc, char *argv[])
     CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
     for (int l = 0; l < num_levels - 1; ++l)
     {
-        //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
-        //P_mg[l] = new InterpolationWithBNDforTranspose(
-                    //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
         offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
         //offsets[l]->Print();
         //offsets[l + 1]->Print();
-        BlockP_mg[l] = new BlkInterpolationWithBNDforTranspose(
+        P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                     *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]), *coarse_bnd_indices_lvls[l],
                 *offsets[l], *offsets[l + 1]);
-        P_mg[l] = BlockP_mg[l];
-        Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
+        BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]);
 
         if (l == 0)
             BlockOps_mg[l] = MainOp;//hcurlh1_op;
         else
-            BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg[l - 1], *BlockOps_mg[l - 1], *BlockP_mg[l - 1], *offsets[l]);
+        {
+            BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd[l - 1],
+                    *BlockOps_mg[l - 1], *BlockP_mg_nobnd[l - 1], *offsets[l]);
+        }
+
+        if (l > 0)
+        {
+            std::vector<Array<int> * > EssTDofs(space_names_hcurlh1.Size());
+            EssTDofs[0] = EssBdrTrueDofs_HcurlFunct_lvls[l][0];
+            EssTDofs[1] = EssBdrTrueDofs_HcurlFunct_lvls[l][1];
+            EliminateBoundaryBlocks(*BlockOps_mg[l], EssTDofs);
+        }
+
+        /*
+        if (l == 1)
+        {
+            HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[l]->GetBlock(1,1));
+            SparseMatrix diag_new;
+            A11_new->GetDiag(diag_new);
+            std::cout << "diag in block 1 new \n";
+            diag_new.Print();
+        }
+        */
+
+
         Ops_mg[l] = BlockOps_mg[l];
-        //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
-        Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
+
+        //Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
+
+
+        //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
+        //P_mg[l] = new InterpolationWithBNDforTranspose(
+                    //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
+        //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
+        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
+
     }
 
     GeneralMultigrid * GeneralMGprec =
             new GeneralMultigrid(P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
+
+    /*
+    // comparing coarsened operators
+    int check_lvl = 1;
+
+    HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(1,1));
+    HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(1,1));
+
+    SparseMatrix diag_old;
+    A11_old->GetDiag(diag_old);
+    //std::cout << "diag in block 1 old \n";
+    //diag_old.Print();
+
+    SparseMatrix diag_new;
+    A11_new->GetDiag(diag_new);
+    //std::cout << "diag in block 1 new \n";
+    //diag_new.Print();
+
+    SparseMatrix diag_diff(diag_new);
+    diag_diff.Add(-1.0, diag_old);
+
+    std::cout << "diag_diff norm = " << diag_diff.MaxNorm() << "\n";
+
+    //diag_diff.Print();
+
+    MPI_Finalize();
+    return 0;
+    */
+
+    /*
+
+    // comparing smoothers (which show some difference at level > 0 )
+
+    int check_lvl = 1;
+    Operator * smoo_new = new MonolithicGSBlockSmoother( *BlockOps_mg[check_lvl], *offsets[check_lvl], false, HypreSmoother::Type::l1GS, 1);
+    //Operator * smoo_new = new MonolithicGSBlockSmoother( *((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl), *offsets[check_lvl],
+                                                         //false, HypreSmoother::Type::l1GS, 1);
+    Operator * smoo_old = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - check_lvl);
+
+    Vector testvec_in(smoo_new->Width());
+    for (int i = 0; i < testvec_in.Size(); ++i)
+        testvec_in[i] = i * 1.0 / testvec_in.Size();
+
+    Vector testvec_out1(smoo_new->Height());
+    smoo_new->Mult(testvec_in, testvec_out1);
+
+    Vector testvec_out2(smoo_old->Height());
+    smoo_old->Mult(testvec_in, testvec_out2);
+
+    Vector testvec_diff(testvec_out1.Size());
+    testvec_diff = testvec_out1;
+    testvec_diff -= testvec_out2;
+
+    if (verbose)
+        std::cout << "testvec_diff norm = " << testvec_diff.Norml2() / sqrt(testvec_diff.Size()) << "\n";
+
+    MPI_Finalize();
+    return 0;
+    */
+
+
 
     /*
     // comparing the new class with the older one
@@ -2747,18 +2836,16 @@ int main(int argc, char *argv[])
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
     solver.SetMaxIter(max_num_iter);
-    solver.SetOperator(*MainOp);
 
 #ifdef NEW_INTERFACE
+    solver.SetOperator(*hcurlh1_op);
     if (with_prec)
         solver.SetPreconditioner(*GeneralMGprec);
 #else
+    solver.SetOperator(*MainOp);
     if (with_prec)
         solver.SetPreconditioner(*prec);
 #endif
-
-    if (with_prec)
-        solver.SetPreconditioner(*prec);
 
     solver.SetPrintLevel(1);
     trueX = 0.0;

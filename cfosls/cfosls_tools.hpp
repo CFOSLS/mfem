@@ -1629,6 +1629,8 @@ public:
 
 HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop);
 
+void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks);
+
 } // for namespace mfem
 
 
