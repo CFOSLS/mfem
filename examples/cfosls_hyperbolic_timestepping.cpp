@@ -638,7 +638,7 @@ int main(int argc, char *argv[])
 
    // finally, creating general multigrid instance
    GeneralMultigrid * spacetime_mg =
-           new GeneralMultigrid(P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
+           new GeneralMultigrid(two_grid, P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
    // creating initial guess which satisfies given initial condition for the starting time slab
    Vector mg_x0(spacetime_mg->Width());
