@@ -4077,13 +4077,16 @@ void MonolithicMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing \n";
         //residual_l.Print();
 
+        std::cout << "residual before smoothing, old MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+
         Smoother_l.Mult(residual_l, correction_l);
 
         //std::cout << "correction after presmoothing \n";
         //correction_l.Print();
 
-        std::cout << "residual before smoothing, old MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        std::cout << "correction after smoothing, old MG, "
+                     "norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
 
         Operator_l.Mult(correction_l, help);
         residual_l -= help;

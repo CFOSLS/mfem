@@ -1331,12 +1331,12 @@ public:
    RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_, const Array<int>& Offsets);
 
    /// Operator application.
-   virtual void Mult(const Vector & x, Vector & y) const
-   { P.Mult(x, Px); A.Mult(Px, APx); Rt.MultTranspose(APx, y); }
+   //virtual void Mult(const Vector & x, Vector & y) const
+   //{ P.Mult(x, Px); A.Mult(Px, APx); Rt.MultTranspose(APx, y); }
 
    /// Application of the transpose.
-   virtual void MultTranspose(const Vector & x, Vector & y) const
-   { Rt.Mult(x, APx); A.MultTranspose(APx, Px); P.MultTranspose(Px, y); }
+   //virtual void MultTranspose(const Vector & x, Vector & y) const
+   //{ Rt.Mult(x, APx); A.MultTranspose(APx, Px); P.MultTranspose(Px, y); }
 };
 
 class BlkInterpolationWithBNDforTranspose : public BlockOperator

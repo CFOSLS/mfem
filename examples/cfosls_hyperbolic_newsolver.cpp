@@ -10,7 +10,7 @@
 #include <list>
 #include <unistd.h>
 
-//#define NEW_INTERFACE
+#define NEW_INTERFACE
 
 //#include "cfosls_testsuite.hpp"
 
@@ -2666,6 +2666,9 @@ int main(int argc, char *argv[])
                     *BlockOps_mg[l - 1], *BlockP_mg_nobnd[l - 1], *offsets[l]);
         }
 
+        I think the error is that BlockOps_mg in Mult is using its blocks in a wrong way.
+        But quick check didn't confirm that
+
         if (l > 0)
         {
             std::vector<Array<int> * > EssTDofs(space_names_hcurlh1.Size());
@@ -2686,16 +2689,21 @@ int main(int argc, char *argv[])
         */
 
 
-        Ops_mg[l] = BlockOps_mg[l];
+        if (l == 0)
+            Ops_mg[l] = BlockOps_mg[l];
+            //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
+        if (l == 1)
+            Ops_mg[l] = BlockOps_mg[l];
+            //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
 
-        //Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
+        Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
 
 
         //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
         //P_mg[l] = new InterpolationWithBNDforTranspose(
                     //*((MonolithicMultigrid*)prec)->GetInterpolation(num_levels - 1 - 1 - l), *coarse_bnd_indices_lvls[l]);
         //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
-        Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
+        //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
 
     }
 
@@ -2708,6 +2716,15 @@ int main(int argc, char *argv[])
 
     HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(1,1));
     HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(1,1));
+
+    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(0,0));
+    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(0,0));
+
+    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(0,1));
+    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(0,1));
+
+    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(1,0));
+    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(1,0));
 
     SparseMatrix diag_old;
     A11_old->GetDiag(diag_old);
