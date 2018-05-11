@@ -1290,16 +1290,19 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 
 }
 
-GeneralMultigrid::GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
+GeneralMultigrid::GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
                                    const Operator& CoarseOp_,
                  const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
-    : Solver(Op_lvls_[0]->Height()), nlevels(Op_lvls_.Size() + 1), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
+    : Solver(Op_lvls_[0]->Height()), nlevels(Nlevels), P_lvls(P_lvls_), Op_lvls(Op_lvls_), CoarseOp(CoarseOp_),
       PreSmoothers_lvls(PreSmoothers_lvls_), PostSmoothers_lvls(PostSmoothers_lvls_),
       symmetric(false), current_level(0)
 {
-    MFEM_ASSERT(nlevels == P_lvls.Size() + 1, "Number of interpolation matrices must equal number of levels - 1");
-    MFEM_ASSERT(nlevels == PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers must equal number of levels - 1");
-    MFEM_ASSERT(nlevels == PostSmoothers_lvls.Size() + 1, "Number of post-smoothers must equal number of levels - 1");
+    MFEM_ASSERT(nlevels <= P_lvls.Size() + 1, "Number of interpolation matrices cannot be less"
+                                              " than number of levels - 1");
+    MFEM_ASSERT(nlevels <= PreSmoothers_lvls.Size() + 1, "Number of pre-smoothers cannot be less "
+                                                         "than number of levels - 1");
+    MFEM_ASSERT(nlevels <= PostSmoothers_lvls.Size() + 1, "Number of post-smoothers cannot be less "
+                                                          "than number of levels - 1");
 
     residual.SetSize(nlevels);
     correction.SetSize(nlevels);

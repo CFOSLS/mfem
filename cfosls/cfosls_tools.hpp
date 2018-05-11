@@ -1294,12 +1294,13 @@ protected:
     mutable int current_level;
 
 public:
-    GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
+    GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
                      const Operator& CoarseOp_, const Array<Operator*> &Smoothers_lvls_)
-        : GeneralMultigrid(P_lvls_, Op_lvls_, CoarseOp_, Smoothers_lvls_, Smoothers_lvls_)
+        : GeneralMultigrid(Nlevels, P_lvls_, Op_lvls_, CoarseOp_, Smoothers_lvls_, Smoothers_lvls_)
     { symmetric = true; }
 
-    GeneralMultigrid(const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_, const Operator& CoarseOp_,
+    GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_,
+                     const Array<Operator*> &Op_lvls_, const Operator& CoarseOp_,
                      const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_);
 
     void MG_Cycle() const;

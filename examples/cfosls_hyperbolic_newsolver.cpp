@@ -2597,14 +2597,10 @@ int main(int argc, char *argv[])
 
     }
 
-    //EssBdrTrueDofs_HcurlFunct_lvls[1][0]->Print();
-    //EssBdrTrueDofs_HcurlFunct_lvls[1][1]->Print();
-    //coarse_bnd_indices_lvls[0]->Print();
-
     Array<BlockOperator*> BlockP_mg_nobnd(nlevels - 1);
     Array<Operator*> P_mg(nlevels - 1);
-    Array<BlockOperator*> BlockOps_mg(nlevels - 1);
-    Array<Operator*> Ops_mg(nlevels - 1);
+    Array<BlockOperator*> BlockOps_mg(nlevels);
+    Array<Operator*> Ops_mg(nlevels);
     Array<Operator*> Smoo_mg(nlevels - 1);
     Operator* CoarseSolver_mg;
 
@@ -2647,24 +2643,22 @@ int main(int argc, char *argv[])
     hcurlh1_op->SetBlock(1,1, op_11);
 
     // setting multigrid components from the older parts of the code
-    CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
-    for (int l = 0; l < num_levels - 1; ++l)
+    for (int l = 0; l < num_levels; ++l)
     {
-        offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
-        //offsets[l]->Print();
-        //offsets[l + 1]->Print();
-        P_mg[l] = new BlkInterpolationWithBNDforTranspose(
-                    *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]), *coarse_bnd_indices_lvls[l],
-                *offsets[l], *offsets[l + 1]);
-        BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]);
+        if (l < num_levels - 1)
+        {
+            offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
+            P_mg[l] = new BlkInterpolationWithBNDforTranspose(
+                        *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]), *coarse_bnd_indices_lvls[l],
+                    *offsets[l], *offsets[l + 1]);
+            BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]);
+        }
 
         if (l == 0)
-            BlockOps_mg[l] = MainOp;//hcurlh1_op;
+            BlockOps_mg[l] = hcurlh1_op;
         else
-        {
             BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd[l - 1],
                     *BlockOps_mg[l - 1], *BlockP_mg_nobnd[l - 1], *offsets[l]);
-        }
 
         if (l > 0)
         {
@@ -2674,26 +2668,10 @@ int main(int argc, char *argv[])
             EliminateBoundaryBlocks(*BlockOps_mg[l], EssTDofs);
         }
 
-        /*
-        if (l == 1)
-        {
-            HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[l]->GetBlock(1,1));
-            SparseMatrix diag_new;
-            A11_new->GetDiag(diag_new);
-            std::cout << "diag in block 1 new \n";
-            diag_new.Print();
-        }
-        */
+        Ops_mg[l] = BlockOps_mg[l];
 
-
-        if (l == 0)
-            Ops_mg[l] = BlockOps_mg[l];
-            //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
-        if (l == 1)
-            Ops_mg[l] = BlockOps_mg[l];
-            //Ops_mg[l] = ((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - l);
-
-        Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
+        if (l < num_levels - 1)
+            Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *offsets[l], false, HypreSmoother::Type::l1GS, 1);
 
 
         //P_mg[l] = ((MonolithicMultigrid*)prec)->GetInterpolation(l);
@@ -2703,141 +2681,32 @@ int main(int argc, char *argv[])
         //Smoo_mg[l] = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - l);
 
     }
+    //CoarseSolver_mg = ((MonolithicMultigrid*)prec)->GetCoarsestSolver();
+
+    int coarsest_level = num_levels - 1;
+    CoarseSolver_mg = new CGSolver(comm);
+    ((CGSolver*)CoarseSolver_mg)->SetAbsTol(sqrt(1e-32));
+    ((CGSolver*)CoarseSolver_mg)->SetRelTol(sqrt(1e-12));
+    ((CGSolver*)CoarseSolver_mg)->SetMaxIter(100);
+    ((CGSolver*)CoarseSolver_mg)->SetPrintLevel(0);
+    ((CGSolver*)CoarseSolver_mg)->SetOperator(*Ops_mg[coarsest_level]);
+    ((CGSolver*)CoarseSolver_mg)->iterative_mode = false;
+
+    BlockDiagonalPreconditioner * CoarsePrec_mg = new BlockDiagonalPreconditioner(BlockOps_mg[coarsest_level]->ColOffsets());
+
+    HypreParMatrix &blk00 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(0,0);
+    HypreParMatrix &blk11 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(1,1);
+
+    HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+    HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
+
+    ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(0, precU);
+    ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(1, precS);
+
+    ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
 
     GeneralMultigrid * GeneralMGprec =
-            new GeneralMultigrid(P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
-
-    /*
-    // comparing coarsened operators
-    int check_lvl = 1;
-
-    HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(1,1));
-    HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(1,1));
-
-    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(0,0));
-    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(0,0));
-
-    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(0,1));
-    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(0,1));
-
-    //HypreParMatrix * A11_new = dynamic_cast<HypreParMatrix*>(&BlockOps_mg[check_lvl]->GetBlock(1,0));
-    //HypreParMatrix * A11_old = dynamic_cast<HypreParMatrix*>(&((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl)->GetBlock(1,0));
-
-    SparseMatrix diag_old;
-    A11_old->GetDiag(diag_old);
-    //std::cout << "diag in block 1 old \n";
-    //diag_old.Print();
-
-    SparseMatrix diag_new;
-    A11_new->GetDiag(diag_new);
-    //std::cout << "diag in block 1 new \n";
-    //diag_new.Print();
-
-    SparseMatrix diag_diff(diag_new);
-    diag_diff.Add(-1.0, diag_old);
-
-    std::cout << "diag_diff norm = " << diag_diff.MaxNorm() << "\n";
-
-    //diag_diff.Print();
-
-    MPI_Finalize();
-    return 0;
-    */
-
-    /*
-
-    // comparing smoothers (which show some difference at level > 0 )
-
-    int check_lvl = 1;
-    Operator * smoo_new = new MonolithicGSBlockSmoother( *BlockOps_mg[check_lvl], *offsets[check_lvl], false, HypreSmoother::Type::l1GS, 1);
-    //Operator * smoo_new = new MonolithicGSBlockSmoother( *((MonolithicMultigrid*)prec)->GetOp(num_levels - 1 - check_lvl), *offsets[check_lvl],
-                                                         //false, HypreSmoother::Type::l1GS, 1);
-    Operator * smoo_old = ((MonolithicMultigrid*)prec)->GetSmoother(num_levels - 1 - check_lvl);
-
-    Vector testvec_in(smoo_new->Width());
-    for (int i = 0; i < testvec_in.Size(); ++i)
-        testvec_in[i] = i * 1.0 / testvec_in.Size();
-
-    Vector testvec_out1(smoo_new->Height());
-    smoo_new->Mult(testvec_in, testvec_out1);
-
-    Vector testvec_out2(smoo_old->Height());
-    smoo_old->Mult(testvec_in, testvec_out2);
-
-    Vector testvec_diff(testvec_out1.Size());
-    testvec_diff = testvec_out1;
-    testvec_diff -= testvec_out2;
-
-    if (verbose)
-        std::cout << "testvec_diff norm = " << testvec_diff.Norml2() / sqrt(testvec_diff.Size()) << "\n";
-
-    MPI_Finalize();
-    return 0;
-    */
-
-
-
-    /*
-    // comparing the new class with the older one
-    if (verbose)
-        std::cout << "\nComparing geometric MG with old and new interfaces \n";
-
-    Array<int> offsets_new(numblocks_funct + 1);
-    offsets_new = 0;
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-        offsets_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
-    offsets_new.PartialSum();
-
-    BlockVector inFunctvec(offsets_new);
-    inFunctvec.GetBlock(0) = sigma_exact_truedofs;
-    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-        inFunctvec.GetBlock(1) = S_exact_truedofs;
-
-    Array<int> offsets_hcurlfunct_new(numblocks_funct + 1);
-    offsets_hcurlfunct_new = 0;
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-        if (blk == 0)
-            offsets_hcurlfunct_new[blk + 1] = Divfree_hpmat_mod_lvls[0]->Width();
-        else
-            offsets_hcurlfunct_new[blk + 1] = (*Funct_hpmat_lvls[0])(blk,blk)->Height();
-    offsets_hcurlfunct_new.PartialSum();
-
-
-    BlockVector inFunctHcurlvec(offsets_hcurlfunct_new);
-    for (int blk = 0; blk < numblocks_funct; ++blk)
-        if (blk == 0)
-            Divfree_hpmat_mod_lvls[0]->MultTranspose(inFunctvec.GetBlock(0), inFunctHcurlvec.GetBlock(0));
-        else
-            inFunctHcurlvec.GetBlock(blk) = inFunctvec.GetBlock(blk);
-
-
-    BlockVector outFunctHcurlvec(offsets_hcurlfunct_new);
-    outFunctHcurlvec = 0.0;
-    if (verbose)
-        std::cout << "Computing action for the old geometric MG ... \n";
-    prec->Mult(inFunctHcurlvec, outFunctHcurlvec);
-
-    BlockVector out2FunctHcurlvec(offsets_hcurlfunct_new);
-    out2FunctHcurlvec = 0.0;
-    if (verbose)
-        std::cout << "Computing action for the new geometric MG ... \n";
-    GeneralMGprec->Mult(inFunctHcurlvec, out2FunctHcurlvec);
-
-    BlockVector diff(offsets_hcurlfunct_new);
-    diff = outFunctHcurlvec;
-    diff -= out2FunctHcurlvec;
-
-    double diff_norm = diff.Norml2() / sqrt (diff.Size());
-    double geommg_norm = outFunctHcurlvec.Norml2() / sqrt(outFunctHcurlvec.Size());
-    if (verbose)
-    {
-        std::cout << "|| NewMG * vec - OldMG * vec || = " << diff_norm << "\n";
-        std::cout << "|| NewMG * vec - OldMG * vec || / || OldMG * vec || = " << diff_norm / geommg_norm << "\n";
-    }
-
-    MPI_Finalize();
-    return 0;
-    */
+            new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
 
 #endif // for #ifdef NEW_INTERFACE
 
