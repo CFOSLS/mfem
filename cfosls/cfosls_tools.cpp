@@ -1356,13 +1356,13 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing, new MG \n";
         //residual_l.Print();
 
-        std::cout << "residual before smoothing, new MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        //std::cout << "residual before smoothing, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
 
         PreSmoother_l->Mult(residual_l, correction_l);
 
-        std::cout << "correction after smoothing, new MG, "
-                     "norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
+        //std::cout << "correction after smoothing, new MG, "
+                     //"norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
 
         //std::cout << "correction after presmoothing, new MG \n";
         //correction_l.Print();
@@ -1376,8 +1376,9 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "help, new MG \n";
         //help.Print();
 
-        std::cout << "new residual after presmoothing, new MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+
+        //std::cout << "new residual after presmoothing, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
 
@@ -1409,7 +1410,13 @@ void GeneralMultigrid::MG_Cycle() const
     }
     else
     {
+        //std::cout << "residual at the coarsest level, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+
         CoarseOp.Mult(residual_l, correction_l);
+
+        //std::cout << "correction at the coarsest level, new MG, "
+                     //"norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
     }
 
     // PostSmoothing

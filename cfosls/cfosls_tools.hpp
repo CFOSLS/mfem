@@ -1347,7 +1347,7 @@ public:
 };
 
 // SmootherSum   * x = (Smoo1 + Smoo2 - Smoo2 * A * Smoo1) * x
-// SmootherSum^T * x = (Smoo2 + Smoo1 - Smoo1 * A * Smoo2) * x
+// SmootherSum^T * x = (Smoo2^T + Smoo1^T - Smoo1^T * A * Smoo2^T) * x
 class SmootherSum : public Operator
 {
 protected:
@@ -1360,51 +1360,88 @@ protected:
 
 public:
     SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) : smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
-    { tmp1 = new Vector(smoo_fst.Height()); tmp2 = new Vector(smoo_snd.Height());}
+    {
+        tmp1 = new Vector(smoo_fst.Height()); tmp2 = new Vector(smoo_snd.Height());
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << "sizes are: \n";
+        //std::cout << "smoo1: " << smoo_fst.Height() << " x " << smoo_fst.Width() << "\n";
+        //std::cout << "smoo2: " << smoo_snd.Height() << " x " << smoo_snd.Width() << "\n";
+        //std::cout << "op: " << op.Height() << " x " << op.Width() << "\n";
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
+    }
 
     ~SmootherSum() {delete tmp1; delete tmp2;}
 
     void Mult(const Vector & x, Vector & y) const override
     {
-        std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
+        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
         smoo_snd.Mult(x, y);
 
-        std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+        //std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
 
-        Vector temp(y.Size());
-        temp = y;
+        //Vector temp(y.Size());
+        //temp = y;
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        std::cout << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
 
         smoo_fst.Mult(x, *tmp1);
 
-        std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+        //std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << "I am here \n";
+        //std::cout << "y size = " << y.Size() << "\n";
+        //std::cout << "tmp1 size = " << tmp1->Size() << "\n";
+        //std::cout << "tmp1 norm = " << tmp1->Norml2() / sqrt (tmp1->Size()) << "\n";
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
 
         y += *tmp1;
+        //y.Add(1.0, *tmp1);
 
-        std::cout << "Smoo1 * x + Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+        //std::cout << "Smoo1 * x + Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
 
         op.Mult(*tmp1, *tmp2);
         smoo_snd.Mult(*tmp2, *tmp1);
 
-        std::cout << "Smoo2 * A * Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+        //std::cout << "Smoo2 * A * Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
 
-        temp -= *tmp1;
-        std::cout << "Smoo2 * x - Smoo2 * A * Smoo1 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
+        //temp -= *tmp1;
+        //std::cout << "Smoo2 * x - Smoo2 * A * Smoo1 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
 
         y -= *tmp1;
 
-        std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
     }
 
     void MultTranspose(const Vector & x, Vector & y) const override
     {
-        smoo_fst.Mult(x, y);
+        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
 
-        smoo_snd.Mult(x, *tmp1);
+        smoo_fst.MultTranspose(x, y);
+
+        //Vector temp(y.Size());
+        //temp = y;
+
+        //std::cout << "Smoo1 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+
+        smoo_snd.MultTranspose(x, *tmp1);
         y += *tmp1;
 
+        //std::cout << "Smoo2 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+
         op.Mult(*tmp1, *tmp2);
-        smoo_fst.Mult(*tmp2, *tmp1);
+        smoo_fst.MultTranspose(*tmp2, *tmp1);
+
+        //temp -= *tmp1;
+        //std::cout << "Smoo1 * x - Smoo1 * A * Smoo2 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
+
         y -= *tmp1;
+
+        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
     }
 
 };

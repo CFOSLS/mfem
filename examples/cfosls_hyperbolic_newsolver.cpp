@@ -1577,10 +1577,14 @@ int main(int argc, char *argv[])
         // creating local problem solver hierarchy
         if (l < num_levels - 1)
         {
+            int size = 0;
+            for (int blk = 0; blk < numblocks_funct; ++blk)
+                size += Dof_TrueDof_Func_lvls[l][blk]->GetNumCols();
+
             bool optimized_localsolve = true;
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
-                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
                                                          *P_WT[l],
@@ -1592,7 +1596,7 @@ int main(int argc, char *argv[])
             }
             else // no S
             {
-                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                (*LocalSolver_partfinder_lvls)[l] = new LocalProblemSolver(size, *Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
                                                          *P_WT[l],
@@ -3174,7 +3178,7 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-#ifdef NEW_INTERFACE2
+//#ifdef NEW_INTERFACE2
     Array<SpaceName> space_names_hdivh1(2);
     space_names_hdivh1[0] = SpaceName::HDIV;
     space_names_hdivh1[1] = SpaceName::H1;
@@ -3308,9 +3312,12 @@ int main(int argc, char *argv[])
 
             // incorrect, a combined smoother is not actually a product of the smoothers
             //Smoo_mg_plus[l] = new OperatorProduct(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l]);
-            Smoo_mg_plus[l] = new SmootherSum(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
 
-            //Smoo_mg_plus[l] = HcurlSmoothers_lvls[l];
+#ifdef SOLVE_WITH_LOCALSOLVERS
+            Smoo_mg_plus[l] = new SmootherSum(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
+#else
+            Smoo_mg_plus[l] = HcurlSmoothers_lvls[l];
+#endif
         }
     }
 
@@ -3368,7 +3375,7 @@ int main(int argc, char *argv[])
 
     GeneralMultigrid * GeneralMGprec_plus =
             new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
-#endif
+//#endif
 
     if (verbose)
         std::cout << "\nCreating an instance of the new Hcurl smoother and the minimization solver \n";
@@ -4868,7 +4875,7 @@ int main(int argc, char *argv[])
     Testsolver.SetAbsTol(sqrt(atol));
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
-    /*
+
 #ifdef NEW_INTERFACE2
     Testsolver.SetOperator(*hdivh1_op);
     Testsolver.SetPreconditioner(*GeneralMGprec_plus);
@@ -4876,10 +4883,6 @@ int main(int argc, char *argv[])
     Testsolver.SetOperator(*BlockMattest);
     Testsolver.SetPreconditioner(NewSolver);
 #endif // for ifdef NEW_INTERFACE2
-    */
-
-    Testsolver.SetOperator(*BlockMattest);
-    Testsolver.SetPreconditioner(NewSolver);
 
     Testsolver.SetPrintLevel(1);
 

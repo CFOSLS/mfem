@@ -287,7 +287,7 @@ protected:
 public:
     ~LocalProblemSolver();
     // main constructor
-    LocalProblemSolver(const BlockMatrix& Op_Blksmat,
+    LocalProblemSolver(int size, const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
                        const std::vector<HypreParMatrix*>& D_tD_blks,
                        const SparseMatrix& AE_el,
@@ -296,7 +296,7 @@ public:
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                        bool Optimized_LocalSolve)
-        : Operator(Op_Blksmat.Height(), Op_Blksmat.Width()),
+        : Operator(size, size),
           numblocks(Op_Blksmat.NumRowBlocks()),
           Op_blkspmat(Op_Blksmat), Constr_spmat(Constr_Spmat),
           d_td_blocks(D_tD_blks),
@@ -329,6 +329,9 @@ public:
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const override { Mult(x,y, NULL); }
 
+    // Transpose is meant to be the same
+    virtual void MultTranspose(const Vector &x, Vector &y) const override { Mult(x,y, NULL); }
+
     // considers x as the righthand side
     // and returns y as a solution to all the local problems
     // (*) both x and y are vectors on true dofs
@@ -357,7 +360,7 @@ public:
     // ~LocalProblemSolverWithS() : ~LocalProblemSolver() {} will call LocalProblemSolver destructor as I understand
 
     // main constructor
-    LocalProblemSolverWithS(const BlockMatrix& Op_Blksmat,
+    LocalProblemSolverWithS(int size, const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
                        const std::vector<HypreParMatrix*>& D_tD_blks,
                        const SparseMatrix& AE_el,
@@ -366,7 +369,7 @@ public:
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                        bool Optimized_LocalSolve)
-        : LocalProblemSolver(Op_Blksmat,
+        : LocalProblemSolver(size, Op_Blksmat,
                               Constr_Spmat,
                               D_tD_blks,
                               AE_el,
@@ -611,11 +614,11 @@ public:
     virtual void Setup() const;
 
     // Operator application
-    virtual void Mult (const Vector & x, Vector & y) const;
+    virtual void Mult (const Vector & x, Vector & y) const override;
 
     // Action of the transpose operator
 #ifndef BLKDIAG_SMOOTHER
-    virtual void MultTranspose (const Vector & x, Vector & y) const;
+    virtual void MultTranspose (const Vector & x, Vector & y) const override;
 #else
     virtual void MultTranspose (const Vector & x, Vector & y) const {Mult(x,y);}
 #endif

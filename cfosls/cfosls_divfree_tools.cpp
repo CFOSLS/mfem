@@ -2274,6 +2274,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
     Setup();
 }
 
+
 #ifndef BLKDIAG_SMOOTHER
 void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
 {
@@ -3327,8 +3328,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         chrono.Start();
 #endif
 
-        std::cout << "residual before smoothing, old GenMinConstr, "
-                     "norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
+        //std::cout << "residual before smoothing, old GenMinConstr, "
+                     //"norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
 
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
@@ -3337,7 +3338,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
 
-            std::cout << "LocalSmoother * r, x, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
+            //std::cout << "LocalSmoother * r, x, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
 
@@ -3362,7 +3363,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
-        std::cout << "residual after LocalSmoother, r - A Smoo1 * r, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
+        //std::cout << "residual after LocalSmoother, r - A Smoo1 * r, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -3394,7 +3395,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
 
-            std::cout << "HcurlSmoother * updated residual, Smoo2 * (r - A Smoo1 * r), norm = " << truetempvec2_lvls[l]->Norml2() / sqrt(truetempvec2_lvls[l]->Size()) << "\n";
+            //std::cout << "HcurlSmoother * updated residual, Smoo2 * (r - A Smoo1 * r), norm = " << truetempvec2_lvls[l]->Norml2() / sqrt(truetempvec2_lvls[l]->Size()) << "\n";
 
             //std::cout << "correction after Hcurl smoothing, old GenMinConstr, "
                          //"norm = " << truetempvec2_lvls[l]->Norml2() / sqrt (truetempvec2_lvls[l]->Size())
@@ -3419,8 +3420,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             chrono.Start();
 #endif
 
-            std::cout << "residual again before smoothing, old GenMinConstr, "
-                         "norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
+            //std::cout << "residual again before smoothing, old GenMinConstr, "
+                         //"norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
 
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -3445,14 +3446,14 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
         }
 
-        std::cout << "correction after smoothing, old GenMinConstr, "
-                     "norm = " << truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls[l]->Size()) << "\n";
+        //std::cout << "correction after smoothing, old GenMinConstr, "
+                     //"norm = " << truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls[l]->Size()) << "\n";
 
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
-        std::cout << "residual after smoothing, old GenMinConstr, "
-                     "norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
+        //std::cout << "residual after smoothing, old GenMinConstr, "
+                     //"norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
 
 
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
@@ -3495,12 +3496,20 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono.Start();
 #endif
 
+    //std::cout << "residual at the coarsest level, old GenMinConstr, "
+                 //"norm = " << trueresfunc_lvls[num_levels - 1]->Norml2() / sqrt (trueresfunc_lvls[num_levels - 1]->Size()) << "\n";
+
+
 #ifdef NO_COARSESOLVE
     *truesolupdate_lvls[num_levels - 1] = 0.0;
 #else
     // BOTTOM: solve the global problem at the coarsest level
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1]);
 #endif
+
+    //std::cout << "coarsest grid correction, old GenMinConstr, "
+                 //"norm = " << truesolupdate_lvls[num_levels - 1]->Norml2() / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
+
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -3561,6 +3570,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             time_resupdate += chrono.RealTime();
 #endif
             *trueresfunc_lvls[l - 1] = *truetempvec2_lvls[l - 1];
+
+            //std::cout << "residual before post-smoothing, old GenMinConstr, "
+                         //"norm = " << trueresfunc_lvls[l - 1]->Norml2() / sqrt (trueresfunc_lvls[l - 1]->Size()) << "\n";
 
 #ifdef TIMING
             MPI_Barrier(comm);
