@@ -296,7 +296,7 @@ public:
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                        bool Optimized_LocalSolve)
-        : Operator(),
+        : Operator(Op_Blksmat.Height(), Op_Blksmat.Width()),
           numblocks(Op_Blksmat.NumRowBlocks()),
           Op_blkspmat(Op_Blksmat), Constr_spmat(Constr_Spmat),
           d_td_blocks(D_tD_blks),

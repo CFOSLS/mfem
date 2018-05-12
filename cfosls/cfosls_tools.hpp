@@ -1324,6 +1324,91 @@ public:
    RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_, const Array<int>& Offsets);
 };
 
+class OperatorProduct : public Operator
+{
+protected:
+    const Operator& op_first;
+    const Operator& op_second;
+    // additional memory for storing intermediate results
+    mutable Vector * tmp;
+    mutable Vector * tmp_tr;
+public:
+    OperatorProduct(const Operator & op1, const Operator& op2) : op_first(op1), op_second(op2)
+    { tmp = new Vector(op1.Height()); tmp_tr = new Vector(op2.Height());}
+
+    ~OperatorProduct() {delete tmp; delete tmp_tr;}
+
+    void Mult(const Vector & x, Vector & y) const override
+    { op_first.Mult(x, *tmp); op_second.Mult(*tmp, y); }
+
+    void MultTranspose(const Vector & x, Vector & y) const override
+    { op_second.Mult(x, *tmp_tr); op_first.Mult(*tmp_tr, y); }
+
+};
+
+// SmootherSum   * x = (Smoo1 + Smoo2 - Smoo2 * A * Smoo1) * x
+// SmootherSum^T * x = (Smoo2 + Smoo1 - Smoo1 * A * Smoo2) * x
+class SmootherSum : public Operator
+{
+protected:
+    const Operator& smoo_fst;
+    const Operator& smoo_snd;
+    const Operator& op;
+    // additional memory for storing intermediate results
+    mutable Vector * tmp1;
+    mutable Vector * tmp2;
+
+public:
+    SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) : smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
+    { tmp1 = new Vector(smoo_fst.Height()); tmp2 = new Vector(smoo_snd.Height());}
+
+    ~SmootherSum() {delete tmp1; delete tmp2;}
+
+    void Mult(const Vector & x, Vector & y) const override
+    {
+        std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
+        smoo_snd.Mult(x, y);
+
+        std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+
+        Vector temp(y.Size());
+        temp = y;
+
+        smoo_fst.Mult(x, *tmp1);
+
+        std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+
+        y += *tmp1;
+
+        std::cout << "Smoo1 * x + Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+
+        op.Mult(*tmp1, *tmp2);
+        smoo_snd.Mult(*tmp2, *tmp1);
+
+        std::cout << "Smoo2 * A * Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+
+        temp -= *tmp1;
+        std::cout << "Smoo2 * x - Smoo2 * A * Smoo1 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
+
+        y -= *tmp1;
+
+        std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+    }
+
+    void MultTranspose(const Vector & x, Vector & y) const override
+    {
+        smoo_fst.Mult(x, y);
+
+        smoo_snd.Mult(x, *tmp1);
+        y += *tmp1;
+
+        op.Mult(*tmp1, *tmp2);
+        smoo_fst.Mult(*tmp2, *tmp1);
+        y -= *tmp1;
+    }
+
+};
+
 class BlkInterpolationWithBNDforTranspose : public BlockOperator
 {
 protected:

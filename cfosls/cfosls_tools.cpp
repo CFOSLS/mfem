@@ -1356,13 +1356,13 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing, new MG \n";
         //residual_l.Print();
 
-        //std::cout << "residual before smoothing, new MG, "
-                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        std::cout << "residual before smoothing, new MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
 
         PreSmoother_l->Mult(residual_l, correction_l);
 
-        //std::cout << "correction after smoothing, new MG, "
-                     //"norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
+        std::cout << "correction after smoothing, new MG, "
+                     "norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
 
         //std::cout << "correction after presmoothing, new MG \n";
         //correction_l.Print();
@@ -1376,8 +1376,8 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "help, new MG \n";
         //help.Print();
 
-        //std::cout << "new residual after presmoothing, new MG, "
-                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        std::cout << "new residual after presmoothing, new MG, "
+                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
 
@@ -1387,6 +1387,9 @@ void GeneralMultigrid::MG_Cycle() const
         const Operator& P_l = *P_lvls[current_level];
 
         P_l.MultTranspose(residual_l, *residual[current_level + 1]);
+
+        //std::cout << "residual after coarsening, new MG, "
+                     //"norm = " << residual[current_level + 1]->Norml2() / sqrt (residual[current_level + 1]->Size()) << "\n";
 
         //std::cout << "residual after projecting onto coarser level, new MG \n";
         //residual[current_level + 1]->Print();

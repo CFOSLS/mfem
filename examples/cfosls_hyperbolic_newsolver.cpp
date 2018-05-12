@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define NEW_INTERFACE
+#define NEW_INTERFACE2
 
 //#include "cfosls_testsuite.hpp"
 
@@ -28,7 +29,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define SOLVE_WITH_LOCALSOLVERS
+#define SOLVE_WITH_LOCALSOLVERS
 
 // activates a test where new solver is used as a preconditioner
 #define USE_AS_A_PREC
@@ -798,7 +799,6 @@ int main(int argc, char *argv[])
    LocalSolver_partfinder_lvls = new Array<LocalProblemSolver*>(num_levels - 1);
 
    Array<Operator*> Smoothers_lvls(num_levels - 1);
-
 
    Operator* CoarsestSolver;
    CoarsestProblemSolver* CoarsestSolver_partfinder;
@@ -2694,14 +2694,16 @@ int main(int argc, char *argv[])
 
     BlockDiagonalPreconditioner * CoarsePrec_mg = new BlockDiagonalPreconditioner(BlockOps_mg[coarsest_level]->ColOffsets());
 
-    HypreParMatrix &blk00 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(0,0);
-    HypreParMatrix &blk11 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(1,1);
+    {
+        HypreParMatrix &blk00 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(0,0);
+        HypreParMatrix &blk11 = (HypreParMatrix&)BlockOps_mg[coarsest_level]->GetBlock(1,1);
 
-    HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
-    HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
 
-    ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(0, precU);
-    ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(1, precS);
+        ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(0, precU);
+        ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(1, precS);
+    }
 
     ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
 
@@ -3163,14 +3165,210 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Errors in the MG code were computed in "<< chrono.RealTime() <<" seconds.\n";
 
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 #endif // for #ifndef COMPARE_MG
 
 #endif // for #ifdef OLD_CODE
 
     chrono.Clear();
     chrono.Start();
+
+#ifdef NEW_INTERFACE2
+    Array<SpaceName> space_names_hdivh1(2);
+    space_names_hdivh1[0] = SpaceName::HDIV;
+    space_names_hdivh1[1] = SpaceName::H1;
+
+    std::vector<const Array<int> *> offsets_hdivh1(nlevels);
+    offsets_hdivh1[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hdivh1);
+
+    // manually truncating the original problem's operator into hdiv-h1 operator
+    BlockOperator * hdivh1_op = new BlockOperator(*offsets_hdivh1[0]);
+
+    HypreParMatrix * hdivh1_op_00 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,0)));
+    HypreParMatrix * hdivh1_op_01 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,1)));
+    HypreParMatrix * hdivh1_op_10 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,0)));
+    HypreParMatrix * hdivh1_op_11 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,1)));
+
+    hdivh1_op->SetBlock(0,0, hdivh1_op_00);
+    hdivh1_op->SetBlock(0,1, hdivh1_op_01);
+    hdivh1_op->SetBlock(1,0, hdivh1_op_10);
+    hdivh1_op->SetBlock(1,1, hdivh1_op_11);
+
+    // setting multigrid components from the older parts of the code
+    Array<BlockOperator*> BlockP_mg_nobnd_plus(nlevels - 1);
+    Array<Operator*> P_mg_plus(nlevels - 1);
+    Array<BlockOperator*> BlockOps_mg_plus(nlevels);
+    Array<Operator*> Ops_mg_plus(nlevels);
+    Array<Operator*> HcurlSmoothers_lvls(nlevels - 1);
+    Array<Operator*> SchwarsSmoothers_lvls(nlevels - 1);
+    Array<Operator*> Smoo_mg_plus(nlevels - 1);
+    Operator* CoarseSolver_mg_plus;
+
+    std::vector<Operator*> Ops_mg_special(nlevels - 1);
+
+    std::vector< Array<int>* > coarse_bnd_indices_hdivh1_lvls(num_levels);
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        int ncoarse_bndtdofs = 0;
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            ncoarse_bndtdofs += EssBdrTrueDofs_Funct_lvls[l + 1][blk]->Size();
+        }
+
+        coarse_bnd_indices_hdivh1_lvls[l] = new Array<int>(ncoarse_bndtdofs);
+
+        int shift_bnd_indices = 0;
+        int shift_tdofs_indices = 0;
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            for (int j = 0; j < EssBdrTrueDofs_Funct_lvls[l + 1][blk]->Size(); ++j)
+                (*coarse_bnd_indices_hdivh1_lvls[l])[j + shift_bnd_indices] =
+                    (*EssBdrTrueDofs_Funct_lvls[l + 1][blk])[j] + shift_tdofs_indices;
+
+            shift_bnd_indices += EssBdrTrueDofs_Funct_lvls[l + 1][blk]->Size();
+            shift_tdofs_indices += TrueP_Func[l]->GetBlock(blk,blk).Width();
+        }
+
+    }
+
+    for (int l = 0; l < num_levels; ++l)
+    {
+        if (l < num_levels - 1)
+        {
+            offsets_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hdivh1);
+            BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, space_names_hdivh1,
+                                                                         *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
+            P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
+                                                              *coarse_bnd_indices_hdivh1_lvls[l],
+                                                              *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
+        }
+
+        if (l == 0)
+            BlockOps_mg_plus[l] = hdivh1_op;
+        else
+            BlockOps_mg_plus[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd_plus[l - 1],
+                    *BlockOps_mg_plus[l - 1], *BlockP_mg_nobnd_plus[l - 1], *offsets_hdivh1[l]);
+
+        if (l > 0)
+        {
+            std::vector<Array<int> * > EssTDofs(space_names_hdivh1.Size());
+            EssTDofs[0] = EssBdrTrueDofs_Funct_lvls[l][0];
+            EssTDofs[1] = EssBdrTrueDofs_Funct_lvls[l][1];
+            EliminateBoundaryBlocks(*BlockOps_mg_plus[l], EssTDofs);
+        }
+
+        Ops_mg_plus[l] = BlockOps_mg_plus[l];
+
+        if (l < num_levels - 1)
+        {
+            Array<int> SweepsNum(numblocks_funct);
+            SweepsNum = ipow(1, l);
+            if (verbose)
+            {
+                std::cout << "Sweeps num: \n";
+                SweepsNum.Print();
+            }
+            HcurlSmoothers_lvls[l] = Smoothers_lvls[l];
+            /*
+            HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*Funct_hpmat_lvls[l], *Divfree_hpmat_mod_lvls[l],
+                                                     *EssBdrTrueDofs_Hcurl[l],
+                                                     EssBdrTrueDofs_Funct_lvls[l],
+                                                     &SweepsNum, offsets_global);
+            */
+
+            SchwarsSmoothers_lvls[l] = (*LocalSolver_lvls)[l];
+            /*
+            bool optimized_localsolve = true;
+            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+            {
+                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+                                                         optimized_localsolve);
+            }
+            else // no S
+            {
+                SchwarsSmoothers_lvls[l] = new LocalProblemSolver(*Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         Dof_TrueDof_Func_lvls[l],
+                                                         *P_WT[l],
+                                                         *Element_dofs_Func[l],
+                                                         *Element_dofs_W[l],
+                                                         BdrDofs_Funct_lvls[l],
+                                                         EssBdrDofs_Funct_lvls[l],
+                                                         optimized_localsolve);
+            }
+            */
+
+            // incorrect, a combined smoother is not actually a product of the smoothers
+            //Smoo_mg_plus[l] = new OperatorProduct(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l]);
+            Smoo_mg_plus[l] = new SmootherSum(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
+
+            //Smoo_mg_plus[l] = HcurlSmoothers_lvls[l];
+        }
+    }
+
+    for (int l = 0; l < nlevels - 1; ++l)
+        Ops_mg_special[l] = Ops_mg_plus[l];
+
+    if (verbose)
+        std::cout << "Creating the new coarsest solver which works in the div-free subspace \n" << std::flush;
+
+    CoarseSolver_mg_plus = CoarsestSolver;
+    /*
+    int size_sp = 0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        size_sp += Dof_TrueDof_Func_lvls[num_levels - 1][blk]->GetNumCols();
+    CoarsestSolver_mg_plus = new CoarsestProblemHcurlSolver(size_sp,
+                                                     *Funct_hpmat_lvls[num_levels - 1],
+                                                     *Divfree_hpmat_mod_lvls[num_levels - 1],
+                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
+                                                     EssBdrTrueDofs_Funct_lvls[num_levels - 1],
+                                                     *EssBdrDofs_Hcurl[num_levels - 1],
+                                                     *EssBdrTrueDofs_Hcurl[num_levels - 1]);
+
+    ((CoarsestProblemHcurlSolver*)CoarsestSolve_mg_plus)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_mg_plus)->SetAbsTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_mg_plus)->SetRelTol(1.0e-7);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_mg_plus)->ResetSolverParams();
+    */
+
+#if 0
+    //int coarsest_level = num_levels - 1;
+    CoarseSolver_mg_plus = new CGSolver(comm);
+    ((CGSolver*)CoarseSolver_mg_plus)->SetAbsTol(sqrt(1e-32));
+    ((CGSolver*)CoarseSolver_mg_plus)->SetRelTol(sqrt(1e-12));
+    ((CGSolver*)CoarseSolver_mg_plus)->SetMaxIter(100);
+    ((CGSolver*)CoarseSolver_mg_plus)->SetPrintLevel(0);
+    ((CGSolver*)CoarseSolver_mg_plus)->SetOperator(*Ops_mg_plus[coarsest_level]);
+    ((CGSolver*)CoarseSolver_mg_plus)->iterative_mode = false;
+
+    BlockDiagonalPreconditioner * CoarsePrec_mg_plus = new BlockDiagonalPreconditioner
+            (BlockOps_mg_plus[coarsest_level]->ColOffsets());
+
+    {
+        HypreParMatrix &blk00 = (HypreParMatrix&)BlockOps_mg_plus[coarsest_level]->GetBlock(0,0);
+        HypreParMatrix &blk11 = (HypreParMatrix&)BlockOps_mg_plus[coarsest_level]->GetBlock(1,1);
+
+        HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+        HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
+
+        ((BlockDiagonalPreconditioner*)CoarsePrec_mg_plus)->SetDiagonalBlock(0, precU);
+        ((BlockDiagonalPreconditioner*)CoarsePrec_mg_plus)->SetDiagonalBlock(1, precS);
+    }
+
+    ((CGSolver*)CoarseSolver_mg_plus)->SetPreconditioner(*CoarsePrec_mg);
+#endif
+
+    GeneralMultigrid * GeneralMGprec_plus =
+            new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
+#endif
 
     if (verbose)
         std::cout << "\nCreating an instance of the new Hcurl smoother and the minimization solver \n";
@@ -3283,7 +3481,8 @@ int main(int argc, char *argv[])
     GeneralMinConstrSolver NewSolver( comm, num_levels,
                      TrueP_Func, EssBdrTrueDofs_Funct_lvls,
                      *Functrhs_global, Smoothers_lvls,
-                     Xinit_truedofs, Funct_global_lvls,
+                     //Xinit_truedofs, Funct_global_lvls,
+                     Xinit_truedofs, Ops_mg_special,
 #ifdef CHECK_CONSTR
                      *Constraint_global, Floc,
 #endif
@@ -4669,9 +4868,20 @@ int main(int argc, char *argv[])
     Testsolver.SetAbsTol(sqrt(atol));
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
+    /*
+#ifdef NEW_INTERFACE2
+    Testsolver.SetOperator(*hdivh1_op);
+    Testsolver.SetPreconditioner(*GeneralMGprec_plus);
+#else
     Testsolver.SetOperator(*BlockMattest);
-    Testsolver.SetPrintLevel(1);
     Testsolver.SetPreconditioner(NewSolver);
+#endif // for ifdef NEW_INTERFACE2
+    */
+
+    Testsolver.SetOperator(*BlockMattest);
+    Testsolver.SetPreconditioner(NewSolver);
+
+    Testsolver.SetPrintLevel(1);
 
     trueXtest = 0.0;
 
