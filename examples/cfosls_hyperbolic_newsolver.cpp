@@ -3236,8 +3236,20 @@ int main(int argc, char *argv[])
 
     }
 
+    std::vector<Array<int>* > dtd_row_offsets(num_levels);
+    std::vector<Array<int>* > dtd_col_offsets(num_levels);
+
+    std::vector<Array<int>* > el2dofs_row_offsets(num_levels);
+    std::vector<Array<int>* > el2dofs_col_offsets(num_levels);
+
     for (int l = 0; l < num_levels; ++l)
     {
+        dtd_row_offsets[l] = new Array<int>();
+        dtd_col_offsets[l] = new Array<int>();
+
+        el2dofs_row_offsets[l] = new Array<int>();
+        el2dofs_col_offsets[l] = new Array<int>();
+
         if (l < num_levels - 1)
         {
             offsets_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hdivh1);
@@ -3277,11 +3289,17 @@ int main(int argc, char *argv[])
             //HcurlSmoothers_lvls[l] = Smoothers_lvls[l];
             //SchwarsSmoothers_lvls[l] = (*LocalSolver_lvls)[l];
 
+            Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+
+            std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+
             HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_mg_plus[l],
-                                                     //*Funct_hpmat_lvls[l],
                                                      *hierarchy->GetDivfreeDop(l),
-                                                     *EssBdrTrueDofs_Hcurl[l],
-                                                     EssBdrTrueDofs_Funct_lvls[l],
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                               essbdr_attribs_Hcurl, l),
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                                               space_names_hdivh1,
+                                                                               essbdr_attribs, l),
                                                      &SweepsNum, *offsets_hdivh1[l]);
             //int size = 0;
             //for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -3297,20 +3315,40 @@ int main(int argc, char *argv[])
             /// TODO:
             /// Next steps are:
             /// 1) Implement a function which outputs essential boundary tdofs from
-            /// the hierarchy, given anemspace and boundary conditions. This shopuld return
+            /// the hierarchy, given spacenames and boundary conditions. This shopuld return
             /// a vector of Array<int>'s when several names are given, and a vector or just
             /// an Array<int> when only one name was given
             /// 2) Implement a function with the same options but constructs element-to-dofs
             /// relations
             /// 3) Implement a function with the same options which produces dof_truedof matrices
-            /// 4) Finalize by computing all the ingredienst and components for the MG with
+            /// 4) Finalize by computing all the ingredients and components for the MG with
             /// Schwarz smoothers from the hierarchy and problem formulation
             /// 5) If have time, also look into the simple parabolic example (especially on adding
             /// the parabolic test to FOSLStest setup
 
+            std::vector<Array<int>*>& fullbdr_attribs = problem->GetBdrConditions().GetFullBdrAttribs();
+
+
             bool optimized_localsolve = true;
+
+            SparseMatrix * P_WT_l = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
+                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
+                                                         *Constraint_mat_lvls[l],
+                                                         hierarchy->GetDofTrueDof(space_names_hdivh1, l),
+                                                         *P_WT_l,
+                                                         //*P_WT[l],
+                                                         hierarchy->GetElementToDofs(space_names_hdivh1, l,
+                                                                                     *el2dofs_row_offsets[l],
+                                                                                     *el2dofs_col_offsets[l]),
+                                                         hierarchy->GetElementToDofs(SpaceName::L2, l),
+                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_hdivh1,
+                                                                                  fullbdr_attribs, l),
+                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_hdivh1,
+                                                                                  essbdr_attribs, l),
+                                                         optimized_localsolve);
+                /*
                 SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
                                                          *Constraint_mat_lvls[l],
                                                          Dof_TrueDof_Func_lvls[l],
@@ -3320,6 +3358,7 @@ int main(int argc, char *argv[])
                                                          BdrDofs_Funct_lvls[l],
                                                          EssBdrDofs_Funct_lvls[l],
                                                          optimized_localsolve);
+                */
             }
             else // no S
             {
@@ -3333,6 +3372,8 @@ int main(int argc, char *argv[])
                                                          EssBdrDofs_Funct_lvls[l],
                                                          optimized_localsolve);
             }
+
+            delete P_WT_l;
 
             // incorrect, a combined smoother is not actually a product of the smoothers
             //Smoo_mg_plus[l] = new OperatorProduct(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l]);

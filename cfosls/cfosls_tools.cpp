@@ -572,8 +572,7 @@ BlockVector * FOSLSProblem::GetTrueInitialCondition()
             Vector exsol_tdofs(pfes[blk]->TrueVSize());
             exsol_pgfun->ParallelProject(exsol_tdofs);
 
-            Array<int> essbdr_attrs;
-            ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+            Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
             Array<int> ess_tdofs;
             pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
@@ -752,8 +751,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
                     //pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
                             //x->GetBlock(i), *plforms[i]);
 
-                    Array<int> essbdr_attrs;
-                    ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(i)), essbdr_attrs);
+                    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
+
                     Vector dummy(pbforms.diag(i)->Height());
                     dummy = 0.0;
 
@@ -798,8 +797,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
                                                                           //x->GetBlock(exist_col), *plforms[exist_row]);
                     //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
 
-                    Array<int> essbdr_attrs;
-                    ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(exist_col)), essbdr_attrs);
+                    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(exist_col);
 
                     Vector dummy(pbforms.offd(exist_row,exist_col)->Height());
                     dummy = 0.0;
@@ -807,9 +805,10 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
                     pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(essbdr_attrs, x->GetBlock(exist_col), dummy);
 
-                    ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(exist_row)), essbdr_attrs);
+                    Array<int>& essbdr_attrs2 = bdr_conds.GetBdrAttribs(exist_row);
+
                     //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
-                    pbforms.offd(exist_row,exist_col)->EliminateTestDofs(essbdr_attrs);
+                    pbforms.offd(exist_row,exist_col)->EliminateTestDofs(essbdr_attrs2);
 
 
                     pbforms.offd(exist_row,exist_col)->Finalize();
@@ -855,8 +854,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
    // restoring correct boundary values for boundary tdofs
    for (int i = 0; i < numblocks; ++i)
    {
-       Array<int> essbdr_attrs;
-       ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(i)), essbdr_attrs);
+       Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 
        Array<int> ess_bnd_tdofs;
        pfes[i]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -912,8 +910,7 @@ void FOSLSProblem::ComputeBndError(const Vector& vec) const
         Vector exsol_tdofs(pfes[blk]->TrueVSize());
         exsol_pgfun->ParallelProject(exsol_tdofs);
 
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> essbnd_tdofs;
         pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
@@ -1027,8 +1024,7 @@ void FOSLSProblem::ZeroBndValues(Vector& vec) const
     int numblocks = fe_formul.Nblocks();
     for (int i = 0; i < numblocks; ++i)
     {
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(i)), essbdr_attrs);
+        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 
         Array<int> ess_bnd_tdofs;
         pfes[i]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -1381,6 +1377,7 @@ void GeneralMultigrid::MG_Cycle() const
                      //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
         //residual_l.Print();
     }
+
 
     // Coarse grid correction
     if (current_level < nlevels - 1)
@@ -2442,6 +2439,406 @@ BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const FOSLSF
     return ConstructTruePforFormul(level, space_names, row_offsets, col_offsets);
 }
 
+const Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
+                                                         SpaceName space_name, const Array<int>& essbdr_attribs,
+                                                         int level) const
+{
+    MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
+                "First argument must be 'dof' or 'tdof' \n");
+    ParFiniteElementSpace * pfes;
+    switch(space_name)
+    {
+    case HDIV:
+        pfes = Hdiv_space_lvls[level];
+        break;
+    case H1:
+        pfes = H1_space_lvls[level];
+        break;
+    case L2:
+        pfes = L2_space_lvls[level];
+        break;
+    case HCURL:
+        pfes = Hcurl_space_lvls[level];
+        break;
+    case HDIVSKEW:
+        pfes = Hdivskew_space_lvls[level];
+        break;
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    Array<int>* res = new Array<int>;
+
+    if (strcmp(tdof_or_dof, "tdof") == 0)
+        pfes->GetEssentialTrueDofs(essbdr_attribs, *res);
+    else // dof
+        pfes->GetEssentialVDofs(essbdr_attribs, *res);
+
+    return *res;
+}
+
+std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
+                                                                  const Array<SpaceName>& space_names,
+                                                                  std::vector<const Array<int>*>& essbdr_attribs,
+                                                                  int level) const
+{
+    MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
+                "First argument must be 'dof' or 'tdof' \n");
+
+    ParFiniteElementSpace* pfes;
+    std::vector<Array<int>* > * res = new std::vector<Array<int>* >();
+    res->resize(space_names.Size());
+
+    for (int i = 0; i < space_names.Size(); ++i)
+    {
+        switch(space_names[i])
+        {
+        case HDIV:
+            pfes = Hdiv_space_lvls[level];
+            break;
+        case H1:
+            pfes = H1_space_lvls[level];
+            break;
+        case L2:
+            pfes = L2_space_lvls[level];
+            break;
+        case HCURL:
+            pfes = Hcurl_space_lvls[level];
+            break;
+        case HDIVSKEW:
+            pfes = Hdivskew_space_lvls[level];
+            break;
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        (*res)[i] = new Array<int>();
+
+        if (strcmp(tdof_or_dof, "tdof") == 0)
+            pfes->GetEssentialTrueDofs(*essbdr_attribs[i], *(*res)[i]);
+        else
+            pfes->GetEssentialVDofs(*essbdr_attribs[i], *(*res)[i]);
+    }
+
+    return *res;
+}
+
+std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
+                                                            const Array<SpaceName> &space_names,
+                                                            std::vector<Array<int>*>& essbdr_attribs,
+                                                            int level) const
+{
+    MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
+                "First argument must be 'dof' or 'tdof' \n");
+
+    ParFiniteElementSpace* pfes;
+    std::vector<Array<int>* > * res = new std::vector<Array<int>* >();
+    res->resize(space_names.Size());
+
+    for (int i = 0; i < space_names.Size(); ++i)
+    {
+        switch(space_names[i])
+        {
+        case HDIV:
+            pfes = Hdiv_space_lvls[level];
+            break;
+        case H1:
+            pfes = H1_space_lvls[level];
+            break;
+        case L2:
+            pfes = L2_space_lvls[level];
+            break;
+        case HCURL:
+            pfes = Hcurl_space_lvls[level];
+            break;
+        case HDIVSKEW:
+            pfes = Hdivskew_space_lvls[level];
+            break;
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        (*res)[i] = new Array<int>();
+
+        if (strcmp(tdof_or_dof, "tdof") == 0)
+            pfes->GetEssentialTrueDofs(*essbdr_attribs[i], *(*res)[i]);
+        else
+            pfes->GetEssentialVDofs(*essbdr_attribs[i], *(*res)[i]);
+    }
+
+    return *res;
+}
+
+ParFiniteElementSpace * GeneralHierarchy::GetSpace(SpaceName space, int level)
+{
+    switch(space)
+    {
+    case HDIV:
+        return Hdiv_space_lvls[level];
+    case H1:
+        return H1_space_lvls[level];
+    case L2:
+        return L2_space_lvls[level];
+    case HCURL:
+        return Hcurl_space_lvls[level];
+    case HDIVSKEW:
+        return Hdivskew_space_lvls[level];
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+HypreParMatrix * GeneralHierarchy::GetTruePspace(SpaceName space, int level)
+{
+    switch(space)
+    {
+    case HDIV:
+        return TrueP_Hdiv_lvls[level];
+    case H1:
+        return TrueP_H1_lvls[level];
+    case L2:
+        return TrueP_L2_lvls[level];
+    case HCURL:
+        return TrueP_Hcurl_lvls[level];
+    case HDIVSKEW:
+        return TrueP_Hdivskew_lvls[level];
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+SparseMatrix * GeneralHierarchy::GetPspace(SpaceName space, int level)
+{
+    switch(space)
+    {
+    case HDIV:
+        return P_Hdiv_lvls[level];
+    case H1:
+        return P_H1_lvls[level];
+    case L2:
+        return P_L2_lvls[level];
+    case HCURL:
+        return P_Hcurl_lvls[level];
+    case HDIVSKEW:
+        return P_Hdivskew_lvls[level];
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+void GeneralHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
+{
+    //if (!dynamic_cast<ParMeshCyl*> (pmesh))
+        //std::cout << "Unsuccessful cast \n";
+    ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
+
+    if (lvl == num_lvls - 1)
+        if (pmeshcyl_view)
+        {
+            //ParMesh * temp = new ParMeshCyl(*pmeshcyl_view);
+            //pmesh_lvls[lvl] = dynamic_cast<ParMesh*>(temp);
+            pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
+        }
+        else
+            pmesh_lvls[lvl] = new ParMesh(*pmesh);
+    else
+    {
+        if (pmeshcyl_view)
+        {
+            pmeshcyl_view->Refine(1);
+            pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
+        }
+        else
+        {
+            pmesh->UniformRefinement();
+            pmesh_lvls[lvl] = new ParMesh(*pmesh);
+        }
+        //pmesh->UniformRefinement();
+    }
+}
+
+SparseMatrix& GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level) const
+{
+    ParFiniteElementSpace * pfes;
+    switch(space_name)
+    {
+    case HDIV:
+        pfes = Hdiv_space_lvls[level];
+        break;
+    case H1:
+        pfes = H1_space_lvls[level];
+        break;
+    case L2:
+        pfes = L2_space_lvls[level];
+        break;
+    case HCURL:
+        pfes = Hcurl_space_lvls[level];
+        break;
+    case HDIVSKEW:
+        pfes = Hdivskew_space_lvls[level];
+        break;
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    return ElementToDofs(*pfes);
+}
+
+BlockMatrix& GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_names, int level,
+                                                Array<int>& row_offsets, Array<int>& col_offsets) const
+{
+    Array<ParFiniteElementSpace*> pfess(space_names.Size());
+
+    row_offsets.SetSize(space_names.Size() + 1);
+    row_offsets[0] = 0;
+    col_offsets.SetSize(space_names.Size() + 1);
+    col_offsets[0] = 0;
+
+    for (int i = 0; i < pfess.Size(); ++i)
+    {
+        switch(space_names[i])
+        {
+        case HDIV:
+            pfess[i] = Hdiv_space_lvls[level];
+            break;
+        case H1:
+            pfess[i] = H1_space_lvls[level];
+            break;
+        case L2:
+            pfess[i] = L2_space_lvls[level];
+            break;
+        case HCURL:
+            pfess[i] = Hcurl_space_lvls[level];
+            break;
+        case HDIVSKEW:
+            pfess[i] = Hdivskew_space_lvls[level];
+            break;
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+
+        row_offsets[i + 1] = pfess[i]->GetNE();
+        col_offsets[i + 1] = pfess[i]->GetVSize();
+    }
+
+    row_offsets.PartialSum();
+    col_offsets.PartialSum();
+
+    BlockMatrix * res = new BlockMatrix(row_offsets, col_offsets);
+
+    for (int i = 0; i < res->NumRowBlocks(); ++i)
+    {
+        SparseMatrix * el2dofs_blk = &ElementToDofs(*pfess[i]);
+        res->SetBlock(i,i, el2dofs_blk);
+    }
+
+    res->owns_blocks = true;
+
+    return * res;
+}
+
+HypreParMatrix& GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level) const
+{
+    ParFiniteElementSpace * pfes;
+    switch(space_name)
+    {
+    case HDIV:
+        pfes = Hdiv_space_lvls[level];
+        break;
+    case H1:
+        pfes = H1_space_lvls[level];
+        break;
+    case L2:
+        pfes = L2_space_lvls[level];
+        break;
+    case HCURL:
+        pfes = Hcurl_space_lvls[level];
+        break;
+    case HDIVSKEW:
+        pfes = Hdivskew_space_lvls[level];
+        break;
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    HypreParMatrix * temp = pfes->Dof_TrueDof_Matrix();
+
+    return *CopyHypreParMatrix(*temp);
+}
+
+std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names, int level) const
+{
+    std::vector<HypreParMatrix*> * res = new std::vector<HypreParMatrix*>;
+    res->resize(space_names.Size());
+    for (int i = 0; i < space_names.Size(); ++i)
+    {
+        (*res)[i] = &GetDofTrueDof(space_names[i], level);
+    }
+
+    return *res;
+}
+
+BlockOperator* GeneralHierarchy::GetDofTrueDof(const Array<SpaceName>& space_names, int level,
+                                               Array<int>& row_offsets, Array<int>& col_offsets) const
+{
+    std::vector<HypreParMatrix*> & temp = GetDofTrueDof(space_names, level);
+
+    row_offsets.SetSize(space_names.Size() + 1);
+    row_offsets[0] = 0;
+
+    col_offsets.SetSize(row_offsets.Size());
+    col_offsets[0] = 0;
+
+    for (int i = 0; i < space_names.Size(); ++i)
+    {
+        row_offsets[i + 1] = temp[i]->Height();
+        col_offsets[i + 1] = temp[i]->Width();
+    }
+
+    row_offsets.PartialSum();
+    col_offsets.PartialSum();
+
+    BlockOperator * res = new BlockOperator(row_offsets, col_offsets);
+    for (int i = 0; i < space_names.Size(); ++i)
+        res->SetDiagonalBlock(i, temp[i]);
+
+    return res;
+}
+
+
 
 /*
 void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
@@ -3460,6 +3857,36 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
         }
 }
 
+SparseMatrix& ElementToDofs(const FiniteElementSpace &fes)
+{
+    // Returns a SparseMatrix with the relation Element to Dofs
+    int * I = new int[fes.GetNE() + 1];
+    Array<int> vdofs_R;
+
+    I[0] = 0;
+    for (int i = 0; i < fes.GetNE(); ++i)
+    {
+        fes.GetElementVDofs(i, vdofs_R);
+        I[i + 1] = I[i] + vdofs_R.Size();
+    }
+    int * J = new int[I[fes.GetNE()]];
+    double * data = new double[I[fes.GetNE()]];
+
+    for (int i = 0; i < fes.GetNE(); ++i)
+    {
+        // Returns indexes of dofs in array for ith' elements'
+        fes.GetElementVDofs(i,vdofs_R);
+        fes.AdjustVDofs(vdofs_R);
+        for (int j = I[i]; j < I[i + 1]; ++j)
+        {
+            J[j] = vdofs_R[j - I[i]];
+            data[j] =1;
+        }
+
+    }
+    SparseMatrix * res = new SparseMatrix(I, J, data, fes.GetNE(), fes.GetVSize());
+    return *res;
+}
 
 
 } // for namespace mfem

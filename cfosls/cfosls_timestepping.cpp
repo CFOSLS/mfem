@@ -158,8 +158,7 @@ void FOSLSCylProblem::CorrectFromInitCnd(const Operator& op,
 
     for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
     {
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> ess_bnd_tdofs;
         pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -249,8 +248,7 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
 
     for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
     {
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> ess_tdofs;
         pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);

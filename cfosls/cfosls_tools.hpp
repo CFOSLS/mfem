@@ -102,22 +102,112 @@ public:
         }
     }
 
-    std::vector<std::vector<int> >* GetAllBdrAttribs()
+    std::vector< Array<int>* >& GetAllBdrAttribs()
     {
-        if (initialized)
-            return &bdr_attribs;
-        else
-            return NULL;
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+
+        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(numblocks);
+        for (int i = 0; i < numblocks; ++i)
+        {
+            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
+            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
+            {
+                (*(*res)[i])[j] = bdr_attribs[i][j];
+            }
+        }
+
+        return *res;
     }
 
+    std::vector< Array<int>* >& GetFullBdrAttribs()
+    {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+
+        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(numblocks);
+        for (int i = 0; i < numblocks; ++i)
+        {
+            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
+            *(*res)[i] = 1;
+        }
+
+        return *res;
+    }
+
+    /*
+    // deprecated
+    std::vector<std::vector<int> >* GetAllBdrAttribs()
+    {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+        return &bdr_attribs;
+    }
+    */
+
+    /*
+    // deprecated
     std::vector<int> * GetBdrAttribs(int blk)
     {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
         MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
-        if (initialized)
-            return &(bdr_attribs[blk]);
-        else
-            return NULL;
+        return &(bdr_attribs[blk]);
     }
+    */
+
+    Array<int>& GetBdrAttribs(int blk)
+    {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+        MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
+
+        Array<int> * res = new Array<int>(bdr_attribs[blk].size());
+        for (unsigned int i = 0; i < bdr_attribs[blk].size(); ++i)
+            (*res)[i] = bdr_attribs[blk][i];
+
+        return * res;
+    }
+
+    /*
+    // deprecated
+    std::vector<std::vector<int> > & GetBdrAttribs(Array<int>& blks)
+    {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+
+        std::vector< std::vector<int> > * res = new std::vector< std::vector<int> >(blks.Size());
+        for (int i = 0; i < blks.Size(); ++i)
+        {
+            int blk = blks[i];
+            MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
+
+            (*res)[i].resize(pmesh.bdr_attributes.Max());
+            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
+            {
+                (*res)[i][j] = bdr_attribs[blk][j];
+            }
+
+        }
+
+        return *res;
+    }
+    */
+
+    std::vector<Array<int>* > & GetBdrAttribs(Array<int>& blks)
+    {
+        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
+
+        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(blks.Size());
+        for (int i = 0; i < blks.Size(); ++i)
+        {
+            int blk = blks[i];
+            MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
+
+            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
+            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
+            {
+                *((*res)[i])[j] = bdr_attribs[blk][j];
+            }
+        }
+
+        return *res;
+    }
+
 
     bool Initialized() const {return initialized;}
 };
@@ -199,36 +289,7 @@ public:
 
     void ConstructDivfreeDops();
 
-    void RefineAndCopy(int lvl, ParMesh* pmesh)
-    {
-        //if (!dynamic_cast<ParMeshCyl*> (pmesh))
-            //std::cout << "Unsuccessful cast \n";
-        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
-
-        if (lvl == num_lvls - 1)
-            if (pmeshcyl_view)
-            {
-                //ParMesh * temp = new ParMeshCyl(*pmeshcyl_view);
-                //pmesh_lvls[lvl] = dynamic_cast<ParMesh*>(temp);
-                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
-            }
-            else
-                pmesh_lvls[lvl] = new ParMesh(*pmesh);
-        else
-        {
-            if (pmeshcyl_view)
-            {
-                pmeshcyl_view->Refine(1);
-                pmesh_lvls[lvl] = new ParMeshCyl(*pmeshcyl_view);
-            }
-            else
-            {
-                pmesh->UniformRefinement();
-                pmesh_lvls[lvl] = new ParMesh(*pmesh);
-            }
-            //pmesh->UniformRefinement();
-        }
-    }
+    void RefineAndCopy(int lvl, ParMesh* pmesh);
 
     ParMesh * GetPmesh(int l) {return pmesh_lvls[l];}
 
@@ -248,77 +309,11 @@ public:
     HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
     HypreParMatrix * GetTrueP_Hcurl(int l) {return TrueP_Hcurl_lvls[l];}
 
-    ParFiniteElementSpace * GetSpace(SpaceName space, int level)
-    {
-        switch(space)
-        {
-        case HDIV:
-            return Hdiv_space_lvls[level];
-        case H1:
-            return H1_space_lvls[level];
-        case L2:
-            return L2_space_lvls[level];
-        case HCURL:
-            return Hcurl_space_lvls[level];
-        case HDIVSKEW:
-            return Hdivskew_space_lvls[level];
-        default:
-            {
-                MFEM_ABORT("Unknown or unsupported space name \n");
-                break;
-            }
-        }
+    ParFiniteElementSpace * GetSpace(SpaceName space, int level);
 
-        return NULL;
-    }
+    HypreParMatrix * GetTruePspace(SpaceName space, int level);
 
-    HypreParMatrix * GetTruePspace(SpaceName space, int level)
-    {
-        switch(space)
-        {
-        case HDIV:
-            return TrueP_Hdiv_lvls[level];
-        case H1:
-            return TrueP_H1_lvls[level];
-        case L2:
-            return TrueP_L2_lvls[level];
-        case HCURL:
-            return TrueP_Hcurl_lvls[level];
-        case HDIVSKEW:
-            return TrueP_Hdivskew_lvls[level];
-        default:
-            {
-                MFEM_ABORT("Unknown or unsupported space name \n");
-                break;
-            }
-        }
-
-        return NULL;
-    }
-
-    SparseMatrix * GetPspace(SpaceName space, int level)
-    {
-        switch(space)
-        {
-        case HDIV:
-            return P_Hdiv_lvls[level];
-        case H1:
-            return P_H1_lvls[level];
-        case L2:
-            return P_L2_lvls[level];
-        case HCURL:
-            return P_Hcurl_lvls[level];
-        case HDIVSKEW:
-            return P_Hdivskew_lvls[level];
-        default:
-            {
-                MFEM_ABORT("Unknown or unsupported space name \n");
-                break;
-            }
-        }
-
-        return NULL;
-    }
+    SparseMatrix * GetPspace(SpaceName space, int level);
 
     const HypreParMatrix * GetDivfreeDop(int level)
     {
@@ -333,6 +328,25 @@ public:
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
     BlockOperator* ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
+
+    const Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
+                                           const Array<int>& essbdr_attribs, int level) const;
+
+    std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
+                                                    std::vector<const Array<int>*>& essbdr_attribs, int level) const;
+
+    std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
+                                                    std::vector<Array<int>*>& essbdr_attribs, int level) const;
+
+    SparseMatrix& GetElementToDofs(SpaceName space_name, int level) const;
+
+    BlockMatrix& GetElementToDofs(const Array<SpaceName>& space_names, int level,
+                                  Array<int>& row_offsets, Array<int>& col_offsets) const;
+
+    HypreParMatrix& GetDofTrueDof(SpaceName space_name, int level) const;
+    std::vector<HypreParMatrix*> & GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
+    BlockOperator* GetDofTrueDof(const Array<SpaceName> &space_names, int level,
+                                 Array<int>& row_offsets, Array<int>& col_offsets) const;
 };
 
 class GeneralCylHierarchy : public GeneralHierarchy
@@ -1023,8 +1037,7 @@ Array<int>* FOSLSProblHierarchy<Problem, Hierarchy>::ConstructBndIndices(int lev
     int nbnd_indices = 0;
     for (int blk= 0; blk < numblocks; ++blk)
     {
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+        Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> ess_bnd_tdofs;
         problems_lvls[level]->GetPfes(blk)->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -1038,8 +1051,7 @@ Array<int>* FOSLSProblHierarchy<Problem, Hierarchy>::ConstructBndIndices(int lev
     int count = 0;
     for (int blk = 0; blk < numblocks; ++blk)
     {
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conds.GetBdrAttribs(blk)), essbdr_attrs);
+        Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         //essbdr_attrs.Print();
 
@@ -1095,8 +1107,7 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
     HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(i,i)));
 
-    Array<int> essbdr_attrs;
-    ConvertSTDvecToArray<int>(*(bdr_conditions.GetBdrAttribs(i)), essbdr_attrs);
+    Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(i);
     Array<int> temp_i;
     problems_lvls[l + 1]->GetPfes(i)->GetEssentialTrueDofs(essbdr_attrs, temp_i);
 
@@ -1125,8 +1136,8 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
         HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
         HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
 
-        Array<int> essbdr_attrs;
-        ConvertSTDvecToArray<int>(*(bdr_conditions.GetBdrAttribs(j)), essbdr_attrs);
+        Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(j);
+
         Array<int> temp_j;
         problems_lvls[l + 1]->GetPfes(j)->GetEssentialTrueDofs(essbdr_attrs, temp_j);
         //const Array<int> *temp_j = EssBdrTrueDofs_Funct_lvls[l][0];
@@ -1737,6 +1748,8 @@ public:
 HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop);
 
 void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks);
+
+SparseMatrix& ElementToDofs(const FiniteElementSpace &fes);
 
 } // for namespace mfem
 
