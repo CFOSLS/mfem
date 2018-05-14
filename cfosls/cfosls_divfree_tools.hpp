@@ -527,7 +527,9 @@ protected:
     const MPI_Comm comm;
 
     mutable Array2D<HypreParMatrix*> * Funct_hpmat;
-    mutable HypreParMatrix* Divfree_hpmat_nobnd;
+    mutable BlockOperator* Funct_op;
+    bool using_blockop;
+    mutable const HypreParMatrix* Divfree_hpmat_nobnd; // FIXME: Maybe mutable const = const and is thus a bad style
 
     const BlockMatrix* Funct_mat;
 
@@ -596,7 +598,15 @@ protected:
 public:
     ~HcurlGSSSmoother();
     HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
-                                        HypreParMatrix& Divfree_HpMat_nobnd,
+                                        const HypreParMatrix& Divfree_HpMat_nobnd,
+                                        const Array<int>& EssBdrtruedofs_Hcurl,
+                                        const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                        const Array<int> * SweepsNum,
+                                        const Array<int>& Block_Offsets);
+
+    // constructor which takes funct matrix as a block operator
+    HcurlGSSSmoother (BlockOperator& Funct_BlockHpMat,
+                                        const HypreParMatrix& Divfree_HpMat_nobnd,
                                         const Array<int>& EssBdrtruedofs_Hcurl,
                                         const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                         const Array<int> * SweepsNum,

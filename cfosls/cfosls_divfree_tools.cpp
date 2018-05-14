@@ -2163,6 +2163,8 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
         delete Smoothers[i];
 }
 
+// FIXME: Remove this, too old and unused
+// deprecated
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                                     const SparseMatrix& Discrete_Curl,
                                     const HypreParMatrix& Dof_TrueDof_Hcurl,
@@ -2217,8 +2219,65 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
     Setup();
 }
 
+HcurlGSSSmoother::HcurlGSSSmoother (BlockOperator& Funct_HpBlockMat,
+                                    const HypreParMatrix& Divfree_HpMat_nobnd,
+                                    const Array<int>& EssBdrtruedofs_Hcurl,
+                                    const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                    const Array<int> * SweepsNum,
+                                    const Array<int>& Block_Offsets)
+    : BlockOperator(Block_Offsets),
+      numblocks(Funct_HpBlockMat.NumRowBlocks()),
+      print_level(0),
+      comm(Divfree_HpMat_nobnd.GetComm()),
+      Funct_op (&Funct_HpBlockMat),
+      using_blockop(true),
+      Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
+      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
+      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
+{
+    block_offsets.SetSize(numblocks + 1);
+    for ( int i = 0; i < numblocks + 1; ++i)
+        block_offsets[i] = Block_Offsets[i];
+
+    xblock = new BlockVector(block_offsets);
+    yblock = new BlockVector(block_offsets);
+
+#ifndef BLKDIAG_SMOOTHER
+    tmp1 = new Vector(Divfree_hpmat_nobnd->Width());
+    if (numblocks > 1)
+        tmp2 = new Vector(xblock->GetBlock(1).Size());
+#endif
+
+    trueblock_offsets.SetSize(numblocks + 1);
+    trueblock_offsets[0] = 0;
+    for ( int blk = 0; blk < numblocks; ++blk)
+    {
+        if (blk == 0)
+            trueblock_offsets[1] = Divfree_hpmat_nobnd->Width();
+        else
+            trueblock_offsets[blk + 1] = Funct_op->GetBlock(blk,blk).Height();
+    }
+    trueblock_offsets.PartialSum();
+
+    Smoothers.SetSize(numblocks);
+
+    sweeps_num.SetSize(numblocks);
+    if (SweepsNum)
+        for ( int blk = 0; blk < numblocks; ++blk)
+            sweeps_num[blk] = (*SweepsNum)[blk];
+    else
+        sweeps_num = 1;
+
+    HcurlFunct_global.SetSize(numblocks, numblocks);
+    for (int rowblk = 0; rowblk < numblocks; ++rowblk)
+        for (int colblk = 0; colblk < numblocks; ++colblk)
+            HcurlFunct_global(rowblk, colblk) = NULL;
+
+    Setup();
+}
+
 HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
-                                    HypreParMatrix& Divfree_HpMat_nobnd,
+                                    const HypreParMatrix& Divfree_HpMat_nobnd,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
                                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                     const Array<int> * SweepsNum,
@@ -2228,6 +2287,7 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
       print_level(0),
       comm(Divfree_HpMat_nobnd.GetComm()),
       Funct_hpmat (&Funct_HpMat),
+      using_blockop(false),
       Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
       essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
       essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
@@ -2657,7 +2717,15 @@ void HcurlGSSSmoother::Setup() const
     {
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
         {
-            HypreParMatrix * Funct_blk = (*Funct_hpmat)(blk1,blk2);
+            HypreParMatrix * Funct_blk;
+            if (using_blockop)
+            {
+                Funct_blk = dynamic_cast<HypreParMatrix*>(&(Funct_op->GetBlock(blk1,blk2)));
+                if (blk1 == blk2)
+                    MFEM_ASSERT(Funct_blk, "Unsuccessful cast of diagonal block into HypreParMatrix* \n");
+            }
+            else
+                Funct_blk = (*Funct_hpmat)(blk1,blk2);
 
             if (Funct_blk)
             {
