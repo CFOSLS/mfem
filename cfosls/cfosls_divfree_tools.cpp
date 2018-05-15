@@ -157,7 +157,7 @@ bool CheckBdrError (const Vector& Candidate, const Vector* Given_bdrdata, const 
 }
 
 CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
-                                                       const Array2D<HypreParMatrix*> & Funct_Global,
+                                                       Array2D<HypreParMatrix*> & Funct_Global,
                                                        const HypreParMatrix& DivfreeOp,
                                                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                                                        const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
@@ -166,7 +166,8 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
     : Operator(Size),
       numblocks(Funct_Global.NumRows()),
       comm(DivfreeOp.GetComm()),
-      Funct_global(Funct_Global),
+      Funct_global(&Funct_Global),
+      using_blockop(false),
       Divfreeop(DivfreeOp),
       essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
@@ -178,7 +179,44 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
     block_offsets.SetSize(numblocks + 1);
     block_offsets[0] = 0;
     for (int blk = 0; blk < numblocks; ++blk)
-        block_offsets[blk + 1] = Funct_global(blk,blk)->Height();
+        block_offsets[blk + 1] = (*Funct_global)(blk,blk)->Height();
+    block_offsets.PartialSum();
+
+    coarse_offsets.SetSize(numblocks + 1);
+
+    maxIter = 50;
+    rtol = 1.e-4;
+    atol = 1.e-4;
+
+    sweeps_num = 1;
+    Setup();
+
+}
+
+CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
+                                                       BlockOperator& Funct_BlockOp,
+                                                       const HypreParMatrix& DivfreeOp,
+                                                       const std::vector<Array<int>* >& EssBdrDofs_blks,
+                                                       const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                                                       const Array<int>& EssBdrDofs_Hcurl,
+                                                       const Array<int>& EssBdrTrueDofs_Hcurl)
+    : Operator(Size),
+      numblocks(Funct_BlockOp.NumRowBlocks()),
+      comm(DivfreeOp.GetComm()),
+      Funct_op(&Funct_BlockOp),
+      using_blockop(true),
+      Divfreeop(DivfreeOp),
+      essbdrdofs_blocks(EssBdrDofs_blks),
+      essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
+      essbdrdofs_Hcurl(EssBdrDofs_Hcurl),
+      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl)
+{
+    finalized = false;
+
+    block_offsets.SetSize(numblocks + 1);
+    block_offsets[0] = 0;
+    for (int blk = 0; blk < numblocks; ++blk)
+        block_offsets[blk + 1] = Funct_op->GetBlock(blk,blk).Height();
     block_offsets.PartialSum();
 
     coarse_offsets.SetSize(numblocks + 1);
@@ -227,7 +265,15 @@ void CoarsestProblemHcurlSolver::Setup() const
     {
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
         {
-            HypreParMatrix * Funct_blk = Funct_global(blk1,blk2);
+            HypreParMatrix * Funct_blk;
+            if (using_blockop)
+            {
+                Funct_blk = dynamic_cast<HypreParMatrix*>(&(Funct_op->GetBlock(blk1,blk2)));
+                if (blk1 == blk2)
+                    MFEM_ASSERT(Funct_blk, "Unsuccessful cast of diagonal block into HypreParMatrix* \n");
+            }
+            else
+                Funct_blk = (*Funct_global)(blk1,blk2);
 
             if (Funct_blk)
             {

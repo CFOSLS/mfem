@@ -75,7 +75,9 @@ private:
 
     mutable bool finalized;
 
-    const Array2D<HypreParMatrix*> & Funct_global;
+    mutable Array2D<HypreParMatrix*> * Funct_global;
+    mutable BlockOperator* Funct_op;
+    bool using_blockop;
 
     const HypreParMatrix& Divfreeop;
     mutable HypreParMatrix * Divfreeop_T;
@@ -106,12 +108,21 @@ protected:
 
 public:
     ~CoarsestProblemHcurlSolver();
+    // for older code
     CoarsestProblemHcurlSolver(int Size,
-                               const Array2D<HypreParMatrix*> & Funct_Global,
+                               Array2D<HypreParMatrix*> & Funct_Global,
                                const HypreParMatrix& DivfreeOp,
                                const std::vector<Array<int>* >& EssBdrDofs_blks,
                                const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
                                const Array<int>& EssBdrTrueDofs_Hcurl);
+
+    CoarsestProblemHcurlSolver(int Size,
+                               BlockOperator& Funct_Op,
+                               const HypreParMatrix& DivfreeOp,
+                               const std::vector<Array<int>* >& EssBdrDofs_blks,
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
+                               const Array<int>& EssBdrTrueDofs_Hcurl);
+
 
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const;
