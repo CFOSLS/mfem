@@ -2609,7 +2609,7 @@ int main(int argc, char *argv[])
     Operator* CoarseSolver_mg;
 
     std::vector<const Array<int> *> offsets(nlevels);
-    offsets[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hcurlh1);
+    offsets[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_hcurlh1);
 
     BlockOperator * orig_op = problem->GetOp();
     const HypreParMatrix * divfree_dop = hierarchy->GetDivfreeDop(0);
@@ -2651,7 +2651,7 @@ int main(int argc, char *argv[])
     {
         if (l < num_levels - 1)
         {
-            offsets[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hcurlh1);
+            offsets[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_hcurlh1);
             P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                         *hierarchy->ConstructTruePforFormul(l, space_names_hcurlh1, *offsets[l], *offsets[l + 1]), *coarse_bnd_indices_lvls[l],
                     *offsets[l], *offsets[l + 1]);
@@ -3184,7 +3184,12 @@ int main(int argc, char *argv[])
     space_names_hdivh1[1] = SpaceName::H1;
 
     std::vector<const Array<int> *> offsets_hdivh1(nlevels);
-    offsets_hdivh1[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hdivh1);
+    offsets_hdivh1[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_hdivh1);
+
+    std::vector<const Array<int> *> offsets_sp_hdivh1(nlevels);
+    offsets_sp_hdivh1[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_hdivh1);
+
+    Array<int> offsets_funct_hdivh1;
 
     // manually truncating the original problem's operator into hdiv-h1 operator
     BlockOperator * hdivh1_op = new BlockOperator(*offsets_hdivh1[0]);
@@ -3242,6 +3247,9 @@ int main(int argc, char *argv[])
     std::vector<Array<int>* > el2dofs_row_offsets(num_levels);
     std::vector<Array<int>* > el2dofs_col_offsets(num_levels);
 
+    Array<SparseMatrix*> Constraint_mat_lvls_mg(num_levels - 1);
+    Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels - 1);
+
     for (int l = 0; l < num_levels; ++l)
     {
         dtd_row_offsets[l] = new Array<int>();
@@ -3252,7 +3260,7 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
-            offsets_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hdivh1);
+            offsets_hdivh1[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_hdivh1);
             BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, space_names_hdivh1,
                                                                          *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
             P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
@@ -3328,17 +3336,44 @@ int main(int argc, char *argv[])
 
             std::vector<Array<int>*>& fullbdr_attribs = problem->GetBdrConditions().GetFullBdrAttribs();
 
+            if (l == 0)
+            {
+                ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                                                        hierarchy->GetSpace(SpaceName::L2, 0));
+                Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+                Divblock->Assemble();
+                Divblock->Finalize();
+                Constraint_mat_lvls_mg[0] = Divblock->LoseMat();
+                delete Divblock;
+
+                //offsets_sp_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_hdivh1);
+
+                Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(offsets_funct_hdivh1);
+            }
+            else
+            {
+                offsets_sp_hdivh1[l] = &hierarchy->ConstructOffsetsforFormul(l, space_names_hdivh1);
+
+                Constraint_mat_lvls_mg[l] = RAP(*hierarchy->GetPspace(SpaceName::L2, l - 1),
+                                                *Constraint_mat_lvls_mg[l - 1], *hierarchy->GetPspace(SpaceName::HDIV, l - 1));
+
+                BlockMatrix * P_Funct = hierarchy->ConstructPforFormul(l - 1, space_names_hdivh1,
+                                                                           *offsets_sp_hdivh1[l - 1], *offsets_sp_hdivh1[l]);
+                Funct_mat_lvls_mg[l] = RAP(*P_Funct, *Funct_mat_lvls_mg[l - 1], *P_Funct);
+
+                delete P_Funct;
+            }
+
 
             bool optimized_localsolve = true;
 
-            SparseMatrix * P_WT_l = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
+            SparseMatrix * P_L2_T = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
-                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
-                                                         *Constraint_mat_lvls[l],
+                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
+                                                         *Constraint_mat_lvls_mg[l],
                                                          hierarchy->GetDofTrueDof(space_names_hdivh1, l),
-                                                         *P_WT_l,
-                                                         //*P_WT[l],
+                                                         *P_L2_T,
                                                          hierarchy->GetElementToDofs(space_names_hdivh1, l,
                                                                                      *el2dofs_row_offsets[l],
                                                                                      *el2dofs_col_offsets[l]),
@@ -3348,17 +3383,6 @@ int main(int argc, char *argv[])
                                                          hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_hdivh1,
                                                                                   essbdr_attribs, l),
                                                          optimized_localsolve);
-                /*
-                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
-                                                         *Constraint_mat_lvls[l],
-                                                         Dof_TrueDof_Func_lvls[l],
-                                                         *P_WT[l],
-                                                         *Element_dofs_Func[l],
-                                                         *Element_dofs_W[l],
-                                                         BdrDofs_Funct_lvls[l],
-                                                         EssBdrDofs_Funct_lvls[l],
-                                                         optimized_localsolve);
-                */
             }
             else // no S
             {
@@ -3373,7 +3397,7 @@ int main(int argc, char *argv[])
                                                          optimized_localsolve);
             }
 
-            delete P_WT_l;
+            delete P_L2_T;
 
             // incorrect, a combined smoother is not actually a product of the smoothers
             //Smoo_mg_plus[l] = new OperatorProduct(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l]);

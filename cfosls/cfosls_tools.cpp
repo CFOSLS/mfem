@@ -1057,6 +1057,72 @@ void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
     }
 }
 
+BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
+{
+    int num_unknowns = fe_formul.GetFormulation()->Nunknowns();
+
+    Array2D<SparseMatrix*> funct_blocks(num_unknowns, num_unknowns);
+
+    for (int i = 0; i < num_unknowns; ++i)
+        for (int j = 0; j < num_unknowns; ++j)
+        {
+            funct_blocks(i,j) = NULL;
+            if (i == j)
+            {
+                if (pbforms.diag(i))
+                {
+                    //pbforms.diag(i)->Update();
+                    //pbforms.diag(i)->Assemble();
+                    //pbforms.diag(i)->Finalize();
+
+                    funct_blocks(i,j) = pbforms.diag(i)->LoseMat();
+                }
+            }
+            else // off-diagonal
+            {
+                if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                {
+                    int exist_row, exist_col;
+                    if (pbforms.offd(i,j))
+                    {
+                        exist_row = i;
+                        exist_col = j;
+                    }
+                    else
+                    {
+                        exist_row = j;
+                        exist_col = i;
+                    }
+
+                    //pbforms.offd(exist_row,exist_col)->Update();
+                    //pbforms.offd(exist_row,exist_col)->Assemble();
+
+                    //pbforms.offd(exist_row,exist_col)->Finalize();
+
+                    funct_blocks(exist_row, exist_col) = pbforms.offd(exist_row,exist_col)->LoseMat();
+                    funct_blocks(exist_col, exist_row) = Transpose(*funct_blocks(exist_row, exist_col));
+                }
+            }
+        }
+
+    offsets.SetSize(num_unknowns + 1);
+    offsets[0] = 0;
+    for (int i = 0; i < num_unknowns; ++i)
+        offsets[i + 1] = funct_blocks(i,i)->Height();
+    offsets.PartialSum();
+
+    BlockMatrix * res = new BlockMatrix(offsets);
+
+    for (int i = 0; i < num_unknowns; ++i)
+        for (int j = 0; j < num_unknowns; ++j)
+            res->SetBlock(i,j, funct_blocks(i,j));
+
+    res->owns_blocks = true;
+
+    return res;
+}
+
+
 void FOSLSProblem::Solve(bool verbose, bool compute_error) const
 {
     MFEM_ASSERT(solver_initialized && system_assembled, "Either solver is not initialized or system is not assembled \n");
@@ -2406,13 +2472,25 @@ void GeneralHierarchy::ConstructDivfreeDops()
 }
 
 
-const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+const Array<int>& GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {
     Array<int> * res = new Array<int>(space_names.Size() + 1);
 
     (*res)[0] = 0;
     for (int i = 0; i < space_names.Size(); ++i)
         (*res)[i + 1] = GetSpace(space_names[i], level)->TrueVSize();
+    res->PartialSum();
+
+    return *res;
+}
+
+const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+{
+    Array<int> * res = new Array<int>(space_names.Size() + 1);
+
+    (*res)[0] = 0;
+    for (int i = 0; i < space_names.Size(); ++i)
+        (*res)[i + 1] = GetSpace(space_names[i], level)->GetVSize();
     res->PartialSum();
 
     return *res;
@@ -2426,6 +2504,18 @@ BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const Array<
 
     for (int i = 0; i < space_names.Size(); ++i)
         res->SetDiagonalBlock(i, GetTruePspace(space_names[i], level), 1.0);
+
+    return res;
+}
+
+BlockMatrix* GeneralHierarchy::ConstructPforFormul(int level, const Array<SpaceName>& space_names,
+                                                   const Array<int>& row_offsets,
+                                                   const Array<int>& col_offsets)
+{
+    BlockMatrix * res = new BlockMatrix(row_offsets, col_offsets);
+
+    for (int i = 0; i < space_names.Size(); ++i)
+        res->SetBlock(i, i, GetPspace(space_names[i], level));
 
     return res;
 }
@@ -3887,6 +3977,17 @@ SparseMatrix& ElementToDofs(const FiniteElementSpace &fes)
     SparseMatrix * res = new SparseMatrix(I, J, data, fes.GetNE(), fes.GetVSize());
     return *res;
 }
+
+BlockMatrix * RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P)
+{
+   BlockMatrix * R = Transpose(Rt);
+   BlockMatrix * RA = Mult(*R,A);
+   delete R;
+   BlockMatrix * out = Mult(*RA, P);
+   delete RA;
+   return out;
+}
+
 
 
 } // for namespace mfem

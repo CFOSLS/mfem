@@ -309,7 +309,7 @@ public:
     HypreParMatrix * GetTrueP_L2(int l) {return TrueP_L2_lvls[l];}
     HypreParMatrix * GetTrueP_Hcurl(int l) {return TrueP_Hcurl_lvls[l];}
 
-    ParFiniteElementSpace * GetSpace(SpaceName space, int level);
+    ParFiniteElementSpace *GetSpace(SpaceName space, int level);
 
     HypreParMatrix * GetTruePspace(SpaceName space, int level);
 
@@ -323,11 +323,16 @@ public:
 
     int Nlevels() const {return num_lvls;}
 
-    const Array<int>& ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    const Array<int>& ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names);
     BlockOperator* ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
     BlockOperator* ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
+
+    const Array<int>& ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    BlockMatrix* ConstructPforFormul(int level, const Array<SpaceName>& space_names,
+                                                             const Array<int>& row_offsets, const Array<int>& col_offsets);
+
 
     const Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
                                            const Array<int>& essbdr_attribs, int level) const;
@@ -842,6 +847,9 @@ public:
     virtual void ComputeExtraError(const Vector& vec) const {}
 
     void ComputeBndError(const Vector& vec) const;
+
+    virtual BlockMatrix* ConstructFunctBlkMat(Array<int> &offsets);
+    //{ MFEM_ABORT("ConstructFunctBlkMat() is not implemented in the base class");}
 };
 
 
@@ -1750,6 +1758,8 @@ HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop);
 void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks);
 
 SparseMatrix& ElementToDofs(const FiniteElementSpace &fes);
+
+BlockMatrix *RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P);
 
 } // for namespace mfem
 
