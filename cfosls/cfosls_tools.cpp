@@ -3989,5 +3989,950 @@ BlockMatrix * RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix
 }
 
 
+// computes elpartition array which is used for computing slice meshes over different time moments
+// elpartition is the output
+// elpartition stores for each time moment a vector of integer indices of the mesh elements which intersect
+// with the corresponding time plane
+void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double deltat, vector<vector<int> > & elpartition)
+{
+    bool verbose = false;
+    int dim = mesh.Dimension();
+
+    const Element * el;
+    const int * vind;
+    const double * vcoords;
+    double eltmin, eltmax;
+
+    for ( int elind = 0; elind < mesh.GetNE(); ++elind)
+    {
+        if (verbose)
+            cout << "elind = " << elind << endl;
+        el = mesh.GetElement(elind);
+        vind = el->GetVertices();
+
+        // computing eltmin and eltmax for an element = minimal and maximal time moments for each element
+        eltmin = t0 + Nmoments * deltat;
+        eltmax = 0.0;
+        for (int vno = 0; vno < el->GetNVertices(); ++vno )
+        {
+            vcoords = mesh.GetVertex(vind[vno]);
+            if ( vcoords[dim - 1] > eltmax )
+                eltmax = vcoords[dim - 1];
+            if ( vcoords[dim - 1] < eltmin )
+                eltmin = vcoords[dim - 1];
+        }
+
+
+        if (verbose)
+        {
+            cout << "Special print: elind = " << elind << endl;
+            for (int vno = 0; vno < el->GetNVertices(); ++vno )
+            {
+                cout << "vertex: ";
+                vcoords = mesh.GetVertex(vind[vno]);
+                for ( int coo = 0; coo < dim; ++coo )
+                    cout << vcoords[coo] << " ";
+                cout << endl;
+            }
+
+            cout << "eltmin = " << eltmin << " eltmax = " << eltmax << endl;
+        }
+
+
+
+
+        // deciding which time moments intersect the element if any
+        //if ( (eltmin > t0 && eltmin < t0 + (Nmoments-1) * deltat) ||  (eltmax > t0 && eltmax < t0 + (Nmoments-1) * deltat))
+        if ( (eltmax > t0 && eltmin < t0 + (Nmoments-1) * deltat))
+        {
+            if (verbose)
+            {
+                cout << "the element is intersected by some time moments" << endl;
+                cout << "t0 = " << t0 << " deltat = " << deltat << endl;
+                cout << fixed << setprecision(6);
+                cout << "low bound = " << ceil( (max(eltmin,t0) - t0) / deltat  ) << endl;
+                cout << "top bound = " << floor ((min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat) << endl;
+                cout << "4isl for low = " << max(eltmin,t0) - t0 << endl;
+                cout << "magic number for low = " << (max(eltmin,t0) - t0) / deltat << endl;
+                cout << "magic number for top = " << (min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat << endl;
+            }
+            for ( int k = ceil( (max(eltmin,t0) - t0) / deltat  ); k <= floor ((min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat) ; ++k)
+            {
+                //if (myid == 0 )
+                if (verbose)
+                {
+                    cout << "k = " << k << endl;
+                }
+                elpartition[k].push_back(elind);
+            }
+        }
+        else
+        {
+            if (verbose)
+                cout << "the element is not intersected by any time moments" << endl;
+        }
+    }
+
+    // intermediate output
+    /*
+    for ( int i = 0; i < Nmoments; ++i)
+    {
+        cout << "moment " << i << ": time = " << t0 + i * deltat << endl;
+        cout << "size for this partition = " << elpartition[i].size() << endl;
+        for ( int j = 0; j < elpartition[i].size(); ++j)
+            cout << "el: " << elpartition[i][j] << endl;
+    }
+    */
+    return;
+}
+
+
+// computes number of slice cell vertexes, slice cell vertex indices and coordinates
+// for a given element with index = elind.
+// updates the edgemarkers and vertex_count correspondingly
+// pvec defines the slice plane
+void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pvec, vector<vector<double> > & ipoints, vector<int>& edgemarkers,
+                             vector<vector<double> >& cellpnts, vector<int>& elvertslocal, int & nip, int & vertex_count )
+{
+    bool verbose = false; // probably should be a function argument
+    int dim = mesh.Dimension();
+
+    const int * edgeindices;
+    int edgenolen, edgeind;
+    Array<int> edgev(2);
+    const double * v1, * v2;
+
+    vector<vector<double> > edgeends(dim);
+    edgeends[0].reserve(dim);
+    edgeends[1].reserve(dim);
+
+    DenseMatrix M(dim, dim);
+    Vector sol(4), rh(4);
+
+    vector<double> ip(dim);
+
+    const Table& el_to_edge = mesh.ElementToEdgeTable();
+
+    edgeindices = el_to_edge.GetRow(elind);
+    edgenolen = el_to_edge.RowSize(elind);
+
+    nip = 0;
+
+    for ( int edgeno = 0; edgeno < edgenolen; ++edgeno)
+    {
+        // true mesh edge index
+        edgeind = edgeindices[edgeno];
+
+        if (verbose)
+            cout << "edgeind " << edgeind << endl;
+        if (edgemarkers[edgeind] == -2) // if this edge was not considered
+        {
+            mesh.GetEdgeVertices(edgeind, edgev);
+
+            // vertex coordinates
+            v1 = mesh.GetVertex(edgev[0]);
+            v2 = mesh.GetVertex(edgev[1]);
+
+            // vertex coordinates as vectors of doubles, edgeends 0 is lower in time coordinate than edgeends[1]
+            if (v1[dim-1] < v2[dim-1])
+            {
+                for ( int coo = 0; coo < dim; ++coo)
+                {
+                    edgeends[0][coo] = v1[coo];
+                    edgeends[1][coo] = v2[coo];
+                }
+            }
+            else
+            {
+                for ( int coo = 0; coo < dim; ++coo)
+                {
+                    edgeends[0][coo] = v2[coo];
+                    edgeends[1][coo] = v1[coo];
+                }
+            }
+
+
+            if (verbose)
+            {
+                cout << "edge vertices:" << endl;
+                for (int i = 0; i < 2; ++i)
+                {
+                    cout << "vert ";
+                    for ( int coo = 0; coo < dim; ++coo)
+                        cout << edgeends[i][coo] << " ";
+                    cout << "   ";
+                }
+                cout << endl;
+            }
+
+
+            // creating the matrix for computing the intersection point
+            for ( int i = 0; i < dim; ++i)
+                for ( int j = 0; j < dim - 1; ++j)
+                    M(i,j) = pvec[j + 1][i];
+            for ( int i = 0; i < dim; ++i)
+                M(i,dim - 1) = edgeends[0][i] - edgeends[1][i];
+
+            /*
+            cout << "M" << endl;
+            M.Print();
+            cout << "M.Det = " << M.Det() << endl;
+            */
+
+            if ( fabs(M.Det()) > MYZEROTOL )
+            {
+                M.Invert();
+
+                // setting righthand side
+                for ( int i = 0; i < dim; ++i)
+                    rh[i] = edgeends[0][i] - pvec[0][i];
+
+                // solving the system
+                M.Mult(rh, sol);
+
+                if ( sol[dim-1] > 0.0 - MYZEROTOL && sol[dim-1] <= 1.0 + MYZEROTOL)
+                {
+                    for ( int i = 0; i < dim; ++i)
+                        ip[i] = edgeends[0][i] + sol[dim-1] * (edgeends[1][i] - edgeends[0][i]);
+
+                    if (verbose)
+                    {
+                        cout << "intersection point for this edge: " << endl;
+                        for ( int i = 0; i < dim; ++i)
+                            cout << ip[i] << " ";
+                        cout << endl;
+                    }
+
+                    ipoints.push_back(ip);
+                    //vrtindices[momentind].push_back(vertex_count);
+                    elvertslocal.push_back(vertex_count);
+                    edgemarkers[edgeind] = vertex_count;
+                    cellpnts.push_back(ip);
+                    nip++;
+                    vertex_count++;
+                }
+                else
+                {
+                    if (verbose)
+                        cout << "Line but not edge intersects" << endl;
+                    edgemarkers[edgeind] = -1;
+                }
+
+            }
+            else
+                if (verbose)
+                    cout << "Edge is parallel" << endl;
+        }
+        else // the edge was already considered -> edgemarkers store the vertex index
+        {
+            if (edgemarkers[edgeind] >= 0)
+            {
+                elvertslocal.push_back(edgemarkers[edgeind]);
+                cellpnts.push_back(ipoints[edgemarkers[edgeind]]);
+                nip++;
+            }
+        }
+
+        //cout << "tempvec.size = " << tempvec.size() << endl;
+
+    } // end of loop over element edges
+
+    return;
+}
+
+// outputs the slice mesh information in VTK format
+void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
+                                std::list<int> &celltypes, int cellstructsize, std::list<std::vector<int> > &elvrtindices)
+{
+    int dim = mesh.Dimension();
+    // output in the vtk format for paraview
+    std::ofstream ofid(fname.str().c_str());
+    ofid.precision(8);
+
+    ofid << "# vtk DataFile Version 3.0" << endl;
+    ofid << "Generated by MFEM" << endl;
+    ofid << "ASCII" << endl;
+    ofid << "DATASET UNSTRUCTURED_GRID" << endl;
+
+    ofid << "POINTS " << ipoints.size() << " double" << endl;
+    for (unsigned int vno = 0; vno < ipoints.size(); ++vno)
+    {
+        for ( int c = 0; c < dim - 1; ++c )
+        {
+            ofid << ipoints[vno][c] << " ";
+        }
+        if (dim == 3)
+            ofid << ipoints[vno][dim - 1] << " ";
+        ofid << endl;
+    }
+
+    ofid << "CELLS " << celltypes.size() << " " << cellstructsize << endl;
+    std::list<int>::const_iterator iter;
+    std::list<vector<int> >::const_iterator iter2;
+    for (iter = celltypes.begin(), iter2 = elvrtindices.begin();
+         iter != celltypes.end() && iter2 != elvrtindices.end()
+         ; ++iter, ++iter2)
+    {
+        //cout << *it;
+        int npoints;
+        if (*iter == VTKTETRAHEDRON)
+            npoints = 4;
+        else if (*iter == VTKWEDGE)
+            npoints = 6;
+        else if (*iter == VTKQUADRIL)
+            npoints = 4;
+        else //(*iter == VTKTRIANGLE)
+            npoints = 3;
+        ofid << npoints << " ";
+
+        for ( int i = 0; i < npoints; ++i)
+            ofid << (*iter2)[i] << " ";
+        ofid << endl;
+    }
+
+    ofid << "CELL_TYPES " << celltypes.size() << endl;
+    for (iter = celltypes.begin(); iter != celltypes.end(); ++iter)
+    {
+        ofid << *iter << endl;
+    }
+
+    // test lines for cell data
+    ofid << "CELL_DATA " << celltypes.size() << endl;
+    ofid << "SCALARS cekk_scalars double 1" << endl;
+    ofid << "LOOKUP_TABLE default" << endl;
+    int cnt = 0;
+    for (iter = celltypes.begin(); iter != celltypes.end(); ++iter)
+    {
+        ofid << cnt * 1.0 << endl;
+        cnt++;
+    }
+    return;
+}
+
+// reorders the cell vertices so as to have the cell vertex ordering compatible with VTK format
+// the output is the sorted elvertexes (which is also the input)
+void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts, std::vector<int> & elvertexes)
+{
+    bool verbose = false;
+    // used only for checking the orientation of tetrahedrons
+    DenseMatrix Mtemp(3, 3);
+
+    // special reordering of vertices is required for the vtk wedge, so that
+    // vertices are added one base after another and not as a mix
+
+    if (nip == 6)
+    {
+
+        /*
+        cout << "Sorting the future wedge" << endl;
+        cout << "Before sorting: " << endl;
+        for (int i = 0; i < 6; ++i)
+        {
+            cout << "vert " << i << ":";
+            for ( int j = 0; j < dim - 1; ++j)
+                cout << cellpnts[i][j] << " ";
+            cout << endl;
+        }
+        */
+
+
+        // FIX IT: NOT TESTED AT ALL
+        int permutation[6];
+        if ( sortWedge3d (cellpnts, permutation) == false )
+        {
+            cout << "sortWedge returns false, possible bad behavior" << endl;
+            return;
+        }
+
+        /*
+        cout << "After sorting: " << endl;
+        for (int i = 0; i < 6; ++i)
+        {
+            cout << "vert " << i << ":";
+            for ( int j = 0; j < dim - 1; ++j)
+                cout << cellpnts[permutation[i]][j] << " ";
+            cout << endl;
+        }
+        */
+
+        int temp[6];
+        for ( int i = 0; i < 6; ++i)
+            temp[i] = elvertexes[permutation[i]];
+        for ( int i = 0; i < 6; ++i)
+            elvertexes[i] = temp[i];
+
+
+        double det = 0.0;
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,0) = (1.0/3.0)*(cellpnts[permutation[3]][i] + cellpnts[permutation[4]][i] + cellpnts[permutation[5]][i])
+                    - cellpnts[permutation[0]][i];
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,1) = cellpnts[permutation[2]][i] - cellpnts[permutation[0]][i];
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,2) = cellpnts[permutation[1]][i] - cellpnts[permutation[0]][i];
+
+        det = Mtemp.Det();
+
+        if (verbose)
+        {
+            if (det < 0)
+                cout << "orientation for wedge = negative" << endl;
+            else if (det == 0.0)
+                cout << "error for wedge: bad volume" << endl;
+            else
+                cout << "orientation for wedge = positive" << endl;
+        }
+
+        if (det < 0)
+        {
+            if (verbose)
+                cout << "Have to swap the vertices to change the orientation of wedge" << endl;
+            int tmp;
+            tmp = elvertexes[1];
+            elvertexes[1] = elvertexes[0];
+            elvertexes[1] = tmp;
+            //Swap(*(elvrtindices[momentind].end()));
+            tmp = elvertexes[4];
+            elvertexes[4] = elvertexes[3];
+            elvertexes[4] = tmp;
+        }
+
+    }
+
+
+    // positive orientation is required for vtk tetrahedron
+    // normal to the plane with first three vertexes should poit towards the 4th vertex
+
+    if (nip == 4 && dim == 4)
+    {
+        /*
+        cout << "tetrahedra points" << endl;
+        for (int i = 0; i < 4; ++i)
+        {
+            cout << "vert " << i << ":";
+            for ( int j = 0; j < dim - 1; ++j)
+                cout << cellpnts[i][j] << " ";
+            cout << endl;
+        }
+        */
+
+        double det = 0.0;
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,0) = cellpnts[3][i] - cellpnts[0][i];
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,1) = cellpnts[2][i] - cellpnts[0][i];
+
+        for ( int i = 0; i < dim - 1; ++i)
+            Mtemp(i,2) = cellpnts[1][i] - cellpnts[0][i];
+
+        //Mtemp.Print();
+
+        det = Mtemp.Det();
+
+        if (verbose)
+        {
+            if (det < 0)
+                cout << "orientation for tetra = negative" << endl;
+            else if (det == 0.0)
+                cout << "error for tetra: bad volume" << endl;
+            else
+                cout << "orientation for tetra = positive" << endl;
+        }
+
+        //return;
+
+        if (det < 0)
+        {
+            if (verbose)
+                cout << "Have to swap the vertices to change the orientation of tetrahedron" << endl;
+            int tmp = elvertexes[1];
+            elvertexes[1] = elvertexes[0];
+            elvertexes[1] = tmp;
+            //Swap(*(elvrtindices[momentind].end()));
+        }
+
+    }
+
+
+    // in 2D case the vertices of a quadrilateral should be umbered in a counter-clock wise fashion
+    if (nip == 4 && dim == 3)
+    {
+        /*
+        cout << "Sorting the future quadrilateral" << endl;
+        cout << "Before sorting: " << endl;
+        for (int i = 0; i < nip; ++i)
+        {
+            cout << "vert " << elvertexes[i] << ":";
+            for ( int j = 0; j < dim - 1; ++j)
+                cout << cellpnts[i][j] << " ";
+            cout << endl;
+        }
+        */
+
+        int permutation[4];
+        sortQuadril2d(cellpnts, permutation);
+
+        int temp[4];
+        for ( int i = 0; i < 4; ++i)
+            temp[i] = elvertexes[permutation[i]];
+        for ( int i = 0; i < 4; ++i)
+            elvertexes[i] = temp[i];
+
+        /*
+        cout << "After sorting: " << endl;
+        for (int i = 0; i < nip; ++i)
+        {
+            cout << "vert " << elvertexes[i] << ":";
+            for ( int j = 0; j < dim - 1; ++j)
+                cout << cellpnts[permutation[i]][j] << " ";
+            cout << endl;
+        }
+        */
+
+    }
+
+    return;
+}
+
+// scalar product of two vectors (outputs 0 if vectors have different length)
+double sprod(std::vector<double> vec1, std::vector<double> vec2)
+{
+    if (vec1.size() != vec2.size())
+        return 0.0;
+    double res = 0.0;
+    for ( unsigned int c = 0; c < vec1.size(); ++c)
+        res += vec1[c] * vec2[c];
+    return res;
+}
+
+double l2Norm(std::vector<double> vec)
+{
+    return sqrt(sprod(vec,vec));
+}
+
+// only first 2 coordinates of each element of Points is used (although now the
+// input is 4 3-dimensional points but the last coordinate is time so it is not used
+// because the slice is with t = const planes
+// sorts in a counter-clock fashion required by VTK format for quadrilateral
+// the main output is the permutation of the input points array
+bool sortQuadril2d(std::vector<std::vector<double> > & Points, int * permutation)
+{
+    bool verbose = false;
+
+    if (Points.size() != 4)
+    {
+        cout << "Error: sortQuadril2d should be called only for a vector storing 4 points" << endl;
+        return false;
+    }
+    /*
+    for ( int p = 0; p < Points.size(); ++p)
+        if (Points[p].size() != 2)
+        {
+            cout << "Error: sortQuadril2d should be called only for a vector storing 4 2d-points" << endl;
+            return false;
+        }
+    */
+
+    /*
+    cout << "Points inside sortQuadril2d() \n";
+    for (int i = 0; i < 4; ++i)
+    {
+        cout << "vert " << i << ":";
+        for ( int j = 0; j < 2; ++j)
+            cout << Points[i][j] << " ";
+        cout << endl;
+    }
+    */
+
+
+    int argbottom = 0; // index of the the vertex with the lowest y-coordinate
+    for (int p = 1; p < 4; ++p)
+        if (Points[p][1] < Points[argbottom][1])
+            argbottom = p;
+
+    if (verbose)
+        cout << "argbottom = " << argbottom << endl;
+
+    // cosinuses of angles between radius vectors from vertex argbottom to the others and positive x-direction
+    vector<pair<int, double> > cos(3);
+    vector<vector<double> > radiuses(3);
+    vector<double> xort(2);
+    xort[0] = 1.0;
+    xort[1] = 0.0;
+    int cnt = 0;
+    for (int p = 0; p < 4; ++p)
+    {
+        if (p != argbottom)
+        {
+            cos[cnt].first = p;
+            for ( int c = 0; c < 2; ++c)
+                radiuses[cnt].push_back(Points[p][c] - Points[argbottom][c]);
+            cos[cnt].second = sprod(radiuses[cnt], xort) / l2Norm(radiuses[cnt]);
+            cnt ++;
+        }
+    }
+
+    //int permutation[4];
+    permutation[0] = argbottom;
+
+    std::sort(cos.begin(), cos.end(), intdComparison);
+
+    for ( int i = 0; i < 3; ++i)
+        permutation[1 + i] = cos[i].first;
+
+    if (verbose)
+    {
+        cout << "permutation:" << endl;
+        for (int i = 0; i < 4; ++i)
+            cout << permutation[i] << " ";
+        cout << endl;
+    }
+
+    // not needed actually. onlt for debugging. actually the output is the correct permutation
+    /*
+    vector<vector<double>> temp(4);
+    for ( int p = 0; p < 4; ++p)
+        for ( int i = 0; i < 3; ++i)
+            temp[p].push_back(Points[permutation[p]][i]);
+
+    for ( int p = 0; p < 4; ++p)
+        for ( int i = 0; i < 3; ++i)
+            Points[p][i] = temp[p][i];
+    */
+    return true;
+}
+
+// sorts the vertices in order for the points to form a proper vtk wedge
+// first three vertices should be the base, with normal to (0,1,2)
+// looking opposite to the direction of where the second base is.
+// This ordering is required by VTK format for wedges, look
+// in vtk wedge class definitio for explanations
+// the main output is the permutation of the input vertexes array
+bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation)
+{
+    /*
+    cout << "wedge points:" << endl;
+    for ( int i = 0; i < Points.size(); ++i)
+    {
+        for ( int j = 0; j < Points[i].size(); ++j)
+            cout << Points[i][j] << " ";
+        cout << endl;
+    }
+    */
+
+    vector<double> p1 = Points[0];
+    int pn2 = -1;
+    vector<int> pnum2;
+
+    //bestimme die 2 quadrate
+    for(unsigned int i=1; i<Points.size(); i++)
+    {
+        vector<double> dets;
+        for(unsigned int k=1; k<Points.size()-1; k++)
+        {
+            for(unsigned int l=k+1; l<Points.size(); l++)
+            {
+                if(k!=i && l!=i)
+                {
+                    vector<double> Q1(3);
+                    vector<double> Q2(3);
+                    vector<double> Q3(3);
+
+                    for ( int c = 0; c < 3; c++)
+                        Q1[c] = p1[c] - Points[i][c];
+                    for ( int c = 0; c < 3; c++)
+                        Q2[c] = p1[c] - Points[k][c];
+                    for ( int c = 0; c < 3; c++)
+                        Q3[c] = p1[c] - Points[l][c];
+
+                    //vector<double> Q1 = p1 - Points[i];
+                    //vector<double> Q2 = p1 - Points[k];
+                    //vector<double> Q3 = p1 - Points[l];
+
+                    DenseMatrix MM(3,3);
+                    MM(0,0) = Q1[0]; MM(0,1) = Q2[0]; MM(0,2) = Q3[0];
+                    MM(1,0) = Q1[1]; MM(1,1) = Q2[1]; MM(1,2) = Q3[1];
+                    MM(2,0) = Q1[2]; MM(2,1) = Q2[2]; MM(2,2) = Q3[2];
+                    double determ = MM.Det();
+
+                    dets.push_back(determ);
+                }
+            }
+        }
+
+        double max_ = 0; double min_ = fabs(dets[0]);
+        for(unsigned int m=0; m<dets.size(); m++)
+        {
+            if(max_<fabs(dets[m])) max_ = fabs(dets[m]);
+            if(min_>fabs(dets[m])) min_ = fabs(dets[m]);
+        }
+
+        //for ( int in = 0; in < dets.size(); ++in)
+            //cout << "det = " << dets[in] << endl;
+
+        if(max_!=0) for(unsigned int m=0; m<dets.size(); m++) dets[m] /= max_;
+
+        //cout << "max_ = " << max_ << endl;
+
+        int count = 0;
+        vector<bool> el;
+        for(unsigned int m=0; m<dets.size(); m++) { if(fabs(dets[m]) < 1e-8) { count++; el.push_back(true); } else el.push_back(false); }
+
+        if(count==2)
+        {
+            for(unsigned int k=1, m=0; k<Points.size()-1; k++)
+                for(unsigned int l=k+1; l<Points.size(); l++)
+                {
+                    if(k!=i && l!=i)
+                    {
+                        if(el[m]) { pnum2.push_back(k); pnum2.push_back(l); }
+                        m++;
+                    }
+
+                }
+
+            pn2 = i;
+            break;
+        }
+
+        if(count == 0 || count > 2)
+        {
+            //cout << "count == 0 || count > 2" << endl;
+            //cout << "count = " << count << endl;
+            return false;
+        }
+    }
+
+    if(pn2<0)
+    {
+        //cout << "pn2 < 0" << endl;
+        return false;
+    }
+
+
+    vector<int> oben(3); oben[0] = pn2;
+    vector<int> unten(3); unten[0] = 0;
+
+    //winkel berechnen
+    vector<double> pp1(3);
+    vector<double> pp2(3);
+    for ( int c = 0; c < 3; c++)
+        pp1[c] = Points[0][c] - Points[pn2][c];
+    for ( int c = 0; c < 3; c++)
+        pp2[c] = Points[pnum2[0]][c] - Points[pn2][c];
+    //vector<double> pp1 = Points[0] - Points[pn2];
+    //vector<double> pp2 = Points[pnum2[0]] - Points[pn2];
+    double w1 = sprod(pp1, pp2)/(l2Norm(pp1)*l2Norm(pp2));
+    for ( int c = 0; c < 3; c++)
+        pp2[c] = Points[pnum2[1]][c] - Points[pn2][c];
+    //pp2 = Points[pnum2[1]]- Points[pn2];
+    double w2 = sprod(pp1, pp2)/(l2Norm(pp1)*l2Norm(pp2));
+
+    if(w1 < w2)  { oben[1] = pnum2[0]; unten[1] = pnum2[1]; }
+    else{ oben[1] = pnum2[1]; unten[1] = pnum2[0]; }
+
+    for ( int c = 0; c < 3; c++)
+        pp2[c] = Points[pnum2[2]][c] - Points[pn2][c];
+    //pp2 = Points[pnum2[2]] - Points[pn2];
+    w1 = sprod(pp1, pp2)/(l2Norm(pp1)*l2Norm(pp2));
+    for ( int c = 0; c < 3; c++)
+        pp2[c] = Points[pnum2[3]][c] - Points[pn2][c];
+    //pp2 = Points[pnum2[3]]- Points[pn2];
+    w2 = sprod(pp1, pp2)/(l2Norm(pp1)*l2Norm(pp2));
+
+    if(w1 < w2)  { oben[2] = pnum2[2]; unten[2] = pnum2[3]; }
+    else{ oben[2] = pnum2[3]; unten[2] = pnum2[2]; }
+
+    for(unsigned int i=0; i<unten.size(); i++) permutation[i] = unten[i];
+    for(unsigned int i=0; i<oben.size(); i++)  permutation[i + unten.size()] = oben[i];
+
+    //not needed since we actually need the permutation only
+    /*
+    vector<vector<double>> pointssort;
+    for(unsigned int i=0; i<unten.size(); i++) pointssort.push_back(Points[unten[i]]);
+    for(unsigned int i=0; i<oben.size(); i++) pointssort.push_back(Points[oben[i]]);
+
+    for(unsigned int i=0; i<pointssort.size(); i++) Points[i] = pointssort[i];
+    */
+
+    return true;
+}
+
+
+// Computes and outputs in VTK format slice meshes of a given 3D or 4D mesh
+// by time-like planes t = t0 + k * deltat, k = 0, ..., Nmoments - 1
+// myid is used for creating different output files by different processes
+// if the mesh is parallel
+// usually it is reasonable to refer myid to the process id in the communicator
+// so as to produce a correct output for parallel ParaView visualization
+void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid)
+{
+    bool verbose = false;
+
+    if ( mesh.GetElementBaseGeometry() != Geometry::PENTATOPE &&
+         mesh.GetElementBaseGeometry() != Geometry::TETRAHEDRON )
+    {
+        std::cout << "ComputeSlices() is implemented only for pentatops "
+                    "and tetrahedrons \n" << std::flush;
+        return;
+    }
+
+    int dim = mesh.Dimension();
+
+    //const Table& el_to_edge = mesh.ElementToEdgeTable();
+
+    /*
+    if (!el_to_edge)
+    {
+        el_to_edge = new Table;
+        NumOfEdges = mesh.GetElementToEdgeTable(*el_to_edge, be_to_edge);
+    }
+    */
+
+    // = -2 if not considered, -1 if considered, but does not intersected, index of this vertex in the new 3d mesh otherwise
+    // refilled for each time moment
+    vector<int> edgemarkers(mesh.GetNEdges());
+
+    // stores indices of elements which are intersected by planes related to the time moments
+    vector<vector<int> > elpartition(Nmoments);
+    // can make it faster, if any estimates are known for how many elements are intersected by a single time plane
+    //for ( int i = 0; i < Nmoments; ++i)
+        //elpartition[i].reserve(100);
+
+    // *************************************************************************
+    // step 1 of x: loop over all elememnts and compute elpartition for all time
+    // moments.
+    // *************************************************************************
+
+    Compute_elpartition (mesh, t0, Nmoments, deltat, elpartition);
+
+
+    // *************************************************************************
+    // step 2 of x: looping over time momemnts and slicing elements for each
+    // given time moment, and outputs the resulting slice mesh in VTK format
+    // *************************************************************************
+
+    // slicing the elements, time moment over time moment
+    int elind;
+
+    vector<vector<double> > pvec(dim);
+    for ( int i = 0; i < dim; ++i)
+        pvec[i].reserve(dim);
+
+    // used only for checking the orientation of tetrahedrons and quadrilateral vertexes reordering
+    //DenseMatrix Mtemp(3, 3);
+
+    // output data structures for vtk format
+    // for each time moment holds a list with cell type for each cell
+    vector<std::list<int> > celltypes(Nmoments);
+    // for each time moment holds a list with vertex indices
+    //vector<std::list<int>> vrtindices(Nmoments);
+    // for each time moment holds a list with cell type for each cell
+    vector<std::list<vector<int> > > elvrtindices(Nmoments);
+
+    // number of integers in cell structure - for each cell 1 integer (number of vertices) +
+    // + x integers (vertex indices)
+    int cellstructsize;
+    int vertex_count; // number of vertices in the slice mesh for a single time moment
+
+    // loop over time moments
+    for ( int momentind = 0; momentind < Nmoments; ++momentind )
+    {
+        if (verbose)
+            cout << "Time moment " << momentind << ": time = " << t0 + momentind * deltat << endl;
+
+        // refilling edgemarkers, resetting vertex_count and cellstructsize
+        for ( int i = 0; i < mesh.GetNEdges(); ++i)
+            edgemarkers[i] = -2;
+
+        vertex_count = 0;
+        cellstructsize = 0;
+
+        vector<vector<double> > ipoints; // one of main arrays: all intersection points for a given time moment
+
+        // vectors, defining the plane of the slice p0, p1, p2 (and p3 in 4D)
+        // p0 is the time aligned vector for the given time moment
+        // p1, p2 (and p3) - basis orts for the plane
+        // pvec is {p0,p1,p2,p3} vector
+        for ( int i = 0; i < dim; ++i)
+            for ( int j = 0; j < dim; ++j)
+                pvec[i][dim - 1 - j] = ( i == j ? 1.0 : 0.0);
+        pvec[0][dim - 1] = t0 + momentind * deltat;
+
+        // loop over elements intersected by the plane realted to a given time moment
+        // here, elno = index in elpartition[momentind]
+        for ( unsigned int elno = 0; elno < elpartition[momentind].size(); ++elno)
+        //for ( int elno = 0; elno < 3; ++elno)
+        {
+            vector<int> tempvec;             // vertex indices for the cell of the slice mesh
+            tempvec.reserve(6);
+            vector<vector<double> > cellpnts; //points of the cell of the slice mesh
+            cellpnts.reserve(6);
+
+            // true mesh element index
+            elind = elpartition[momentind][elno];
+            //Element * el = GetElement(elind);
+
+            if (verbose)
+                cout << "Element: " << elind << endl;
+
+            // computing number of intersection points, indices and coordinates for
+            // local slice cell vertexes (cellpnts and tempvec)  and adding new intersection
+            // points and changing edges markers for a given element elind
+            // and plane defined by pvec
+            int nip;
+            computeSliceCell (mesh, elind, pvec, ipoints, edgemarkers, cellpnts, tempvec, nip, vertex_count);
+
+            if ( (dim == 4 && (nip != 4 && nip != 6)) || (dim == 3 && (nip != 3 && nip != 4)) )
+                cout << "Strange nip =  " << nip << " for elind = " << elind << ", time = " << t0 + momentind * deltat << endl;
+            else
+            {
+                if (nip == 4) // tetrahedron in 3d or quadrilateral in 2d
+                    if (dim == 4)
+                        celltypes[momentind].push_back(VTKTETRAHEDRON);
+                    else // dim == 3
+                        celltypes[momentind].push_back(VTKQUADRIL);
+                else if (nip == 6) // prism
+                    celltypes[momentind].push_back(VTKWEDGE);
+                else // nip == 3 = triangle
+                    celltypes[momentind].push_back(VTKTRIANGLE);
+
+                cellstructsize += nip + 1;
+
+                elvrtindices[momentind].push_back(tempvec);
+
+                // special reordering of cell vertices, required for the wedge,
+                // tetrahedron and quadrilateral cells
+                reorder_cellvertices (dim, nip, cellpnts, elvrtindices[momentind].back());
+
+                if (verbose)
+                    cout << "nip for the element = " << nip << endl;
+            }
+
+        } // end of loop over elements for a given time moment
+
+        // intermediate output
+        std::stringstream fname;
+        fname << "slicemesh_"<< dim - 1 << "d_myid_" << myid << "_moment_" << momentind << ".vtk";
+        outputSliceMeshVTK (mesh, fname, ipoints, celltypes[momentind], cellstructsize, elvrtindices[momentind]);
+
+
+    } //end of loop over time moments
+
+    /*
+    // if not deleted here, gets segfault for more than two parallel refinements afterwards
+    delete edge_vertex;
+    edge_vertex = NULL;
+    */
+
+    return;
+}
+
+
 
 } // for namespace mfem

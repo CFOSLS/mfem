@@ -4,6 +4,11 @@
 #ifndef MFEM_CFOSLS_TOOLS
 #define MFEM_CFOSLS_TOOLS
 
+#define VTKTETRAHEDRON 10
+#define VTKWEDGE 13
+#define VTKTRIANGLE 5
+#define VTKQUADRIL 9
+
 using namespace std;
 using namespace mfem;
 
@@ -1760,6 +1765,25 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
 SparseMatrix& ElementToDofs(const FiniteElementSpace &fes);
 
 BlockMatrix *RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P);
+
+// time moments: t0 + i * deltat, i = 0, ... Nmoments - 1
+void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid);
+void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double deltat, std::vector<std::vector<int> > & elpartition);
+void computeSliceCell (const Mesh& mesh, int elind, std::vector<std::vector<double> > & pvec,
+                       std::vector<std::vector<double> > & ipoints, std::vector<int>& edgemarkers,
+                       std::vector<std::vector<double> >& cellpnts, std::vector<int>& elvertslocal, int & nip, int & vertex_count);
+void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
+std::list<int> &celltypes, int cellstructusize, std::list<std::vector<int> > &elvrtindices);
+
+void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts, std::vector<int> & elvertexes);
+bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation);
+bool sortQuadril2d(std::vector<std::vector<double> > & Points, int * permutation);
+double l2Norm(std::vector<double> vec);
+double sprod(std::vector<double> vec1, std::vector<double> vec2);
+
+// compares pairs<int,double> with respect to the second (double) elements
+bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b)
+{ return a.second>b.second;}
 
 } // for namespace mfem
 
