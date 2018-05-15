@@ -10,8 +10,8 @@
 #include <list>
 #include <unistd.h>
 
-#define NEW_INTERFACE
-#define NEW_INTERFACE2
+//#define NEW_INTERFACE
+//#define NEW_INTERFACE2
 
 //#include "cfosls_testsuite.hpp"
 
@@ -235,7 +235,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -2532,7 +2532,7 @@ int main(int argc, char *argv[])
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
 
 
-#ifdef NEW_INTERFACE
+//#ifdef NEW_INTERFACE
 
     /*
     // Hdiv-L2 formulation
@@ -2579,7 +2579,7 @@ int main(int argc, char *argv[])
 
     std::vector<Array<int>*>& fullbdr_attribs = problem->GetBdrConditions().GetFullBdrAttribs();
 
-    Array<SpaceName> space_names_funct(2);
+    Array<SpaceName> space_names_funct(numblocks_funct);
     space_names_funct[0] = SpaceName::HDIV;
     if (strcmp(space_for_S,"H1") == 0)
         space_names_funct[1] = SpaceName::H1;
@@ -2744,7 +2744,7 @@ int main(int argc, char *argv[])
     GeneralMultigrid * GeneralMGprec =
             new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
 
-#endif // for #ifdef NEW_INTERFACE
+//#endif // for #ifdef NEW_INTERFACE
 
 #ifndef COMPARE_MG
 
