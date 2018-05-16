@@ -813,7 +813,9 @@ public:
         MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
     }
 
-    Array<ParGridFunction*> * GetGrFuns() {return &grfuns;}
+    Array<ParGridFunction*> & GetGrFuns() {return grfuns;}
+
+    ParGridFunction* GetGrFun(int i) {return grfuns[i];}
 
     ParFiniteElementSpace * GetPfes(int i) {return pfes[i];}
 
@@ -882,7 +884,8 @@ public:
     }
 
     void ComputeExtraError(const Vector& vec) const override;
-    //void CreateEstimator(int option); (not implemented)
+
+    ParGridFunction * RecoverS();
 };
 
 class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
@@ -907,7 +910,6 @@ public:
         CreatePrec(*CFOSLSop, prec_option, verbose);
         UpdateSolverPrec();
     }
-
 };
 
 /*

@@ -419,56 +419,6 @@ void invert_permutation(int *perm_in, int size, int * perm_out);
 void invert_permutation(std::vector<int> perm_in, std::vector<int> &perm_out);
 int ipow(int base, int exp);
 
-
-/*
-class A
-{
-protected:
-    double * testA;
-public:
-    A()  {testA = new double[0];}
-};
-
-class B : public A
-{
-protected:
-    double * testB;
-public:
-    B() : A()  {testB = new double[0];}
-};
-
-class C : public B
-{
-protected:
-    B& Binstance;
-    double * testC;
-public:
-    C(B& Binst) : B(), Binstance(Binst)  {testC = new double[0];}
-protected:
-    void testfuncC () { std::cout << Binstance.testB[0];}
-};
-*/
-
-/*
-class B
-{
-protected:
-    double * testB;
-public:
-    B() {testB = new double[0];}
-
-    //friend class C;
-};
-
-class C : public B
-{
-protected:
-    B& Binstance;
-public:
-    C(B& Binst) : B(), Binstance(Binst) {std::cout << Binstance.testB[0];}
-};
-*/
-
 } // end of namespace mfem
 
 #endif // MFEM_USE_MPI

@@ -1164,7 +1164,6 @@ void FOSLSProblem::Solve(bool verbose, bool compute_error) const
 void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
-
     MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
 
     // aliases
@@ -1240,6 +1239,54 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 
     delete S;
 }
+
+ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
+{
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+    ParGridFunction * sigma = grfuns[0];
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
+    Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
+    Cblock->Assemble();
+    Cblock->Finalize();
+    HypreParMatrix * C = Cblock->ParallelAssemble();
+
+    ParMixedBilinearForm *Bblock = new ParMixedBilinearForm(Hdiv_space, L2_space);
+    Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*test->GetB()));
+    Bblock->Assemble();
+    Bblock->Finalize();
+    HypreParMatrix * B = Bblock->ParallelAssemble();
+
+    Vector bTsigma(C->Height());
+    B->Mult(trueX->GetBlock(0),bTsigma);
+
+    Vector trueS(C->Height());
+
+    CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+    ParGridFunction * S = new ParGridFunction(L2_space);
+    S->Distribute(trueS);
+
+    delete Cblock;
+    delete Bblock;
+    delete B;
+    delete C;
+
+    return S;
+}
+
 
 // prec_option:
 // 0 for no preconditioner
