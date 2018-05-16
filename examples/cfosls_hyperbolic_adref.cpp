@@ -29,10 +29,6 @@
 
 #define MYZEROTOL (1.0e-13)
 
-//#include "cfosls_testsuite.hpp"
-//#include "cfosls_integrators.hpp"
-//#include "cfosls_tools.hpp"
-
 #define NEW_SETUP
 //#define REGULARIZE_A
 
@@ -1410,7 +1406,7 @@ int main(int argc, char *argv[])
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
-   const int max_dofs = 1600000;
+   const int max_dofs = 200000;//1600000;
    for (int it = 0; ; it++)
    {
        HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
@@ -1445,6 +1441,8 @@ int main(int argc, char *argv[])
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
        refiner.Apply(*problem->GetParMesh());
+       //delete problem->GetParMesh()->GetEdgeVertexTable();
+       //problem->GetParMesh()->GetEdgeVertexTable();
        if (refiner.Stop())
        {
           if (myid == 0)
@@ -1466,6 +1464,24 @@ int main(int argc, char *argv[])
        problem->Update();
 
        problem->BuildSystem(verbose);
+
+       if (it == 0 || it == 1)
+       {
+           double t0 = 0.1;
+           double Nmoments = 4;
+           double deltat = 0.2;
+
+           ComputeSlices(*problem->GetParMesh(), t0, Nmoments, deltat, myid);
+       }
+
+
+       /*
+       Vector& solution = problem->GetSol();
+       BlockVector sol_viewer(solution.GetData(), problem->GetTrueOffsets());
+       ParGridFunction * sol_sigma_h = new ParGridFunction(problem->GetPfes(0));
+       sol_sigma_h->SetFromTrueDofs(sol_viewer.GetBlock(0));
+       sol_sigma_h->ComputeSlices (t0, Nmoments, deltat, myid, false);
+       */
    }
    //MPI_Finalize();
    //return 0;

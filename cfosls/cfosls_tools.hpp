@@ -1780,10 +1780,8 @@ bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation);
 bool sortQuadril2d(std::vector<std::vector<double> > & Points, int * permutation);
 double l2Norm(std::vector<double> vec);
 double sprod(std::vector<double> vec1, std::vector<double> vec2);
-
 // compares pairs<int,double> with respect to the second (double) elements
-bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b)
-{ return a.second>b.second;}
+bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
 
 } // for namespace mfem
 

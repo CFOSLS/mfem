@@ -4107,7 +4107,7 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
     edgeends[1].reserve(dim);
 
     DenseMatrix M(dim, dim);
-    Vector sol(4), rh(4);
+    Vector sol(dim), rh(dim);
 
     vector<double> ip(dim);
 
@@ -4118,12 +4118,14 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
 
     nip = 0;
 
+    std::cout << "\nStarting the main over edges in computeSliceCell \n";
+
     for ( int edgeno = 0; edgeno < edgenolen; ++edgeno)
     {
         // true mesh edge index
         edgeind = edgeindices[edgeno];
 
-        if (verbose)
+        //if (verbose)
             cout << "edgeind " << edgeind << endl;
         if (edgemarkers[edgeind] == -2) // if this edge was not considered
         {
@@ -4152,7 +4154,7 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
             }
 
 
-            if (verbose)
+            //if (verbose)
             {
                 cout << "edge vertices:" << endl;
                 for (int i = 0; i < 2; ++i)
@@ -4195,7 +4197,7 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
                     for ( int i = 0; i < dim; ++i)
                         ip[i] = edgeends[0][i] + sol[dim-1] * (edgeends[1][i] - edgeends[0][i]);
 
-                    if (verbose)
+                    //if (verbose)
                     {
                         cout << "intersection point for this edge: " << endl;
                         for ( int i = 0; i < dim; ++i)
@@ -4213,14 +4215,14 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
                 }
                 else
                 {
-                    if (verbose)
+                    //if (verbose)
                         cout << "Line but not edge intersects" << endl;
                     edgemarkers[edgeind] = -1;
                 }
 
             }
             else
-                if (verbose)
+                //if (verbose)
                     cout << "Edge is parallel" << endl;
         }
         else // the edge was already considered -> edgemarkers store the vertex index
@@ -4236,6 +4238,8 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
         //cout << "tempvec.size = " << tempvec.size() << endl;
 
     } // end of loop over element edges
+
+    std::cout << "nip = " << nip << "\n";
 
     return;
 }
@@ -4514,6 +4518,12 @@ double l2Norm(std::vector<double> vec)
 {
     return sqrt(sprod(vec,vec));
 }
+
+bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b)
+{
+    return a.second>b.second;
+}
+
 
 // only first 2 coordinates of each element of Points is used (although now the
 // input is 4 3-dimensional points but the last coordinate is time so it is not used
@@ -4805,7 +4815,7 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
         //elpartition[i].reserve(100);
 
     // *************************************************************************
-    // step 1 of x: loop over all elememnts and compute elpartition for all time
+    // step 1 of x: loop over all elements and compute elpartition for all time
     // moments.
     // *************************************************************************
 
