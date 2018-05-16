@@ -6937,6 +6937,11 @@ void Mesh::LocalRefinement(const Array<int> &marked_el, int type)
       // 7. Free the allocated memory.
       delete [] middle;
 
+      delete el_to_el;
+      delete face_edge;
+      delete edge_vertex;
+      edge_vertex = NULL;
+
       if (el_to_edge != NULL)
       {
          NumOfEdges = GetElementToEdgeTable(*el_to_edge, be_to_edge);

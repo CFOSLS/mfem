@@ -1441,8 +1441,6 @@ int main(int argc, char *argv[])
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
        refiner.Apply(*problem->GetParMesh());
-       //delete problem->GetParMesh()->GetEdgeVertexTable();
-       //problem->GetParMesh()->GetEdgeVertexTable();
        if (refiner.Stop())
        {
           if (myid == 0)

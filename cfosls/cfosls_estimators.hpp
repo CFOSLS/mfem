@@ -47,7 +47,9 @@ public:
                    Array2D<BilinearFormIntegrator*>& integrators, bool verbose_ = false);
 
     FOSLSEstimator(FOSLSProblem& problem, std::vector<std::pair<int,int> > & grfuns_descriptor,
-                   Array<ParGridFunction *> *extra_grfuns, Array2D<BilinearFormIntegrator*>& integrators, bool Verbose = false);
+                   Array<ParGridFunction *> *extra_grfuns, Array2D<BilinearFormIntegrator*>& integrators,
+                   bool Verbose = false);
+
     virtual const Vector & GetLocalErrors () override;
     double GetEstimate() {ComputeEstimates(); return global_total_error;}
     virtual void Reset () override;

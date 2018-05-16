@@ -2613,6 +2613,11 @@ void ParMesh::LocalRefinement(const Array<int> &marked_el, int type)
       // 7. Free the allocated memory.
       middle.DeleteAll();
 
+      delete el_to_el;
+      delete face_edge;
+      delete edge_vertex;
+      edge_vertex = NULL;
+
       if (el_to_edge != NULL)
       {
          NumOfEdges = GetElementToEdgeTable(*el_to_edge, be_to_edge);

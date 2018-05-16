@@ -355,6 +355,17 @@ int main(int argc, char *argv[])
        extra_grfuns.SetSize(1);
    }
 
+   /// The descriptor describes the grid functions used in the error estimator
+   /// each pair (which corresponds to a grid function used in the estimator)
+   /// has the form <a,b>, where:
+   /// 1) a pair of the form <1,b> means that the corresponding grid function
+   /// is one of the grid functions inside the FOSLSProblem, and b
+   /// equals its index in grfuns array
+   /// 2) a pair of the for <-1,b> means that the grid function is in the extra
+   /// grid functions (additional argument in the estimator construction)
+   /// and b is its index inside the extra grfuns array.
+   /// (*) The user should take care of updating the extra grfuns, if they
+   /// are not a part of the problem (e.g., defined on a different pfespace)
 
    std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
 
@@ -429,10 +440,42 @@ int main(int argc, char *argv[])
    else
        estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
 
+   FOSLSProblem * problem_divfree = problem->ConstructDivfreeProblem();
+
+   std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numfoslsfuns);
+
+   Array2D<BilinearFormIntegrator *> integs_divfree(numfoslsfuns, numfoslsfuns);
+   for (int i = 0; i < integs_divfree.NumRows(); ++i)
+       for (int j = 0; j < integs_divfree.NumCols(); ++j)
+           integs_divfree(i,j) = NULL;
+
+   FOSLSEstimator * estimator_divfree;
+   {
+       // this works
+       grfuns_descriptor_divfree[0] = std::make_pair<int,int>(1, 0);
+       if (strcmp(space_for_S,"H1") == 0)
+            grfuns_descriptor_divfree[1] = std::make_pair<int,int>(1, 1);
+
+       estimator_divfree = new FOSLSEstimator(*problem, grfuns_descriptor_divfree, integs_divfree, verbose);
+
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           integs(0,0) = new CurlCurlIntegrator;
+           integs(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
+           integs(1,0) = new MixedCurlScalarIntegrator(*Mytest->GetMinB());
+       }
+       else
+           integs(0,0) = new CurlCurlIntegrator(*Mytest->GetKtilda());
+
+   }
+
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
    refiner.SetTotalErrorFraction(0.5);
+
+   ThresholdRefiner refiner_divfree(*estimator_divfree);
+   refiner_divfree.SetTotalErrorFraction(0.5);
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.

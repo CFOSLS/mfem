@@ -4165,14 +4165,15 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
 
     nip = 0;
 
-    std::cout << "\nStarting the main over edges in computeSliceCell \n";
+    if (verbose)
+        std::cout << "\nStarting the main over edges in computeSliceCell \n";
 
     for ( int edgeno = 0; edgeno < edgenolen; ++edgeno)
     {
         // true mesh edge index
         edgeind = edgeindices[edgeno];
 
-        //if (verbose)
+        if (verbose)
             cout << "edgeind " << edgeind << endl;
         if (edgemarkers[edgeind] == -2) // if this edge was not considered
         {
@@ -4201,7 +4202,7 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
             }
 
 
-            //if (verbose)
+            if (verbose)
             {
                 cout << "edge vertices:" << endl;
                 for (int i = 0; i < 2; ++i)
@@ -4244,7 +4245,7 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
                     for ( int i = 0; i < dim; ++i)
                         ip[i] = edgeends[0][i] + sol[dim-1] * (edgeends[1][i] - edgeends[0][i]);
 
-                    //if (verbose)
+                    if (verbose)
                     {
                         cout << "intersection point for this edge: " << endl;
                         for ( int i = 0; i < dim; ++i)
@@ -4262,14 +4263,14 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
                 }
                 else
                 {
-                    //if (verbose)
+                    if (verbose)
                         cout << "Line but not edge intersects" << endl;
                     edgemarkers[edgeind] = -1;
                 }
 
             }
             else
-                //if (verbose)
+                if (verbose)
                     cout << "Edge is parallel" << endl;
         }
         else // the edge was already considered -> edgemarkers store the vertex index
@@ -4286,7 +4287,8 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
 
     } // end of loop over element edges
 
-    std::cout << "nip = " << nip << "\n";
+    if (verbose)
+        std::cout << "nip = " << nip << "\n";
 
     return;
 }
