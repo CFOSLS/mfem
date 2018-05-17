@@ -509,23 +509,25 @@ public:
     }
 };
 
-// abstract structure for a (C)FOSLS formulation
-// CFOSLS is considered to be a FOSLS formulation with constraint
-// blk_structure is a vector of size = nblocks which contains:
-// pairs <'a','b'> where, 'a' = 0,1,2 describes the type of the variable
-// and 'b' is the index in the test coefficient array (corresponding to 'a')
-// For example, <1,2> at place 3 means that the third equation corresponds
-// to a vector unknown ('a' = 1), for which we have in the FOSLS_test a
-// VectorFunctionCoefficient stored at test.vec_coeffs[2]('b' = 2).
-// If a variable is not present in the FOSLS test (e.g., it's a Lagrange multiplier)
-// then one must set 'a' = -1, 'b' = -1.
+/// abstract structure for a (C)FOSLS formulation
+/// CFOSLS is considered to be a FOSLS formulation with constraint
+///
+/// blk_structure is a vector of size = nblocks which contains:
+/// pairs <'a','b'> where, 'a' = 0,1,2 describes the type of the variable
+/// and 'b' is the index in the test coefficient array (corresponding to 'a').
+/// Values for 'a': 0 (scalar) or 1 (vector).
 
+/// For example, <1,2> at place 3 means that the third equation corresponds
+/// to a vector unknown ('a' = 1), for which we have in the FOSLS_test a
+/// VectorFunctionCoefficient stored at test.vec_coeffs[2]('b' = 2).
+/// If a variable is not present in the FOSLS test (e.g., it's a Lagrange multiplier)
+/// then one must set 'a' = -1, 'b' = -1.
 
-// It is implicitly assumed that first (unknowns_number) of equations
-// are related to the FOSLS functional and the rest (up to the total number
-// equal numblocks) are constrains.
-// Thus, in FOSLSEstimator the first block of (unknowns_number) x (unknowns_number)
-// of integrators is used as functional integrators(forms)
+/// It is implicitly assumed that first (unknowns_number) of equations
+/// are related to the FOSLS functional and the rest (up to the total number
+/// equal numblocks) are constrains.
+/// Thus, in FOSLSEstimator the first block of (unknowns_number) x (unknowns_number)
+/// of integrators is used as functional integrators(forms)
 struct FOSLSFormulation
 {
 protected:
@@ -575,7 +577,13 @@ public:
         MFEM_ASSERT(i >=0 && i < lfis.Size(), "Index for lfis out of bounds \n");
         return lfis[i];
     }
+
+    virtual int NumSol() const
+    { MFEM_ABORT("NumSol() must not be called from the base class FOSLSFormulation! \n");}
+
 };
+
+// specific FOSLSFormulations
 
 struct CFOSLSFormulation_HdivL2Hyper : public FOSLSFormulation
 {
@@ -590,6 +598,8 @@ public:
     virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 0;}
+
+    int NumSol() const override {return numsol;}
 };
 
 struct CFOSLSFormulation_HdivH1Hyper : public FOSLSFormulation
@@ -605,8 +615,31 @@ public:
     virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
+
+    int NumSol() const override {return numsol;}
 };
 
+struct CFOSLSFormulation_HdivH1DivfreeHyp : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Hyper_test test;
+public:
+    CFOSLSFormulation_HdivH1DivfreeHyp(int dimension, int num_solution, bool verbose);
+
+    CFOSLSFormulation_HdivH1DivfreeHyp(CFOSLSFormulation_HdivH1Hyper& hdivh1_formul, bool verbose)
+        : CFOSLSFormulation_HdivH1DivfreeHyp(hdivh1_formul.Dim(), hdivh1_formul.NumSol(), verbose) {}
+
+    virtual FOSLS_test * GetTest() override {return &test;}
+    virtual void InitBlkStructure() override;
+    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+
+};
+
+/// general class for FOSLS finite element formulations
+/// constructed on top of the FOSLS formulation
 struct FOSLSFEFormulation
 {
 protected:
@@ -638,17 +671,35 @@ public:
 
 };
 
+// specific FOSLSFEFormulation
+
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivL2L2 problem but take
+/// a general FOSLSFEFormulation as an input.
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 {
 public:
     CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
 };
 
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivL2L2 problem but take
+/// a general FOSLSFEFormulation as an input.
 struct CFOSLSFEFormulation_HdivH1Hyper : FOSLSFEFormulation
 {
 public:
     CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order);
 };
+
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivL2L2 problem but take
+/// a general FOSLSFEFormulation as an input.
+struct CFOSLSFEFormulation_HdivH1DivfreeHyper : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order);
+};
+
 
 
 class BlockProblemForms
@@ -763,8 +814,16 @@ public:
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
 
-    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
-    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_);
+    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
+                 bool verbose_, bool assemble_system);
+    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system);
+
+    FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_)
+        : FOSLSProblem(pmesh_, bdr_conditions, fe_formulation, verbose_, true) {}
+    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_, true) {}
+
     void Solve(bool verbose, bool compute_error) const;
     void BuildSystem(bool verbose);
     void Update();
@@ -859,7 +918,9 @@ public:
     //{ MFEM_ABORT("ConstructFunctBlkMat() is not implemented in the base class");}
 };
 
-
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivL2L2 problem but take
+/// a general FOSLSFEFormulation as an input.
 class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
 {
 protected:
@@ -888,6 +949,9 @@ public:
     ParGridFunction * RecoverS();
 };
 
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivH1L2 problem but take
+/// a general FOSLSFEFormulation as an input.
 class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
 {
 protected:
@@ -910,6 +974,29 @@ public:
         CreatePrec(*CFOSLSop, prec_option, verbose);
         UpdateSolverPrec();
     }
+};
+
+
+// a regular FOSLS problem with additional routines for the divfree space
+class FOSLSDivfreeProblem : virtual public FOSLSProblem
+{
+protected:
+    FiniteElementCollection *hdiv_fecoll;
+    ParFiniteElementSpace * hdiv_pfespace;
+    HypreParMatrix * divfree_hpmat;
+
+public:
+    FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, bool verbose_);
+
+    FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
+                        FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace& Hdiv_space, bool verbose_);
+
+    void ConstructDivfreeHpMat();
+
+    const HypreParMatrix& GetDivfreeHpMat()  const {return *divfree_hpmat;}
+
+    //ParFiniteElementSpace * GetDivfreeFESpace() {return divfree_pfespace;}
 };
 
 /*

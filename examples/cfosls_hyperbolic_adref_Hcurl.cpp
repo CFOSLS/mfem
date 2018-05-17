@@ -27,12 +27,7 @@
 #include <iomanip>
 #include <list>
 
-#define MYZEROTOL (1.0e-13)
-
-#define NEW_SETUP
-//#define REGULARIZE_A
-
-#define NEW_INTERFACE
+#define DIVFREE_ESTIMATOR
 
 using namespace std;
 using namespace mfem;
@@ -225,11 +220,6 @@ int main(int argc, char *argv[])
         std::cout << "Number of mpi processes: " << num_procs << "\n";
 
     StopWatch chrono;
-
-    //DEFAULTED LINEAR SOLVER OPTIONS
-    int max_iter = 100000;
-    double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-14;//1e-9;//1e-12;
 
     Mesh *mesh = NULL;
 
@@ -440,7 +430,20 @@ int main(int argc, char *argv[])
    else
        estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
 
-   FOSLSProblem * problem_divfree = problem->ConstructDivfreeProblem();
+   problem->AddEstimator(*estimator);
+
+   ThresholdRefiner refiner(*estimator);
+   refiner.SetTotalErrorFraction(0.5);
+
+#ifdef DIVFREE_ESTIMATOR
+   CFOSLSFormulation_HdivH1DivfreeHyp * formulat_divfree =
+           new CFOSLSFormulation_HdivH1DivfreeHyp (dim, numsol, verbose);
+
+   CFOSLSFEFormulation_HdivH1DivfreeHyper * fe_formulat_divfree =
+           new CFOSLSFEFormulation_HdivH1DivfreeHyper(*formulat_divfree, feorder);
+
+   FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
+                                                                   *problem->GetFEformulation().GetFeColl(0), *problem->GetPfes(0), verbose);
 
    std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numfoslsfuns);
 
@@ -456,26 +459,28 @@ int main(int argc, char *argv[])
        if (strcmp(space_for_S,"H1") == 0)
             grfuns_descriptor_divfree[1] = std::make_pair<int,int>(1, 1);
 
-       estimator_divfree = new FOSLSEstimator(*problem, grfuns_descriptor_divfree, integs_divfree, verbose);
+       estimator_divfree = new FOSLSEstimator(*problem_divfree, grfuns_descriptor_divfree, NULL, integs_divfree, verbose);
 
        if (strcmp(space_for_S,"H1") == 0)
        {
            integs(0,0) = new CurlCurlIntegrator;
            integs(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
-           integs(1,0) = new MixedCurlScalarIntegrator(*Mytest->GetMinB());
+           // untested integrator, actually
+           integs(1,0) = new MixedVectorFECurlVQScalarIntegrator(*Mytest->GetMinB());
        }
        else
            integs(0,0) = new CurlCurlIntegrator(*Mytest->GetKtilda());
-
    }
 
-   problem->AddEstimator(*estimator);
-
-   ThresholdRefiner refiner(*estimator);
-   refiner.SetTotalErrorFraction(0.5);
+   problem_divfree->AddEstimator(*estimator_divfree);
 
    ThresholdRefiner refiner_divfree(*estimator_divfree);
    refiner_divfree.SetTotalErrorFraction(0.5);
+
+   MPI_Finalize();
+   return 0;
+#endif
+
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
@@ -491,7 +496,21 @@ int main(int argc, char *argv[])
        }
 
        bool compute_error = true;
+#ifdef DIVFREE_ESTIMATOR
+       // finding a particular solution
+       // ...
+
+       //  creating the right hand side for the divfree problem
+       // ...
+
+       problem_divfree->Solve(verbose, compute_error);
+
+       // converting the solution back into sigma from Hdiv inside the problem
+       // (adding a particular solution as a part of the process)
+       // ...
+#else
        problem->Solve(verbose, compute_error);
+#endif
 
        // 17. Send the solution by socket to a GLVis server.
        if (visualization)
@@ -524,9 +543,11 @@ int main(int argc, char *argv[])
        //     estimator to obtain element errors, then it selects elements to be
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
+#ifdef DIVFREE_ESTIMATOR
+       refiner_divfree.Apply(*problem_divfree->GetParMesh());
+#else
        refiner.Apply(*problem->GetParMesh());
-       //delete problem->GetParMesh()->GetEdgeVertexTable();
-       //problem->GetParMesh()->GetEdgeVertexTable();
+#endif
        if (refiner.Stop())
        {
           if (myid == 0)
@@ -548,6 +569,14 @@ int main(int argc, char *argv[])
        problem->Update();
 
        problem->BuildSystem(verbose);
+
+#ifdef DIVFREE_ESTIMATOR
+       problem_divfree->Update();
+
+       // casting the functional from problem into the (hcurl) functional of problem_divfree
+       // ...
+
+#endif
 
        /*
        //if (it == 0 || it == 1)

@@ -300,6 +300,38 @@ const Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() con
     return *res;
 }
 
+
+CFOSLSFormulation_HdivH1DivfreeHyp::CFOSLSFormulation_HdivH1DivfreeHyp (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 2, 2, false), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new CurlCurlIntegrator();
+    blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
+
+    MFEM_ABORT("Set the correct linear forms, or decide whether it is needed at all \n");
+    //lfis[1] = new GradDomainLFIntegrator(*test.GetBf());
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_HdivH1DivfreeHyp::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(1,-1);
+}
+
+const Array<SpaceName> &CFOSLSFormulation_HdivH1DivfreeHyp::GetSpacesDescriptor() const
+{
+    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+
+    (*res)[0] = SpaceName::HCURL;
+    (*res)[1] = SpaceName::H1;
+
+    return *res;
+}
+
+
+// FE formulations
+
 CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
     : FOSLSFEFormulation(formulation, fe_order)
 {
@@ -327,6 +359,23 @@ CFOSLSFEFormulation_HdivH1Hyper::CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulatio
         fecolls[1] = new H1_FECollection(feorder + 1, dim);
 
     fecolls[2] = new L2_FECollection(feorder, dim);
+}
+
+CFOSLSFEFormulation_HdivH1DivfreeHyper::CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
+    : FOSLSFEFormulation(formulation, fe_order)
+{
+    int dim = formul.Dim();
+
+    if (dim == 4)
+        fecolls[0] = new DivSkew1_4DFECollection;
+    else
+        fecolls[0] = new ND_FECollection(feorder + 1, dim);
+
+    if (dim == 4)
+        fecolls[1] = new LinearFECollection;
+    else
+        fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
 }
 
 void BlockProblemForms::Update()
@@ -369,7 +418,7 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
 }
 
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-             FOSLSFEFormulation& fe_formulation, bool verbose_)
+             FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(&Hierarchy), level_in_hierarchy(level),
       spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
@@ -384,17 +433,17 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     forms_initialized = true;
     InitGrFuns();
 
-    AssembleSystem(verbose);
-    system_assembled = true;
+    if (assemble_system)
+    {
+        AssembleSystem(verbose);
+        system_assembled = true;
 
-    //InitPrec(prec_option, verbose);
-    InitSolver(verbose);
-    solver_initialized = true;
+        InitSolver(verbose);
+        solver_initialized = true;
+    }
 }
 
-
-FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
-                           FOSLSFEFormulation& fe_formulation, bool verbose_)
+FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(NULL), level_in_hierarchy(-1),
       spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
@@ -409,12 +458,14 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions &bdr_conditions,
     forms_initialized = true;
     InitGrFuns();
 
-    AssembleSystem(verbose);
-    system_assembled = true;
+    if (assemble_system)
+    {
+        AssembleSystem(verbose);
+        system_assembled = true;
 
-    //InitPrec(prec_option, verbose);
-    InitSolver(verbose);
-    solver_initialized = true;
+        InitSolver(verbose);
+        solver_initialized = true;
+    }
 }
 
 void FOSLSProblem::Update()
@@ -1397,6 +1448,49 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
         if (verbose)
             cout << "No preconditioner is used. \n";
 
+}
+
+
+FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                FOSLSFEFormulation& fe_formulation, bool verbose_)
+    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+{
+    int dim = Pmesh.Dimension();
+    int feorder = fe_formulation.Feorder();
+    MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
+
+    if (dim == 4)
+        hdiv_fecoll = new RT0_4DFECollection;
+    else
+        hdiv_fecoll = new RT_FECollection(feorder, dim);
+
+    hdiv_pfespace = new ParFiniteElementSpace(&pmesh, hdiv_fecoll);
+}
+
+FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace &Hdiv_space, bool verbose_)
+    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space)
+{
+    int dim = Pmesh.Dimension();
+    MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
+}
+
+void FOSLSDivfreeProblem::ConstructDivfreeHpMat()
+{
+    ParDiscreteLinearOperator * divfree_op = new ParDiscreteLinearOperator(pfes[0], hdiv_pfespace);
+
+    int dim = pmesh.Dimension();
+
+    if (dim == 3)
+        divfree_op->AddDomainInterpolator(new CurlInterpolator);
+    else
+        divfree_op->AddDomainInterpolator(new DivSkewInterpolator);
+
+    divfree_op->Assemble();
+    divfree_op->Finalize();
+    divfree_hpmat = divfree_op->ParallelAssemble();
+
+    delete divfree_op;
 }
 
 GeneralMultigrid::GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
@@ -2513,6 +2607,8 @@ void GeneralHierarchy::ConstructDivfreeDops()
         Divfree_op->Assemble();
         Divfree_op->Finalize();
         DivfreeDops_lvls[l] = Divfree_op->ParallelAssemble();
+
+        delete Divfree_op;
     }
 
     divfreedops_constructed = true;

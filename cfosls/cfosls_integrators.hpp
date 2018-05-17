@@ -144,7 +144,7 @@ public:
                                        DenseMatrix &elmat);
 };
 
-/** Bilinear integrator for (curl u, v) for Nedelec and scalar finite element for v. If the trial and
+/** Bilinear integrator for (curl u, Q v) for Nedelec and scalar finite element for v. If the trial and
     test spaces are switched, assembles the form (u, curl v). */
 class VectorFECurlVQIntegrator: public BilinearFormIntegrator
 {
@@ -173,6 +173,8 @@ public:
                                         ElementTransformation &Trans,
                                         DenseMatrix &elmat);
 };
+
+using MixedVectorFECurlVQScalarIntegrator = VectorFECurlVQIntegrator;
 
 class VectorcurlDomainLFIntegrator : public LinearFormIntegrator
 {
