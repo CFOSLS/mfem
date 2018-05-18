@@ -292,6 +292,10 @@ public:
 
     GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
 
+    // should be called if the finest mesh was refined and
+    // one wants to extend the hierarchy
+    void Update();
+
     void ConstructDivfreeDops();
 
     void RefineAndCopy(int lvl, ParMesh* pmesh);
@@ -831,6 +835,8 @@ public:
 
     void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
 
+    void DistributeToGrfuns(const Vector& vec) const;
+
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
 
@@ -1026,8 +1032,12 @@ public:
     FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, bool verbose_);
 
-    FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
-                        FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace& Hdiv_space, bool verbose_);
+    FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                        FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll,
+                        ParFiniteElementSpace& Hdiv_space, bool verbose_);
+
+    FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose);
 
     void ConstructDivfreeHpMats();
 

@@ -461,7 +461,15 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
+
+    x = NULL;
+    trueX = NULL;
+    trueRhs = NULL;
+    trueBnd = NULL;
     CreateOffsetsRhsSol();
+
+    CFOSLSop = NULL;
+    CFOSLSop_nobnd = NULL;
 
     if (assemble_system)
     {
@@ -483,7 +491,15 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
     InitSpaces(pmesh);
     InitForms();
     InitGrFuns();
+
+    x = NULL;
+    trueX = NULL;
+    trueRhs = NULL;
+    trueBnd = NULL;
     CreateOffsetsRhsSol();
+
+    CFOSLSop = NULL;
+    CFOSLSop_nobnd = NULL;
 
     if (assemble_system)
     {
@@ -512,10 +528,19 @@ void FOSLSProblem::Update()
     for (int i = 0; i < estimators.Size(); ++i)
         estimators[i]->Update();
 
-    delete trueRhs;
-    delete trueX;
-    delete trueBnd;
-    delete x;
+    if (trueRhs)
+        delete trueRhs;
+    trueRhs = NULL;
+    if (trueX)
+        delete trueX;
+    trueX = NULL;
+    if (trueBnd)
+        delete trueBnd;
+    trueBnd = NULL;
+
+    if (x)
+        delete x;
+    x = NULL;
 
     delete solver;
 
@@ -534,8 +559,13 @@ void FOSLSProblem::Update()
                 if (hpmats_nobnd(i,j))
                     delete hpmats_nobnd(i,j);
 
-    delete CFOSLSop;
-    delete CFOSLSop_nobnd;
+    if  (CFOSLSop)
+        delete CFOSLSop;
+    CFOSLSop = NULL;
+
+    if (CFOSLSop_nobnd)
+        delete CFOSLSop_nobnd;
+    CFOSLSop_nobnd = NULL;
 
     system_assembled = false;
     solver_initialized = false;
@@ -737,6 +767,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 {
     int numblocks = fe_formul.Nblocks();
 
+    if (x)
+        delete x;
     x = GetInitialCondition();
 
     for (int i = 0; i < numblocks; ++i)
@@ -900,6 +932,9 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
    //trueRhs->Print();
 
+   if (trueBnd)
+       delete trueBnd;
+
    trueBnd = GetTrueInitialCondition();
 
    // moving the contribution from inhomogenous bnd conditions
@@ -942,6 +977,13 @@ void FOSLSProblem::DistributeSolution() const
 {
     for (int i = 0; i < fe_formul.Nblocks(); ++i)
         grfuns[i]->Distribute(&(trueX->GetBlock(i)));
+}
+
+void FOSLSProblem::DistributeToGrfuns(const Vector& vec) const
+{
+    const BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+        grfuns[i]->Distribute(&(vec_viewer.GetBlock(i)));
 }
 
 void FOSLSProblem::ComputeBndError(const Vector& vec, int blk) const
@@ -1225,6 +1267,12 @@ void FOSLSProblem::CreateOffsetsRhsSol()
     for (int i = 0; i < numblocks; ++i)
         blkoffsets[i + 1] = pfes[i]->GetVSize();
     blkoffsets.PartialSum();
+
+    if (trueRhs)
+        delete trueRhs;
+
+    if (trueX)
+        delete trueX;
 
     trueRhs = new BlockVector(blkoffsets_true);
     trueX = new BlockVector(blkoffsets_true);
@@ -1603,6 +1651,16 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
             cout << "No preconditioner is used. \n";
 }
 
+FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+             FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)
+    : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose, false)
+{
+    int dim = pmesh.Dimension();
+    MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
+
+    hdiv_pfespace = Hierarchy.GetSpace(SpaceName::HDIV, level);
+    hdiv_fecoll = NULL;
+}
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                 FOSLSFEFormulation& fe_formulation, bool verbose_)
@@ -1665,6 +1723,8 @@ void FOSLSDivfreeProblem::ConstructDivfreeHpMats()
 void FOSLSDivfreeProblem::Update()
 {
     FOSLSProblem::Update();
+
+    hdiv_pfespace->Update();
 
     if (divfree_hpmat)
         delete divfree_hpmat;
@@ -2849,6 +2909,12 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
 
 }
 
+void GeneralHierarchy::Update()
+{
+
+}
+
+
 void GeneralHierarchy::ConstructDivfreeDops()
 {
     int dim = pmesh_lvls[0]->Dimension();
@@ -2878,7 +2944,6 @@ void GeneralHierarchy::ConstructDivfreeDops()
 
     divfreedops_constructed = true;
 }
-
 
 const Array<int>& GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {

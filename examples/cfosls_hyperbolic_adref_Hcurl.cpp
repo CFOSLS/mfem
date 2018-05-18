@@ -315,6 +315,20 @@ int main(int argc, char *argv[])
    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+#ifdef DIVFREE_ESTIMATOR
+   DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
+   DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
+#endif
+
+   // now constructed via a hierarchy
+   //ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   //FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
+                                                                   //*problem->GetFEformulation().GetFeColl(0),
+                                                                   //*problem->GetPfes(0), verbose);
+   //FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
+                                                                   //*problem->GetFEformulation().GetFeColl(0),
+                                                                   //*problem->GetPfes(0), verbose);
 
    /*
    // Hdiv-L2 case
@@ -336,7 +350,18 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-   ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
+   FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
+           FOSLSProblHierarchy<ProblemType, GeneralHierarchy>(*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+   ProblemType * problem = prob_hierarchy->GetProblem(0);
+
+#ifdef DIVFREE_ESTIMATOR
+   FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy = new
+           FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>(*hierarchy, 1, *bdr_conds, *fe_formulat_divfree, prec_option, verbose);
+
+   FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+#endif
 
    Hyper_test* Mytest = dynamic_cast<Hyper_test*>
            (problem->GetFEformulation().GetFormulation()->GetTest());
@@ -443,14 +468,6 @@ int main(int argc, char *argv[])
    refiner.SetTotalErrorFraction(0.5);
 
 #ifdef DIVFREE_ESTIMATOR
-   DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
-
-   DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
-
-   FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
-                                                                   *problem->GetFEformulation().GetFeColl(0),
-                                                                   *problem->GetPfes(0), verbose);
-
    std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numblocks_funct);
 
    Array2D<BilinearFormIntegrator *> integs_divfree(numblocks_funct, numblocks_funct);
@@ -484,6 +501,9 @@ int main(int argc, char *argv[])
 
    ThresholdRefiner refiner_divfree(*estimator_divfree);
    refiner_divfree.SetTotalErrorFraction(0.5);
+
+   //MPI_Finalize();
+   //return 0;
 
    //MPI_Finalize();
    //return 0;
@@ -541,11 +561,11 @@ int main(int argc, char *argv[])
 
        problem_divfree->ResetOp(*problem_divfree_op);
        problem_divfree->InitSolver(verbose);
+
+       // creating a preconditioner for the divfree problem
        problem_divfree->CreatePrec(*problem_divfree->GetOp(), 0, verbose);
        problem_divfree->UpdateSolverPrec();
 
-       // creating a preconditioner for the divfree problem
-       // ...
 
        //  creating the solution and right hand side for the divfree problem
        BlockVector rhs(problem_divfree->GetTrueOffsets());
@@ -559,8 +579,6 @@ int main(int argc, char *argv[])
        if (strcmp(space_for_S,"H1") == 0)
            rhs.GetBlock(1) = temp.GetBlock(1);
 
-       //rhs.GetBlock(1).Print();
-
        problem_divfree->SolveProblem(rhs, verbose, false);
 
        /// converting the solution back into sigma from Hdiv inside the problem
@@ -572,8 +590,6 @@ int main(int argc, char *argv[])
 
        BlockVector& problem_divfree_sol = problem_divfree->GetSol();
 
-       //problem_divfree_sol.GetBlock(1).Print();
-
        problem_divfree->GetDivfreeHpMat().Mult(1.0, problem_divfree_sol.GetBlock(0), 1.0, problem_sol.GetBlock(0));
        if (strcmp(space_for_S,"H1") == 0)
            problem_sol.GetBlock(1) = problem_divfree_sol.GetBlock(1);
@@ -582,6 +598,10 @@ int main(int argc, char *argv[])
 
        if (compute_error)
            problem->ComputeError(problem_sol, verbose, true);
+
+       // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
+       // though for now it coordination already happens in ComputeError()
+       problem->DistributeToGrfuns(problem_sol);
 #else
        if (compute_error)
            problem->Solve(verbose, compute_error);
@@ -618,11 +638,7 @@ int main(int argc, char *argv[])
        //     estimator to obtain element errors, then it selects elements to be
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
-#ifdef DIVFREE_ESTIMATOR
-       refiner_divfree.Apply(*problem_divfree->GetParMesh());
-#else
        refiner.Apply(*problem->GetParMesh());
-#endif
        if (refiner.Stop())
        {
           if (verbose)
@@ -630,7 +646,17 @@ int main(int argc, char *argv[])
           break;
        }
 
-       problem->Update();
+       hierarchy->Update();
+
+       //problem->Update();
+
+#ifdef DIVFREE_ESTIMATOR
+       //problem_divfree->Update();
+       delete partsigma;
+#endif
+
+       MPI_Finalize();
+       return 0;
 
        problem->BuildSystem(verbose);
 
@@ -643,11 +669,6 @@ int main(int argc, char *argv[])
           break;
        }
 
-#ifdef DIVFREE_ESTIMATOR
-       problem_divfree->Update();
-
-       delete partsigma;
-#endif
    }
 
    MPI_Finalize();

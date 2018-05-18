@@ -1400,7 +1400,7 @@ int main(int argc, char *argv[])
        refiner.Apply(*problem->GetParMesh());
        if (refiner.Stop())
        {
-          if (myid == 0)
+          if (verbose)
           {
              cout << "Stopping criterion satisfied. Stop." << endl;
           }
