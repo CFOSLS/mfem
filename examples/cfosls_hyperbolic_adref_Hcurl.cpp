@@ -641,9 +641,6 @@ int main(int argc, char *argv[])
        problem->BuildSystem(verbose);
 
 #ifdef DIVFREE_ESTIMATOR
-       //MFEM_ABORT("Current issue is that (1,1) block as HypreParMatrix belongs to both problem and problem_divfree"
-                  //" and both of them try to delete it. With that, problem has it as a part of hpmats as well.");
-
        problem_divfree->Update();
 
        delete partsigma;

@@ -1566,15 +1566,7 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     }
 
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
-    // FIXME: Make C here back to be a reference. Current version is only for studying
-    // the issue with a preconditioner for FOSLSDivfreeProblem
-    //HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
-    HypreParMatrix * C;
-    C = dynamic_cast<HypreParMatrix*>(&CFOSLSop->GetBlock(1,1));
-
-    //SparseMatrix C_diag;
-    //C->GetDiag(C_diag);
-    //C_diag.Print();
+    HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
 
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
@@ -1591,9 +1583,8 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     invA = new HypreDiagScale(A);
     invA->iterative_mode = false;
 
-    Solver * invC = new HypreBoomerAMG(*C);
-    //Solver * invC = new HypreBoomerAMG(C);
-    ((HypreBoomerAMG*)invC)->SetPrintLevel(1);
+    Solver * invC = new HypreBoomerAMG(C);
+    ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
     ((HypreBoomerAMG*)invC)->iterative_mode = false;
 
     Solver * invS = new HypreBoomerAMG(*Schur);
@@ -1610,26 +1601,6 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     else
         if (verbose)
             cout << "No preconditioner is used. \n";
-
-    Vector testvec1(invC->Width());
-    for (int i = 0; i < testvec1.Size(); ++i)
-        testvec1[i] = cos(i * 100);
-
-    std::cout << "testvec1 norm = " << testvec1.Norml2() / sqrt(testvec1.Size())
-              << "\n";
-
-    Vector testvec2(invC->Width());
-
-    C->Mult(testvec1, testvec2);
-    //C.Mult(testvec1, testvec2);
-    std::cout << "C * testvec1 norm = " << testvec2.Norml2() / sqrt(testvec2.Size())
-              << "\n";
-
-    invC->Mult(testvec1, testvec2);
-    std::cout << "invC * testvec1 norm = " << testvec2.Norml2() / sqrt(testvec2.Size())
-              << "\n";
-
-    std::cout << "Check in FOSLSProblem_HdivH1L2hyp::CreatePrec() \n";
 }
 
 
@@ -1715,16 +1686,17 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
     }
 
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    SparseMatrix A_diag;
+    A.GetDiag(A_diag);
+    A_diag.MoveDiagonalFirst();
 
     HypreParMatrix * C;
     if (op.NumRowBlocks() > 1) // case when S is present
     {
-        //C = dynamic_cast<HypreParMatrix*>(&CFOSLSop->GetBlock(1,1));
         C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
         SparseMatrix C_diag;
         C->GetDiag(C_diag);
         C_diag.MoveDiagonalFirst();
-        //C_diag.Print();
     }
 
     Solver * invA;
@@ -1737,7 +1709,7 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
     if (op.NumRowBlocks() > 1) // case when S is present
     {
         invC = new HypreBoomerAMG(*C);
-        ((HypreBoomerAMG*)invC)->SetPrintLevel(1);
+        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
         ((HypreBoomerAMG*)invC)->iterative_mode = false;
 
         //invC  = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
@@ -1749,6 +1721,7 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
     if (op.NumRowBlocks() > 1) // case when S is present
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
 
+    /*
     Vector testvec1(invC->Width());
     for (int i = 0; i < testvec1.Size(); ++i)
         testvec1[i] = cos(i * 100);
@@ -1773,6 +1746,7 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
                "The issue appeared because BoomerAMG requires the diagonal element"
                " to be the first in the row. So it disappeared when I added MoveDiagonalFIrst() "
                "for the diagonal of C. A clean-up commit to come. \n");
+   */
 }
 
 

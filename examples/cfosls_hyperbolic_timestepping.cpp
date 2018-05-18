@@ -11,9 +11,6 @@
 #define MYZEROTOL (1.0e-13)
 #define ZEROTOL (1.0e-13)
 
-//#include "cfosls/testhead.hpp"
-//#include "divfree_solver_tools.hpp"
-
 #define NONHOMO_TEST
 
 // must be active
@@ -56,7 +53,6 @@ int main(int argc, char *argv[])
 
    // solver options
    int prec_option = 1; //defines whether to use preconditioner or not, and which one
-   bool use_ADS;
 
    int feorder = 0;
    bool visualization = 0;
@@ -135,36 +131,13 @@ int main(int argc, char *argv[])
        }
    }
 
-   switch (prec_option)
-   {
-   case 1: // smth simple like AMS
-       use_ADS = false;
-       break;
-   case 2: // MG
-       use_ADS = true;
-       break;
-   default: // no preconditioner
-       break;
-   }
-
-   if (verbose)
-   {
-       std::cout << "use_ADS = " << use_ADS << "\n";
-   }
-
    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
 
    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
-   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && use_ADS == false), "ADS cannot be used when sigma is from H1vec!\n");
 
    StopWatch chrono;
-
-   //DEFAULTED LINEAR SOLVER OPTIONS
-   //int max_iter = 150000;
-   //double rtol = 1e-12;//1e-7;//1e-9;
-   //double atol = 1e-14;//1e-9;//1e-12;
 
 #ifdef NONHOMO_TEST
    if (nDimensions == 3)
@@ -207,14 +180,6 @@ int main(int argc, char *argv[])
        imesh.close();
    }
 
-   /*
-   std::stringstream fname;
-   fname << "square_2d_moderate_corrected.mesh";
-   std::ofstream ofid(fname.str().c_str());
-   ofid.precision(8);
-   meshbase->Print(ofid);
-   */
-
    meshbase->CheckElementOrientation(true);
 
    for (int l = 0; l < ser_ref_levels; l++)
@@ -247,11 +212,6 @@ int main(int argc, char *argv[])
    //pmesh->Refine(1);
 
    //pmesh->PrintSlabsStruct();
-
-   //delete pmeshbase;
-   //delete pmesh;
-   //MPI_Finalize();
-   //return 0;
 
    /*
    if (num_procs == 1)
@@ -346,63 +306,35 @@ int main(int argc, char *argv[])
       std::cout << "Checking a single solve from a one TimeCylHyper instance "
                     "created for the entire domain \n";
 
+   // Hdiv-H1 case
+   using FormulType = CFOSLSFormulation_HdivH1Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+   using ProblemType = FOSLSCylProblem_HdivH1L2hyp;
+
    /*
-   // Hdiv-L2 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSCylProblem_HdivL2L2hyp * problem = new FOSLSCylProblem_HdivL2L2hyp
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   // Hdiv-L2 case
+   using FormulType = CFOSLSFormulation_HdivL2Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+   using ProblemType = FOSLSCylProblem_HdivL2L2hyp;
    */
 
-   // Hdiv-H1 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
+   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
-   //FOSLSCylProblem_HdivH1L2hyp * problem = new FOSLSCylProblem_HdivH1L2hyp
-           //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   //ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    //problem->Solve(verbose);
-
-   //int length = 2;
-   //mfem::D<C> * testtt = new mfem::D<C>(1,2, length);
 
    //MPI_Finalize();
    //return 0;
 
-   /*
-   int nlevels = 2;
-   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
-
-   FOSLSProblHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper, GeneralHierarchy> * problems_hierarchy =
-           new FOSLSProblHierarchy<FOSLSProblem_CFOSLS_HdivL2_Hyper, GeneralHierarchy>(*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
-
-   for (int l = 0; l < nlevels; ++l)
-   {
-       FOSLSProblem_CFOSLS_HdivL2_Hyper* problem = problems_hierarchy->GetProblem(l);
-       problem->Solve(verbose);
-   }
-   */
-
-   /*
-   Array<FOSLSCylProblem_HdivL2L2hyp*> problems(nlevels);
-   for (int l = 0; l < nlevels; ++l)
-   {
-       problems[l] = new FOSLSCylProblem_HdivL2L2hyp
-               (*hierarchy, l, *bdr_conds, *fe_formulat, prec_option, verbose);
-   }
-
-   //problems[0]->Solve(verbose);
-   for (int l = 0; l < nlevels; ++l)
-       problems[l]->Solve(verbose);
-   */
-
-   int nslabs = 2;//4;//2;
-   double slab_tau = 0.125;//1.0/16;//0.125;
-   int slab_width = 4; // in time steps (as time intervals) withing a single time slab
+   int nslabs = 2;//1;//2;//4;//2;
+   double slab_tau = 0.125;//0.125;//1.0/16;//0.125;
+       int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
-   //Array<FOSLSCylProblem_HdivH1L2hyp*> timeslabs_problems(nslabs);
 
    if (verbose)
    {
@@ -412,13 +344,16 @@ int main(int argc, char *argv[])
        std::cout << "time step within a time slab: " << slab_tau << "\n";
    }
 
+   // creating fine-level time-stepping from a bunch of problems in the cylinders
+//#if 0
    double tinit_tslab = 0.0;
+   Array<ProblemType*> timeslabs_problems(nslabs);
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
+       timeslabs_pmeshcyls[tslab]->Refine(1);
 
-       //timeslabs_problems[tslab] = new FOSLSCylProblem_HdivL2L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
-       //timeslabs_problems[tslab] = new FOSLSCylProblem_HdivH1L2hyp(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
 
        tinit_tslab += slab_tau * slab_width;
    }
@@ -426,45 +361,42 @@ int main(int argc, char *argv[])
    MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
                                                  "[0,1] but the upper bound doesn't match \n");
 
-   /*
-   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * time_stepping = new TimeStepping<FOSLSCylProblem_HdivH1L2hyp>(timeslabs_problems, verbose);
+   TimeStepping<ProblemType> * fine_timestepping = new TimeStepping<ProblemType>(timeslabs_problems, verbose);
 
-   Vector* init_vector = timeslabs_problems[0]->GetExactBase("bot");
+//#endif // for creating fine-level time-stepping from a bunch of problems in the cylinders
 
-   bool compute_error = true;
-   time_stepping->SequentialSolve(*init_vector, compute_error);
+   // creating fine-level time-stepping from a TwoGridTimeStepping instance
+#if 0
+   double tinit_tslab = 0.0;
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+   {
+       timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
+       tinit_tslab += slab_tau * slab_width;
+   }
 
-   MPI_Finalize();
-   return 0;
-   */
-
-   /*
-   int nlevels = 2;
-   GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
-
-   FOSLSCylProblHierarchy<FOSLSCylProblem_HdivL2L2hyp, GeneralCylHierarchy> * problems_hierarchy =
-           new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivL2L2hyp, GeneralCylHierarchy>
-           (*hierarchy, nlevels, *bdr_conds, *fe_formulat, prec_option, verbose);
-   */
+   MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                 "[0,1] but the upper bound doesn't match \n");
 
    // creating a set of problems hierarchies (a hierarchy per time slab)
    int two_grid = 2;
    Array<GeneralCylHierarchy*> cyl_hierarchies(nslabs);
-   Array<FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>* > cyl_probhierarchies(nslabs);
+   Array<FOSLSCylProblHierarchy<ProblemType, GeneralCylHierarchy>* > cyl_probhierarchies(nslabs);
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
        cyl_hierarchies[tslab] =
                new GeneralCylHierarchy(two_grid, *timeslabs_pmeshcyls[tslab], feorder, verbose);
        cyl_probhierarchies[tslab] =
-               new FOSLSCylProblHierarchy<FOSLSCylProblem_HdivH1L2hyp, GeneralCylHierarchy>
+               new FOSLSCylProblHierarchy<ProblemType, GeneralCylHierarchy>
                (*cyl_hierarchies[tslab], 2, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
 
-   TwoGridTimeStepping<FOSLSCylProblem_HdivH1L2hyp> * twogrid_tstp =
-           new TwoGridTimeStepping<FOSLSCylProblem_HdivH1L2hyp>(cyl_probhierarchies, verbose);
+   TwoGridTimeStepping<ProblemType> * twogrid_tstp =
+           new TwoGridTimeStepping<ProblemType>(cyl_probhierarchies, verbose);
 
    // creating fine and coarse time-stepping and interpolation operator between them
-   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+   TimeStepping<ProblemType> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+
+#endif // for creating fine-level time-stepping from a TwoGridTimeStepping instance
 
 #if 0
    /*
@@ -517,165 +449,37 @@ int main(int argc, char *argv[])
    */
 #endif
 
-   TimeStepping<FOSLSCylProblem_HdivH1L2hyp> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
-
-   Array<Operator*> P_tstp(1);
-   P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
-   //P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOpWithBnd();
-
-   // creating fine-level operator, smoother and coarse-level operator
-   Array<Operator*> Ops_tstp(1);
-   Array<Operator*> Smoo_tstp(1);
-   Array<Operator*> NullSmoo_tstp(1);
-   Operator* CoarseOp_tstp;
-
-   Ops_tstp[0] =
-           new TimeSteppingSeqOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
-
-#if 0
-   // checking SeqOp
-   if (verbose)
-       std::cout << "\n Sequential solve: \n";
-
-   Vector input_tslab0(fine_timestepping->GetInitCondSize());
-   input_tslab0 = 0.0;
-
-   Vector testsol(fine_timestepping->GetGlobalProblemSize());
-   Vector testAsol(fine_timestepping->GetGlobalProblemSize());
-   Vector testrhs(fine_timestepping->GetGlobalProblemSize());
-   testrhs = 2.0;
-   fine_timestepping->ZeroBndValues(testrhs);
-   fine_timestepping->SequentialSolve(testrhs, input_tslab0, testsol, true);
-
-   BlockVector sol_viewer(testsol.GetData(), fine_timestepping->GetGlobalOffsets());
-
-   Ops_tstp[0]->Mult(testsol, testAsol);
-
-   testAsol -= testrhs;
-
-   BlockVector diff_viewer(testAsol.GetData(), fine_timestepping->GetGlobalOffsets());
-   for (int tslab = 0; tslab < fine_timestepping->Nslabs() ; ++tslab)
-   {
-       std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
-                    / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
-       for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
-           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-8)
-               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
-   }
-
-   if (verbose)
-       std::cout << "|| f - A * sol through SeqOp || = " <<
-                    testAsol.Norml2() / sqrt (testAsol.Size()) << "\n";
-   MPI_Finalize();
-   return 0;
-
-#endif
-
-#if 0
-   // checking SolveOp for the finest level (no coarsening)
-   Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
-
-   Vector testsol(fine_timestepping->GetGlobalProblemSize());
-
-   /*
-   Vector input_tslab0(fine_timestepping->GetInitCondSize());
-   input_tslab0 = 0.0;
-
-   Vector testrhs(fine_timestepping->GetGlobalProblemSize());
-   testrhs = 2.0;
-   fine_timestepping->ZeroBndValues(testrhs);
-
-   fine_timestepping->SequentialSolve(testrhs, input_tslab0, testsol, true);
-   */
-
-   testsol = 2.0;
-   BlockVector testsol_viewer(testsol.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->GetProblem(0)->ZeroBndValues(testsol_viewer.GetBlock(0));
-
-   Vector Atestsol(fine_timestepping->GetGlobalProblemSize());
-   Ops_tstp[0]->Mult(testsol, Atestsol);
-
-   Vector check_testsol(fine_timestepping->GetGlobalProblemSize());
-   FineOp_tstp->Mult(Atestsol, check_testsol);
-
-   Vector diff(fine_timestepping->GetGlobalProblemSize());
-   diff = check_testsol;
-   diff -= testsol;
-
-   BlockVector Atestsol_viewer(Atestsol.GetData(), fine_timestepping->GetGlobalOffsets());
-   BlockVector check_testsol_viewer(check_testsol.GetData(), fine_timestepping->GetGlobalOffsets());
-   BlockVector diff_viewer(diff.GetData(), fine_timestepping->GetGlobalOffsets());
-   for (int tslab = 0; tslab < fine_timestepping->Nslabs() ; ++tslab)
-   {
-       std::cout << "component diff norm = " << diff_viewer.GetBlock(tslab).Norml2()
-                    / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
-       for (int j = 0; j < diff_viewer.GetBlock(tslab).Size(); ++j)
-           if (fabs(diff_viewer.GetBlock(tslab)[j]) > 1.0e-8)
-               //std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j] << "\n";
-               std::cout << j << ": diff = " << diff_viewer.GetBlock(tslab)[j]
-                            << " val1 = " << testsol_viewer.GetBlock(tslab)[j]
-                            << ", val2 = " << check_testsol_viewer.GetBlock(tslab)[j]
-                            << ", Atestsol =  " << Atestsol_viewer.GetBlock(tslab)[j] << "\n";
-   }
-
-   if (verbose)
-       std::cout << "|| testsol - A^(-1) * A * testsol through SeqOp and SolveOp || = " <<
-                    diff.Norml2() / sqrt (diff.Size()) << "\n";
-
-   MPI_Finalize();
-   return 0;
-
-#endif
-
-   Smoo_tstp[0] =
-           new TimeSteppingSmoother<FOSLSCylProblem_HdivH1L2hyp> (*fine_timestepping, verbose);
-
-   CoarseOp_tstp =
-           new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
-   //CoarseOp_tstp =
-           //new TSTSpecialSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*coarse_timestepping, verbose);
-   NullSmoo_tstp[0] = NULL;
-
-   // finally, creating general multigrid instance
-   GeneralMultigrid * spacetime_mg =
-           new GeneralMultigrid(two_grid, P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
-
+   int global_size = fine_timestepping->GetGlobalProblemSize();
    // creating initial guess which satisfies given initial condition for the starting time slab
-   Vector mg_x0(spacetime_mg->Width());
-   mg_x0 = 0.0;
-   FOSLSCylProblem_HdivH1L2hyp * problem0 = fine_timestepping->GetProblem(0);
-   BlockVector mg_x0_viewer(mg_x0.GetData(), fine_timestepping->GetGlobalOffsets());
+   Vector xinit(global_size);
+   xinit = 0.0;
+   FOSLSCylProblem * problem0 = fine_timestepping->GetProblem(0);
+   BlockVector xinit_viewer(xinit.GetData(), fine_timestepping->GetGlobalOffsets());
    BlockVector * exact_initcond0 = problem0->GetTrueInitialCondition();
-   mg_x0_viewer.GetBlock(0) = *exact_initcond0;
+   xinit_viewer.GetBlock(0) = *exact_initcond0;
 
-   // creating rhs and computing the residual for the mg_x0
-   Vector mg_rhs(spacetime_mg->Width());
-   fine_timestepping->ComputeGlobalRhs(mg_rhs);
-   BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->ZeroBndValues(mg_rhs);
+   // computing rhs
+   Vector rhs(global_size);
+   fine_timestepping->ComputeGlobalRhs(rhs);
+   fine_timestepping->ZeroBndValues(rhs);
 
+   // computing initial data
    Vector input_tslab0(fine_timestepping->GetInitCondSize());
    input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
-   //fine_timestepping->GetProblem(0)->SetAtBase("bot", input_tslab0, mg_rhs_viewer.GetBlock(0));
 
-   // first, to check, we solve with seq. solve on the finest level and compute the error
+   // now we solve with seq. solve on the finest level and compute the error
 
    if (verbose)
        std::cout << "\n\nSolving with sequential solve and checking the error \n";
 
+   Vector checksol(global_size);
+   fine_timestepping->SequentialSolve(rhs, input_tslab0, checksol, true);
 
-   //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
-   //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(input_tslab0, temp_vec);
-
-   Vector checksol(spacetime_mg->Width());
-   BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
-
-   Vector checkres(spacetime_mg->Width());
+   Vector checkres(global_size);
    BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
 
    fine_timestepping->SeqOp(checksol, &input_tslab0, checkres);
-   checkres -= mg_rhs;
+   checkres -= rhs;
    checkres *= -1;
 
    for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -689,10 +493,6 @@ int main(int argc, char *argv[])
        std::cout << "norm = " << checkres_viewer.GetBlock(tslab).Norml2() /
                     sqrt (checkres_viewer.GetBlock(tslab).Size()) << "\n";
 
-       //for (int i = 0; i < checkres_viewer.GetBlock(tslab).Size(); ++i)
-           //if (fabs(checkres_viewer.GetBlock(tslab)[i]) > 1.0e-10)
-               //std::cout << "entry " << i << ": res value = " << checkres_viewer.GetBlock(tslab)[i] << "\n";
-
        //std::cout << "values of res at bottom interface: \n";
        //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", checkres_viewer.GetBlock(tslab));
        //vec.Print();
@@ -701,280 +501,15 @@ int main(int argc, char *argv[])
    fine_timestepping->ComputeError(checksol);
    fine_timestepping->ComputeBndError(checksol);
 
-   //double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
-   //if (verbose)
-       //std::cout << "checkres norm = " << checkres_norm << "\n";
-
-   //MPI_Finalize();
-   //return 0;
-
-   /*
-   Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", checksol);
-   std::cout << "botbases of output from seq,. solve outside mg \n";
-   for (int tslab = 0; tslab < nslabs; ++tslab)
-   {
-       std::cout << "tslab = " << tslab << "\n";
-       debug_botbases[tslab]->Print();
-   }
-   */
-
-
-   /*
-   BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
-   //checksol_viewer.GetBlock(0).Print();
-
-   fine_timestepping->ComputeBndError(checksol);
+   double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
+   if (verbose)
+       std::cout << "checkres norm = " << checkres_norm << "\n";
 
    MPI_Finalize();
    return 0;
-   */
 
-   fine_timestepping->ComputeGlobalRhs(mg_rhs);
-   fine_timestepping->GetProblem(0)->CorrectFromInitCnd(input_tslab0, mg_rhs_viewer.GetBlock(0));
-   fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
-
+   // older code
 #if 0
-   // second, to check, we solve with seq. solve on the finest level for the correction
-   // and compute the error
-
-   if (verbose)
-       std::cout << "Solving for a correction with sequential solve and checking the final error \n";
-
-
-   //Operator * FineOp_tstp = new TimeSteppingSolveOp<FOSLSCylProblem_HdivH1L2hyp>(*fine_timestepping, verbose);
-   input_tslab0 = 0.0;
-
-   Vector checksol2(spacetime_mg->Width());
-   BlockVector checksol2_viewer(checksol2.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol2, false);
-   checksol2 += mg_x0;
-
-   fine_timestepping->ComputeBndError(checksol2);
-
-   fine_timestepping->ComputeError(checksol2);
-
-   Vector diff(checksol2_viewer.GetBlock(0).Size());
-   diff = checksol2_viewer.GetBlock(0);
-   diff -= checksol_viewer.GetBlock(0);
-   if (verbose)
-       std::cout << "|| diff of checksols || = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
-   //diff.Print();
-
-   MPI_Finalize();
-   return 0;
-#endif
-
-#if 0
-   if (verbose)
-       std::cout << "Solving for a correction with 1 MG cycle \n";
-
-   // solving for the correction, only one MG cycle
-   Vector mg_sol(spacetime_mg->Width());
-   mg_sol = 0.0;
-
-   spacetime_mg->Mult(mg_rhs, mg_sol);
-
-   Vector mg_finalsol(spacetime_mg->Width());
-   mg_finalsol = mg_x0;
-   mg_finalsol += mg_sol;
-
-   fine_timestepping->ComputeError(mg_finalsol);
-
-   MPI_Finalize();
-   return 0;
-#endif
-
-   if (verbose)
-       std::cout << "Solving for a correction with multiple MG cycles \n";
-
-   double eps = 1.0e-6;
-
-   Vector mg_res(spacetime_mg->Width());
-   BlockVector mg_res_viewer(mg_res.GetData(), fine_timestepping->GetGlobalOffsets());
-   mg_res = mg_rhs;
-
-   int local_size = mg_res.Size();
-   int global_size = 0;
-   MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
-
-   double local_res0_norm_sq = mg_res.Norml2() * mg_res.Norml2();
-   double global_res0_norm = 0.0;
-   MPI_Allreduce(&local_res0_norm_sq, &global_res0_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-   global_res0_norm = sqrt (global_res0_norm / global_size);
-
-   if (verbose)
-       std::cout << "res0 norm = " << global_res0_norm << "\n";
-
-   Vector mg_finalsol(spacetime_mg->Width());
-   BlockVector mg_finalsol_viewer(mg_finalsol.GetData(), fine_timestepping->GetGlobalOffsets());
-
-   mg_finalsol = mg_x0;
-
-   // solving for the correction, only one MG cycle
-   Vector mg_sol(spacetime_mg->Width());
-   mg_sol = 0.0;
-
-   Vector mg_temp(spacetime_mg->Width());
-
-   bool converged = false;
-
-   int iter = 0;
-   int mg_max_iter = 10;
-   while (!converged && iter < mg_max_iter)
-   {
-       ++iter;
-
-       /*
-       Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", mg_res);
-       std::cout << "botbases of input residual for MG Mult \n";
-       for (int tslab = 0; tslab < nslabs; ++tslab)
-       {
-           std::cout << "tslab = " << tslab << "\n";
-           debug_botbases[tslab]->Print();
-       }
-       */
-
-       if (iter > 1)
-           for (int tslab = 0; tslab < nslabs; ++tslab)
-           {
-               std::cout << "mg_res full tslab = " << tslab << "\n";
-               std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
-                            sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
-               //mg_res_viewer.GetBlock(tslab).Print();
-           }
-
-
-       // solve for a correction with a current residual
-       mg_sol = 0.0;
-       spacetime_mg->Mult(mg_res, mg_sol);
-
-
-       double local_corr_norm_sq = mg_sol.Norml2() * mg_sol.Norml2();
-       double global_corr_norm = 0;
-
-       MPI_Allreduce(&local_corr_norm_sq, &global_corr_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-
-       global_corr_norm = sqrt (global_corr_norm / global_size);
-
-       if (verbose)
-           std::cout << "Iteration " << iter << ": correction norm = " <<
-                        global_corr_norm << "\n";
-
-       // removing discrepancy at the interfaces between time slabs (taking values from below)
-       fine_timestepping->UpdateInterfaceFromPrev(mg_sol);
-
-       // update the solution
-       mg_finalsol += mg_sol;
-
-       /*
-       std::cout << "Checking jump on the interface between time slabs \n";
-
-       Vector& vec1 = fine_timestepping->GetProblem(0)->ExtractAtBase("top", mg_finalsol_viewer.GetBlock(0));
-       Vector& vec2 = fine_timestepping->GetProblem(1)->ExtractAtBase("bot", mg_finalsol_viewer.GetBlock(1));
-
-       Vector diff(vec1.Size());
-       diff = vec1;
-       diff -= vec2;
-
-       std::cout << "Discrepancy at the interface, norm = " << diff.Norml2() / sqrt(diff.Size()) << "\n";
-       */
-
-       // update the residual
-       fine_timestepping->SeqOp(mg_sol, mg_temp);
-       mg_temp -= mg_res;
-       mg_temp *= -1;
-       // FIXME: This zeroing is too much on paper, but without it error at the boundary is reported
-       fine_timestepping->ZeroBndValues(mg_temp);
-       //mg_temp.Print();
-
-       mg_res = mg_temp;
-
-       for (int tslab = 0; tslab < nslabs; ++tslab)
-       {
-           if (verbose)
-                std::cout << "mg_res after iterate, tslab = " << tslab << "\n";
-           // FIXME: Works only in serial correctly, but it's only a debuggint print
-           std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
-                        sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
-
-           //for (int i = 0; i < mg_res_viewer.GetBlock(tslab).Size(); ++i)
-               //if (fabs(mg_res_viewer.GetBlock(tslab)[i]) > 1.0e-10)
-                   //std::cout << "entry " << i << ": res value = " << mg_res_viewer.GetBlock(tslab)[i] << "\n";
-
-           //std::cout << "values of res at bottom interface: \n";
-           //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", mg_res_viewer.GetBlock(tslab));
-           //vec.Print();
-       }
-
-       double local_res_norm_sq = mg_res.Norml2() * mg_res.Norml2();
-       double global_res_norm = 0.0;
-
-       MPI_Allreduce(&local_res_norm_sq, &global_res_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-       global_res_norm = sqrt (global_res_norm / global_size);
-
-       // check convergence
-       if (global_res_norm < eps * global_res0_norm)
-           converged = true;
-
-       // output convergence status
-       if (verbose)
-       {
-           std::cout << "Iteration " << iter << ": res_norm = " << global_res_norm << "\n";
-       }
-
-       //fine_timestepping->ComputeError(mg_finalsol);
-       //fine_timestepping->ComputeBndError(mg_finalsol);
-   }
-
-   if (verbose)
-   {
-       if (converged)
-            std::cout << "Convergence's been reached within " << iter << " iterations. \n";
-       else
-           std::cout << "Convergence has not been reached within " << iter << " iterations. \n";
-   }
-
-   fine_timestepping->ComputeError(mg_finalsol);
-   fine_timestepping->ComputeBndError(mg_finalsol);
-
-   Vector diff(spacetime_mg->Width());
-   diff = mg_finalsol;
-   diff -= checksol;
-
-   BlockVector diff_viewer(diff.GetData(), fine_timestepping->GetGlobalOffsets());
-
-   for (int tslab = 0; tslab < nslabs; ++tslab)
-   {
-       if (verbose)
-           std::cout << "tslab = " << tslab << "\n";
-
-       BlockVector diff_blk_viewer(diff_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
-       BlockVector checksol_blk_viewer(checksol_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
-       BlockVector finalsol_blk_viewer(mg_finalsol_viewer.GetBlock(tslab).GetData(), fine_timestepping->GetProblem(tslab)->GetTrueOffsets());
-       for (int blk = 0; blk < fe_formulat->Nunknowns(); ++blk)
-       {
-           if (verbose)
-           {
-               std::cout << "|| diff of checksol and mg sol ||, blk = " << blk << " = " <<
-                            diff_blk_viewer.GetBlock(blk).Norml2() / sqrt(diff_blk_viewer.GetBlock(blk).Size()) << "\n";
-           }
-
-           for (int i = 0; i < diff_blk_viewer.GetBlock(blk).Size(); ++i)
-               if (fabs(diff_blk_viewer.GetBlock(blk)[i]) > 1.0e-9)
-               {
-                   std::cout << "entry " << i << ": checksol = " << checksol_blk_viewer.GetBlock(blk)[i] << ", "
-                             << "finalsol = " << finalsol_blk_viewer.GetBlock(blk)[i] << ", "
-                             << "diff = " << diff_blk_viewer.GetBlock(blk)[i] << "\n";
-               }
-
-       }
-       //if (verbose)
-           //std::cout << "|| diff of checksol and mg sol ||(tslab = " << tslab << ") = " <<
-                        //diff_viewer.GetBlock(tslab).Norml2() / sqrt(diff_viewer.GetBlock(tslab).Size()) << "\n";
-   }
-
-   MPI_Finalize();
-   return 0;
 
    /*
 
@@ -1844,6 +1379,7 @@ int main(int argc, char *argv[])
 
   }// end of block of testing a parallel-in-time solver
 #endif
+#endif // if 0 for commenting older time-stepping code
 
    // 17. Free the used memory.
    MPI_Barrier(comm);
