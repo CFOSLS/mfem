@@ -307,7 +307,7 @@ CFOSLSFormulation_HdivH1DivfreeHyp::CFOSLSFormulation_HdivH1DivfreeHyp (int dime
     blfis(0,0) = new CurlCurlIntegrator();
     blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
 
-    MFEM_ABORT("Set the correct linear forms, or decide whether it is needed at all \n");
+    //MFEM_ABORT("Set the correct linear forms, or decide whether it is needed at all \n");
     //lfis[1] = new GradDomainLFIntegrator(*test.GetBf());
 
     InitBlkStructure();
@@ -329,6 +329,35 @@ const Array<SpaceName> &CFOSLSFormulation_HdivH1DivfreeHyp::GetSpacesDescriptor(
     return *res;
 }
 
+/*
+CFOSLSFormulation_PartSol::CFOSLSFormulation_PartSol (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 2, 2, false), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new CurlCurlIntegrator();
+    blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
+    blfis(1,0) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
+
+    lfis[1] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_PartSol::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(1,-1);
+}
+
+const Array<SpaceName> &CFOSLSFormulation_PartSol::GetSpacesDescriptor() const
+{
+    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+
+    (*res)[0] = SpaceName::HDIV;
+    (*res)[1] = SpaceName::L2;
+
+    return *res;
+}
+*/
 
 // FE formulations
 
@@ -394,8 +423,10 @@ void BlockProblemForms::Update()
 
 void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFiniteElementSpace*>& pfes)
 {
-    MFEM_ASSERT(numblocks == fe_formul.Nblocks(), "numblocks mismatch in BlockProblemForms::InitForms!");
-    MFEM_ASSERT(pfes.Size() == numblocks, "size of pfes is different from numblocks in BlockProblemForms::InitForms!");
+    MFEM_ASSERT(numblocks == fe_formul.Nblocks(),
+                "numblocks mismatch in BlockProblemForms::InitForms!");
+    MFEM_ASSERT(pfes.Size() == numblocks,
+                "size of pfes is different from numblocks in BlockProblemForms::InitForms!");
 
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
@@ -421,50 +452,43 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
              FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(&Hierarchy), level_in_hierarchy(level),
-      spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
-      hierarchy_initialized(true),
+      spaces_initialized(false), forms_initialized(false), system_assembled(false),
+      solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
     estimators.SetSize(0);
 
     InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
-    spaces_initialized = true;
     InitForms();
-    forms_initialized = true;
     InitGrFuns();
+    CreateOffsetsRhsSol();
 
     if (assemble_system)
     {
         AssembleSystem(verbose);
-        system_assembled = true;
-
         InitSolver(verbose);
-        solver_initialized = true;
     }
 }
 
-FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
+FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
+                           FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
       hierarchy(NULL), level_in_hierarchy(-1),
-      spaces_initialized(false), forms_initialized(false), system_assembled(false), solver_initialized(false),
-      hierarchy_initialized(true),
+      spaces_initialized(false), forms_initialized(false), system_assembled(false),
+      solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
 {
     estimators.SetSize(0);
 
     InitSpaces(pmesh);
-    spaces_initialized = true;
     InitForms();
-    forms_initialized = true;
     InitGrFuns();
+    CreateOffsetsRhsSol();
 
     if (assemble_system)
     {
         AssembleSystem(verbose);
-        system_assembled = true;
-
         InitSolver(verbose);
-        solver_initialized = true;
     }
 }
 
@@ -473,6 +497,7 @@ void FOSLSProblem::Update()
     for (int i = 0; i < pfes.Size(); ++i)
     {
         pfes[i]->Update();
+        // FIXME: Is it necessary?
         pfes[i]->Dof_TrueDof_Matrix();
     }
 
@@ -497,15 +522,17 @@ void FOSLSProblem::Update()
     if (prec)
         delete prec;
 
-    for (int i = 0; i < hpmats.NumRows(); ++i)
-        for (int j = 0; j < hpmats.NumCols(); ++j)
-            if (hpmats(i,j))
-                delete hpmats(i,j);
+    if (hpmats_initialized)
+        for (int i = 0; i < hpmats.NumRows(); ++i)
+            for (int j = 0; j < hpmats.NumCols(); ++j)
+                if (hpmats(i,j))
+                    delete hpmats(i,j);
 
-    for (int i = 0; i < hpmats_nobnd.NumRows(); ++i)
-        for (int j = 0; j < hpmats_nobnd.NumCols(); ++j)
-            if (hpmats_nobnd(i,j))
-                delete hpmats_nobnd(i,j);
+    if (hpmats_initialized)
+        for (int i = 0; i < hpmats_nobnd.NumRows(); ++i)
+            for (int j = 0; j < hpmats_nobnd.NumCols(); ++j)
+                if (hpmats_nobnd(i,j))
+                    delete hpmats_nobnd(i,j);
 
     delete CFOSLSop;
     delete CFOSLSop_nobnd;
@@ -531,6 +558,8 @@ void FOSLSProblem::InitForms()
             plforms[i]->AddDomainIntegrator(fe_formul.GetLfi(i));
         }
     }
+
+    forms_initialized = true;
 }
 
 void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, const Array<SpaceName> &spaces_descriptor)
@@ -541,6 +570,8 @@ void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int leve
     {
         pfes[i] = hierarchy.GetSpace(spaces_descriptor[i], level);
     }
+
+    spaces_initialized = true;
 }
 
 
@@ -550,6 +581,8 @@ void FOSLSProblem::InitSpaces(ParMesh &pmesh)
 
     for (int i = 0; i < fe_formul.Nblocks(); ++i)
         pfes[i] = new ParFiniteElementSpace(&pmesh, fe_formul.GetFeColl(i));
+
+    spaces_initialized = true;
 }
 
 void FOSLSProblem::InitGrFuns()
@@ -584,6 +617,8 @@ void FOSLSProblem::InitSolver(bool verbose)
 
     if (verbose)
         std::cout << "Here you should print out parameters of the linear solver \n";
+
+    solver_initialized = true;
 }
 
 BlockVector * FOSLSProblem::GetTrueInitialCondition()
@@ -682,27 +717,18 @@ BlockVector * FOSLSProblem::GetInitialCondition()
 
 void FOSLSProblem::BuildSystem(bool verbose)
 {
-    MFEM_ASSERT(spaces_initialized && forms_initialized, "Cannot build system if spaces or forms were not initialized");
+    MFEM_ASSERT(spaces_initialized && forms_initialized,
+                "Cannot build system if spaces or forms were not initialized");
+
+    CreateOffsetsRhsSol();
 
     AssembleSystem(verbose);
-    system_assembled = true;
 
     InitSolver(verbose);
-    solver_initialized = true;
 
     CreatePrec(*CFOSLSop, prec_option, verbose);
     UpdateSolverPrec();
 }
-
-/*
-FOSLSEstimator& FOSLSProblem::ExtractEstimator(bool verbose)
-{
-    FOSLSEstimator * res = new FOSLSEstimator(MPI_Comm& Comm, Array<ParGridFunction*>& solutions, Array2D<BilinearFormIntegrator*>& integrators, bool Verbose = false);;
-    MFEM_ABORT("Not implemented");
-
-    return *res;
-}
-*/
 
 // works correctly only for problems with homogeneous initial conditions?
 // see the times-stepping branch, think of how boundary conditions for off-diagonal blocks are imposed
@@ -711,22 +737,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 {
     int numblocks = fe_formul.Nblocks();
 
-    blkoffsets_true.SetSize(numblocks + 1);
-    blkoffsets_true[0] = 0;
-    for (int i = 0; i < numblocks; ++i)
-        blkoffsets_true[i + 1] = pfes[i]->TrueVSize();
-    blkoffsets_true.PartialSum();
-
-    blkoffsets.SetSize(numblocks + 1);
-    blkoffsets[0] = 0;
-    for (int i = 0; i < numblocks; ++i)
-        blkoffsets[i + 1] = pfes[i]->GetVSize();
-    blkoffsets.PartialSum();
-
     x = GetInitialCondition();
-
-    trueRhs = new BlockVector(blkoffsets_true);
-    trueX = new BlockVector(blkoffsets_true);
 
     for (int i = 0; i < numblocks; ++i)
         plforms[i]->Assemble();
@@ -869,6 +880,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
             }
         }
 
+   hpmats_initialized = true;
+
    CFOSLSop = new BlockOperator(blkoffsets_true);
    for (int i = 0; i < numblocks; ++i)
        for (int j = 0; j < numblocks; ++j)
@@ -919,14 +932,68 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
    //if (verbose)
        //cout << "Final saddle point matrix and rhs assembled \n";
-   MPI_Comm comm = pfes[0]->GetComm();
-   MPI_Barrier(comm);
+   //MPI_Comm comm = pfes[0]->GetComm();
+   //MPI_Barrier(comm);
+
+   system_assembled = true;
 }
 
 void FOSLSProblem::DistributeSolution() const
 {
     for (int i = 0; i < fe_formul.Nblocks(); ++i)
         grfuns[i]->Distribute(&(trueX->GetBlock(i)));
+}
+
+void FOSLSProblem::ComputeBndError(const Vector& vec, int blk) const
+{
+    const BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+    int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+
+    MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+    switch (fe_formul.GetFormulation()->GetPair(blk).first)
+    {
+    case 0: // function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+        break;
+    case 1: // vector function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+        break;
+    default:
+        {
+            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+        }
+        break;
+    }
+
+    Vector exsol_tdofs(pfes[blk]->TrueVSize());
+    exsol_pgfun->ParallelProject(exsol_tdofs);
+
+    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+
+    Array<int> essbnd_tdofs;
+    pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
+    for (int i = 0; i < essbnd_tdofs.Size(); ++i)
+    {
+        int tdof = essbnd_tdofs[i];
+
+        double value_ex = exsol_tdofs[tdof];
+        double value_com = vec_viewer.GetBlock(blk)[tdof];
+
+        if (fabs(value_ex - value_com) > MYZEROTOL)
+        {
+            std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
+                      << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+            std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(blk)[tdof] << "\n";
+        }
+    }
+
+    delete exsol_pgfun;
 }
 
 void FOSLSProblem::ComputeBndError(const Vector& vec) const
@@ -1068,6 +1135,102 @@ void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd) 
     ComputeExtraError(vec);
 }
 
+void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd, int blk) const
+{
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    const BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    grfuns[blk]->Distribute(&(vec_viewer.GetBlock(blk)));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    double err =  0.0;
+    double norm_exsol = 0.0;
+
+    int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+
+    switch (fe_formul.GetFormulation()->GetPair(blk).first)
+    {
+    case 0: // function coefficient
+        err = grfuns[blk]->ComputeL2Error(*test->GetFuncCoeff(coeff_index), irs);
+        norm_exsol = ComputeGlobalLpNorm(2, *test->GetFuncCoeff(coeff_index), pmesh, irs);
+        break;
+    case 1: // vector function coefficient
+        err = grfuns[blk]->ComputeL2Error(*test->GetVecCoeff(coeff_index), irs);
+        norm_exsol = ComputeGlobalLpNorm(2, *test->GetVecCoeff(coeff_index), pmesh, irs);
+        break;
+    default:
+        {
+            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+        }
+        break;
+    }
+
+    //double err = grfuns[blk]->ComputeL2Error(*(Mytest.sigma), irs);
+    //double norm_exsol = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+    if (verbose)
+        cout << "component No. " << blk << ": || error || / || exact_sol || = " << err / norm_exsol << endl;
+
+    double projection_error = -1.0;
+
+    ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+    MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+    switch (fe_formul.GetFormulation()->GetPair(blk).first)
+    {
+    case 0: // function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+        projection_error = exsol_pgfun->ComputeL2Error(*test->GetFuncCoeff(coeff_index), irs);
+        break;
+    case 1: // vector function coefficient
+        exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+        projection_error = exsol_pgfun->ComputeL2Error(*test->GetVecCoeff(coeff_index), irs);
+        break;
+    default:
+        {
+            MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+        }
+        break;
+    }
+
+    if (checkbnd)
+        ComputeBndError(vec, blk);
+
+    if (verbose)
+        std::cout << "component No. " << blk << ": || exact - proj || / || exact || = "
+                        << projection_error / norm_exsol << "\n";
+
+    delete exsol_pgfun;
+}
+
+void FOSLSProblem::CreateOffsetsRhsSol()
+{
+    int numblocks = fe_formul.Nblocks();
+
+    blkoffsets_true.SetSize(numblocks + 1);
+    blkoffsets_true[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets_true[i + 1] = pfes[i]->TrueVSize();
+    blkoffsets_true.PartialSum();
+
+    blkoffsets.SetSize(numblocks + 1);
+    blkoffsets[0] = 0;
+    for (int i = 0; i < numblocks; ++i)
+        blkoffsets[i + 1] = pfes[i]->GetVSize();
+    blkoffsets.PartialSum();
+
+    trueRhs = new BlockVector(blkoffsets_true);
+    trueX = new BlockVector(blkoffsets_true);
+}
+
+
 void FOSLSProblem::ZeroBndValues(Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
@@ -1174,23 +1337,16 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
 }
 
 
-void FOSLSProblem::Solve(bool verbose, bool compute_error) const
+void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const
 {
-    MFEM_ASSERT(solver_initialized && system_assembled, "Either solver is not initialized or system is not assembled \n");
-
-    *trueX = 0;
+    MFEM_ASSERT(solver_initialized, "Solver is not initialized \n");
 
     chrono.Clear();
     chrono.Start();
 
-    //trueRhs->Print();
-    //SparseMatrix diag;
-    //((HypreParMatrix&)(CFOSLSop->GetBlock(0,0))).GetDiag(diag);
-    //diag.Print();
+    sol = 0.0;
 
-    //trueRhs->Print();
-
-    solver->Mult(*trueRhs, *trueX);
+    solver->Mult(rhs, sol);
 
     chrono.Stop();
 
@@ -1204,6 +1360,11 @@ void FOSLSProblem::Solve(bool verbose, bool compute_error) const
                     << " iterations. Residual norm is " << solver->GetFinalNorm() << ".\n";
        std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
     }
+}
+
+void FOSLSProblem::SolveProblem(const Vector& rhs, bool verbose, bool compute_error) const
+{
+    SolveProblem(rhs, *trueX, verbose, compute_error);
 
     DistributeSolution();
 
@@ -1299,14 +1460,6 @@ ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
     // aliases
     ParFiniteElementSpace * Hdiv_space = pfes[0];
     ParFiniteElementSpace * L2_space = pfes[1];
-    ParGridFunction * sigma = grfuns[0];
-
-    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
-    const IntegrationRule *irs[Geometry::NumGeom];
-    for (int i = 0; i < Geometry::NumGeom; ++i)
-    {
-       irs[i] = &(IntRules.Get(i, order_quad));
-    }
 
     ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
     Cblock->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
@@ -1453,7 +1606,7 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                 FOSLSFEFormulation& fe_formulation, bool verbose_)
-    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false)
 {
     int dim = Pmesh.Dimension();
     int feorder = fe_formulation.Feorder();
@@ -1469,13 +1622,14 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_cond
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                 FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace &Hdiv_space, bool verbose_)
-    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space)
+    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false),
+      hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space)
 {
     int dim = Pmesh.Dimension();
     MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
 }
 
-void FOSLSDivfreeProblem::ConstructDivfreeHpMat()
+void FOSLSDivfreeProblem::ConstructDivfreeHpMats()
 {
     ParDiscreteLinearOperator * divfree_op = new ParDiscreteLinearOperator(pfes[0], hdiv_pfespace);
 
@@ -1488,7 +1642,22 @@ void FOSLSDivfreeProblem::ConstructDivfreeHpMat()
 
     divfree_op->Assemble();
     divfree_op->Finalize();
-    divfree_hpmat = divfree_op->ParallelAssemble();
+    divfree_hpmat_nobnd = divfree_op->ParallelAssemble();
+
+    HypreParMatrix * temp = divfree_hpmat_nobnd->Transpose();
+    divfree_hpmat = temp->Transpose();
+    divfree_hpmat->CopyColStarts();
+    divfree_hpmat->CopyRowStarts();
+    delete temp;
+
+    Array<int> & essbdr_attribs = bdr_conds.GetBdrAttribs(0);
+
+    Array<int> essbdr_tdofs_Hcurl;
+    pfes[0]->GetEssentialTrueDofs(essbdr_attribs, essbdr_tdofs_Hcurl);
+    Array<int> essbdr_tdofs_Hdiv;
+    hdiv_pfespace->GetEssentialTrueDofs(essbdr_attribs, essbdr_tdofs_Hdiv);
+
+    Eliminate_ib_block(*divfree_hpmat, essbdr_tdofs_Hcurl, essbdr_tdofs_Hdiv);
 
     delete divfree_op;
 }
@@ -1705,13 +1874,10 @@ CFOSLSHyperbolicProblem::CFOSLSHyperbolicProblem(ParMesh& pmesh, CFOSLSHyperboli
 {
     InitFEColls(verbose);
     InitSpaces(pmesh);
-    spaces_initialized = true;
     InitForms();
-    forms_initialized = true;
     AssembleSystem(verbose);
     InitPrec(prec_option, verbose);
     InitSolver(verbose);
-    solver_initialized = true;
     InitGrFuns();
 }
 
@@ -1781,6 +1947,7 @@ void CFOSLSHyperbolicProblem::InitSpaces(ParMesh &pmesh)
     if (struct_formul.have_constraint)
         pfes[blkcount] = L2_space;
 
+    spaces_initialized = true;
 }
 
 void CFOSLSHyperbolicProblem::InitForms()
@@ -2227,10 +2394,14 @@ void CFOSLSHyperbolicProblem::AssembleSystem(bool verbose)
        for (int j = 0; j < numblocks; ++j)
            CFOSLSop->SetBlock(i,j, hpmats(i,j));
 
+   CFOSLSop->owns_blocks = false;
+
    CFOSLSop_nobnd = new BlockOperator(blkoffsets_true);
    for (int i = 0; i < numblocks; ++i)
        for (int j = 0; j < numblocks; ++j)
            CFOSLSop_nobnd->SetBlock(i,j, hpmats_nobnd(i,j));
+
+   CFOSLSop_nobnd->owns_blocks = false;
 
    // assembling rhs forms without boundary conditions
    for (int i = 0; i < numblocks; ++i)
@@ -5086,6 +5257,52 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
     */
 
     return;
+}
+
+
+ParGridFunction * FindParticularSolution(ParFiniteElementSpace * Hdiv_space,
+                                         const HypreParMatrix & B, const Vector& rhs, bool verbose)
+{
+    MPI_Comm comm = Hdiv_space->GetComm();
+
+    if (verbose)
+        std::cout << "Solving Poisson problem for finding a particular solution \n";
+
+    MFEM_ASSERT(Hdiv_space->TrueVSize() == B.Width(),
+                "Dimension of Hdiv_space and divergence matrix B mismatch!");
+
+    ParGridFunction * sigma_hat = new ParGridFunction(Hdiv_space);
+
+    HypreParMatrix *BT = B.Transpose();
+    HypreParMatrix *BBT = ParMult(&B, BT);
+
+    HypreBoomerAMG * invBBT = new HypreBoomerAMG(*BBT);
+    invBBT->SetPrintLevel(0);
+
+    mfem::CGSolver solver(comm);
+    solver.SetPrintLevel(0);
+    solver.SetMaxIter(70000);
+    solver.SetRelTol(1.0e-12);
+    solver.SetAbsTol(1.0e-14);
+    solver.SetPreconditioner(*invBBT);
+    solver.SetOperator(*BBT);
+
+    Vector lapl_sol(B.Height());
+    solver.Mult(rhs, lapl_sol);
+
+    Vector truesigma_hat(Hdiv_space->TrueVSize());
+    B.MultTranspose(lapl_sol, truesigma_hat);
+
+    sigma_hat->Distribute(truesigma_hat);
+
+    delete invBBT;
+    delete BBT;
+    delete BT;
+
+    if (verbose)
+        std::cout << "Particular solution has been computed \n";
+
+    return sigma_hat;
 }
 
 

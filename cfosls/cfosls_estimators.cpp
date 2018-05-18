@@ -193,7 +193,7 @@ FOSLSEstimator::FOSLSEstimator(FOSLSProblem& problem, std::vector<std::pair<int,
         MFEM_ASSERT(grfuns_descriptor[i].first == 1 || grfuns_descriptor[i].first == -1,
                     "Values of grfuns_descriptor must be either 1 or -1");
         if (grfuns_descriptor[i].first == 1)
-            grfuns[i] = (*problem.GetGrFuns())[grfuns_descriptor[i].second];
+            grfuns[i] = problem.GetGrFuns()[grfuns_descriptor[i].second];
         else
         {
             MFEM_ASSERT(extra_grfuns, "Trying to use extra_grfuns which is NULL \n");

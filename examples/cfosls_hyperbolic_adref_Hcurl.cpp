@@ -339,6 +339,10 @@ int main(int argc, char *argv[])
    else if (fosls_func_version == 2)
        numfoslsfuns = 3;
 
+   int numblocks_funct = 1;
+   if (strcmp(space_for_S,"H1") == 0)
+       ++numblocks_funct;
+
    Array<ParGridFunction*> extra_grfuns(0);
    if (fosls_func_version == 2)
    {
@@ -445,40 +449,40 @@ int main(int argc, char *argv[])
    FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
                                                                    *problem->GetFEformulation().GetFeColl(0), *problem->GetPfes(0), verbose);
 
-   std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numfoslsfuns);
+   std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numblocks_funct);
 
-   Array2D<BilinearFormIntegrator *> integs_divfree(numfoslsfuns, numfoslsfuns);
+   Array2D<BilinearFormIntegrator *> integs_divfree(numblocks_funct, numblocks_funct);
    for (int i = 0; i < integs_divfree.NumRows(); ++i)
        for (int j = 0; j < integs_divfree.NumCols(); ++j)
            integs_divfree(i,j) = NULL;
 
    FOSLSEstimator * estimator_divfree;
+
+   // this works
+   grfuns_descriptor_divfree[0] = std::make_pair<int,int>(1, 0);
+   if (strcmp(space_for_S,"H1") == 0)
+        grfuns_descriptor_divfree[1] = std::make_pair<int,int>(1, 1);
+
+   if (strcmp(space_for_S,"H1") == 0)
    {
-       // this works
-       grfuns_descriptor_divfree[0] = std::make_pair<int,int>(1, 0);
-       if (strcmp(space_for_S,"H1") == 0)
-            grfuns_descriptor_divfree[1] = std::make_pair<int,int>(1, 1);
-
-       estimator_divfree = new FOSLSEstimator(*problem_divfree, grfuns_descriptor_divfree, NULL, integs_divfree, verbose);
-
-       if (strcmp(space_for_S,"H1") == 0)
-       {
-           integs(0,0) = new CurlCurlIntegrator;
-           integs(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
-           // untested integrator, actually
-           integs(1,0) = new MixedVectorFECurlVQScalarIntegrator(*Mytest->GetMinB());
-       }
-       else
-           integs(0,0) = new CurlCurlIntegrator(*Mytest->GetKtilda());
+       integs_divfree(0,0) = new CurlCurlIntegrator;
+       integs_divfree(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
+       // untested integrator, actually
+       integs_divfree(1,0) = new MixedVectorFECurlVQScalarIntegrator(*Mytest->GetMinB());
    }
+   else
+       integs_divfree(0,0) = new CurlCurlIntegrator(*Mytest->GetKtilda());
 
+   estimator_divfree = new FOSLSEstimator(*problem_divfree, grfuns_descriptor_divfree, NULL, integs_divfree, verbose);
+
+   problem_divfree->ConstructDivfreeHpMats();
    problem_divfree->AddEstimator(*estimator_divfree);
 
    ThresholdRefiner refiner_divfree(*estimator_divfree);
    refiner_divfree.SetTotalErrorFraction(0.5);
 
-   MPI_Finalize();
-   return 0;
+   //MPI_Finalize();
+   //return 0;
 #endif
 
 
@@ -496,20 +500,84 @@ int main(int argc, char *argv[])
        }
 
        bool compute_error = true;
+
 #ifdef DIVFREE_ESTIMATOR
        // finding a particular solution
+       HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(2,0));
+       Vector& div_rhs = problem->GetRhs().GetBlock(2);
+       ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, div_rhs, verbose);
+       BlockVector true_partsol(problem->GetTrueOffsets());
+       true_partsol = 0.0;
+       partsigma->ParallelProject(true_partsol.GetBlock(0));
+
+       // creating the operator for the div-free problem
+       problem_divfree->CreateOffsetsRhsSol();
+       const HypreParMatrix * divfree_hpmat = &problem_divfree->GetDivfreeHpMat();
+       BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree->GetTrueOffsets());
+       HypreParMatrix * orig00 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(0,0));
+       HypreParMatrix * blk00 = RAP(divfree_hpmat, orig00, divfree_hpmat);
+       problem_divfree_op->SetBlock(0,0,blk00);
+
+       HypreParMatrix * blk10, *blk01, *blk11;
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           blk11 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,1));
+
+           HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,0));
+           blk10 = ParMult(orig10, divfree_hpmat);
+
+           blk01 = blk10->Transpose();
+
+           problem_divfree_op->SetBlock(0,1,blk01);
+           problem_divfree_op->SetBlock(1,0,blk10);
+           problem_divfree_op->SetBlock(1,1,blk11);
+       }
+       problem_divfree_op->owns_blocks = true;
+
+       problem_divfree->ResetOp(*problem_divfree_op);
+       problem_divfree->InitSolver(verbose);
+
+       // creating a preconditioner for the divfree problem
        // ...
 
-       //  creating the right hand side for the divfree problem
-       // ...
+       //  creating the solution and right hand side for the divfree problem
+       BlockVector rhs(problem_divfree->GetTrueOffsets());
 
-       problem_divfree->Solve(verbose, compute_error);
+       BlockVector temp(problem->GetTrueOffsets());
+       problem->GetOp()->Mult(true_partsol, temp);
+       temp *= -1;
+       temp += problem->GetRhs();
 
-       // converting the solution back into sigma from Hdiv inside the problem
-       // (adding a particular solution as a part of the process)
-       // ...
+       divfree_hpmat->MultTranspose(temp.GetBlock(0), rhs.GetBlock(0));
+       if (strcmp(space_for_S,"H1") == 0)
+           rhs.GetBlock(1) = temp.GetBlock(1);
+
+       //rhs.GetBlock(1).Print();
+
+       problem_divfree->SolveProblem(rhs, verbose, false);
+
+       /// converting the solution back into sigma from Hdiv inside the problem
+       /// (adding a particular solution as a part of the process)
+       /// and checking the accuracy of the resulting solution
+
+       BlockVector& problem_sol = problem->GetSol();
+       problem_sol = 0.0;
+
+       BlockVector& problem_divfree_sol = problem_divfree->GetSol();
+
+       //problem_divfree_sol.GetBlock(1).Print();
+
+       problem_divfree->GetDivfreeHpMat().Mult(1.0, problem_divfree_sol.GetBlock(0), 1.0, problem_sol.GetBlock(0));
+       if (strcmp(space_for_S,"H1") == 0)
+           problem_sol.GetBlock(1) = problem_divfree_sol.GetBlock(1);
+
+       problem_sol += true_partsol;
+
+       if (compute_error)
+           problem->ComputeError(problem_sol, verbose, true);
 #else
-       problem->Solve(verbose, compute_error);
+       if (compute_error)
+           problem->Solve(verbose, compute_error);
 #endif
 
        // 17. Send the solution by socket to a GLVis server.
@@ -571,11 +639,13 @@ int main(int argc, char *argv[])
        problem->BuildSystem(verbose);
 
 #ifdef DIVFREE_ESTIMATOR
+       MFEM_ABORT("Current issue is that (1,1) block as HypreParMatrix belongs to both problem and problem_divfree"
+                  " and both of them try to delete it. With that, problem has it as a part of hpmats as well.");
+
        problem_divfree->Update();
 
-       // casting the functional from problem into the (hcurl) functional of problem_divfree
-       // ...
-
+       delete B_hpmat;
+       delete partsigma;
 #endif
 
        /*

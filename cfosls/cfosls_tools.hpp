@@ -579,7 +579,7 @@ public:
     }
 
     virtual int NumSol() const
-    { MFEM_ABORT("NumSol() must not be called from the base class FOSLSFormulation! \n");}
+    { MFEM_ABORT("NumSol() must not be called from the base class FOSLSFormulation! \n"); return -1;}
 
 };
 
@@ -590,12 +590,13 @@ struct CFOSLSFormulation_HdivL2Hyper : public FOSLSFormulation
 protected:
     int numsol;
     Hyper_test test;
+protected:
+    void InitBlkStructure() override;
 public:
     CFOSLSFormulation_HdivL2Hyper(int dimension, int num_solution, bool verbose);
 
-    virtual FOSLS_test * GetTest() override {return &test;}
-    virtual void InitBlkStructure() override;
-    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
+    FOSLS_test * GetTest() override {return &test;}
+    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 0;}
 
@@ -607,12 +608,13 @@ struct CFOSLSFormulation_HdivH1Hyper : public FOSLSFormulation
 protected:
     int numsol;
     Hyper_test test;
+protected:
+    void InitBlkStructure() override;
 public:
     CFOSLSFormulation_HdivH1Hyper(int dimension, int num_solution, bool verbose);
 
-    virtual FOSLS_test * GetTest() override {return &test;}
-    virtual void InitBlkStructure() override;
-    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
+    FOSLS_test * GetTest() override {return &test;}
+    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 
@@ -624,19 +626,38 @@ struct CFOSLSFormulation_HdivH1DivfreeHyp : public FOSLSFormulation
 protected:
     int numsol;
     Hyper_test test;
+protected:
+    void InitBlkStructure() override;
 public:
     CFOSLSFormulation_HdivH1DivfreeHyp(int dimension, int num_solution, bool verbose);
 
     CFOSLSFormulation_HdivH1DivfreeHyp(CFOSLSFormulation_HdivH1Hyper& hdivh1_formul, bool verbose)
         : CFOSLSFormulation_HdivH1DivfreeHyp(hdivh1_formul.Dim(), hdivh1_formul.NumSol(), verbose) {}
 
-    virtual FOSLS_test * GetTest() override {return &test;}
-    virtual void InitBlkStructure() override;
-    virtual const Array<SpaceName>& GetSpacesDescriptor() const override;
+    FOSLS_test * GetTest() override {return &test;}
+    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 
 };
+
+/*
+struct CFOSLSFormulation_PartSol : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    FOSLS_test test;
+protected:
+    void InitBlkStructure() override;
+public:
+    CFOSLSFormulation_PartSol(int dimension, int num_solution, bool verbose);
+
+    FOSLS_test * GetTest() override {return &test;}
+    const Array<SpaceName>& GetSpacesDescriptor() const override;
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+};
+*/
 
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
@@ -758,6 +779,7 @@ protected:
     bool system_assembled;
     bool solver_initialized;
     bool hierarchy_initialized;
+    bool hpmats_initialized;
 
     // all par grid functions which are relevant to the formulation
     // e.g., solution components and right hand sides (2 * numblocks)
@@ -791,7 +813,6 @@ protected:
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
-    void InitSolver(bool verbose);
     void SetPrec(Solver & Prec)
     {
         MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
@@ -805,12 +826,10 @@ protected:
 
     void InitGrFuns();
     void DistributeSolution() const;
-    void ComputeError(bool verbose, bool checkbnd) const
-    { ComputeError(*trueX, verbose, checkbnd);}
-    void ComputeExtraError() const
-    { ComputeExtraError(*trueX); }
 
 public:
+    void InitSolver(bool verbose);
+
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
 
@@ -824,7 +843,11 @@ public:
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_, true) {}
 
-    void Solve(bool verbose, bool compute_error) const;
+    void Solve(bool verbose, bool compute_error) const
+    { SolveProblem(*trueRhs, verbose, compute_error); }
+    void SolveProblem(const Vector& rhs, bool verbose, bool compute_error) const;
+    void SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const;
+
     void BuildSystem(bool verbose);
     void Update();
 
@@ -888,7 +911,9 @@ public:
 
     void ComputeAnalyticalRhs(Vector& rhs) const;
 
-    Vector& GetSol() {return *trueX;}
+    BlockVector& GetSol() {return *trueX;}
+
+    BlockVector& GetRhs() {return *trueRhs;}
 
     BdrConditions& GetBdrConditions() {return bdr_conds;}
 
@@ -896,26 +921,37 @@ public:
 
     void ResetOp(BlockOperator& op)
     {
-        MFEM_ASSERT(op.Height() == CFOSLSop->Height() && op.Width() == CFOSLSop->Width(),
-                    "Replacing operator sizes mismatch the existing's");
+        MFEM_ASSERT(op.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
+                    && op.Width() == op.Height(), "Replacing operator sizes mismatch the existing's");
         CFOSLSop = &op;
     }
     void ResetOp_nobnd(BlockOperator& op_nobnd)
     {
-        MFEM_ASSERT(op_nobnd.Height() == CFOSLSop_nobnd->Height() && op_nobnd.Width() == CFOSLSop_nobnd->Width(),
-                    "Replacing operator sizes mismatch the existing's");
+        MFEM_ASSERT(op_nobnd.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
+                    && op_nobnd.Width() == op_nobnd.Height(), "Replacing operator sizes mismatch the existing's");
         CFOSLSop_nobnd = &op_nobnd;
     }
 
     void ZeroBndValues(Vector& vec) const;
 
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd) const;
+    void ComputeError(const Vector& vec, bool verbose, bool checkbnd, int blk) const;
+
     virtual void ComputeExtraError(const Vector& vec) const {}
 
     void ComputeBndError(const Vector& vec) const;
+    void ComputeBndError(const Vector& vec, int blk) const;
+
+    void ComputeError(bool verbose, bool checkbnd) const
+    { ComputeError(*trueX, verbose, checkbnd);}
+
+    void ComputeExtraError() const
+    { ComputeExtraError(*trueX); }
 
     virtual BlockMatrix* ConstructFunctBlkMat(Array<int> &offsets);
     //{ MFEM_ABORT("ConstructFunctBlkMat() is not implemented in the base class");}
+
+    void CreateOffsetsRhsSol();
 };
 
 /// FIXME: Looks like this shouldn't have happened
@@ -984,7 +1020,7 @@ protected:
     FiniteElementCollection *hdiv_fecoll;
     ParFiniteElementSpace * hdiv_pfespace;
     HypreParMatrix * divfree_hpmat;
-
+    HypreParMatrix * divfree_hpmat_nobnd;
 public:
     FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, bool verbose_);
@@ -992,9 +1028,10 @@ public:
     FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                         FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace& Hdiv_space, bool verbose_);
 
-    void ConstructDivfreeHpMat();
+    void ConstructDivfreeHpMats();
 
     const HypreParMatrix& GetDivfreeHpMat()  const {return *divfree_hpmat;}
+    const HypreParMatrix& GetDivfreeHpMat_nobnd()  const {return *divfree_hpmat_nobnd;}
 
     //ParFiniteElementSpace * GetDivfreeFESpace() {return divfree_pfespace;}
 };
@@ -1871,6 +1908,8 @@ double l2Norm(std::vector<double> vec);
 double sprod(std::vector<double> vec1, std::vector<double> vec2);
 // compares pairs<int,double> with respect to the second (double) elements
 bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
+
+ParGridFunction * FindParticularSolution(ParFiniteElementSpace *Hdiv_space, const HypreParMatrix & B, const Vector& rhs, bool verbose);
 
 } // for namespace mfem
 

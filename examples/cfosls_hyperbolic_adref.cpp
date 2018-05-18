@@ -1463,6 +1463,7 @@ int main(int argc, char *argv[])
 
        problem->BuildSystem(verbose);
 
+       /*
        if (it == 0 || it == 1)
        {
            double t0 = 0.1;
@@ -1471,6 +1472,7 @@ int main(int argc, char *argv[])
 
            ComputeSlices(*problem->GetParMesh(), t0, Nmoments, deltat, myid);
        }
+       */
 
 
        /*
