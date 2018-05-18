@@ -536,6 +536,8 @@ int main(int argc, char *argv[])
 
        problem_divfree->ResetOp(*problem_divfree_op);
        problem_divfree->InitSolver(verbose);
+       problem_divfree->CreatePrec(*problem_divfree->GetOp(), 0, verbose);
+       problem_divfree->UpdateSolverPrec();
 
        // creating a preconditioner for the divfree problem
        // ...

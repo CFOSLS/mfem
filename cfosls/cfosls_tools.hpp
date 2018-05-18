@@ -820,7 +820,6 @@ protected:
         solver->SetPreconditioner(*prec);
     }
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) {}
-    void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
     void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
     void SetPrecOption(int option) { prec_option = option; }
 
@@ -829,6 +828,8 @@ protected:
 
 public:
     void InitSolver(bool verbose);
+
+    void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
 
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
@@ -1036,6 +1037,8 @@ public:
     //ParFiniteElementSpace * GetDivfreeFESpace() {return divfree_pfespace;}
 
     virtual void Update();
+
+    virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) override;
 };
 
 /*
