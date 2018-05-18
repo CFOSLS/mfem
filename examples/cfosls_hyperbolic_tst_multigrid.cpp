@@ -1,4 +1,6 @@
-//                       CFOSLS formulation for transport equation in 3D/4D with time-slabbing technique
+///                       CFOSLS formulation for transport equation in 3D/4D
+///                         solved with a parallel-in-time multigrid
+///                             (similar to parareal and XBraid)
 
 #include "mfem.hpp"
 #include <fstream>

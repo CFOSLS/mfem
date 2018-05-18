@@ -177,10 +177,10 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    //mesh_file = "../data/pmesh_check.mesh";
+    mesh_file = "../data/pmesh_check.mesh";
     //mesh_file = "../data/cube_3d_moderate.mesh";
 
 
@@ -294,14 +294,30 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "Running AMR ... \n";
 
-   /*
-   // Hdiv-L2 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSProblem_HdivL2L2hyp * problem = new FOSLSProblem_HdivL2L2hyp
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   // Hdiv-H1 case
+   using FormulType = CFOSLSFormulation_HdivH1Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+   using ProblemType = FOSLSProblem_HdivH1L2hyp;
+#ifdef DIVFREE_ESTIMATOR
+   using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
+   using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
+#endif
 
+   /*
+   // Hdiv-L2 case
+   using FormulType = CFOSLSFormulation_HdivL2Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+   using ProblemType = FOSLSCylProblem_HdivL2L2hyp;
+   */
+
+   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+
+   /*
+   // Hdiv-L2 case
    int numfoslsfuns = 1;
 
    std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
@@ -320,15 +336,10 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-   // Hdiv-H1 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
+   ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-
-   Hyper_test* Mytest = dynamic_cast<Hyper_test*>(problem->GetFEformulation().GetFormulation()->GetTest());
+   Hyper_test* Mytest = dynamic_cast<Hyper_test*>
+           (problem->GetFEformulation().GetFormulation()->GetTest());
    MFEM_ASSERT(Mytest, "Unsuccessful cast into Hyper_test* \n");
 
    int numfoslsfuns = -1;
@@ -367,14 +378,6 @@ int main(int argc, char *argv[])
    for (int i = 0; i < integs.NumRows(); ++i)
        for (int j = 0; j < integs.NumCols(); ++j)
            integs(i,j) = NULL;
-
-   //// and this is a test for providing extra grfuns for the estimator
-   //int n_extragrfuns = 1;
-   //grfuns_descriptor[0] = std::make_pair<int,int>(-1,0);
-   //Array<ParGridFunction*> extra_grfuns(n_extragrfuns);
-   //extra_grfuns[0] = new ParGridFunction(problem->GetPfes(1));
-   //extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
-   //FOSLSEstimator estimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
 
    // version 1, only || sigma - b S ||^2, or || K sigma ||^2
    if (fosls_func_version == 1)
@@ -440,14 +443,13 @@ int main(int argc, char *argv[])
    refiner.SetTotalErrorFraction(0.5);
 
 #ifdef DIVFREE_ESTIMATOR
-   CFOSLSFormulation_HdivH1DivfreeHyp * formulat_divfree =
-           new CFOSLSFormulation_HdivH1DivfreeHyp (dim, numsol, verbose);
+   DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
 
-   CFOSLSFEFormulation_HdivH1DivfreeHyper * fe_formulat_divfree =
-           new CFOSLSFEFormulation_HdivH1DivfreeHyper(*formulat_divfree, feorder);
+   DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
 
    FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
-                                                                   *problem->GetFEformulation().GetFeColl(0), *problem->GetPfes(0), verbose);
+                                                                   *problem->GetFEformulation().GetFeColl(0),
+                                                                   *problem->GetPfes(0), verbose);
 
    std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numblocks_funct);
 
@@ -456,6 +458,9 @@ int main(int argc, char *argv[])
        for (int j = 0; j < integs_divfree.NumCols(); ++j)
            integs_divfree(i,j) = NULL;
 
+   /// Not needed after the discussion with Panayot. The error should
+   /// be estimated by the initial error estimator for the problem
+   /// involving the H(div) space
    FOSLSEstimator * estimator_divfree;
 
    // this works
@@ -488,14 +493,14 @@ int main(int argc, char *argv[])
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 200000;//1600000;
+   HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
+
    for (int it = 0; ; it++)
    {
-       HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
-
-       if (myid == 0)
+       if (verbose)
        {
-          cout << "\nAMR iteration " << it << endl;
-          cout << "Number of unknowns: " << global_dofs << endl;
+          cout << "\nAMR iteration " << it << "\n";
+          cout << "Number of unknowns: " << global_dofs << "\n";
        }
 
        bool compute_error = true;
@@ -620,19 +625,8 @@ int main(int argc, char *argv[])
 #endif
        if (refiner.Stop())
        {
-          if (myid == 0)
-          {
-             cout << "Stopping criterion satisfied. Stop." << endl;
-          }
-          break;
-       }
-
-       if (global_dofs > max_dofs)
-       {
-          if (myid == 0)
-          {
-             cout << "Reached the maximum number of dofs. Stop." << endl;
-          }
+          if (verbose)
+             cout << "Stopping criterion satisfied. Stop. \n";
           break;
        }
 
@@ -640,30 +634,20 @@ int main(int argc, char *argv[])
 
        problem->BuildSystem(verbose);
 
+       global_dofs = problem->GlobalTrueProblemSize();
+
+       if (global_dofs > max_dofs)
+       {
+          if (verbose)
+             cout << "Reached the maximum number of dofs. Stop. \n";
+          break;
+       }
+
 #ifdef DIVFREE_ESTIMATOR
        problem_divfree->Update();
 
        delete partsigma;
 #endif
-
-       /*
-       //if (it == 0 || it == 1)
-       {
-           double t0 = 0.1;
-           double Nmoments = 4;
-           double deltat = 0.2;
-
-           ComputeSlices(*problem->GetParMesh(), t0, Nmoments, deltat, myid);
-       }
-       */
-
-       /*
-       Vector& solution = problem->GetSol();
-       BlockVector sol_viewer(solution.GetData(), problem->GetTrueOffsets());
-       ParGridFunction * sol_sigma_h = new ParGridFunction(problem->GetPfes(0));
-       sol_sigma_h->SetFromTrueDofs(sol_viewer.GetBlock(0));
-       sol_sigma_h->ComputeSlices (t0, Nmoments, deltat, myid, false);
-       */
    }
 
    MPI_Finalize();

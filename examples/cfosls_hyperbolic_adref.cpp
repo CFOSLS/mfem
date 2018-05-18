@@ -40,57 +40,6 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
-double uFun_ex(const Vector& x); // Exact Solution
-double uFun_ex_dt(const Vector& xt);
-void uFun_ex_gradx(const Vector& xt, Vector& grad);
-
-void bFun_ex (const Vector& xt, Vector& b);
-double  bFundiv_ex(const Vector& xt);
-
-double uFun3_ex(const Vector& x); // Exact Solution
-double uFun3_ex_dt(const Vector& xt);
-void uFun3_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun4_ex(const Vector& x); // Exact Solution
-double uFun4_ex_dt(const Vector& xt);
-void uFun4_ex_gradx(const Vector& xt, Vector& grad);
-
-//void bFun4_ex (const Vector& xt, Vector& b);
-
-//void bFun6_ex (const Vector& xt, Vector& b);
-
-double uFun5_ex(const Vector& x); // Exact Solution
-double uFun5_ex_dt(const Vector& xt);
-void uFun5_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun6_ex(const Vector& x); // Exact Solution
-double uFun6_ex_dt(const Vector& xt);
-void uFun6_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFunCylinder_ex(const Vector& x); // Exact Solution
-double uFunCylinder_ex_dt(const Vector& xt);
-void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun66_ex(const Vector& x); // Exact Solution
-double uFun66_ex_dt(const Vector& xt);
-void uFun66_ex_gradx(const Vector& xt, Vector& grad);
-
-
-double uFun2_ex(const Vector& x); // Exact Solution
-double uFun2_ex_dt(const Vector& xt);
-void uFun2_ex_gradx(const Vector& xt, Vector& grad);
-
-void Hdivtest_fun(const Vector& xt, Vector& out );
-double  L2test_fun(const Vector& xt);
-
-double uFun33_ex(const Vector& x); // Exact Solution
-double uFun33_ex_dt(const Vector& xt);
-void uFun33_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun10_ex(const Vector& x); // Exact Solution
-double uFun10_ex_dt(const Vector& xt);
-void uFun10_ex_gradx(const Vector& xt, Vector& grad);
-
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -1277,13 +1226,25 @@ int main(int argc, char *argv[])
        std::cout << "Running AMR ... \n";
 
 #ifdef NEW_INTERFACE
-    /*
-   // Hdiv-L2 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivL2Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivL2Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivL2_Hyper(*pmesh);
-   FOSLSProblem_HdivL2L2hyp * problem = new FOSLSProblem_HdivL2L2hyp
-           (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   // Hdiv-H1 case
+   using FormulType = CFOSLSFormulation_HdivH1Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+   using ProblemType = FOSLSProblem_HdivH1L2hyp;
+
+   /*
+   // Hdiv-L2 case
+   using FormulType = CFOSLSFormulation_HdivL2Hyper;
+   using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+   using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+   using ProblemType = FOSLSCylProblem_HdivL2L2hyp;
+   */
+
+   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+
+   /*
 
    int numfoslsfuns = 1;
 
@@ -1303,12 +1264,7 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-   // Hdiv-H1 formulation
-   FOSLSFormulation * formulat = new CFOSLSFormulation_HdivH1Hyper (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new CFOSLSFEFormulation_HdivH1Hyper(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrConditions_CFOSLS_HdivH1_Hyper(*pmesh);
-
-   FOSLSProblem_HdivH1L2hyp * problem = new FOSLSProblem_HdivH1L2hyp
+   ProblemType * problem = new ProblemType
            (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    int numfoslsfuns = -1;
@@ -1407,14 +1363,15 @@ int main(int argc, char *argv[])
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 200000;//1600000;
+
+   HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
+
    for (int it = 0; ; it++)
    {
-       HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
-
-       if (myid == 0)
+       if (verbose)
        {
-          cout << "\nAMR iteration " << it << endl;
-          cout << "Number of unknowns: " << global_dofs << endl;
+          cout << "\nAMR iteration " << it << "\n";
+          cout << "Number of unknowns: " << global_dofs << "\n";
        }
 
        problem->Solve(verbose, true);
@@ -1450,18 +1407,18 @@ int main(int argc, char *argv[])
           break;
        }
 
-       if (global_dofs > max_dofs)
-       {
-          if (myid == 0)
-          {
-             cout << "Reached the maximum number of dofs. Stop." << endl;
-          }
-          break;
-       }
-
        problem->Update();
 
        problem->BuildSystem(verbose);
+
+       global_dofs = problem->GlobalTrueProblemSize();
+
+       if (global_dofs > max_dofs)
+       {
+          if (verbose)
+             cout << "Reached the maximum number of dofs. Stop. \n";
+          break;
+       }
 
        /*
        if (it == 0 || it == 1)
@@ -1474,7 +1431,6 @@ int main(int argc, char *argv[])
        }
        */
 
-
        /*
        Vector& solution = problem->GetSol();
        BlockVector sol_viewer(solution.GetData(), problem->GetTrueOffsets());
@@ -1485,6 +1441,7 @@ int main(int argc, char *argv[])
    }
    //MPI_Finalize();
    //return 0;
+
 #else
 
    ParGridFunction * f = new ParGridFunction(W_space);
@@ -2052,11 +2009,6 @@ int main(int argc, char *argv[])
 #endif
 
    // 17. Free the used memory.
-   //delete fform;
-   //delete CFOSLSop;
-   //delete A;
-
-   //delete Ablock;
    if (strcmp(space_for_S,"H1") == 0) // S was from H1
         delete H_space;
    delete W_space;
@@ -2067,406 +2019,6 @@ int main(int argc, char *argv[])
    delete h1_coll;
    delete hdiv_coll;
 
-   //delete pmesh;
-
    MPI_Finalize();
-
    return 0;
-}
-
-double uFun_ex(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    //return t;
-    ////setback
-    return sin(t)*exp(t);
-}
-
-double uFun_ex_dt(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    return (cos(t) + sin(t)) * exp(t);
-}
-
-void uFun_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    gradx.SetSize(xt.Size() - 1);
-    gradx = 0.0;
-}
-
-
-/*
-
-double fFun(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    //double tmp = (xt.Size()==4) ? 1.0 - 2.0 * xt(2) : 0;
-    double tmp = (xt.Size()==4) ? 2*M_PI * sin(2*xt(2)*M_PI) : 0;
-    //double tmp = (xt.Size()==4) ? M_PI * cos(xt(2)*M_PI) : 0;
-    //double tmp = (xt.Size()==4) ? M_PI * sin(xt(2)*M_PI) : 0;
-    return cos(t)*exp(t)+sin(t)*exp(t)+(M_PI*cos(xt(1)*M_PI)*cos(xt(0)*M_PI)+
-                   2*M_PI*cos(xt(0)*2*M_PI)*cos(xt(1)*M_PI)+tmp) *uFun_ex(xt);
-    //return cos(t)*exp(t)+sin(t)*exp(t)+(1.0 - 2.0 * xt(0) + 1.0 - 2.0 * xt(1) +tmp) *uFun_ex(xt);
-}
-*/
-
-void bFun_ex(const Vector& xt, Vector& b )
-{
-    b.SetSize(xt.Size());
-
-    //for (int i = 0; i < xt.Size()-1; i++)
-        //b(i) = xt(i) * (1 - xt(i));
-
-    //if (xt.Size() == 4)
-        //b(2) = 1-cos(2*xt(2)*M_PI);
-        //b(2) = sin(xt(2)*M_PI);
-        //b(2) = 1-cos(xt(2)*M_PI);
-
-    b(0) = sin(xt(0)*2*M_PI)*cos(xt(1)*M_PI);
-    b(1) = sin(xt(1)*M_PI)*cos(xt(0)*M_PI);
-    b(2) = 1-cos(2*xt(2)*M_PI);
-
-    b(xt.Size()-1) = 1.;
-
-}
-
-double bFundiv_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-    if (xt.Size() == 4)
-        return 2*M_PI * cos(x*2*M_PI)*cos(y*M_PI) + M_PI * cos(y*M_PI)*cos(x*M_PI) + 2*M_PI * sin(2*z*M_PI);
-    if (xt.Size() == 3)
-        return 2*M_PI * cos(x*2*M_PI)*cos(y*M_PI) + M_PI * cos(y*M_PI)*cos(x*M_PI);
-    return 0.0;
-}
-
-double uFun2_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    return t * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun2_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return (1.0 + t) * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-void uFun2_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = t * exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y));
-    gradx(1) = t * exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-/*
-double fFun2(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    Vector b(3);
-    bFunCircle2D_ex(xt,b);
-    return (t + 1) * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y)) +
-             t * exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(0) +
-             t * exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(1);
-}
-*/
-
-double uFun3_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return sin(t)*exp(t) * sin ( M_PI * (x + y + z));
-}
-
-double uFun3_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return (sin(t) + cos(t)) * exp(t) * sin ( M_PI * (x + y + z));
-}
-
-void uFun3_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-    gradx(1) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-    gradx(2) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-}
-
-
-/*
-double fFun3(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    Vector b(4);
-    bFun_ex(xt,b);
-
-    return (cos(t)*exp(t)+sin(t)*exp(t)) * sin ( M_PI * (x + y + z)) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(0) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(1) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(2) +
-            (2*M_PI*cos(x*2*M_PI)*cos(y*M_PI) +
-             M_PI*cos(y*M_PI)*cos(x*M_PI)+
-             + 2*M_PI*sin(z*2*M_PI)) * uFun3_ex(xt);
-}
-*/
-
-double uFun4_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun4_ex_dt(const Vector& xt)
-{
-    return uFun4_ex(xt);
-}
-
-void uFun4_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y));
-    gradx(1) = exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun33_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25) ));
-}
-
-double uFun33_ex_dt(const Vector& xt)
-{
-    return uFun33_ex(xt);
-}
-
-void uFun33_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-    gradx(1) = exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-    gradx(2) = exp(t) * 2.0 * (z -0.25) * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-}
-/*
-double fFun4(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    Vector b(3);
-    bFunCircle2D_ex(xt,b);
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y)) +
-             exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(0) +
-             exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(1);
-}
-
-
-double f_natural(const Vector & xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    if ( t > MYZEROTOL)
-        return 0.0;
-    else
-        return (-uFun5_ex(xt));
-}
-*/
-
-double uFun5_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    if ( t < MYZEROTOL)
-        return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
-    else
-        return 0.0;
-}
-
-double uFun5_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-    return 0.0;
-}
-
-void uFun5_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5) * uFun5_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y * uFun5_ex(xt);
-}
-
-
-double uFun6_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y)) * exp(-10.0*t);
-}
-
-double uFun6_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-    return -10.0 * uFun6_ex(xt);
-}
-
-void uFun6_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5) * uFun6_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y * uFun6_ex(xt);
-}
-
-double uFun66_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25)*(z - 0.25))) * exp(-10.0*t);
-}
-
-double uFun66_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-    return -10.0 * uFun6_ex(xt);
-}
-
-void uFun66_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5)  * uFun6_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y          * uFun6_ex(xt);
-    gradx(2) = -100.0 * 2.0 * (z - 0.25) * uFun6_ex(xt);
-}
-
-void Hdivtest_fun(const Vector& xt, Vector& out )
-{
-    out.SetSize(xt.Size());
-
-    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    out(0) = x;
-    out(1) = 0.0;
-    out(2) = 0.0;
-    out(xt.Size()-1) = 0.;
-
-}
-
-double L2test_fun(const Vector& xt)
-{
-    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    return x;
-}
-
-
-double uFun10_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return sin(t)*exp(t)*x*y;
-}
-
-double uFun10_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return (cos(t)*exp(t) + sin(t)*exp(t)) * x * y;
-}
-
-void uFun10_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = sin(t)*exp(t)*y;
-    gradx(1) = sin(t)*exp(t)*x;
-    gradx(2) = 0.0;
 }
