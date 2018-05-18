@@ -849,7 +849,7 @@ public:
     void SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const;
 
     void BuildSystem(bool verbose);
-    void Update();
+    virtual void Update();
 
     ParMesh * GetParMesh(int level = 0)
     {
@@ -1034,6 +1034,8 @@ public:
     const HypreParMatrix& GetDivfreeHpMat_nobnd()  const {return *divfree_hpmat_nobnd;}
 
     //ParFiniteElementSpace * GetDivfreeFESpace() {return divfree_pfespace;}
+
+    virtual void Update();
 };
 
 /*

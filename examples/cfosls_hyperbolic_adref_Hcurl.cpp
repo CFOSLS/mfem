@@ -177,10 +177,10 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    mesh_file = "../data/pmesh_check.mesh";
+    //mesh_file = "../data/pmesh_check.mesh";
     //mesh_file = "../data/cube_3d_moderate.mesh";
 
 
@@ -475,7 +475,6 @@ int main(int argc, char *argv[])
 
    estimator_divfree = new FOSLSEstimator(*problem_divfree, grfuns_descriptor_divfree, NULL, integs_divfree, verbose);
 
-   problem_divfree->ConstructDivfreeHpMats();
    problem_divfree->AddEstimator(*estimator_divfree);
 
    ThresholdRefiner refiner_divfree(*estimator_divfree);
@@ -511,6 +510,7 @@ int main(int argc, char *argv[])
        partsigma->ParallelProject(true_partsol.GetBlock(0));
 
        // creating the operator for the div-free problem
+       problem_divfree->ConstructDivfreeHpMats();
        problem_divfree->CreateOffsetsRhsSol();
        const HypreParMatrix * divfree_hpmat = &problem_divfree->GetDivfreeHpMat();
        BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree->GetTrueOffsets());
@@ -521,7 +521,7 @@ int main(int argc, char *argv[])
        HypreParMatrix * blk10, *blk01, *blk11;
        if (strcmp(space_for_S,"H1") == 0)
        {
-           blk11 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,1));
+           blk11 = CopyHypreParMatrix(*(dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,1))));
 
            HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,0));
            blk10 = ParMult(orig10, divfree_hpmat);
@@ -639,12 +639,11 @@ int main(int argc, char *argv[])
        problem->BuildSystem(verbose);
 
 #ifdef DIVFREE_ESTIMATOR
-       MFEM_ABORT("Current issue is that (1,1) block as HypreParMatrix belongs to both problem and problem_divfree"
-                  " and both of them try to delete it. With that, problem has it as a part of hpmats as well.");
+       //MFEM_ABORT("Current issue is that (1,1) block as HypreParMatrix belongs to both problem and problem_divfree"
+                  //" and both of them try to delete it. With that, problem has it as a part of hpmats as well.");
 
        problem_divfree->Update();
 
-       delete B_hpmat;
        delete partsigma;
 #endif
 

@@ -1662,6 +1662,20 @@ void FOSLSDivfreeProblem::ConstructDivfreeHpMats()
     delete divfree_op;
 }
 
+void FOSLSDivfreeProblem::Update()
+{
+    FOSLSProblem::Update();
+
+    if (divfree_hpmat)
+        delete divfree_hpmat;
+
+    if (divfree_hpmat_nobnd)
+        delete divfree_hpmat_nobnd;
+}
+
+
+//////////////////////////////////////
+
 GeneralMultigrid::GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
                                    const Operator& CoarseOp_,
                  const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_)
