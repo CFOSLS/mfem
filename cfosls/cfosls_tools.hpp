@@ -306,6 +306,7 @@ protected:
 
     bool divfreedops_constructed;
 
+    int pmesh_ne;
 public:
     GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose);
 
@@ -1142,9 +1143,10 @@ public:
 
     Array<int>* ConstructBndIndices(int level);
 
-protected:
     void ConstructCoarsenedOps();
     void ConstructCoarsenedOps_nobnd();
+
+protected:
     HypreParMatrix& CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
 };
 
@@ -1186,18 +1188,13 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     CoarsenedOps_lvls.SetSize(nlevels);
     for (int l = 0; l < nlevels; ++l )
         CoarsenedOps_lvls[l] = NULL;
-    CoarsenedOps_lvls[0] = problems_lvls[0]->GetOp();
 
     CoarsenedOps_nobnd_lvls.SetSize(nlevels);
     for (int l = 0; l < nlevels; ++l )
         CoarsenedOps_nobnd_lvls[l] = NULL;
-    CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
 
     ConstructCoarsenedOps();
     ConstructCoarsenedOps_nobnd();
-
-    //std::cout << "CoarsenedOp[1] = " << CoarsenedOps_lvls[1] << "\n";
-    //std::cout << "CoarsenedO_nobnd[1] = " << CoarsenedOps_nobnd_lvls[1] << "\n";
 }
 
 template <class Problem, class Hierarchy>
@@ -1227,24 +1224,26 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
     TrueP_lvls.Prepend(TrueP_new);
 
     // update number of levels
-    int nlevels_old = nlevels;
-    ++nlevels;
+    nlevels = hierarchy.Nlevels();
+
+    // delete the o old coarsened ops
+    for (int l = 0; l < CoarsenedOps_lvls.Size(); ++l )
+    {
+        delete CoarsenedOps_lvls[l];
+        delete CoarsenedOps_nobnd_lvls[l];
+    }
+
+    CoarsenedOps_lvls.SetSize(nlevels);
+    for (int l = 1; l < nlevels; ++l)
+        CoarsenedOps_lvls[l] = NULL;
+
+    CoarsenedOps_nobnd_lvls.SetSize(nlevels);
+    for (int l = 1; l < nlevels; ++l)
+        CoarsenedOps_nobnd_lvls[l] = NULL;
 
     // reconstruct coarsened operators if required
     if (recoarsen)
     {
-        for (int l = 0; l < nlevels_old; ++l )
-        {
-            delete CoarsenedOps_lvls[l];
-            delete CoarsenedOps_nobnd_lvls[l];
-        }
-
-        CoarsenedOps_nobnd_lvls.SetSize(nlevels_old + 1);
-        CoarsenedOps_lvls[0] = problems_lvls[0]->GetOp();
-
-        CoarsenedOps_nobnd_lvls.SetSize(nlevels_old + 1);
-        CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
-
         ConstructCoarsenedOps();
         ConstructCoarsenedOps_nobnd();
     }
@@ -1398,6 +1397,8 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 template <class Problem, class Hierarchy>
 void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
 {
+    CoarsenedOps_lvls[0] = problems_lvls[0]->GetOp();
+
     int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
     for (int l = 1; l < nlevels; ++l )
     {
@@ -1433,6 +1434,8 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
 template <class Problem, class Hierarchy>
 void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
 {
+    CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
+
     int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
     for (int l = 1; l < nlevels; ++l )
     {

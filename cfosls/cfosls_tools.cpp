@@ -2726,9 +2726,10 @@ void CFOSLSHyperbolicProblem::Update()
 }
 
 GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
-    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false)
+    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false), pmesh_ne(0)
 {
-    int dim = pmesh_.Dimension();
+    pmesh_ne = pmesh.GetNE();
+    int dim = pmesh.Dimension();
 
     if (dim == 4)
         hdiv_coll = new RT0_4DFECollection;
@@ -2763,16 +2764,16 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
     else
         hdivskew_coll = NULL;
 
-    Hdiv_space = new ParFiniteElementSpace(&pmesh_, hdiv_coll);
+    Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
 
-    L2_space = new ParFiniteElementSpace(&pmesh_, l2_coll);
+    L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
 
-    H1_space = new ParFiniteElementSpace(&pmesh_, h1_coll);
+    H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
 
-    Hcurl_space = new ParFiniteElementSpace(&pmesh_, hcurl_coll);
+    Hcurl_space = new ParFiniteElementSpace(&pmesh, hcurl_coll);
 
     if (dim == 4)
-        Hdivskew_space = new ParFiniteElementSpace(&pmesh_, hdivskew_coll);
+        Hdivskew_space = new ParFiniteElementSpace(&pmesh, hdivskew_coll);
     else
         Hdivskew_space = NULL;
 
@@ -2808,7 +2809,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
 
     for (int l = num_lvls - 1; l >= 0; --l)
     {
-        RefineAndCopy(l, &pmesh_);
+        RefineAndCopy(l, &pmesh);
+        pmesh_ne = pmesh.GetNE();
 
         // creating pfespaces for level l
         Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
@@ -2900,10 +2902,13 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
 
 void GeneralHierarchy::Update()
 {
-    long sequence = pmesh.GetSequence();
-    if (sequence > 0)
+    // TODO: Instead of checking the mesh number of elements to define
+    // TODO: whether the hierarchy is to be updated one can use the same
+    // TODO: trick as in FOSLSEstimator method MeshIsModified
+    bool update_required = (pmesh.GetNE() != pmesh_ne);
+    if (update_required)
     {
-        MFEM_ASSERT(sequence == 1 && pmesh.GetLastOperation() == Mesh::Operation::REFINE, "It is assumed that exactly one refinement was done \n");
+        MFEM_ASSERT(pmesh.GetLastOperation() == Mesh::Operation::REFINE, "It is assumed that a refinement was done \n");
 
         // updating mesh
         ParMesh * pmesh_new = new ParMesh(pmesh);
@@ -3027,34 +3032,36 @@ void GeneralHierarchy::Update()
             TrueP_Hdivskew_lvls.Prepend(TrueP_Hdivskew_new);
             delete RP_Hdivskew_local;
         }
-    } // end of if sequence > 0, i.e. update is really required
 
-    if (divfreedops_constructed)
-    {
-        int dim = pmesh_lvls[0]->Dimension();
-
-        ParDiscreteLinearOperator * Divfree_op;
-        if (dim == 3)
+        if (divfreedops_constructed)
         {
-            Divfree_op = new ParDiscreteLinearOperator(Hcurl_space_lvls[0], Hdiv_space_lvls[0]);
-            Divfree_op->AddDomainInterpolator(new CurlInterpolator);
+            int dim = pmesh_lvls[0]->Dimension();
+
+            ParDiscreteLinearOperator * Divfree_op;
+            if (dim == 3)
+            {
+                Divfree_op = new ParDiscreteLinearOperator(Hcurl_space_lvls[0], Hdiv_space_lvls[0]);
+                Divfree_op->AddDomainInterpolator(new CurlInterpolator);
+            }
+            else
+            {
+                Divfree_op = new ParDiscreteLinearOperator(Hdivskew_space_lvls[0], Hdiv_space_lvls[0]);
+                Divfree_op->AddDomainInterpolator(new DivSkewInterpolator);
+            }
+
+            Divfree_op->Assemble();
+            Divfree_op->Finalize();
+            HypreParMatrix * DivfreeDops_new = Divfree_op->ParallelAssemble();
+
+            delete Divfree_op;
+
+            DivfreeDops_lvls.Prepend(DivfreeDops_new);
         }
-        else
-        {
-            Divfree_op = new ParDiscreteLinearOperator(Hdivskew_space_lvls[0], Hdiv_space_lvls[0]);
-            Divfree_op->AddDomainInterpolator(new DivSkewInterpolator);
-        }
 
-        Divfree_op->Assemble();
-        Divfree_op->Finalize();
-        HypreParMatrix * DivfreeDops_new = Divfree_op->ParallelAssemble();
+        pmesh_ne = pmesh.GetNE();
 
-        delete Divfree_op;
-
-        DivfreeDops_lvls.Prepend(DivfreeDops_new);
-    }
-
-    ++num_lvls;
+        ++num_lvls;
+    } // end of if update is required
 }
 
 

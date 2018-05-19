@@ -224,7 +224,10 @@ bool FOSLSEstimator::MeshIsModified()
 
 const Vector & FOSLSEstimator::GetLocalErrors()
 {
-    if (MeshIsModified()) { ComputeEstimates(); }
+    if (MeshIsModified())
+    {
+        ComputeEstimates();
+    }
     return error_estimates;
 }
 

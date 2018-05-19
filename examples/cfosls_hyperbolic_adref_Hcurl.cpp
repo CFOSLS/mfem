@@ -560,6 +560,7 @@ int main(int argc, char *argv[])
        problem_divfree_op->owns_blocks = true;
 
        problem_divfree->ResetOp(*problem_divfree_op);
+       divfreeprob_hierarchy->ConstructCoarsenedOps();
        problem_divfree->InitSolver(verbose);
 
        // creating a preconditioner for the divfree problem
@@ -642,6 +643,10 @@ int main(int argc, char *argv[])
        // new variant
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
 
+       MFEM_ABORT("Right now the estimator is connected to the problem pgfuns, "
+                  "but after updating the hierarchy we redefine problem to be the newly"
+                  " created finest-level problem. Thus the estimator still has "
+                  "old pgfuns of old problem which is now problem_lvls[1].");
        // old variant, before introducing the hierarchy stuff
        //refiner.Apply(*problem->GetParMesh());
 
@@ -653,8 +658,10 @@ int main(int argc, char *argv[])
        }
 
        bool recoarsen = true;
-       MFEM_ABORT("The code fails.");
        prob_hierarchy->Update(recoarsen);
+       divfreeprob_hierarchy->Update(false);
+       problem = prob_hierarchy->GetProblem(0);
+       problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
        // old variant
        //problem->Update();
@@ -665,10 +672,8 @@ int main(int argc, char *argv[])
        delete partsigma;
 #endif
 
-       MPI_Finalize();
-       return 0;
-
-       problem->BuildSystem(verbose);
+       //old variant
+       //problem->BuildSystem(verbose);
 
        global_dofs = problem->GlobalTrueProblemSize();
 
