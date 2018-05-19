@@ -1113,10 +1113,13 @@ protected:
     Array<BlockOperator*> TrueP_lvls;
     Array<BlockOperator*> CoarsenedOps_lvls;
     Array<BlockOperator*> CoarsenedOps_nobnd_lvls;
+    int prec_option;
     bool verbose;
 public:
     FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
+
+    virtual void Update(bool recoarsen);
 
     Problem* GetProblem(int l)
     {
@@ -1146,16 +1149,20 @@ protected:
 };
 
 template <class Problem, class Hierarchy>
-FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_,
-                      BdrConditions& bdr_conditions_, FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_)
-    : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_), nlevels(nlevels_), hierarchy(hierarchy_), verbose(verbose_)
+FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarchy_,
+                                                             int nlevels_, BdrConditions& bdr_conditions_,
+                                                             FOSLSFEFormulation& fe_formulation_,
+                                                             int precond_option, bool verbose_)
+    : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_),
+      nlevels(nlevels_),
+      hierarchy(hierarchy_), prec_option(precond_option), verbose(verbose_)
 {
     problems_lvls.SetSize(nlevels);
     TrueP_lvls.SetSize(nlevels - 1);
     for (int l = 0; l < nlevels; ++l )
     {
         //std::cout << "I am here, verbose = " << verbose << "\n";
-        problems_lvls[l] = new Problem(hierarchy, l, bdr_conditions, fe_formulation, precond_option, verbose);
+        problems_lvls[l] = new Problem(hierarchy, l, bdr_conditions, fe_formulation, prec_option, verbose);
         //std::cout << "I created a problem, l = " << l << "\n";
         if (l > 0)
         {
@@ -1192,6 +1199,58 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     //std::cout << "CoarsenedOp[1] = " << CoarsenedOps_lvls[1] << "\n";
     //std::cout << "CoarsenedO_nobnd[1] = " << CoarsenedOps_nobnd_lvls[1] << "\n";
 }
+
+template <class Problem, class Hierarchy>
+void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
+{
+    // update hierarchy
+    hierarchy.Update();
+
+    // create the new finest-level problem
+    Problem * problem_new = new Problem(hierarchy, 0, bdr_conditions, fe_formulation, prec_option, verbose);
+    problems_lvls.Prepend(problem_new);
+
+    // create new interpolation block operator
+    Array<int>& blkoffsets_true_row = problems_lvls[0]->GetTrueOffsets();
+    Array<int>& blkoffsets_true_col = problems_lvls[1]->GetTrueOffsets();
+    const Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+
+    BlockOperator * TrueP_new = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
+
+    int numblocks = fe_formulation.Nblocks();
+    for (int blk = 0; blk < numblocks; ++blk)
+    {
+        HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], 0);
+        TrueP_new->SetBlock(blk, blk, TrueP_blk);
+    }
+
+    TrueP_lvls.Prepend(TrueP_new);
+
+    // update number of levels
+    int nlevels_old = nlevels;
+    ++nlevels;
+
+    // reconstruct coarsened operators if required
+    if (recoarsen)
+    {
+        for (int l = 0; l < nlevels_old; ++l )
+        {
+            delete CoarsenedOps_lvls[l];
+            delete CoarsenedOps_nobnd_lvls[l];
+        }
+
+        CoarsenedOps_nobnd_lvls.SetSize(nlevels_old + 1);
+        CoarsenedOps_lvls[0] = problems_lvls[0]->GetOp();
+
+        CoarsenedOps_nobnd_lvls.SetSize(nlevels_old + 1);
+        CoarsenedOps_nobnd_lvls[0] = problems_lvls[0]->GetOp_nobnd();
+
+        ConstructCoarsenedOps();
+        ConstructCoarsenedOps_nobnd();
+    }
+
+}
+
 
 template <class Problem, class Hierarchy>
 void FOSLSProblHierarchy<Problem, Hierarchy>::Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out)

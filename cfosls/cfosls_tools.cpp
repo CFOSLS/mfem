@@ -3029,6 +3029,32 @@ void GeneralHierarchy::Update()
         }
     } // end of if sequence > 0, i.e. update is really required
 
+    if (divfreedops_constructed)
+    {
+        int dim = pmesh_lvls[0]->Dimension();
+
+        ParDiscreteLinearOperator * Divfree_op;
+        if (dim == 3)
+        {
+            Divfree_op = new ParDiscreteLinearOperator(Hcurl_space_lvls[0], Hdiv_space_lvls[0]);
+            Divfree_op->AddDomainInterpolator(new CurlInterpolator);
+        }
+        else
+        {
+            Divfree_op = new ParDiscreteLinearOperator(Hdivskew_space_lvls[0], Hdiv_space_lvls[0]);
+            Divfree_op->AddDomainInterpolator(new DivSkewInterpolator);
+        }
+
+        Divfree_op->Assemble();
+        Divfree_op->Finalize();
+        HypreParMatrix * DivfreeDops_new = Divfree_op->ParallelAssemble();
+
+        delete Divfree_op;
+
+        DivfreeDops_lvls.Prepend(DivfreeDops_new);
+    }
+
+    ++num_lvls;
 }
 
 

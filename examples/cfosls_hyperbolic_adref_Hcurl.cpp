@@ -652,7 +652,9 @@ int main(int argc, char *argv[])
           break;
        }
 
-       hierarchy->Update();
+       bool recoarsen = true;
+       MFEM_ABORT("The code fails.");
+       prob_hierarchy->Update(recoarsen);
 
        // old variant
        //problem->Update();
