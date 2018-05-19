@@ -2725,13 +2725,10 @@ void CFOSLSHyperbolicProblem::Update()
         grfuns[i]->Update();
 }
 
-GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose)
-    : num_lvls(num_levels), divfreedops_constructed (false)
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
+    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false)
 {
-    int dim = pmesh.Dimension();
-
-    FiniteElementCollection *hdiv_coll;
-    FiniteElementCollection *l2_coll;
+    int dim = pmesh_.Dimension();
 
     if (dim == 4)
         hdiv_coll = new RT0_4DFECollection;
@@ -2740,7 +2737,6 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
 
     l2_coll = new L2_FECollection(feorder, dim);
 
-    FiniteElementCollection *h1_coll;
     if (dim == 3)
         h1_coll = new H1_FECollection(feorder + 1, dim);
     else
@@ -2757,34 +2753,28 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
             MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
     }
 
-    FiniteElementCollection *hcurl_coll;
     if (dim == 4)
         hcurl_coll = new ND1_4DFECollection;
     else
         hcurl_coll = new ND_FECollection(feorder + 1, dim);
 
-    FiniteElementCollection *hdivskew_coll;
     if (dim == 4)
         hdivskew_coll = new DivSkew1_4DFECollection;
     else
         hdivskew_coll = NULL;
 
+    Hdiv_space = new ParFiniteElementSpace(&pmesh_, hdiv_coll);
 
-    ParFiniteElementSpace *Hdiv_space;
-    Hdiv_space = new ParFiniteElementSpace(&pmesh, hdiv_coll);
+    L2_space = new ParFiniteElementSpace(&pmesh_, l2_coll);
 
-    ParFiniteElementSpace *L2_space;
-    L2_space = new ParFiniteElementSpace(&pmesh, l2_coll);
+    H1_space = new ParFiniteElementSpace(&pmesh_, h1_coll);
 
-    ParFiniteElementSpace *H1_space;
-    H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
+    Hcurl_space = new ParFiniteElementSpace(&pmesh_, hcurl_coll);
 
-    ParFiniteElementSpace *Hcurl_space;
-    Hcurl_space = new ParFiniteElementSpace(&pmesh, hcurl_coll);
-
-    ParFiniteElementSpace *Hdivskew_space;
     if (dim == 4)
-        Hdivskew_space = new ParFiniteElementSpace(&pmesh, hdivskew_coll);
+        Hdivskew_space = new ParFiniteElementSpace(&pmesh_, hdivskew_coll);
+    else
+        Hdivskew_space = NULL;
 
     const SparseMatrix* P_Hdiv_local;
     const SparseMatrix* P_H1_local;
@@ -2792,25 +2782,25 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
     const SparseMatrix* P_Hcurl_local;
     const SparseMatrix* P_Hdivskew_local;
 
-    pmesh_lvls.resize(num_lvls);
-    Hdiv_space_lvls.resize(num_lvls);
-    H1_space_lvls.resize(num_lvls);
-    L2_space_lvls.resize(num_lvls);
-    Hcurl_space_lvls.resize(num_lvls);
+    pmesh_lvls.SetSize(num_lvls);
+    Hdiv_space_lvls.SetSize(num_lvls);
+    H1_space_lvls.SetSize(num_lvls);
+    L2_space_lvls.SetSize(num_lvls);
+    Hcurl_space_lvls.SetSize(num_lvls);
     if (dim == 4)
-        Hdivskew_space_lvls.resize(num_lvls);
-    P_Hdiv_lvls.resize(num_lvls - 1);
-    P_H1_lvls.resize(num_lvls - 1);
-    P_L2_lvls.resize(num_lvls - 1);
-    P_Hcurl_lvls.resize(num_lvls - 1);
+        Hdivskew_space_lvls.SetSize(num_lvls);
+    P_Hdiv_lvls.SetSize(num_lvls - 1);
+    P_H1_lvls.SetSize(num_lvls - 1);
+    P_L2_lvls.SetSize(num_lvls - 1);
+    P_Hcurl_lvls.SetSize(num_lvls - 1);
     if (dim == 4)
-        P_Hdivskew_lvls.resize(num_lvls - 1);
-    TrueP_Hdiv_lvls.resize(num_lvls - 1);
-    TrueP_H1_lvls.resize(num_lvls - 1);
-    TrueP_L2_lvls.resize(num_lvls - 1);
-    TrueP_Hcurl_lvls.resize(num_lvls - 1);
+        P_Hdivskew_lvls.SetSize(num_lvls - 1);
+    TrueP_Hdiv_lvls.SetSize(num_lvls - 1);
+    TrueP_H1_lvls.SetSize(num_lvls - 1);
+    TrueP_L2_lvls.SetSize(num_lvls - 1);
+    TrueP_Hcurl_lvls.SetSize(num_lvls - 1);
     if (dim == 4)
-        TrueP_Hdivskew_lvls.resize(num_lvls - 1);
+        TrueP_Hdivskew_lvls.SetSize(num_lvls - 1);
 
     //std::cout << "Checking test for dynamic cast \n";
     //if (dynamic_cast<testB*> (testA))
@@ -2818,7 +2808,7 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
 
     for (int l = num_lvls - 1; l >= 0; --l)
     {
-        RefineAndCopy(l, &pmesh);
+        RefineAndCopy(l, &pmesh_);
 
         // creating pfespaces for level l
         Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
@@ -2906,11 +2896,138 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, 
         }
 
     } // end of loop over levels
-
 }
 
 void GeneralHierarchy::Update()
 {
+    long sequence = pmesh.GetSequence();
+    if (sequence > 0)
+    {
+        MFEM_ASSERT(sequence == 1 && pmesh.GetLastOperation() == Mesh::Operation::REFINE, "It is assumed that exactly one refinement was done \n");
+
+        // updating mesh
+        ParMesh * pmesh_new = new ParMesh(pmesh);
+        pmesh_lvls.Prepend(pmesh_new);
+
+        int dim = pmesh.Dimension();
+
+        ParFiniteElementSpace * Hdiv_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hdiv_coll);
+        ParFiniteElementSpace * L2_space_new = new ParFiniteElementSpace(pmesh_lvls[0], l2_coll);
+        ParFiniteElementSpace * H1_space_new = new ParFiniteElementSpace(pmesh_lvls[0], h1_coll);
+        ParFiniteElementSpace * Hcurl_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hcurl_coll);
+        ParFiniteElementSpace * Hdivskew_space_new;
+        if (dim == 4)
+            Hdivskew_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hdivskew_coll);
+        else
+            Hdivskew_space_new = NULL;
+
+        Hdiv_space_lvls.Prepend(Hdiv_space_new);
+        L2_space_lvls.Prepend(L2_space_new);
+        H1_space_lvls.Prepend(H1_space_new);
+        Hcurl_space_lvls.Prepend(Hcurl_space_new);
+        Hdivskew_space_lvls.Prepend(Hdivskew_space_new);
+
+        Hdiv_space->Update();
+        H1_space->Update();
+        L2_space->Update();
+        Hcurl_space->Update();
+        if (dim == 4)
+            Hdivskew_space->Update();
+
+        const SparseMatrix* P_Hdiv_local;
+        const SparseMatrix* P_H1_local;
+        const SparseMatrix* P_L2_local;
+        const SparseMatrix* P_Hcurl_local;
+        const SparseMatrix* P_Hdivskew_local;
+
+        // Hdiv
+        P_Hdiv_local = (SparseMatrix *)Hdiv_space->GetUpdateOperator();
+
+        SparseMatrix * P_Hdiv_new = RemoveZeroEntries(*P_Hdiv_local);
+        P_Hdiv_lvls.Prepend(P_Hdiv_new);
+
+        auto d_td_coarse_Hdiv = Hdiv_space_lvls[1]->Dof_TrueDof_Matrix();
+        SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[0]->GetRestrictionMatrix(), *P_Hdiv_lvls[0]);
+
+        HypreParMatrix * TrueP_Hdiv_new = d_td_coarse_Hdiv->LeftDiagMult(
+                    *RP_Hdiv_local, Hdiv_space_lvls[0]->GetTrueDofOffsets());
+        TrueP_Hdiv_new->CopyColStarts();
+        TrueP_Hdiv_new->CopyRowStarts();
+
+        TrueP_Hdiv_lvls.Prepend(TrueP_Hdiv_new);
+        delete RP_Hdiv_local;
+
+        // H1
+        P_H1_local = (SparseMatrix *)H1_space->GetUpdateOperator();
+
+        SparseMatrix * P_H1_new = RemoveZeroEntries(*P_H1_local);
+        P_H1_lvls.Prepend(P_H1_new);
+
+        auto d_td_coarse_H1 = H1_space_lvls[1]->Dof_TrueDof_Matrix();
+        SparseMatrix * RP_H1_local = Mult(*H1_space_lvls[0]->GetRestrictionMatrix(), *P_H1_lvls[0]);
+
+        HypreParMatrix * TrueP_H1_new = d_td_coarse_H1->LeftDiagMult(
+                    *RP_H1_local, H1_space_lvls[0]->GetTrueDofOffsets());
+        TrueP_H1_new->CopyColStarts();
+        TrueP_H1_new->CopyRowStarts();
+
+        TrueP_H1_lvls.Prepend(TrueP_H1_new);
+        delete RP_H1_local;
+
+        // L2
+        P_L2_local = (SparseMatrix *)L2_space->GetUpdateOperator();
+
+        SparseMatrix * P_L2_new = RemoveZeroEntries(*P_L2_local);
+        P_L2_lvls.Prepend(P_L2_new);
+
+        auto d_td_coarse_L2 = L2_space_lvls[1]->Dof_TrueDof_Matrix();
+        SparseMatrix * RP_L2_local = Mult(*L2_space_lvls[0]->GetRestrictionMatrix(), *P_L2_lvls[0]);
+
+        HypreParMatrix * TrueP_L2_new = d_td_coarse_L2->LeftDiagMult(
+                    *RP_L2_local, L2_space_lvls[0]->GetTrueDofOffsets());
+        TrueP_L2_new->CopyColStarts();
+        TrueP_L2_new->CopyRowStarts();
+
+        TrueP_L2_lvls.Prepend(TrueP_L2_new);
+        delete RP_L2_local;
+
+        // Hcurl
+        P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
+
+        SparseMatrix * P_Hcurl_new = RemoveZeroEntries(*P_Hcurl_local);
+        P_Hcurl_lvls.Prepend(P_Hcurl_new);
+
+        auto d_td_coarse_Hcurl = Hcurl_space_lvls[1]->Dof_TrueDof_Matrix();
+        SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[0]->GetRestrictionMatrix(), *P_Hcurl_lvls[0]);
+
+        HypreParMatrix * TrueP_Hcurl_new = d_td_coarse_Hcurl->LeftDiagMult(
+                    *RP_Hcurl_local, Hcurl_space_lvls[0]->GetTrueDofOffsets());
+        TrueP_Hcurl_new->CopyColStarts();
+        TrueP_Hcurl_new->CopyRowStarts();
+
+        TrueP_Hcurl_lvls.Prepend(TrueP_Hcurl_new);
+        delete RP_Hcurl_local;
+
+        // Hdivskew
+        if (dim == 4)
+        {
+            P_Hdivskew_local = (SparseMatrix *)Hdivskew_space->GetUpdateOperator();
+
+            SparseMatrix * P_Hdivskew_new = RemoveZeroEntries(*P_Hdivskew_local);
+            P_Hdivskew_lvls.Prepend(P_Hdivskew_new);
+
+            auto d_td_coarse_Hdivskew = Hdivskew_space_lvls[1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[0]->GetRestrictionMatrix(), *P_Hdivskew_lvls[0]);
+
+            HypreParMatrix * TrueP_Hdivskew_new = d_td_coarse_Hdivskew->LeftDiagMult(
+                        *RP_Hdivskew_local, Hdivskew_space_lvls[0]->GetTrueDofOffsets());
+            TrueP_Hdivskew_new->CopyColStarts();
+            TrueP_Hdivskew_new->CopyRowStarts();
+
+            TrueP_Hdivskew_lvls.Prepend(TrueP_Hdivskew_new);
+            delete RP_Hdivskew_local;
+        }
+    } // end of if sequence > 0, i.e. update is really required
 
 }
 
@@ -2919,7 +3036,7 @@ void GeneralHierarchy::ConstructDivfreeDops()
 {
     int dim = pmesh_lvls[0]->Dimension();
 
-    DivfreeDops_lvls.resize(num_lvls);
+    DivfreeDops_lvls.SetSize(num_lvls);
 
     for (int l = 0; l < num_lvls; ++l)
     {
@@ -3401,32 +3518,12 @@ BlockOperator* GeneralHierarchy::GetDofTrueDof(const Array<SpaceName>& space_nam
     return res;
 }
 
-
-
-/*
-void GeneralCylHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
-{
-    if (lvl == num_lvls - 1)
-        pmesh_lvls[lvl] = new ParMesh(*pmesh);
-    else
-    {
-        ParMeshCyl * pmeshcyl_view = dynamic_cast<ParMeshCyl*> (pmesh);
-        if (!pmeshcyl_view)
-        {
-            MFEM_ABORT("Dynamic cast into ParMeshCyl returned NULL \n");
-        }
-        pmeshcyl_view->Refine(1);
-        pmesh_lvls[lvl] = new ParMesh(*pmesh);
-    }
-}
-*/
-
 void GeneralCylHierarchy::ConstructRestrictions()
 {
-    Restrict_bot_H1_lvls.resize(num_lvls);
-    Restrict_bot_Hdiv_lvls.resize(num_lvls);
-    Restrict_top_H1_lvls.resize(num_lvls);
-    Restrict_top_Hdiv_lvls.resize(num_lvls);
+    Restrict_bot_H1_lvls.SetSize(num_lvls);
+    Restrict_bot_Hdiv_lvls.SetSize(num_lvls);
+    Restrict_top_H1_lvls.SetSize(num_lvls);
+    Restrict_top_Hdiv_lvls.SetSize(num_lvls);
 
     for (int l = num_lvls - 1; l >= 0; --l)
     {
@@ -3439,10 +3536,10 @@ void GeneralCylHierarchy::ConstructRestrictions()
 
 void GeneralCylHierarchy::ConstructInterpolations()
 {
-    TrueP_bndbot_H1_lvls.resize(num_lvls - 1);
-    TrueP_bndbot_Hdiv_lvls.resize(num_lvls - 1);
-    TrueP_bndtop_H1_lvls.resize(num_lvls - 1);
-    TrueP_bndtop_Hdiv_lvls.resize(num_lvls - 1);
+    TrueP_bndbot_H1_lvls.SetSize(num_lvls - 1);
+    TrueP_bndbot_Hdiv_lvls.SetSize(num_lvls - 1);
+    TrueP_bndtop_H1_lvls.SetSize(num_lvls - 1);
+    TrueP_bndtop_Hdiv_lvls.SetSize(num_lvls - 1);
 
     for (int l = num_lvls - 2; l >= 0; --l)
     {

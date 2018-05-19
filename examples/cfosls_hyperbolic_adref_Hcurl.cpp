@@ -638,7 +638,13 @@ int main(int argc, char *argv[])
        //     estimator to obtain element errors, then it selects elements to be
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
-       refiner.Apply(*problem->GetParMesh());
+
+       // new variant
+       refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
+
+       // old variant, before introducing the hierarchy stuff
+       //refiner.Apply(*problem->GetParMesh());
+
        if (refiner.Stop())
        {
           if (verbose)
@@ -648,9 +654,11 @@ int main(int argc, char *argv[])
 
        hierarchy->Update();
 
+       // old variant
        //problem->Update();
 
 #ifdef DIVFREE_ESTIMATOR
+       // old variant
        //problem_divfree->Update();
        delete partsigma;
 #endif

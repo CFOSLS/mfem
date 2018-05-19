@@ -265,36 +265,55 @@ class GeneralHierarchy
 {
 protected:
     int num_lvls;
-    std::vector<ParMesh*> pmesh_lvls;
-    std::vector<ParFiniteElementSpace* > Hdiv_space_lvls;
-    std::vector<ParFiniteElementSpace* > Hcurl_space_lvls;
-    std::vector<ParFiniteElementSpace* > H1_space_lvls;
-    std::vector<ParFiniteElementSpace* > L2_space_lvls;
-    std::vector<ParFiniteElementSpace* > Hdivskew_space_lvls;
 
-    std::vector<SparseMatrix*> P_H1_lvls;
-    std::vector<SparseMatrix*> P_Hdiv_lvls;
-    std::vector<SparseMatrix*> P_L2_lvls;
-    std::vector<SparseMatrix*> P_Hcurl_lvls;
-    std::vector<SparseMatrix*> P_Hdivskew_lvls;
+    // the finest mesh (a copy of it is also stored in pmesh_lvls)
+    // used for updating the hierarchy when the hierarchy's finest mesh is refined
+    ParMesh& pmesh;
+    // pfespaces and fecolls which live on the pmesh
+    // used for updating the hierarchy
+    ParFiniteElementSpace * Hdiv_space;
+    ParFiniteElementSpace * Hcurl_space;
+    ParFiniteElementSpace * H1_space;
+    ParFiniteElementSpace * L2_space;
+    ParFiniteElementSpace * Hdivskew_space;
 
-    std::vector<HypreParMatrix*> TrueP_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_L2_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hcurl_lvls;
-    std::vector<HypreParMatrix*> TrueP_Hdivskew_lvls;
+    FiniteElementCollection *hdiv_coll;
+    FiniteElementCollection *hcurl_coll;
+    FiniteElementCollection *h1_coll;
+    FiniteElementCollection *l2_coll;
+    FiniteElementCollection *hdivskew_coll;
 
-    std::vector<const HypreParMatrix*> DivfreeDops_lvls;
+    Array<ParMesh*> pmesh_lvls;
+    Array<ParFiniteElementSpace* > Hdiv_space_lvls;
+    Array<ParFiniteElementSpace* > Hcurl_space_lvls;
+    Array<ParFiniteElementSpace* > H1_space_lvls;
+    Array<ParFiniteElementSpace* > L2_space_lvls;
+    Array<ParFiniteElementSpace* > Hdivskew_space_lvls;
+
+    Array<SparseMatrix*> P_H1_lvls;
+    Array<SparseMatrix*> P_Hdiv_lvls;
+    Array<SparseMatrix*> P_L2_lvls;
+    Array<SparseMatrix*> P_Hcurl_lvls;
+    Array<SparseMatrix*> P_Hdivskew_lvls;
+
+    Array<HypreParMatrix*> TrueP_H1_lvls;
+    Array<HypreParMatrix*> TrueP_Hdiv_lvls;
+    Array<HypreParMatrix*> TrueP_L2_lvls;
+    Array<HypreParMatrix*> TrueP_Hcurl_lvls;
+    Array<HypreParMatrix*> TrueP_Hdivskew_lvls;
+
+    Array<const HypreParMatrix*> DivfreeDops_lvls;
 
     bool divfreedops_constructed;
 
 public:
+    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose);
 
-    GeneralHierarchy(int num_levels, ParMesh& pmesh, int feorder, bool verbose);
+    ParMesh* GetFinestParMesh() {return &pmesh;}
 
     // should be called if the finest mesh was refined and
     // one wants to extend the hierarchy
-    void Update();
+    virtual void Update();
 
     void ConstructDivfreeDops();
 
@@ -366,19 +385,19 @@ public:
 class GeneralCylHierarchy : public GeneralHierarchy
 {
 protected:
-    std::vector<ParMeshCyl*> pmeshcyl_lvls;
+    Array<ParMeshCyl*> pmeshcyl_lvls;
 
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
 
-    std::vector<HypreParMatrix*> TrueP_bndbot_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_H1_lvls;
-    std::vector<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_H1_lvls;
-    std::vector<HypreParMatrix*> Restrict_top_Hdiv_lvls;
+    Array<HypreParMatrix*> TrueP_bndbot_H1_lvls;
+    Array<HypreParMatrix*> TrueP_bndbot_Hdiv_lvls;
+    Array<HypreParMatrix*> TrueP_bndtop_H1_lvls;
+    Array<HypreParMatrix*> TrueP_bndtop_Hdiv_lvls;
+    Array<HypreParMatrix*> Restrict_bot_H1_lvls;
+    Array<HypreParMatrix*> Restrict_bot_Hdiv_lvls;
+    Array<HypreParMatrix*> Restrict_top_H1_lvls;
+    Array<HypreParMatrix*> Restrict_top_Hdiv_lvls;
 protected:
     void ConstructRestrictions();
     void ConstructInterpolations();
@@ -388,7 +407,7 @@ public:
     GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
         : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
     {
-        pmeshcyl_lvls.resize(num_lvls);
+        pmeshcyl_lvls.SetSize(num_lvls);
         for (int l = 0; l < num_lvls; ++l)
         {
             ParMeshCyl * temp = dynamic_cast<ParMeshCyl*>(pmesh_lvls[l]);
@@ -405,6 +424,10 @@ public:
         ConstructRestrictions();
         ConstructInterpolations();
     }
+
+    // should be called if the finest mesh was refined and
+    // one wants to extend the hierarchy
+    virtual void Update() override { MFEM_ABORT("Update() is not implemented for GeneralCylHierarchy!");}
 
     ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
 
