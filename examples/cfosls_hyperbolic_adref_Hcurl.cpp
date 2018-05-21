@@ -381,9 +381,7 @@ int main(int argc, char *argv[])
 
    Array<ParGridFunction*> extra_grfuns(0);
    if (fosls_func_version == 2)
-   {
        extra_grfuns.SetSize(1);
-   }
 
    /// The descriptor describes the grid functions used in the error estimator
    /// each pair (which corresponds to a grid function used in the estimator)
@@ -456,17 +454,21 @@ int main(int argc, char *argv[])
 
    FOSLSEstimator * estimator;
 
-   // this works
    if (fosls_func_version == 2)
-       estimator = new FOSLSEstimator(*problem, grfuns_descriptor, &extra_grfuns, integs, verbose);
+   {
+       estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
+               (*prob_hierarchy, 0, grfuns_descriptor, &extra_grfuns, integs, verbose);
+   }
    else
-       estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
+       estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
+               (*prob_hierarchy, 0, grfuns_descriptor, NULL, integs, verbose);
 
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
    refiner.SetTotalErrorFraction(0.5);
 
+#if 0
 #ifdef DIVFREE_ESTIMATOR
    std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numblocks_funct);
 
@@ -504,9 +506,7 @@ int main(int argc, char *argv[])
 
    //MPI_Finalize();
    //return 0;
-
-   //MPI_Finalize();
-   //return 0;
+#endif
 #endif
 
 
@@ -643,13 +643,6 @@ int main(int argc, char *argv[])
        // new variant
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
 
-       MFEM_ABORT("Right now the estimator is connected to the problem pgfuns, "
-                  "but after updating the hierarchy we redefine problem to be the newly"
-                  " created finest-level problem. Thus the estimator still has "
-                  "old pgfuns of old problem which is now problem_lvls[1].");
-       // old variant, before introducing the hierarchy stuff
-       //refiner.Apply(*problem->GetParMesh());
-
        if (refiner.Stop())
        {
           if (verbose)
@@ -663,17 +656,33 @@ int main(int argc, char *argv[])
        problem = prob_hierarchy->GetProblem(0);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
-       // old variant
-       //problem->Update();
+       if (fosls_func_version == 2)
+       {
+           // first option is just to delete and recreate the extra grid function
+           // this is slightly different from the old approach when the pgfun was
+           // updated (~ interpolated)
+           /*
+           delete extra_grfuns[0];
+           extra_grfuns[0] = new ParGridFunction(problem->GetPfes(numblocks - 1));
+           extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().
+                                               GetFormulation()->GetTest()->GetRhs());
+           */
+
+           // second option is to project it (which is quiv. to Update() in the
+           // old variant w/o hierarchies
+           Vector true_temp1(prob_hierarchy->GetProblem(1)->GetPfes(numblocks - 1)->TrueVSize());
+           extra_grfuns[0]->ParallelProject(true_temp1);
+
+           Vector true_temp2(prob_hierarchy->GetProblem(0)->GetPfes(numblocks - 1)->TrueVSize());
+           prob_hierarchy->GetHierarchy().GetTruePspace(SpaceName::L2, 0)->Mult(true_temp1, true_temp2);
+           delete extra_grfuns[0];
+           extra_grfuns[0] = new ParGridFunction(problem->GetPfes(numblocks - 1));
+           extra_grfuns[0]->SetFromTrueDofs(true_temp2);
+       }
 
 #ifdef DIVFREE_ESTIMATOR
-       // old variant
-       //problem_divfree->Update();
        delete partsigma;
 #endif
-
-       //old variant
-       //problem->BuildSystem(verbose);
 
        global_dofs = problem->GlobalTrueProblemSize();
 

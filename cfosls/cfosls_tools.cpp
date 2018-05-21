@@ -525,6 +525,9 @@ void FOSLSProblem::Update()
     for (int i = 0; i < plforms.Size(); ++i)
         plforms[i]->Update();
 
+    // If it's a basic FOSLSEstimator constructed without any
+    // extra grfuns, this call does nothing since all the grfuns
+    // are already updated several lines above
     for (int i = 0; i < estimators.Size(); ++i)
         estimators[i]->Update();
 
@@ -2726,7 +2729,8 @@ void CFOSLSHyperbolicProblem::Update()
 }
 
 GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
-    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false), pmesh_ne(0)
+    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false),
+      pmesh_ne(0), update_counter(0)
 {
     pmesh_ne = pmesh.GetNE();
     int dim = pmesh.Dimension();
@@ -3061,6 +3065,8 @@ void GeneralHierarchy::Update()
         pmesh_ne = pmesh.GetNE();
 
         ++num_lvls;
+
+        ++update_counter;
     } // end of if update is required
 }
 

@@ -8,7 +8,8 @@ namespace mfem
 
 // old implementation, now is a simplified form of the blocked case
 // here FOSLS functional is given as a bilinear form(sigma, sigma)
-double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Vector &error_estimates)
+double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma,
+                           Vector &error_estimates)
 {
     FiniteElementSpace * fes = sigma.FESpace();
     int ne = fes->GetNE();
@@ -50,7 +51,8 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma, Ve
 
 // here FOSLS functional is given as a symmetric block matrix with bilinear forms for
 // different grid functions (each for all solution and rhs components)
-double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis, Array<ParGridFunction*> & grfuns, Vector &error_estimates)
+double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
+                           Array<ParGridFunction*> & grfuns, Vector &error_estimates)
 {
     /*
      * using a simpler version
@@ -178,15 +180,17 @@ FOSLSEstimator::FOSLSEstimator(MPI_Comm Comm, Array<ParGridFunction *> &solution
 // 'a' must be 1, if the corresponding grid function
 // can be found inside the grfuns array of the problem
 // and -1, if it must be found in the extra_grfuns.
-
-FOSLSEstimator::FOSLSEstimator(FOSLSProblem& problem, std::vector<std::pair<int,int> > & grfuns_descriptor,
-               Array<ParGridFunction*>* extra_grfuns, Array2D<BilinearFormIntegrator*>& integrators, bool verbose_)
+FOSLSEstimator::FOSLSEstimator(FOSLSProblem& problem,
+                               std::vector<std::pair<int,int> > & grfuns_descriptor,
+                               Array<ParGridFunction*>* extra_grfuns,
+                               Array2D<BilinearFormIntegrator*>& integrators, bool verbose_)
     : comm (problem.GetComm()), numblocks(integrators.NumRows()), current_sequence(-1),
       global_total_error(0.0), verbose(verbose_)
 {
     grfuns.SetSize(numblocks);
 
-    MFEM_ASSERT(numblocks == (int)(grfuns_descriptor.size()), "Numblocks mismatch the length of the grfuns_descriptor");
+    MFEM_ASSERT(numblocks == (int)(grfuns_descriptor.size()),
+                "Numblocks mismatch the length of the grfuns_descriptor");
 
     for (int i = 0; i < numblocks; ++i)
     {
@@ -207,7 +211,6 @@ FOSLSEstimator::FOSLSEstimator(FOSLSProblem& problem, std::vector<std::pair<int,
             integs(i,j) = integrators(i,j);
 }
 
-
 void FOSLSEstimator::Update()
 {
     for (int i = 0; i < grfuns.Size(); ++i)
@@ -225,9 +228,7 @@ bool FOSLSEstimator::MeshIsModified()
 const Vector & FOSLSEstimator::GetLocalErrors()
 {
     if (MeshIsModified())
-    {
         ComputeEstimates();
-    }
     return error_estimates;
 }
 
@@ -245,12 +246,9 @@ void FOSLSEstimator::ComputeEstimates()
 
     //error_estimates.Print();
 
+    // FIXME: Probably should be moved out of the ComputeEstimates
+    // FIXME: in view of the inheriting classes which might not use current_sequence at all
     current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
-}
-
-void FOSLSEstimator::Reset()
-{
-    current_sequence = -1;
 }
 
 } // for namespace mfem

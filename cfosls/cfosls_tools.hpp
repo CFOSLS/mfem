@@ -307,6 +307,9 @@ protected:
     bool divfreedops_constructed;
 
     int pmesh_ne;
+
+    int update_counter;
+
 public:
     GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose);
 
@@ -381,6 +384,8 @@ public:
     std::vector<HypreParMatrix*> & GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
     BlockOperator* GetDofTrueDof(const Array<SpaceName> &space_names, int level,
                                  Array<int>& row_offsets, Array<int>& col_offsets) const;
+
+    int GetUpdateCounter() const {return update_counter;}
 };
 
 class GeneralCylHierarchy : public GeneralHierarchy
@@ -811,6 +816,8 @@ protected:
 
     // all par grid functions which are relevant to the formulation
     // e.g., solution components and right hand sides (2 * numblocks)
+    // with that, righthand sides are essentially vector representations
+    // of the linear forms in the rhs of the variational formulation
     Array<ParGridFunction*> grfuns;
 
     Array<ParFiniteElementSpace*> pfes;
@@ -1146,6 +1153,8 @@ public:
     void ConstructCoarsenedOps();
     void ConstructCoarsenedOps_nobnd();
 
+    int GetUpdateCounter() const {return hierarchy.GetUpdateCounter();}
+
 protected:
     HypreParMatrix& CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
 };
@@ -1157,7 +1166,8 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
                                                              int precond_option, bool verbose_)
     : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_),
       nlevels(nlevels_),
-      hierarchy(hierarchy_), prec_option(precond_option), verbose(verbose_)
+      hierarchy(hierarchy_), prec_option(precond_option),
+      verbose(verbose_)
 {
     problems_lvls.SetSize(nlevels);
     TrueP_lvls.SetSize(nlevels - 1);
