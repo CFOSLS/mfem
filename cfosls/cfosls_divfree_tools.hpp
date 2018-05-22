@@ -169,7 +169,10 @@ private:
 
     // Dof_TrueDof relation tables for each level for functional-related
     // variables and the L2 variable (constraint space).
-    const std::vector<HypreParMatrix*> & dof_trueDof_blocks;
+    const std::vector<HypreParMatrix*> * dof_trueDof_blocks; // for the old version
+    mutable BlockOperator* d_td_funct;
+    bool using_blockop;
+
     const HypreParMatrix& dof_trueDof_L2;
 
     const std::vector<Array<int>* > & essbdrdofs_blocks;
@@ -204,6 +207,14 @@ public:
                           const HypreParMatrix& D_tD_L2,
                           const std::vector<Array<int>* >& EssBdrDofs_blks,
                           const std::vector<Array<int> *> &EssBdrTrueDofs_blks);
+
+    // for the new interface
+    CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
+                          SparseMatrix& Constr_Spmat,
+                          BlockOperator * D_tD_blkop,
+                          const HypreParMatrix& D_tD_L2,
+                          const std::vector<Array<int>* >& EssBdrDofs_blks,
+                          const std::vector<Array<int>* >& EssBdrTrueDofs_blks);
 
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }

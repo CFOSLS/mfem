@@ -1723,9 +1723,19 @@ int main(int argc, char *argv[])
     FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
                                              *fe_formulat, prec_option, verbose);
 
+    // FIXME: Delete this
+    {
+        int numblocks = 2;
+        if (strcmp(space_for_S,"H1") == 0)
+            ++numblocks;
+        std::cout << "problem grfun ... f norm = " << problem->GetGrFun(numblocks + numblocks - 1)->Norml2()
+                     / sqrt(problem->GetGrFun(numblocks + numblocks - 1)->Size())<< "\n";
+    }
+
     int nlevels = ref_levels + 1;
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
     hierarchy->ConstructDivfreeDops();
+    hierarchy->ConstructDofTrueDofs();
 
     Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
 
@@ -3267,8 +3277,8 @@ int main(int argc, char *argv[])
     std::vector<Array<int>* > el2dofs_row_offsets(num_levels);
     std::vector<Array<int>* > el2dofs_col_offsets(num_levels);
 
-    Array<SparseMatrix*> Constraint_mat_lvls_mg(num_levels - 1);
-    Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels - 1);
+    Array<SparseMatrix*> Constraint_mat_lvls_mg(num_levels);
+    Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels);
 
     for (int l = 0; l < num_levels; ++l)
     {
@@ -3301,6 +3311,34 @@ int main(int argc, char *argv[])
 
         Ops_mg_plus[l] = BlockOps_mg_plus[l];
 
+        if (l == 0)
+        {
+            ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                                                    hierarchy->GetSpace(SpaceName::L2, 0));
+            Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Divblock->Assemble();
+            Divblock->Finalize();
+            Constraint_mat_lvls_mg[0] = Divblock->LoseMat();
+            delete Divblock;
+
+            //offsets_sp_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_funct);
+
+            Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(offsets_funct_hdivh1);
+        }
+        else
+        {
+            offsets_sp_hdivh1[l] = &hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
+
+            Constraint_mat_lvls_mg[l] = RAP(*hierarchy->GetPspace(SpaceName::L2, l - 1),
+                                            *Constraint_mat_lvls_mg[l - 1], *hierarchy->GetPspace(SpaceName::HDIV, l - 1));
+
+            BlockMatrix * P_Funct = hierarchy->ConstructPforFormul(l - 1, space_names_funct,
+                                                                       *offsets_sp_hdivh1[l - 1], *offsets_sp_hdivh1[l]);
+            Funct_mat_lvls_mg[l] = RAP(*P_Funct, *Funct_mat_lvls_mg[l - 1], *P_Funct);
+
+            delete P_Funct;
+        }
+
         if (l < num_levels - 1)
         {
             Array<int> SweepsNum(numblocks_funct);
@@ -3329,35 +3367,6 @@ int main(int argc, char *argv[])
             /// Next steps are:
             /// 5) If have time, also look into the simple parabolic example (especially on adding
             /// the parabolic test to FOSLStest setup
-
-            if (l == 0)
-            {
-                ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
-                                                                        hierarchy->GetSpace(SpaceName::L2, 0));
-                Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-                Divblock->Assemble();
-                Divblock->Finalize();
-                Constraint_mat_lvls_mg[0] = Divblock->LoseMat();
-                delete Divblock;
-
-                //offsets_sp_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_funct);
-
-                Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(offsets_funct_hdivh1);
-            }
-            else
-            {
-                offsets_sp_hdivh1[l] = &hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
-
-                Constraint_mat_lvls_mg[l] = RAP(*hierarchy->GetPspace(SpaceName::L2, l - 1),
-                                                *Constraint_mat_lvls_mg[l - 1], *hierarchy->GetPspace(SpaceName::HDIV, l - 1));
-
-                BlockMatrix * P_Funct = hierarchy->ConstructPforFormul(l - 1, space_names_funct,
-                                                                           *offsets_sp_hdivh1[l - 1], *offsets_sp_hdivh1[l]);
-                Funct_mat_lvls_mg[l] = RAP(*P_Funct, *Funct_mat_lvls_mg[l - 1], *P_Funct);
-
-                delete P_Funct;
-            }
-
 
             bool optimized_localsolve = true;
 
@@ -3566,14 +3575,44 @@ int main(int argc, char *argv[])
 
     BlockVector * xinit_new = problem->GetTrueInitialConditionFunc();
 
-    //std::cout << "Floc \n";
-    //Floc.Print();
+    FunctionCoefficient * rhs_coeff = problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs();
+    ParLinearForm * constrfform_new = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
+    constrfform_new->AddDomainIntegrator(new DomainLFIntegrator(*rhs_coeff));
+    constrfform_new->Assemble();
 
-    //std::cout << "problem grfun ... f \n";
-    //problem->GetGrFun(numblocks + numblocks - 1)->Print();
+    // Creating the coarsest problem solver
+    const Array<SpaceName>& space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+    int coarse_size = 0;
+    for (int i = 0; i < space_names_problem.Size(); ++i)
+        coarse_size += hierarchy->GetSpace(space_names_problem[i], num_levels - 1)->TrueVSize();
 
-    MFEM_ABORT("This shows in serial that problem grfun ... = 0 "
-               "but I expected it to be equal Floc. To study tomorrow");
+    Array<int> row_offsets_coarse, col_offsets_coarse;
+
+    std::vector<Array<int>* > &essbdr_tdofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
+
+    std::vector<Array<int>* > &essbdr_dofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
+
+
+    CoarsestProblemSolver* CoarsestSolver_partfinder_new =
+            new CoarsestProblemSolver(coarse_size,
+                                      *Funct_mat_lvls_mg[num_levels - 1],
+            *Constraint_mat_lvls_mg[num_levels - 1],
+            hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
+            *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse);
+
+    Array<LocalProblemSolver*> LocalSolver_partfinder_lvls_new(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (strcmp(space_for_S,"H1") == 0)
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolverWithS*>(SchwarsSmoothers_lvls[l]);
+        else
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolver*>(SchwarsSmoothers_lvls[l]);
+        MFEM_ASSERT(LocalSolver_partfinder_lvls_new[l], "*Unsuccessful cast of the Schwars smoother \n");
+    }
 
     DivConstraintSolver PartsolFinder(comm, num_levels,
                                       AE_e_lvls,
@@ -3586,11 +3625,15 @@ int main(int argc, char *argv[])
                                       Smoo_mg_plus,
                                       *xinit_new,
 #ifdef CHECK_CONSTR
-                                      Floc,
-                                      //*problem->GetGrFun(numblocks + numblocks - 1),
+                                      *constrfform_new,
 #endif
-                                      LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder);
+                                      &LocalSolver_partfinder_lvls_new,
+                                      CoarsestSolver_partfinder_new);
+    CoarsestSolver_partfinder_new->SetMaxIter(70000);
+    CoarsestSolver_partfinder_new->SetAbsTol(1.0e-18);
+    CoarsestSolver_partfinder_new->SetRelTol(1.0e-18);
+    CoarsestSolver_partfinder_new->ResetSolverParams();
+
 #else
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
@@ -3659,9 +3702,9 @@ int main(int argc, char *argv[])
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
 
-    std::cout << "partic sol norm = " << ParticSol.Norml2() / sqrt (ParticSol.Size()) << "\n";
-    MPI_Finalize();
-    return 0;
+    //std::cout << "partic sol norm = " << ParticSol.Norml2() / sqrt (ParticSol.Size()) << "\n";
+    //MPI_Finalize();
+    //return 0;
 #else
     Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif

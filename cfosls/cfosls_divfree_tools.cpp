@@ -574,7 +574,9 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
       comm(D_tD_L2.GetComm()),
       Op_blkspmat(&Op_Blksmat),
       Constr_spmat(&Constr_Spmat),
-      dof_trueDof_blocks(D_tD_blks),
+      dof_trueDof_blocks(&D_tD_blks),
+      d_td_funct(NULL),
+      using_blockop(false),
       dof_trueDof_L2(D_tD_L2),
       essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks)
@@ -584,7 +586,43 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
     block_offsets.SetSize(numblocks + 1);
     block_offsets[0] = 0;
     for (int blk = 0; blk < numblocks; ++blk)
-        block_offsets[blk + 1] = dof_trueDof_blocks[blk]->Width();
+        block_offsets[blk + 1] = (*dof_trueDof_blocks)[blk]->Width();
+    block_offsets.PartialSum();
+
+    coarse_rhsfunc_offsets.SetSize(numblocks + 1);
+    coarse_offsets.SetSize(numblocks + 2);
+
+    maxIter = 50;
+    rtol = 1.e-4;
+    atol = 1.e-4;
+
+    Setup();
+}
+
+CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
+                                             SparseMatrix& Constr_Spmat,
+                                             BlockOperator * D_tD_blkop,
+                                             const HypreParMatrix& D_tD_L2,
+                                             const std::vector<Array<int>* >& EssBdrDofs_blks,
+                                             const std::vector<Array<int>* >& EssBdrTrueDofs_blks)
+    : Operator(Size),
+      numblocks(Op_Blksmat.NumRowBlocks()),
+      comm(D_tD_L2.GetComm()),
+      Op_blkspmat(&Op_Blksmat),
+      Constr_spmat(&Constr_Spmat),
+      dof_trueDof_blocks(NULL),
+      d_td_funct(D_tD_blkop),
+      using_blockop(true),
+      dof_trueDof_L2(D_tD_L2),
+      essbdrdofs_blocks(EssBdrDofs_blks),
+      essbdrtruedofs_blocks(EssBdrTrueDofs_blks)
+{
+    finalized = false;
+
+    block_offsets.SetSize(numblocks + 1);
+    block_offsets[0] = 0;
+    for (int blk = 0; blk < numblocks; ++blk)
+        block_offsets[blk + 1] = d_td_funct->GetBlock(blk,blk).Width();
     block_offsets.PartialSum();
 
     coarse_rhsfunc_offsets.SetSize(numblocks + 1);
@@ -659,19 +697,23 @@ void CoarsestProblemSolver::Setup() const
 
     // 2. Creating the block matrix from the local parts using dof_truedof relation
     HYPRE_Int glob_num_rows = dof_trueDof_L2.M();
-    HYPRE_Int glob_num_cols = dof_trueDof_blocks[0]->M();
+    HYPRE_Int glob_num_cols;
+    if (using_blockop)
+        glob_num_cols = ((HypreParMatrix&)d_td_funct->GetBlock(0,0)).M();
+    else
+        glob_num_cols = (*dof_trueDof_blocks)[0]->M();
     HYPRE_Int * row_starts = dof_trueDof_L2.GetRowStarts();
-    HYPRE_Int * col_starts = dof_trueDof_blocks[0]->GetRowStarts();;
+    HYPRE_Int * col_starts;
+    if (using_blockop)
+        col_starts = ((HypreParMatrix&)d_td_funct->GetBlock(0,0)).GetRowStarts();
+    else
+        col_starts = (*dof_trueDof_blocks)[0]->GetRowStarts();
     HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, Constr_spmat);
-    //temp->CopyRowStarts();
-    //temp->CopyColStarts();
-    HypreParMatrix * Constr_global = RAP(&dof_trueDof_L2, temphpmat, dof_trueDof_blocks[0]);
-
-    // old way
-    //HypreParMatrix * Constr_d_td = dof_trueDof_blocks[0]->LeftDiagMult(
-                //*Constr_spmat, dof_trueDof_L2.GetColStarts());
-    //HypreParMatrix * d_td_L2_T = dof_trueDof_L2.Transpose();
-    //HypreParMatrix * Constr_global = ParMult(d_td_L2_T, Constr_d_td);
+    HypreParMatrix * Constr_global;
+    if (using_blockop)
+        Constr_global = RAP(&dof_trueDof_L2, temphpmat, (HypreParMatrix*)(&d_td_funct->GetBlock(0,0)));
+    else
+        Constr_global = RAP(&dof_trueDof_L2, temphpmat, (*dof_trueDof_blocks)[0]);
 
     Constr_global->CopyRowStarts();
     Constr_global->CopyColStarts();
@@ -686,36 +728,39 @@ void CoarsestProblemSolver::Setup() const
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
         {
+            HYPRE_Int glob_num_rows;
+            HYPRE_Int glob_num_cols;
+            HYPRE_Int * row_starts;
+            HYPRE_Int * col_starts;
+
             // alternative way
-            HYPRE_Int glob_num_rows = dof_trueDof_blocks[blk1]->M();
-            HYPRE_Int glob_num_cols = dof_trueDof_blocks[blk2]->M();
-            HYPRE_Int * row_starts = dof_trueDof_blocks[blk1]->GetRowStarts();
-            HYPRE_Int * col_starts = dof_trueDof_blocks[blk2]->GetRowStarts();;
-            //std::cout << "row_starts: " << row_starts[0] << ", " << row_starts[1] << "\n";
-            //std::cout << "col_starts: " << col_starts[0] << ", " << col_starts[1] << "\n";
-            //HypreParMatrix * temp = new HypreParMatrix(MPI_COMM_WORLD, glob_size, row_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+            if (using_blockop)
+            {
+                glob_num_rows = ((HypreParMatrix&)d_td_funct->GetBlock(blk1,blk1)).M();
+                glob_num_cols = ((HypreParMatrix&)d_td_funct->GetBlock(blk2,blk2)).M();
+                row_starts = ((HypreParMatrix&)d_td_funct->GetBlock(blk1,blk1)).GetRowStarts();
+                col_starts = ((HypreParMatrix&)d_td_funct->GetBlock(blk2,blk2)).GetRowStarts();
+            }
+            else
+            {
+                glob_num_rows = (*dof_trueDof_blocks)[blk1]->M();
+                glob_num_cols = (*dof_trueDof_blocks)[blk2]->M();
+                row_starts = (*dof_trueDof_blocks)[blk1]->GetRowStarts();
+                col_starts = (*dof_trueDof_blocks)[blk2]->GetRowStarts();;
+            }
+
+
             HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
-            //temp->CopyRowStarts();
-            //temp->CopyColStarts();
-            Funct_global(blk1, blk2) = RAP(dof_trueDof_blocks[blk1], temphpmat, dof_trueDof_blocks[blk2]);
-
-            // old way
-            //auto Funct_d_td = dof_trueDof_blocks[blk2]->LeftDiagMult(Op_blkspmat->GetBlock(blk1,blk2),
-            //                                                         dof_trueDof_blocks[blk1]->GetRowStarts() );
-            //auto d_td_T = dof_trueDof_blocks[blk1]->Transpose();
-            //Funct_global(blk1, blk2) = ParMult(d_td_T, Funct_d_td);
-
+            if (using_blockop)
+                Funct_global(blk1, blk2) = RAP((HypreParMatrix*)&d_td_funct->GetBlock(blk1,blk1), temphpmat,
+                                               (HypreParMatrix*)&d_td_funct->GetBlock(blk2,blk2));
+            else
+                Funct_global(blk1, blk2) = RAP((*dof_trueDof_blocks)[blk1], temphpmat, (*dof_trueDof_blocks)[blk2]);
 
             Funct_global(blk1, blk2)->CopyRowStarts();
             Funct_global(blk1, blk2)->CopyColStarts();
 
-            //SparseMatrix diag_debug;
-            //Funct_global(blk1, blk2)->GetDiag(diag_debug);
-            //diag_debug.Print();
-
             delete temphpmat;
-            //delete Funct_d_td;
-            //delete d_td_T;
         }
 
     coarse_offsets[0] = 0;

@@ -2787,7 +2787,8 @@ void CFOSLSHyperbolicProblem::Update()
 }
 
 GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
-    : num_lvls(num_levels), pmesh(pmesh_), divfreedops_constructed (false),
+    : num_lvls(num_levels), pmesh(pmesh_),
+      divfreedops_constructed (false), doftruedofs_constructed (true),
       pmesh_ne(0), update_counter(0)
 {
     pmesh_ne = pmesh.GetNE();
@@ -3120,6 +3121,26 @@ void GeneralHierarchy::Update()
             DivfreeDops_lvls.Prepend(DivfreeDops_new);
         }
 
+        if (doftruedofs_constructed)
+        {
+            int dim = pmesh_lvls[0]->Dimension();
+
+            HypreParMatrix * DofTrueDof_L2_new = L2_space_lvls[0]->Dof_TrueDof_Matrix();
+            HypreParMatrix * DofTrueDof_H1_new = H1_space_lvls[0]->Dof_TrueDof_Matrix();
+            HypreParMatrix * DofTrueDof_Hdiv_new = Hdiv_space_lvls[0]->Dof_TrueDof_Matrix();
+            HypreParMatrix * DofTrueDof_Hcurl_new = Hcurl_space_lvls[0]->Dof_TrueDof_Matrix();
+            HypreParMatrix * DofTrueDof_Hdivskew_new;
+            if (dim == 4)
+                DofTrueDof_Hdivskew_new = Hdivskew_space_lvls[0]->Dof_TrueDof_Matrix();
+
+            DofTrueDof_L2_lvls.Prepend(DofTrueDof_L2_new);
+            DofTrueDof_H1_lvls.Prepend(DofTrueDof_H1_new);
+            DofTrueDof_Hdiv_lvls.Prepend(DofTrueDof_Hdiv_new);
+            DofTrueDof_Hcurl_lvls.Prepend(DofTrueDof_Hcurl_new);
+            if (dim == 4)
+                DofTrueDof_Hdivskew_lvls.Prepend(DofTrueDof_Hdivskew_new);
+        }
+
         pmesh_ne = pmesh.GetNE();
 
         ++num_lvls;
@@ -3158,6 +3179,30 @@ void GeneralHierarchy::ConstructDivfreeDops()
 
     divfreedops_constructed = true;
 }
+
+void GeneralHierarchy::ConstructDofTrueDofs()
+{
+    int dim = pmesh_lvls[0]->Dimension();
+
+    DofTrueDof_L2_lvls.SetSize(num_lvls);
+    DofTrueDof_H1_lvls.SetSize(num_lvls);
+    DofTrueDof_Hdiv_lvls.SetSize(num_lvls);
+    DofTrueDof_Hcurl_lvls.SetSize(num_lvls);
+    if (dim == 4)
+        DofTrueDof_Hdivskew_lvls.SetSize(num_lvls);
+
+    for (int l = 0; l < num_lvls; ++l)
+    {
+        DofTrueDof_L2_lvls[l] = L2_space_lvls[l]->Dof_TrueDof_Matrix();
+        DofTrueDof_H1_lvls[l] = H1_space_lvls[l]->Dof_TrueDof_Matrix();
+        DofTrueDof_Hdiv_lvls[l] = Hdiv_space_lvls[l]->Dof_TrueDof_Matrix();
+        DofTrueDof_Hcurl_lvls[l] = Hcurl_space_lvls[l]->Dof_TrueDof_Matrix();
+        if (dim == 4)
+            DofTrueDof_Hdivskew_lvls[l] = Hdivskew_space_lvls[l]->Dof_TrueDof_Matrix();
+    }
+    doftruedofs_constructed = true;
+}
+
 
 const Array<int>& GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {
@@ -3546,24 +3591,18 @@ BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_na
 
 HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level) const
 {
-    ParFiniteElementSpace * pfes;
     switch(space_name)
     {
     case HDIV:
-        pfes = Hdiv_space_lvls[level];
-        break;
+        return DofTrueDof_Hdiv_lvls[level];
     case H1:
-        pfes = H1_space_lvls[level];
-        break;
+        return DofTrueDof_H1_lvls[level];
     case L2:
-        pfes = L2_space_lvls[level];
-        break;
+        return DofTrueDof_L2_lvls[level];
     case HCURL:
-        pfes = Hcurl_space_lvls[level];
-        break;
+        return DofTrueDof_Hcurl_lvls[level];
     case HDIVSKEW:
-        pfes = Hdivskew_space_lvls[level];
-        break;
+        return DofTrueDof_Hdivskew_lvls[level];
     default:
         {
             MFEM_ABORT("Unknown or unsupported space name \n");
@@ -3571,9 +3610,7 @@ HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
         }
     }
 
-    HypreParMatrix * temp = pfes->Dof_TrueDof_Matrix();
-
-    return CopyHypreParMatrix(*temp);
+    return NULL;
 }
 
 std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names, int level) const

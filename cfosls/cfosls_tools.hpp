@@ -304,7 +304,14 @@ protected:
 
     Array<const HypreParMatrix*> DivfreeDops_lvls;
 
+    Array< HypreParMatrix* > DofTrueDof_L2_lvls;
+    Array< HypreParMatrix* > DofTrueDof_H1_lvls;
+    Array< HypreParMatrix* > DofTrueDof_Hdiv_lvls;
+    Array< HypreParMatrix* > DofTrueDof_Hcurl_lvls;
+    Array< HypreParMatrix* > DofTrueDof_Hdivskew_lvls;
+
     bool divfreedops_constructed;
+    bool doftruedofs_constructed;
 
     int pmesh_ne;
 
@@ -320,6 +327,7 @@ public:
     virtual void Update();
 
     void ConstructDivfreeDops();
+    void ConstructDofTrueDofs();
 
     void RefineAndCopy(int lvl, ParMesh* pmesh);
 
