@@ -375,12 +375,12 @@ public:
     std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<Array<int>*>& essbdr_attribs, int level) const;
 
-    SparseMatrix& GetElementToDofs(SpaceName space_name, int level) const;
+    SparseMatrix* GetElementToDofs(SpaceName space_name, int level) const;
 
-    BlockMatrix& GetElementToDofs(const Array<SpaceName>& space_names, int level,
+    BlockMatrix* GetElementToDofs(const Array<SpaceName>& space_names, int level,
                                   Array<int>& row_offsets, Array<int>& col_offsets) const;
 
-    HypreParMatrix& GetDofTrueDof(SpaceName space_name, int level) const;
+    HypreParMatrix *GetDofTrueDof(SpaceName space_name, int level) const;
     std::vector<HypreParMatrix*> & GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
     BlockOperator* GetDofTrueDof(const Array<SpaceName> &space_names, int level,
                                  Array<int>& row_offsets, Array<int>& col_offsets) const;
@@ -1994,11 +1994,11 @@ public:
     void Reset() {MFEM_ABORT("Not implemented \n");}
 };
 
-HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop);
+HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& hpmat);
 
 void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks);
 
-SparseMatrix& ElementToDofs(const FiniteElementSpace &fes);
+SparseMatrix *ElementToDofs(const FiniteElementSpace &fes);
 
 BlockMatrix *RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P);
 

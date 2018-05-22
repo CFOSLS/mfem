@@ -914,6 +914,8 @@ public:
                    Array< SparseMatrix*> &Element_dofs_W,
                    HypreParMatrix * d_td_coarse_R,
                    HypreParMatrix * d_td_coarse_W,
+                   int* R_offsets,
+                   int* W_offsets,
                    Vector &sigma,
                    Array<int>& ess_dof_coarsestlvl_list
                    )
@@ -1171,15 +1173,20 @@ public:
 
         Vector sig_c(B_coarse->Width());
 
-        auto B_Global = d_td_coarse_R->LeftDiagMult(*B_coarse,d_td_coarse_W->GetColStarts());
+        //std::cout << "first LeftDiagMult \n";
+        auto B_Global = d_td_coarse_R->LeftDiagMult(*B_coarse, W_offsets);//d_td_coarse_W->GetColStarts());// W_trueoffsets);
+
         Vector Truesig_c(B_Global->Width());
 
         if (M_fine)
         {
-            auto d_td_M = d_td_coarse_R->LeftDiagMult(*M_coarse);
+            //std::cout << "second LeftDiagMult \n";
+            auto d_td_M = d_td_coarse_R->LeftDiagMult(*M_coarse, R_offsets);
+
             HypreParMatrix *d_td_T = d_td_coarse_R->Transpose();
 
             HypreParMatrix *M_Global = ParMult(d_td_T, d_td_M);
+
             HypreParMatrix *BT = B_Global->Transpose();
 
             Array<int> block_offsets(3); // number of variables + 1

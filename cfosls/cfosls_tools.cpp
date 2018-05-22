@@ -3400,7 +3400,7 @@ void GeneralHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
     }
 }
 
-SparseMatrix& GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level) const
+SparseMatrix* GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level) const
 {
     ParFiniteElementSpace * pfes;
     switch(space_name)
@@ -3430,7 +3430,7 @@ SparseMatrix& GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level
     return ElementToDofs(*pfes);
 }
 
-BlockMatrix& GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_names, int level,
+BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_names, int level,
                                                 Array<int>& row_offsets, Array<int>& col_offsets) const
 {
     Array<ParFiniteElementSpace*> pfess(space_names.Size());
@@ -3477,16 +3477,16 @@ BlockMatrix& GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_na
 
     for (int i = 0; i < res->NumRowBlocks(); ++i)
     {
-        SparseMatrix * el2dofs_blk = &ElementToDofs(*pfess[i]);
+        SparseMatrix * el2dofs_blk = ElementToDofs(*pfess[i]);
         res->SetBlock(i,i, el2dofs_blk);
     }
 
     res->owns_blocks = true;
 
-    return * res;
+    return res;
 }
 
-HypreParMatrix& GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level) const
+HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level) const
 {
     ParFiniteElementSpace * pfes;
     switch(space_name)
@@ -3515,7 +3515,7 @@ HypreParMatrix& GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
 
     HypreParMatrix * temp = pfes->Dof_TrueDof_Matrix();
 
-    return *CopyHypreParMatrix(*temp);
+    return CopyHypreParMatrix(*temp);
 }
 
 std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names, int level) const
@@ -3524,7 +3524,7 @@ std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<Space
     res->resize(space_names.Size());
     for (int i = 0; i < space_names.Size(); ++i)
     {
-        (*res)[i] = &GetDofTrueDof(space_names[i], level);
+        (*res)[i] = GetDofTrueDof(space_names[i], level);
     }
 
     return *res;
@@ -4431,9 +4431,9 @@ HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
 
 /// simple copy by using Transpose (and temporarily allocating
 /// additional memory of size = size of the inpt matrix)
-HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& divfree_dop)
+HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& hpmat)
 {
-    HypreParMatrix * temp = divfree_dop.Transpose();
+    HypreParMatrix * temp = hpmat.Transpose();
     temp->CopyColStarts();
     temp->CopyRowStarts();
 
@@ -4556,7 +4556,7 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
         }
 }
 
-SparseMatrix& ElementToDofs(const FiniteElementSpace &fes)
+SparseMatrix* ElementToDofs(const FiniteElementSpace &fes)
 {
     // Returns a SparseMatrix with the relation Element to Dofs
     int * I = new int[fes.GetNE() + 1];
@@ -4584,7 +4584,7 @@ SparseMatrix& ElementToDofs(const FiniteElementSpace &fes)
 
     }
     SparseMatrix * res = new SparseMatrix(I, J, data, fes.GetNE(), fes.GetVSize());
-    return *res;
+    return res;
 }
 
 BlockMatrix * RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P)

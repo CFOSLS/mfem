@@ -26,6 +26,8 @@ double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec
     return global_norm;
 }
 
+
+
 // Vector norm assembled over MPI
 double ComputeMPIVecNorm(MPI_Comm comm, const Vector& bvec, char const * string, bool print)
 {
@@ -702,6 +704,7 @@ void CoarsestProblemSolver::Setup() const
             //                                                         dof_trueDof_blocks[blk1]->GetRowStarts() );
             //auto d_td_T = dof_trueDof_blocks[blk1]->Transpose();
             //Funct_global(blk1, blk2) = ParMult(d_td_T, Funct_d_td);
+
 
             Funct_global(blk1, blk2)->CopyRowStarts();
             Funct_global(blk1, blk2)->CopyColStarts();
