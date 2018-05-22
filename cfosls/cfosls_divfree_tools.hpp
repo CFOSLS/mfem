@@ -917,7 +917,7 @@ public:
                    int* R_offsets,
                    int* W_offsets,
                    Vector &sigma,
-                   Array<int>& ess_dof_coarsestlvl_list
+                   const Array<int>& ess_dof_coarsestlvl_list
                    )
     {
 //        StopWatch chrono;

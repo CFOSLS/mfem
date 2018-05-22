@@ -16,7 +16,7 @@
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
-#define WITH_DIVCONSTRAINT_SOLVER
+//#define WITH_DIVCONSTRAINT_SOLVER
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
     bool aniso_refine = false;
     bool refine_t_first = false;
 
-    bool with_multilevel = true;
+    bool with_multilevel = false;
     bool monolithicMG = false;
 
     bool useM_in_divpart = true;
@@ -1968,11 +1968,9 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
     ParGridFunction * Sigmahat = new ParGridFunction(R_space);
-    ParLinearForm *gform;
     HypreParMatrix *Bdiv;
 
-    Vector F_fine(P_W[0]->Height());
-    Vector G_fine(P_R[0]->Height());
+    ParLinearForm *gform;
     Vector sigmahat_pau;
 
     if (with_multilevel)
@@ -1985,7 +1983,7 @@ int main(int argc, char *argv[])
         SparseMatrix *M_local;
         if (useM_in_divpart)
         {
-            ParBilinearForm *Massform = new ParBilinearForm(R_space);
+            ParBilinearForm *Massform = new ParBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0));
             Massform->AddDomainIntegrator(new VectorFEMassIntegrator(k));
             Massform->Assemble();
             Massform->Finalize();
@@ -1995,7 +1993,9 @@ int main(int argc, char *argv[])
         else
             M_local = NULL;
 
-        ParMixedBilinearForm *DivForm(new ParMixedBilinearForm(R_space, W_space));
+        ParMixedBilinearForm *DivForm(new ParMixedBilinearForm
+                                      (hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                       hierarchy->GetSpace(SpaceName::L2, 0)));
         DivForm->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
         DivForm->Assemble();
         DivForm->Finalize();
@@ -2003,85 +2003,56 @@ int main(int argc, char *argv[])
         SparseMatrix *B_local = DivForm->LoseMat();
 
         //Right hand size
-        gform = new ParLinearForm(W_space);
-        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*problem->GetFEformulation().
+                                                          GetFormulation()->GetTest()->GetRhs()));
         gform->Assemble();
+
+        Vector F_fine(hierarchy->GetSpace(SpaceName::L2, 0)->GetVSize());
+        Vector G_fine(hierarchy->GetSpace(SpaceName::HDIV, 0)->GetVSize());
 
         F_fine = *gform;
         G_fine = .0;
 
         Array< SparseMatrix*> el2dofs_R(ref_levels);
         Array< SparseMatrix*> el2dofs_W(ref_levels);
+        Array< SparseMatrix*> P_Hdiv_lvls(ref_levels);
+        Array< SparseMatrix*> P_L2_lvls(ref_levels);
+        Array< SparseMatrix*> AE_e_lvls(ref_levels);
 
         for (int l = 0; l < ref_levels; ++l)
         {
             el2dofs_R[l] = hierarchy->GetElementToDofs(SpaceName::HDIV, l);
             el2dofs_W[l] = hierarchy->GetElementToDofs(SpaceName::L2, l);
+
+            P_Hdiv_lvls[l] = hierarchy->GetPspace(SpaceName::HDIV, l);
+            P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
+            AE_e_lvls[l] = P_L2_lvls[l];
         }
 
-        /*
-        HypreParMatrix * d_td_l2_coarse = hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1);
-        HypreParMatrix * check = d_td_l2_coarse->Transpose();
-
-        HypreParMatrix * temp = Dof_TrueDof_Func_lvls[num_levels - 1][0]->Transpose();
-        temp->CopyColStarts();
-        temp->CopyRowStarts();
-
-        HypreParMatrix * temp2 = temp->Transpose();
-        temp2->CopyColStarts();
-        temp2->CopyRowStarts();
-
-        //HypreParMatrix * temp2 = Dof_TrueDof_Func_lvls[num_levels - 1][0];
-
-        ParBilinearForm *Massform = new ParBilinearForm
-                (hierarchy->GetSpace(SpaceName::HDIV, num_levels - 1));
-        Massform->AddDomainIntegrator(new VectorFEMassIntegrator(k));
-        Massform->Assemble();
-        Massform->Finalize();
-        SparseMatrix * M_coarse = Massform->LoseMat();
-        delete Massform;
-
-
-        auto d_td_M = temp2->LeftDiagMult(*M_coarse,
-                                          hierarchy->GetSpace(SpaceName::HDIV, num_levels - 1)->GetTrueDofOffsets());
-        d_td_M->CopyColStarts();
-        d_td_M->CopyRowStarts();
-
-        HypreParMatrix *d_td_T = temp2->Transpose();
-        d_td_T->CopyColStarts();
-        d_td_T->CopyRowStarts();
-
-        HypreParMatrix *M_Global = ParMult(d_td_T, d_td_M);
-        M_Global->CopyColStarts();
-        M_Global->CopyRowStarts();
-
-        MPI_Finalize();
-        return 0;
-        */
+        const Array<int>& coarse_essbdr_dofs_Hdiv = hierarchy->GetEssBdrTdofsOrDofs
+                ("dof", SpaceName::HDIV, *essbdr_attribs[0], num_levels - 1);
 
         divp.div_part(ref_levels,
                       M_local, B_local,
                       G_fine,
                       F_fine,
-                      P_W, P_R, P_W,
+                      P_L2_lvls, P_Hdiv_lvls, AE_e_lvls,
                       el2dofs_R,
                       el2dofs_W,
                       hierarchy->GetDofTrueDof(SpaceName::HDIV, num_levels - 1),
-                      //Dof_TrueDof_Func_lvls[num_levels - 1][0],
-                      //temp2,
                       hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
-                      //Dof_TrueDof_L2_lvls[num_levels - 1],
                       R_space_lvls[num_levels - 1]->GetDofOffsets(),
                       W_space_lvls[num_levels - 1]->GetDofOffsets(),
                       sigmahat_pau,
-                      *EssBdrDofs_Funct_lvls[num_levels - 1][0]);
-
-        //MPI_Finalize();
-        //return 0;
+                      coarse_essbdr_dofs_Hdiv);
 
         delete DivForm;
 
 #else
+        Vector F_fine(P_W[0]->Height());
+        Vector G_fine(P_R[0]->Height());
+
         ConstantCoefficient k(1.0);
 
         SparseMatrix *M_local;
@@ -2155,6 +2126,59 @@ int main(int argc, char *argv[])
         HypreParMatrix *BBT;
         HypreParVector *Rhs;
 
+#ifdef NEW_INTERFACE
+        sigma_exact = new ParGridFunction(hierarchy->GetSpace(SpaceName::HDIV, 0));
+        sigma_exact->ProjectCoefficient(*problem->GetFEformulation().
+                                        GetFormulation()->GetTest()->GetSigma());
+        //sigma_exact->ProjectCoefficient(*Mytest.sigma);
+
+        gform = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*problem->GetFEformulation().
+                                                          GetFormulation()->GetTest()->GetRhs()));
+        //gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform->Assemble();
+
+        Bblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                          hierarchy->GetSpace(SpaceName::L2, 0));
+        Bblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Bblock->Assemble();
+        Bblock->EliminateTrialDofs(*essbdr_attribs[0], *sigma_exact, *gform);
+
+        Bblock->Finalize();
+        Bdiv = Bblock->ParallelAssemble();
+        BdivT = Bdiv->Transpose();
+        BBT = ParMult(Bdiv, BdivT);
+        Rhs = gform->ParallelAssemble();
+
+        HypreBoomerAMG * invBBT = new HypreBoomerAMG(*BBT);
+        invBBT->SetPrintLevel(0);
+
+        mfem::CGSolver solver(comm);
+        solver.SetPrintLevel(0);
+        solver.SetMaxIter(70000);
+        solver.SetRelTol(1.0e-12);
+        solver.SetAbsTol(1.0e-14);
+        solver.SetPreconditioner(*invBBT);
+        solver.SetOperator(*BBT);
+
+        Vector * Temphat = new Vector(hierarchy->GetSpace(SpaceName::L2, 0)->TrueVSize());
+        *Temphat = 0.0;
+        solver.Mult(*Rhs, *Temphat);
+
+        Vector * Temp = new Vector(hierarchy->GetSpace(SpaceName::HDIV, 0)->TrueVSize());
+        BdivT->Mult(*Temphat, *Temp);
+
+        Sigmahat->Distribute(*Temp);
+        //Sigmahat->SetFromTrueDofs(*Temp);
+
+        delete sigma_exact;
+        delete invBBT;
+        delete BBT;
+        delete Bblock;
+        delete Rhs;
+        delete Temphat;
+        delete Temp;
+#else
         sigma_exact = new ParGridFunction(R_space);
         sigma_exact->ProjectCoefficient(*Mytest.sigma);
 
@@ -2201,6 +2225,8 @@ int main(int argc, char *argv[])
         delete Rhs;
         delete Temphat;
         delete Temp;
+#endif
+
     }
 
     // in either way now Sigmahat is a function from H(div) s.t. div Sigmahat = div sigma = f
