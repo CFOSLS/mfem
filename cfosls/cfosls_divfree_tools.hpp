@@ -420,6 +420,7 @@ protected:
     int num_levels;
 
     // Relation tables which represent agglomerated elements-to-elements relation at each level
+    // used in ProjectFinerL2ToCoarser (and further in ComputeLocalRhsConstr)
     const Array< SparseMatrix*>& AE_e;
 
     const MPI_Comm comm;

@@ -16,7 +16,7 @@
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
-//#define WITH_DIVCONSTRAINT_SOLVER
+#define WITH_DIVCONSTRAINT_SOLVER
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
     bool aniso_refine = false;
     bool refine_t_first = false;
 
-    bool with_multilevel = false;
+    bool with_multilevel = true;
     bool monolithicMG = false;
 
     bool useM_in_divpart = true;
@@ -2018,7 +2018,7 @@ int main(int argc, char *argv[])
         Array< SparseMatrix*> el2dofs_W(ref_levels);
         Array< SparseMatrix*> P_Hdiv_lvls(ref_levels);
         Array< SparseMatrix*> P_L2_lvls(ref_levels);
-        Array< SparseMatrix*> AE_e_lvls(ref_levels);
+        Array< SparseMatrix*> e_AE_lvls(ref_levels);
 
         for (int l = 0; l < ref_levels; ++l)
         {
@@ -2027,7 +2027,7 @@ int main(int argc, char *argv[])
 
             P_Hdiv_lvls[l] = hierarchy->GetPspace(SpaceName::HDIV, l);
             P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
-            AE_e_lvls[l] = P_L2_lvls[l];
+            e_AE_lvls[l] = P_L2_lvls[l];
         }
 
         const Array<int>& coarse_essbdr_dofs_Hdiv = hierarchy->GetEssBdrTdofsOrDofs
@@ -2037,13 +2037,15 @@ int main(int argc, char *argv[])
                       M_local, B_local,
                       G_fine,
                       F_fine,
-                      P_L2_lvls, P_Hdiv_lvls, AE_e_lvls,
+                      P_L2_lvls, P_Hdiv_lvls, e_AE_lvls,
                       el2dofs_R,
                       el2dofs_W,
                       hierarchy->GetDofTrueDof(SpaceName::HDIV, num_levels - 1),
                       hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
-                      R_space_lvls[num_levels - 1]->GetDofOffsets(),
-                      W_space_lvls[num_levels - 1]->GetDofOffsets(),
+                      hierarchy->GetSpace(SpaceName::HDIV, num_levels - 1)->GetDofOffsets(),
+                      hierarchy->GetSpace(SpaceName::L2, num_levels - 1)->GetDofOffsets(),
+                      //R_space_lvls[num_levels - 1]->GetDofOffsets(),
+                      //W_space_lvls[num_levels - 1]->GetDofOffsets(),
                       sigmahat_pau,
                       coarse_essbdr_dofs_Hdiv);
 
@@ -2097,6 +2099,8 @@ int main(int argc, char *argv[])
                       Element_dofs_W,
                       Dof_TrueDof_Func_lvls[num_levels - 1][0],
                       Dof_TrueDof_L2_lvls[num_levels - 1],
+                      R_space_lvls[num_levels - 1]->GetDofOffsets(),
+                      W_space_lvls[num_levels - 1]->GetDofOffsets(),
                       sigmahat_pau,
                       *EssBdrDofs_Funct_lvls[num_levels - 1][0]);
 
@@ -3533,6 +3537,61 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
+
+#ifdef NEW_INTERFACE
+    //std::vector<Array<int>* > &essbdr_tdofs_funct =
+            //hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names, essbdr_attribs, l + 1);
+
+    //Array< SparseMatrix*> el2dofs_R(ref_levels);
+    //Array< SparseMatrix*> el2dofs_W(ref_levels);
+    //Array< SparseMatrix*> P_Hdiv_lvls(ref_levels);
+    Array< SparseMatrix*> P_L2_lvls(ref_levels);
+    Array< SparseMatrix*> AE_e_lvls(ref_levels);
+
+    for (int l = 0; l < ref_levels; ++l)
+    {
+        //el2dofs_R[l] = hierarchy->GetElementToDofs(SpaceName::HDIV, l);
+        //el2dofs_W[l] = hierarchy->GetElementToDofs(SpaceName::L2, l);
+        //P_Hdiv_lvls[l] = hierarchy->GetPspace(SpaceName::HDIV, l);
+        P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
+        AE_e_lvls[l] = Transpose(*P_L2_lvls[l]);
+    }
+
+    std::vector< std::vector<Array<int>* > > essbdr_tdofs_funct_lvls(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+    {
+        essbdr_tdofs_funct_lvls[l] = hierarchy->GetEssBdrTdofsOrDofs
+                ("tdof", space_names_funct, essbdr_attribs, l);
+    }
+
+    BlockVector * xinit_new = problem->GetTrueInitialConditionFunc();
+
+    //std::cout << "Floc \n";
+    //Floc.Print();
+
+    //std::cout << "problem grfun ... f \n";
+    //problem->GetGrFun(numblocks + numblocks - 1)->Print();
+
+    MFEM_ABORT("This shows in serial that problem grfun ... = 0 "
+               "but I expected it to be equal Floc. To study tomorrow");
+
+    DivConstraintSolver PartsolFinder(comm, num_levels,
+                                      AE_e_lvls,
+                                      BlockP_mg_nobnd_plus,
+                                      P_L2_lvls,
+                                      essbdr_tdofs_funct_lvls,
+                                      Ops_mg_special,
+                                      (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
+                                      Floc,
+                                      Smoo_mg_plus,
+                                      *xinit_new,
+#ifdef CHECK_CONSTR
+                                      Floc,
+                                      //*problem->GetGrFun(numblocks + numblocks - 1),
+#endif
+                                      LocalSolver_partfinder_lvls,
+                                      CoarsestSolver_partfinder);
+#else
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
@@ -3546,6 +3605,7 @@ int main(int argc, char *argv[])
 #endif
                                       LocalSolver_partfinder_lvls,
                                       CoarsestSolver_partfinder);
+#endif
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
@@ -3598,6 +3658,10 @@ int main(int argc, char *argv[])
     }
 
     PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+
+    std::cout << "partic sol norm = " << ParticSol.Norml2() / sqrt (ParticSol.Size()) << "\n";
+    MPI_Finalize();
+    return 0;
 #else
     Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif

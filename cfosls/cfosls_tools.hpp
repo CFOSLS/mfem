@@ -825,6 +825,7 @@ protected:
     Array<ParLinearForm*> plforms;
 
     Array<int> blkoffsets_true;
+    Array<int> blkoffsets_func_true;
     Array<int> blkoffsets;
     Array2D<HypreParMatrix*> hpmats;
     BlockOperator *CFOSLSop;
@@ -870,6 +871,7 @@ public:
 
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
+    BlockVector * GetTrueInitialConditionFunc();
 
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                  bool verbose_, bool assemble_system);
@@ -940,6 +942,8 @@ public:
     ParFiniteElementSpace * GetPfes(int i) {return pfes[i];}
 
     Array<int>& GetTrueOffsets() { return blkoffsets_true;}
+
+    Array<int>& GetTrueOffsetsFunc() { return blkoffsets_func_true;}
 
     BlockOperator* GetOp() { return CFOSLSop; }
 

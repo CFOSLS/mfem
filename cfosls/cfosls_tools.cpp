@@ -659,12 +659,63 @@ BlockVector * FOSLSProblem::GetTrueInitialCondition()
     // alias
     FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
 
-    //blkoffsets_true.Print();
-
     BlockVector * truebnd = new BlockVector(blkoffsets_true);
     *truebnd = 0.0;
 
     for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
+    {
+        if (fe_formul.GetFormulation()->GetPair(blk).first != -1)
+        {
+            ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+            int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+            MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+            switch (fe_formul.GetFormulation()->GetPair(blk).first)
+            {
+            case 0: // function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+                break;
+            case 1: // vector function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+                break;
+            default:
+                {
+                    MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+                }
+                break;
+
+            }
+
+            Vector exsol_tdofs(pfes[blk]->TrueVSize());
+            exsol_pgfun->ParallelProject(exsol_tdofs);
+
+            Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+
+            Array<int> ess_tdofs;
+            pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
+
+            for (int j = 0; j < ess_tdofs.Size(); ++j)
+            {
+                int tdof = ess_tdofs[j];
+                truebnd->GetBlock(blk)[tdof] = exsol_tdofs[tdof];
+            }
+
+            delete exsol_pgfun;
+        }
+    }
+
+    return truebnd;
+}
+
+BlockVector * FOSLSProblem::GetTrueInitialConditionFunc()
+{
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    BlockVector * truebnd = new BlockVector(blkoffsets_func_true);
+    *truebnd = 0.0;
+
+    for (int blk = 0; blk < fe_formul.Nunknowns(); ++blk)
     {
         if (fe_formul.GetFormulation()->GetPair(blk).first != -1)
         {
@@ -1258,12 +1309,19 @@ void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd, 
 void FOSLSProblem::CreateOffsetsRhsSol()
 {
     int numblocks = fe_formul.Nblocks();
+    int numunknowns = fe_formul.Nunknowns();
 
     blkoffsets_true.SetSize(numblocks + 1);
     blkoffsets_true[0] = 0;
     for (int i = 0; i < numblocks; ++i)
         blkoffsets_true[i + 1] = pfes[i]->TrueVSize();
     blkoffsets_true.PartialSum();
+
+    blkoffsets_func_true.SetSize(numunknowns + 1);
+    blkoffsets_func_true[0] = 0;
+    for (int i = 0; i < numunknowns; ++i)
+        blkoffsets_func_true[i + 1] = pfes[i]->TrueVSize();
+    blkoffsets_func_true.PartialSum();
 
     blkoffsets.SetSize(numblocks + 1);
     blkoffsets[0] = 0;
