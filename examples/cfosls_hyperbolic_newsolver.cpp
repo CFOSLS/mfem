@@ -10,8 +10,8 @@
 #include <list>
 #include <unistd.h>
 
-#define NEW_INTERFACE
-#define NEW_INTERFACE2
+//#define NEW_INTERFACE
+//#define NEW_INTERFACE2
 
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
@@ -108,6 +108,7 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 2;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
+
     // Hdiv-H1 case
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
@@ -3225,7 +3226,7 @@ int main(int argc, char *argv[])
     Array<BlockOperator*> BlockOps_mg_plus(nlevels);
     Array<Operator*> Ops_mg_plus(nlevels);
     Array<Operator*> HcurlSmoothers_lvls(nlevels - 1);
-    Array<Operator*> SchwarsSmoothers_lvls(nlevels - 1);
+    Array<Operator*> SchwarzSmoothers_lvls(nlevels - 1);
     Array<Operator*> Smoo_mg_plus(nlevels - 1);
     Operator* CoarseSolver_mg_plus;
 
@@ -3341,7 +3342,7 @@ int main(int argc, char *argv[])
             }
             // getting smoothers from the older mg setup
             //HcurlSmoothers_lvls[l] = Smoothers_lvls[l];
-            //SchwarsSmoothers_lvls[l] = (*LocalSolver_lvls)[l];
+            //SchwarzSmoothers_lvls[l] = (*LocalSolver_lvls)[l];
 
             HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_mg_plus[l],
                                                      *hierarchy->GetDivfreeDop(l),
@@ -3364,7 +3365,7 @@ int main(int argc, char *argv[])
             SparseMatrix * P_L2_T = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
-                SchwarsSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
                                                          *Constraint_mat_lvls_mg[l],
                                                          hierarchy->GetDofTrueDof(space_names_funct, l),
                                                          *P_L2_T,
@@ -3380,7 +3381,7 @@ int main(int argc, char *argv[])
             }
             else // no S
             {
-                SchwarsSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls_mg[l],
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls_mg[l],
                                                                   *Constraint_mat_lvls_mg[l],
                                                                   hierarchy->GetDofTrueDof(space_names_funct, l),
                                                                   *P_L2_T,
@@ -3397,11 +3398,8 @@ int main(int argc, char *argv[])
 
             delete P_L2_T;
 
-            // incorrect, a combined smoother is not actually a product of the smoothers
-            //Smoo_mg_plus[l] = new OperatorProduct(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l]);
-
 #ifdef SOLVE_WITH_LOCALSOLVERS
-            Smoo_mg_plus[l] = new SmootherSum(*SchwarsSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
+            Smoo_mg_plus[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
 #else
             Smoo_mg_plus[l] = HcurlSmoothers_lvls[l];
 #endif
@@ -3542,9 +3540,9 @@ int main(int argc, char *argv[])
     for (int l = 0; l < num_levels - 1; ++l)
     {
         if (strcmp(space_for_S,"H1") == 0)
-            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolverWithS*>(SchwarsSmoothers_lvls[l]);
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolverWithS*>(SchwarzSmoothers_lvls[l]);
         else
-            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolver*>(SchwarsSmoothers_lvls[l]);
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolver*>(SchwarzSmoothers_lvls[l]);
         MFEM_ASSERT(LocalSolver_partfinder_lvls_new[l], "*Unsuccessful cast of the Schwars smoother \n");
     }
 
@@ -3618,7 +3616,7 @@ int main(int argc, char *argv[])
                                       Ops_mg_special,
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
                                       *constrfform_new, //Floc,
-                                      Smoo_mg_plus,
+                                      HcurlSmoothers_lvls,
                                       *xinit_new,
 #ifdef CHECK_CONSTR
                                       *constrfform_new,
@@ -3634,7 +3632,7 @@ int main(int argc, char *argv[])
                                       //Funct_global_lvls,
                                       *Constraint_global,
                                       Floc,
-                                      Smoo_mg_plus,
+                                      HcurlSmoothers_lvls,
                                       //Smoothers_lvls,
                                       Xinit_truedofs,
 #ifdef CHECK_CONSTR
@@ -3652,24 +3650,26 @@ int main(int argc, char *argv[])
 #endif
 
     GeneralMinConstrSolver NewSolver( comm, num_levels,
-                     TrueP_Func, EssBdrTrueDofs_Funct_lvls,
-                     *Functrhs_global,
-                     Smoo_mg_plus, //Smoothers_lvls,
-                     //Xinit_truedofs, Funct_global_lvls,
-                     Xinit_truedofs, Ops_mg_special,
+                                      BlockP_mg_nobnd_plus,
+                                      //TrueP_Func,
+                                      EssBdrTrueDofs_Funct_lvls,
+                                      *Functrhs_global,
+                                      HcurlSmoothers_lvls, //Smoothers_lvls,
+                                      //Xinit_truedofs, Funct_global_lvls,
+                                      Xinit_truedofs, Ops_mg_special,
 #ifdef CHECK_CONSTR
-                     *Constraint_global, Floc,
+                                     *Constraint_global, Floc,
 #endif
 #ifdef TIMING
-                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
+                                     Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
 #endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
-                     &SchwarsSmoothers_lvls, //LocalSolver_lvls,
+                                      &SchwarzSmoothers_lvls, //LocalSolver_lvls,
 #else
                      NULL,
 #endif
-                     CoarseSolver_mg_plus, //CoarsestSolver,
-                     stopcriteria_type);
+                                      CoarseSolver_mg_plus, //CoarsestSolver,
+                                      stopcriteria_type);
 
     double newsolver_reltol = 1.0e-6;
 
@@ -5047,11 +5047,12 @@ int main(int argc, char *argv[])
     Testsolver.SetRelTol(sqrt(rtol));
     Testsolver.SetMaxIter(TestmaxIter);
 
-#ifdef NEW_INTERFACE2
     Testsolver.SetOperator(*hdivh1_op);
+#ifdef NEW_INTERFACE2
+    //Testsolver.SetOperator(*hdivh1_op);
     Testsolver.SetPreconditioner(*GeneralMGprec_plus);
 #else
-    Testsolver.SetOperator(*BlockMattest);
+    //Testsolver.SetOperator(*BlockMattest);
     Testsolver.SetPreconditioner(NewSolver);
 #endif // for ifdef NEW_INTERFACE2
 

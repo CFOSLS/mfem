@@ -1655,9 +1655,9 @@ public:
         //Vector temp(y.Size());
         //temp = y;
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        std::cout << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
 
         smoo_fst.Mult(x, *tmp1);
 
