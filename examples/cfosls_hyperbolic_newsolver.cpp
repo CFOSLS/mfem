@@ -107,7 +107,21 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "L2";    // "H1" or "L2"
+    const char *space_for_S = "H1";    // "H1" or "L2"
+    // Hdiv-H1 case
+    using FormulType = CFOSLSFormulation_HdivH1Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+    using ProblemType = FOSLSProblem_HdivH1L2hyp;
+
+    /*
+    // Hdiv-L2 case
+    using FormulType = CFOSLSFormulation_HdivL2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    */
+
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
     bool aniso_refine = false;
@@ -1702,35 +1716,12 @@ int main(int argc, char *argv[])
 
 //#ifdef NEW_INTERFACE
 
-    // Hdiv-H1 case
-    /*
-    using FormulType = CFOSLSFormulation_HdivH1Hyper;
-    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
-    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
-    using ProblemType = FOSLSProblem_HdivH1L2hyp;
-    */
-
-    // Hdiv-L2 case
-    using FormulType = CFOSLSFormulation_HdivL2Hyper;
-    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
-    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
-
     FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
     FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
     BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
     FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
                                              *fe_formulat, prec_option, verbose);
-
-    // FIXME: Delete this
-    {
-        int numblocks = 2;
-        if (strcmp(space_for_S,"H1") == 0)
-            ++numblocks;
-        std::cout << "problem grfun ... f norm = " << problem->GetGrFun(numblocks + numblocks - 1)->Norml2()
-                     / sqrt(problem->GetGrFun(numblocks + numblocks - 1)->Size())<< "\n";
-    }
 
     int nlevels = ref_levels + 1;
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
@@ -3547,6 +3538,45 @@ int main(int argc, char *argv[])
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
 
+    Array<LocalProblemSolver*> LocalSolver_partfinder_lvls_new(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        if (strcmp(space_for_S,"H1") == 0)
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolverWithS*>(SchwarsSmoothers_lvls[l]);
+        else
+            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolver*>(SchwarsSmoothers_lvls[l]);
+        MFEM_ASSERT(LocalSolver_partfinder_lvls_new[l], "*Unsuccessful cast of the Schwars smoother \n");
+    }
+
+    // Creating the coarsest problem solver
+    const Array<SpaceName>& space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+    int coarse_size = 0;
+    for (int i = 0; i < space_names_problem.Size(); ++i)
+        coarse_size += hierarchy->GetSpace(space_names_problem[i], num_levels - 1)->TrueVSize();
+
+    Array<int> row_offsets_coarse, col_offsets_coarse;
+
+    std::vector<Array<int>* > &essbdr_tdofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
+
+    std::vector<Array<int>* > &essbdr_dofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
+
+
+    CoarsestProblemSolver* CoarsestSolver_partfinder_new =
+            new CoarsestProblemSolver(coarse_size,
+                                      *Funct_mat_lvls_mg[num_levels - 1],
+            *Constraint_mat_lvls_mg[num_levels - 1],
+            hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
+            *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse);
+
+    CoarsestSolver_partfinder_new->SetMaxIter(70000);
+    CoarsestSolver_partfinder_new->SetAbsTol(1.0e-18);
+    CoarsestSolver_partfinder_new->SetRelTol(1.0e-18);
+    CoarsestSolver_partfinder_new->ResetSolverParams();
+
 #ifdef NEW_INTERFACE
     //std::vector<Array<int>* > &essbdr_tdofs_funct =
             //hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names, essbdr_attribs, l + 1);
@@ -3580,40 +3610,6 @@ int main(int argc, char *argv[])
     constrfform_new->AddDomainIntegrator(new DomainLFIntegrator(*rhs_coeff));
     constrfform_new->Assemble();
 
-    // Creating the coarsest problem solver
-    const Array<SpaceName>& space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
-    int coarse_size = 0;
-    for (int i = 0; i < space_names_problem.Size(); ++i)
-        coarse_size += hierarchy->GetSpace(space_names_problem[i], num_levels - 1)->TrueVSize();
-
-    Array<int> row_offsets_coarse, col_offsets_coarse;
-
-    std::vector<Array<int>* > &essbdr_tdofs_funct_coarse =
-            hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
-
-    std::vector<Array<int>* > &essbdr_dofs_funct_coarse =
-            hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
-
-
-    CoarsestProblemSolver* CoarsestSolver_partfinder_new =
-            new CoarsestProblemSolver(coarse_size,
-                                      *Funct_mat_lvls_mg[num_levels - 1],
-            *Constraint_mat_lvls_mg[num_levels - 1],
-            hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
-            *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
-            essbdr_dofs_funct_coarse,
-            essbdr_tdofs_funct_coarse);
-
-    Array<LocalProblemSolver*> LocalSolver_partfinder_lvls_new(num_levels - 1);
-    for (int l = 0; l < num_levels - 1; ++l)
-    {
-        if (strcmp(space_for_S,"H1") == 0)
-            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolverWithS*>(SchwarsSmoothers_lvls[l]);
-        else
-            LocalSolver_partfinder_lvls_new[l] = dynamic_cast<LocalProblemSolver*>(SchwarsSmoothers_lvls[l]);
-        MFEM_ASSERT(LocalSolver_partfinder_lvls_new[l], "*Unsuccessful cast of the Schwars smoother \n");
-    }
-
     DivConstraintSolver PartsolFinder(comm, num_levels,
                                       AE_e_lvls,
                                       BlockP_mg_nobnd_plus,
@@ -3621,7 +3617,7 @@ int main(int argc, char *argv[])
                                       essbdr_tdofs_funct_lvls,
                                       Ops_mg_special,
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
-                                      Floc,
+                                      *constrfform_new, //Floc,
                                       Smoo_mg_plus,
                                       *xinit_new,
 #ifdef CHECK_CONSTR
@@ -3629,25 +3625,25 @@ int main(int argc, char *argv[])
 #endif
                                       &LocalSolver_partfinder_lvls_new,
                                       CoarsestSolver_partfinder_new);
-    CoarsestSolver_partfinder_new->SetMaxIter(70000);
-    CoarsestSolver_partfinder_new->SetAbsTol(1.0e-18);
-    CoarsestSolver_partfinder_new->SetRelTol(1.0e-18);
-    CoarsestSolver_partfinder_new->ResetSolverParams();
 
 #else
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
                                       EssBdrTrueDofs_Funct_lvls,
-                                      Funct_global_lvls,
+                                      Ops_mg_special,
+                                      //Funct_global_lvls,
                                       *Constraint_global,
                                       Floc,
-                                      Smoothers_lvls,
+                                      Smoo_mg_plus,
+                                      //Smoothers_lvls,
                                       Xinit_truedofs,
 #ifdef CHECK_CONSTR
                                       Floc,
 #endif
-                                      LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder);
+                                      &LocalSolver_partfinder_lvls_new,
+                                      //LocalSolver_partfinder_lvls,
+                                      CoarsestSolver_partfinder_new);
+                                      //CoarsestSolver_partfinder);
 #endif
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
@@ -3657,7 +3653,8 @@ int main(int argc, char *argv[])
 
     GeneralMinConstrSolver NewSolver( comm, num_levels,
                      TrueP_Func, EssBdrTrueDofs_Funct_lvls,
-                     *Functrhs_global, Smoothers_lvls,
+                     *Functrhs_global,
+                     Smoo_mg_plus, //Smoothers_lvls,
                      //Xinit_truedofs, Funct_global_lvls,
                      Xinit_truedofs, Ops_mg_special,
 #ifdef CHECK_CONSTR
@@ -3667,11 +3664,12 @@ int main(int argc, char *argv[])
                      Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
 #endif
 #ifdef SOLVE_WITH_LOCALSOLVERS
-                     LocalSolver_lvls,
+                     &SchwarsSmoothers_lvls, //LocalSolver_lvls,
 #else
                      NULL,
 #endif
-                     CoarsestSolver, stopcriteria_type);
+                     CoarseSolver_mg_plus, //CoarsestSolver,
+                     stopcriteria_type);
 
     double newsolver_reltol = 1.0e-6;
 
@@ -3682,7 +3680,6 @@ int main(int argc, char *argv[])
     NewSolver.SetMaxIter(200);
     NewSolver.SetPrintLevel(0);
     NewSolver.SetStopCriteriaType(0);
-    //NewSolver.SetLocalSolvers(LocalSolver_lvls);
 
     BlockVector ParticSol(new_trueoffsets);
     ParticSol = 0.0;
