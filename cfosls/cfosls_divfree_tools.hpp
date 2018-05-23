@@ -1622,7 +1622,7 @@ public:
     Multigrid(HypreParMatrix &Op,
               const Array<HypreParMatrix*> &P,
 #ifdef BND_FOR_MULTIGRID
-              const std::vector<const Array<int>* > & EssBdrTDofs_lvls,
+              const std::vector<Array<int>* > & EssBdrTDofs_lvls,
 #endif
 #ifdef COARSEPREC_AMS
               ParFiniteElementSpace * C_space_coarsest = NULL,
@@ -1795,7 +1795,7 @@ private:
     const Array<HypreParMatrix*> &P_;
 
 #ifdef BND_FOR_MULTIGRID
-    const std::vector<const Array<int>*> & essbdrtdofs_lvls;
+    const std::vector<Array<int>*> & essbdrtdofs_lvls;
 #endif
 
     Array<HypreParMatrix*> Operators_;

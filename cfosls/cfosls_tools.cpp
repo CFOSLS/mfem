@@ -1484,13 +1484,16 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, bool verbose, bool compute_er
 
 void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 {
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
     MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
 
     // aliases
     ParFiniteElementSpace * Hdiv_space = pfes[0];
     ParFiniteElementSpace * L2_space = pfes[1];
-    ParGridFunction * sigma = grfuns[0];
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&vec_viewer.GetBlock(0));
 
     int order_quad = max(2, 2*fe_formul.Feorder() + 1);
     const IntegrationRule *irs[Geometry::NumGeom];
@@ -1503,15 +1506,15 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
     Div.AddDomainInterpolator(new DivergenceInterpolator());
     ParGridFunction DivSigma(L2_space);
     Div.Assemble();
-    Div.Mult(*sigma, DivSigma);
+    Div.Mult(sigma, DivSigma);
 
     double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
     double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
 
     if (verbose)
     {
-        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div/norm_div  << "\n";
+        std::cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div / norm_div  << "\n";
     }
 
     ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
@@ -1527,21 +1530,21 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
     HypreParMatrix * B = Bblock->ParallelAssemble();
 
     Vector bTsigma(C->Height());
-    B->Mult(trueX->GetBlock(0),bTsigma);
+    B->Mult(vec_viewer.GetBlock(0),bTsigma);
 
     Vector trueS(C->Height());
 
     CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
 
-    ParGridFunction * S = new ParGridFunction(L2_space);
-    S->Distribute(trueS);
+    ParGridFunction S(L2_space);
+    S.Distribute(trueS);
 
     delete Cblock;
     delete Bblock;
     delete B;
     delete C;
 
-    double err_S = S->ComputeL2Error(*test->GetU(), irs);
+    double err_S = S.ComputeL2Error(*test->GetU(), irs);
     double norm_S = ComputeGlobalLpNorm(2, *test->GetU(), pmesh, irs);
     if (verbose)
     {
@@ -1549,16 +1552,16 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
                      err_S / norm_S << "\n";
     }
 
-    ParGridFunction * S_exact = new ParGridFunction(L2_space);
-    S_exact->ProjectCoefficient(*test->GetU());
+    ParGridFunction S_exact(L2_space);
+    S_exact.ProjectCoefficient(*test->GetU());
 
-    double projection_error_S = S_exact->ComputeL2Error(*test->GetU(), irs);
+    double projection_error_S = S_exact.ComputeL2Error(*test->GetU(), irs);
 
     if (verbose)
         std::cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
                         << projection_error_S / norm_S << "\n";
 
-    delete S;
+    ComputeFuncError(vec);
 }
 
 ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
@@ -1657,6 +1660,199 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 
 }
 
+// computes || sigma - L(S) ||
+void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
+{
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&vec_viewer.GetBlock(0));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    Vector trueSigma(Hdiv_space->TrueVSize());
+    trueSigma = vec_viewer.GetBlock(0);
+
+    Vector MtrueSigma(Hdiv_space->TrueVSize());
+    MtrueSigma = 0.0;
+
+    HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    M->Mult(trueSigma, MtrueSigma);
+    double localFunctional = trueSigma * MtrueSigma;
+
+    double globalFunctional;
+    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+        std::cout << "Energy Error = " << sqrt(globalFunctional + err_div * err_div) << "\n";
+        std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
+                     / norm_div << "\n";
+    }
+
+    ParLinearForm gform(L2_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
+                                                     GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+
+    Vector Rhs(L2_space->TrueVSize());
+    Rhs = *gform.ParallelAssemble();
+
+    double mass_loc = Rhs.Norml1();
+    double mass;
+    MPI_Reduce(&mass_loc, &mass, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        cout << "Sum of local mass = " << mass << "\n";
+
+    Vector DtrueSigma(L2_space->TrueVSize());
+    DtrueSigma = 0.0;
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
+    Bdiv->Mult(trueSigma, DtrueSigma);
+    DtrueSigma -= Rhs;
+    double mass_loss_loc = DtrueSigma.Norml1();
+    double mass_loss;
+    MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Sum of local mass loss = " << mass_loss << "\n";
+
+}
+
+// computes || sigma - L(S) || only, no term with || div bS - f
+void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * H1_space = pfes[1];
+    ParFiniteElementSpace * L2_space = pfes[2];
+
+    Vector trueSigma(Hdiv_space->TrueVSize());
+    trueSigma = vec_viewer.GetBlock(0);
+
+    Vector MtrueSigma(Hdiv_space->TrueVSize());
+    MtrueSigma = 0.0;
+
+    HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    M->Mult(trueSigma, MtrueSigma);
+    double localFunctional = trueSigma * MtrueSigma;
+
+    Vector GtrueSigma(H1_space->TrueVSize());
+    GtrueSigma = 0.0;
+
+    HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
+    BT->Mult(trueSigma, GtrueSigma);
+    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+
+    Vector XtrueS(H1_space->TrueVSize());
+    XtrueS = 0.0;
+    HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    C->Mult(vec_viewer.GetBlock(1), XtrueS);
+    localFunctional += vec_viewer.GetBlock(1)*XtrueS;
+
+    double globalFunctional;
+    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+    }
+
+    ParLinearForm gform(L2_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
+                                                     GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+
+    Vector Rhs(L2_space->TrueVSize());
+    Rhs = *gform.ParallelAssemble();
+
+    double mass_loc = Rhs.Norml1();
+    double mass;
+    MPI_Reduce(&mass_loc, &mass, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        cout << "Sum of local mass = " << mass << "\n";
+
+    Vector DtrueSigma(L2_space->TrueVSize());
+    DtrueSigma = 0.0;
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    Bdiv->Mult(trueSigma, DtrueSigma);
+    DtrueSigma -= Rhs;
+    double mass_loss_loc = DtrueSigma.Norml1();
+    double mass_loss;
+    MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Sum of local mass loss = " << mass_loss << "\n";
+
+}
+
+void FOSLSProblem_HdivH1L2hyp::ComputeExtraError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[2];
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&(vec_viewer.GetBlock(0)));
+
+    //std::cout << "vec norm = " << vec.Norml2() / sqrt (vec.Size()) << "\n";
+    //sigma->Print();
+
+    //std::cout << "sigma norm = " << sigma.Norml2() / sqrt (sigma.Size()) << "\n";
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    //std::cout << "DivSigma norm = " << DivSigma.Norml2() / sqrt (DivSigma.Size()) << "\n";
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div / norm_div  << "\n";
+    }
+
+    ComputeFuncError(vec);
+}
 
 // prec_option:
 // 0 for no preconditioner
@@ -3261,8 +3457,8 @@ BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const FOSLSF
     return ConstructTruePforFormul(level, space_names, row_offsets, col_offsets);
 }
 
-const Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
-                                                         SpaceName space_name, const Array<int>& essbdr_attribs,
+Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
+                                                         SpaceName space_name, Array<int>& essbdr_attribs,
                                                          int level) const
 {
     MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
@@ -3302,9 +3498,10 @@ const Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_do
     return *res;
 }
 
+
 std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
                                                                   const Array<SpaceName>& space_names,
-                                                                  std::vector<const Array<int>*>& essbdr_attribs,
+                                                                  std::vector<Array<int>*>& essbdr_attribs,
                                                                   int level) const
 {
     MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
@@ -3351,9 +3548,10 @@ std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * t
     return *res;
 }
 
+/*
 std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
                                                             const Array<SpaceName> &space_names,
-                                                            std::vector<Array<int>*>& essbdr_attribs,
+                                                            std::vector<const Array<int>*>& essbdr_attribs,
                                                             int level) const
 {
     MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
@@ -3399,6 +3597,7 @@ std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * t
 
     return *res;
 }
+*/
 
 ParFiniteElementSpace * GeneralHierarchy::GetSpace(SpaceName space, int level)
 {

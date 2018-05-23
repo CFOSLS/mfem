@@ -374,14 +374,16 @@ public:
                                                              const Array<int>& row_offsets, const Array<int>& col_offsets);
 
 
-    const Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
-                                           const Array<int>& essbdr_attribs, int level) const;
-
-    std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
-                                                    std::vector<const Array<int>*>& essbdr_attribs, int level) const;
+    Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
+                                           Array<int>& essbdr_attribs, int level) const;
 
     std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<Array<int>*>& essbdr_attribs, int level) const;
+
+    /*
+    std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
+                                                    std::vector<const Array<int>*>& essbdr_attribs, int level) const;
+    */
 
     SparseMatrix* GetElementToDofs(SpaceName space_name, int level) const;
 
@@ -988,6 +990,8 @@ public:
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd, int blk) const;
 
     virtual void ComputeExtraError(const Vector& vec) const {}
+    virtual void ComputeFuncError(const Vector& vec) const {}
+
 
     void ComputeBndError(const Vector& vec) const;
     void ComputeBndError(const Vector& vec, int blk) const;
@@ -1032,6 +1036,8 @@ public:
 
     void ComputeExtraError(const Vector& vec) const override;
 
+    void ComputeFuncError(const Vector& vec) const override;
+
     ParGridFunction * RecoverS();
 };
 
@@ -1060,6 +1066,10 @@ public:
         CreatePrec(*CFOSLSop, prec_option, verbose);
         UpdateSolverPrec();
     }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
 };
 
 
