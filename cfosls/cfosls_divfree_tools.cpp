@@ -3672,7 +3672,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     //std::cout << "coarsest grid correction, old GenMinConstr, "
                  //"norm = " << truesolupdate_lvls[num_levels - 1]->Norml2() / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
 
-
 #ifdef TIMING
     MPI_Barrier(comm);
     chrono.Stop();

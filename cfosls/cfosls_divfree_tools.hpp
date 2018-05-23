@@ -1587,7 +1587,7 @@ private:
     const Array<BlockOperator*> &P_;
 
 #ifdef BND_FOR_MULTIGRID
-    const std::vector<std::vector<Array<int>*> > & essbdrtdofs_lvls;
+    const std::vector< std::vector<Array<int>*>  >& essbdrtdofs_lvls;
     mutable std::vector<Array<int>*>  block_offsets;
     mutable std::vector<BlockVector*> block_viewers;
 #endif
@@ -1622,7 +1622,7 @@ public:
     Multigrid(HypreParMatrix &Op,
               const Array<HypreParMatrix*> &P,
 #ifdef BND_FOR_MULTIGRID
-              const std::vector<Array<int>*> & EssBdrTDofs_lvls,
+              const std::vector<const Array<int>* > & EssBdrTDofs_lvls,
 #endif
 #ifdef COARSEPREC_AMS
               ParFiniteElementSpace * C_space_coarsest = NULL,
@@ -1795,7 +1795,7 @@ private:
     const Array<HypreParMatrix*> &P_;
 
 #ifdef BND_FOR_MULTIGRID
-    const std::vector<Array<int>*> & essbdrtdofs_lvls;
+    const std::vector<const Array<int>*> & essbdrtdofs_lvls;
 #endif
 
     Array<HypreParMatrix*> Operators_;
