@@ -1618,6 +1618,8 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
             std::cout << "ADS(A) for H(div) \n";
         else
              std::cout << "Diag(A) for H(div) or H1vec \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
 
         std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
     }
@@ -1635,17 +1637,25 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
 
-    Solver * invA;
-    if (prec_option == 2)
-        invA = new HypreADS(A, pfes[0]);
-    else // using Diag(A);
-        invA = new HypreDiagScale(A);
+    Solver * invA, *invS;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        invS = new HypreSmoother(*Schur, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        if (prec_option == 2)
+            invA = new HypreADS(A, pfes[0]);
+        else // using Diag(A);
+            invA = new HypreDiagScale(A);
 
-    invA->iterative_mode = false;
+        invA->iterative_mode = false;
 
-    Solver * invS = new HypreBoomerAMG(*Schur);
-    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
-    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
 
     prec = new BlockDiagonalPreconditioner(blkoffsets_true);
     if (prec_option > 0)
@@ -1867,6 +1877,8 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
         std::cout << "Diag(A) for H(div) \n";
         std::cout << "BoomerAMG(C) for H1 \n";
         std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for the Lagrange multiplier \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
     }
 
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
@@ -2009,6 +2021,8 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
         std::cout << "BoomerAMG for H(curl) \n";
         if (op.NumRowBlocks() > 1) // case when S is present
             std::cout << "BoomerAMG(C) for H1 (if necessary) \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
     }
 
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
