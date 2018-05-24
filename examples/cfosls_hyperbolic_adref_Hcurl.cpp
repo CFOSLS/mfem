@@ -1,5 +1,5 @@
-//                                MFEM(with 4D elements) CFOSLS with S from H1 for 3D/4D hyperbolic equation
-//                                  with adaptive refinement in H(curl)
+//                                MFEM(with 4D elements) CFOSLS for 3D/4D hyperbolic equation
+//                                  with adaptive refinement involving a div-free formulation
 //
 // Compile with: make
 //
@@ -18,7 +18,6 @@
 //               We discretize with Raviart-Thomas finite elements (sigma), continuous H1 elements (u) and
 //					  discontinuous polynomials (mu) for the lagrange multiplier.
 //
-// Solver: MINRES preconditioned by boomerAMG or ADS
 
 #include "mfem.hpp"
 #include <fstream>
@@ -27,13 +26,23 @@
 #include <iomanip>
 #include <list>
 
+// activates the setup when the solution is sought for as a sum of a particular solution
+// and a divergence-free correction
 #define DIVFREE_ESTIMATOR
+
+// activates using the solution at the previous mesh as a starting guess for the next problem
+#define CLEVER_STARTING_GUESS
+
+// activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
+//#define USE_GS_PREC
 
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
+
+BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem);
 
 int main(int argc, char *argv[])
 {
@@ -57,12 +66,27 @@ int main(int argc, char *argv[])
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
-    bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
+
+    // Hdiv-H1 case
+    using FormulType = CFOSLSFormulation_HdivH1Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+    using ProblemType = FOSLSProblem_HdivH1L2hyp;
+ #ifdef DIVFREE_ESTIMATOR
+    using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
+ #endif
+
+    /*
+    // Hdiv-L2 case
+    using FormulType = CFOSLSFormulation_HdivL2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    */
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
-    bool use_ADS;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
@@ -116,12 +140,6 @@ int main(int argc, char *argv[])
                    "Space for S (H1 or L2).");
     args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
                    "Space for sigma (Hdiv or H1).");
-    args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
-                   "--no-eliminateS",
-                   "Turn on/off elimination of S in L2 formulation.");
-    args.AddOption(&keep_divdiv, "-divdiv", "--divdiv", "-no-divdiv",
-                   "--no-divdiv",
-                   "Defines if div-div term is/ is not kept in the system.");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -159,17 +177,7 @@ int main(int argc, char *argv[])
             std::cout << "Space for S: L2 \n";
 
         if (strcmp(space_for_S,"L2") == 0)
-        {
-            std::cout << "S: is ";
-            if (!eliminateS)
-                std::cout << "not ";
-            std::cout << "eliminated from the system \n";
-        }
-
-        std::cout << "div-div term: is ";
-        if (keep_divdiv)
-            std::cout << "not ";
-        std::cout << "eliminated \n";
+            std::cout << "S: is eliminated from the system \n";
     }
 
     if (verbose)
@@ -188,33 +196,37 @@ int main(int argc, char *argv[])
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
 
-    switch (prec_option)
-    {
-    case 1: // smth simple like AMS
-        use_ADS = false;
-        break;
-    case 2: // MG
-        use_ADS = true;
-        break;
-    default: // no preconditioner
-        break;
-    }
-
+#ifdef DIVFREE_ESTIMATOR
     if (verbose)
-    {
-        std::cout << "use_ADS = " << use_ADS << "\n";
-    }
+        std::cout << "DIVFREE_ESTIMATOR active \n";
+#else
+    if (verbose)
+        std::cout << "DIVFREE_ESTIMATOR passive \n";
+#endif
 
-    //MFEM_ASSERT(numsol == 8 && nDimensions == 3, "Adaptive refinement is tested currently only for the older reports' problem in the cylinder! \n");
+#ifdef CLEVER_STARTING_GUESS
+    if (verbose)
+        std::cout << "CLEVER_STARTING_GUESS active \n";
+#else
+    if (verbose)
+        std::cout << "CLEVER_STARTING_GUESS passive \n";
+#endif
+
+#ifdef USE_GS_PREC
+    if (verbose)
+        std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
+    prec_option = 100;
+#else
+    if (verbose)
+        std::cout << "USE_GS_PREC passive \n";
+#endif
+
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
 
     MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && use_ADS == false), "ADS cannot be used when sigma is from H1vec!\n");
-    MFEM_ASSERT(!(strcmp(formulation,"fosls") == 0 && strcmp(space_for_S,"L2") == 0 && !keep_divdiv), "For FOSLS formulation with S from L2 div-div term must be present!\n");
-    MFEM_ASSERT(!(strcmp(formulation,"cfosls") == 0 && strcmp(space_for_S,"H1") == 0 && keep_divdiv), "For CFOSLS formulation with S from H1 div-div term must not be present for sigma!\n");
 
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
@@ -282,9 +294,6 @@ int main(int argc, char *argv[])
 
     if (strcmp(space_for_S,"H1") == 0)
         numblocks++;
-    else // "L2"
-        if (!eliminateS)
-            numblocks++;
     if (strcmp(formulation,"cfosls") == 0)
         numblocks++;
 
@@ -294,24 +303,6 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "Running AMR ... \n";
 
-   // Hdiv-H1 case
-   using FormulType = CFOSLSFormulation_HdivH1Hyper;
-   using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
-   using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
-   using ProblemType = FOSLSProblem_HdivH1L2hyp;
-#ifdef DIVFREE_ESTIMATOR
-   using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
-   using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
-#endif
-
-   /*
-   // Hdiv-L2 case
-   using FormulType = CFOSLSFormulation_HdivL2Hyper;
-   using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
-   using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-   using ProblemType = FOSLSProblem_HdivL2L2hyp;
-   */
-
    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
@@ -319,16 +310,6 @@ int main(int argc, char *argv[])
    DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
    DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
 #endif
-
-   // now constructed via a hierarchy
-   //ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
-
-   //FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
-                                                                   //*problem->GetFEformulation().GetFeColl(0),
-                                                                   //*problem->GetPfes(0), verbose);
-   //FOSLSDivfreeProblem * problem_divfree = new FOSLSDivfreeProblem(*pmesh, *bdr_conds, *fe_formulat_divfree,
-                                                                   //*problem->GetFEformulation().GetFeColl(0),
-                                                                   //*problem->GetPfes(0), verbose);
 
    /*
    // Hdiv-L2 case
@@ -352,13 +333,15 @@ int main(int argc, char *argv[])
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
-           FOSLSProblHierarchy<ProblemType, GeneralHierarchy>(*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
+           FOSLSProblHierarchy<ProblemType, GeneralHierarchy>(*hierarchy, 1, *bdr_conds,
+                                                              *fe_formulat, prec_option, verbose);
 
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
 #ifdef DIVFREE_ESTIMATOR
    FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy = new
-           FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>(*hierarchy, 1, *bdr_conds, *fe_formulat_divfree, prec_option, verbose);
+           FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>(*hierarchy, 1, *bdr_conds,
+                                                                      *fe_formulat_divfree, prec_option, verbose);
 
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 #endif
@@ -370,6 +353,9 @@ int main(int argc, char *argv[])
    int numfoslsfuns = -1;
 
    int fosls_func_version = 2;
+   if (verbose)
+    std::cout << "fosls_func_version = " << fosls_func_version << "\n";
+
    if (fosls_func_version == 1)
        numfoslsfuns = 2;
    else if (fosls_func_version == 2)
@@ -509,6 +495,9 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+#ifdef CLEVER_STARTING_GUESS
+   BlockVector * coarse_guess;
+#endif
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
@@ -537,36 +526,15 @@ int main(int argc, char *argv[])
        // creating the operator for the div-free problem
        problem_divfree->ConstructDivfreeHpMats();
        problem_divfree->CreateOffsetsRhsSol();
-       const HypreParMatrix * divfree_hpmat = &problem_divfree->GetDivfreeHpMat();
-       BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree->GetTrueOffsets());
-       HypreParMatrix * orig00 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(0,0));
-       HypreParMatrix * blk00 = RAP(divfree_hpmat, orig00, divfree_hpmat);
-       problem_divfree_op->SetBlock(0,0,blk00);
-
-       HypreParMatrix * blk10, *blk01, *blk11;
-       if (strcmp(space_for_S,"H1") == 0)
-       {
-           blk11 = CopyHypreParMatrix(*(dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,1))));
-
-           HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(1,0));
-           blk10 = ParMult(orig10, divfree_hpmat);
-
-           blk01 = blk10->Transpose();
-
-           problem_divfree_op->SetBlock(0,1,blk01);
-           problem_divfree_op->SetBlock(1,0,blk10);
-           problem_divfree_op->SetBlock(1,1,blk11);
-       }
-       problem_divfree_op->owns_blocks = true;
-
+       BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
        problem_divfree->ResetOp(*problem_divfree_op);
+
        divfreeprob_hierarchy->ConstructCoarsenedOps();
+
        problem_divfree->InitSolver(verbose);
-
        // creating a preconditioner for the divfree problem
-       problem_divfree->CreatePrec(*problem_divfree->GetOp(), 0, verbose);
+       problem_divfree->CreatePrec(*problem_divfree->GetOp(), prec_option, verbose);
        problem_divfree->UpdateSolverPrec();
-
 
        //  creating the solution and right hand side for the divfree problem
        BlockVector rhs(problem_divfree->GetTrueOffsets());
@@ -576,11 +544,20 @@ int main(int argc, char *argv[])
        temp *= -1;
        temp += problem->GetRhs();
 
+       const HypreParMatrix * divfree_hpmat = &problem_divfree->GetDivfreeHpMat();
        divfree_hpmat->MultTranspose(temp.GetBlock(0), rhs.GetBlock(0));
        if (strcmp(space_for_S,"H1") == 0)
            rhs.GetBlock(1) = temp.GetBlock(1);
 
+       // solving the div-free problem
+#ifdef CLEVER_STARTING_GUESS
+       // if it's not the first iteration we reuse the previous solution as a starting guess
+       if (it > 0)
+           divfreeprob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem_divfree->GetSol());
+       problem_divfree->SolveProblem(rhs, problem_divfree->GetSol(), verbose, false);
+#else
        problem_divfree->SolveProblem(rhs, verbose, false);
+#endif
 
        /// converting the solution back into sigma from Hdiv inside the problem
        /// (adding a particular solution as a part of the process)
@@ -590,6 +567,13 @@ int main(int argc, char *argv[])
        problem_sol = 0.0;
 
        BlockVector& problem_divfree_sol = problem_divfree->GetSol();
+
+#ifdef CLEVER_STARTING_GUESS
+       if (it > 0)
+           delete coarse_guess;
+       coarse_guess = new BlockVector(problem_divfree->GetTrueOffsets());
+       *coarse_guess = problem_divfree_sol;
+#endif
 
        problem_divfree->GetDivfreeHpMat().Mult(1.0, problem_divfree_sol.GetBlock(0), 1.0, problem_sol.GetBlock(0));
        if (strcmp(space_for_S,"H1") == 0)
@@ -601,11 +585,30 @@ int main(int argc, char *argv[])
            problem->ComputeError(problem_sol, verbose, true);
 
        // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
-       // though for now it coordination already happens in ComputeError()
+       // though for now its coordination already happens in ComputeError()
        problem->DistributeToGrfuns(problem_sol);
+#else // the case when the original problem is solved, i.e., no div-free formulation is used
+
+#ifdef CLEVER_STARTING_GUESS
+       // if it's not the first iteration we reuse the previous solution as a starting guess
+       if (it > 0)
+           prob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem->GetSol());
+       problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
 #else
-       if (compute_error)
-           problem->Solve(verbose, compute_error);
+       problem->Solve(verbose, false);
+#endif
+
+      BlockVector& problem_sol = problem->GetSol();
+      if (compute_error)
+          problem->ComputeError(problem_sol, verbose, true);
+
+#ifdef CLEVER_STARTING_GUESS
+       if (it > 0)
+           delete coarse_guess;
+       coarse_guess = new BlockVector(problem->GetTrueOffsets());
+       *coarse_guess = problem_sol;
+#endif
+
 #endif
 
        // 17. Send the solution by socket to a GLVis server.
@@ -640,7 +643,6 @@ int main(int argc, char *argv[])
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
 
-       // new variant
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
 
        if (refiner.Stop())
@@ -652,9 +654,12 @@ int main(int argc, char *argv[])
 
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
-       divfreeprob_hierarchy->Update(false);
        problem = prob_hierarchy->GetProblem(0);
+
+#ifdef DIVFREE_ESTIMATOR
+       divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+#endif
 
        if (fosls_func_version == 2)
        {
@@ -684,8 +689,8 @@ int main(int argc, char *argv[])
        delete partsigma;
 #endif
 
+       // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();
-
        if (global_dofs > max_dofs)
        {
           if (verbose)
@@ -698,4 +703,35 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 }
+
+// works for HdivH1 and HdivL2 formulations
+BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem)
+{
+    const HypreParMatrix * divfree_hpmat = &problem_divfree.GetDivfreeHpMat();
+    BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree.GetTrueOffsets());
+    HypreParMatrix * orig00 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(0,0));
+    HypreParMatrix * blk00 = RAP(divfree_hpmat, orig00, divfree_hpmat);
+    problem_divfree_op->SetBlock(0,0,blk00);
+
+    HypreParMatrix * blk10, *blk01, *blk11;
+    // Hdiv-H1 case
+    if (problem.GetFEformulation().Nunknowns() == 2)
+    {
+        blk11 = CopyHypreParMatrix(*(dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,1))));
+
+        HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,0));
+        blk10 = ParMult(orig10, divfree_hpmat);
+
+        blk01 = blk10->Transpose();
+
+        problem_divfree_op->SetBlock(0,1,blk01);
+        problem_divfree_op->SetBlock(1,0,blk10);
+        problem_divfree_op->SetBlock(1,1,blk11);
+    }
+    problem_divfree_op->owns_blocks = true;
+
+    return problem_divfree_op;
+}
+
+
 

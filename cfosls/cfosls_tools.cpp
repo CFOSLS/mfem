@@ -1453,8 +1453,6 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bo
     chrono.Clear();
     chrono.Start();
 
-    sol = 0.0;
-
     solver->Mult(rhs, sol);
 
     chrono.Stop();
@@ -1473,6 +1471,7 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bo
 
 void FOSLSProblem::SolveProblem(const Vector& rhs, bool verbose, bool compute_error) const
 {
+    *trueX = 0.0;
     SolveProblem(rhs, *trueX, verbose, compute_error);
 
     DistributeSolution();
@@ -1884,17 +1883,27 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
 
-    Solver * invA;
-    invA = new HypreDiagScale(A);
-    invA->iterative_mode = false;
+    Solver *invA, *invC, *invS;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        invC = new HypreSmoother(C, HypreSmoother::Type::l1GS, 1);
+        invS = new HypreSmoother(*Schur, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        invA = new HypreDiagScale(A);
+        invA->iterative_mode = false;
 
-    Solver * invC = new HypreBoomerAMG(C);
-    ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
-    ((HypreBoomerAMG*)invC)->iterative_mode = false;
+        invC = new HypreBoomerAMG(C);
+        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+        ((HypreBoomerAMG*)invC)->iterative_mode = false;
 
-    Solver * invS = new HypreBoomerAMG(*Schur);
-    ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
-    ((HypreBoomerAMG *)invS)->iterative_mode = false;
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
+
 
     prec = new BlockDiagonalPreconditioner(blkoffsets_true);
     if (prec_option > 0)
@@ -1992,7 +2001,7 @@ void FOSLSDivfreeProblem::Update()
 
 void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool verbose)
 {
-    MFEM_ASSERT(prec_option == 0, "Only one preconditioner (prec_option = 0) is implemented \n");
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
     if (verbose)
     {
@@ -2016,21 +2025,31 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
         C_diag.MoveDiagonalFirst();
     }
 
-    Solver * invA;
-    invA = new HypreBoomerAMG(A);
-    ((HypreBoomerAMG*)invA)->SetPrintLevel(0);
-    ((HypreBoomerAMG*)invA)->iterative_mode = false;
-    //invA  = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
-
-    Solver * invC;
-    if (op.NumRowBlocks() > 1) // case when S is present
+    Solver * invA, *invC;
+    if (prec_option == 100)
     {
-        invC = new HypreBoomerAMG(*C);
-        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
-        ((HypreBoomerAMG*)invC)->iterative_mode = false;
-
-        //invC  = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        if (op.NumRowBlocks() > 1) // case when S is present
+            invC = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
     }
+    else // standard case
+    {
+        invA = new HypreBoomerAMG(A);
+        ((HypreBoomerAMG*)invA)->SetPrintLevel(0);
+        ((HypreBoomerAMG*)invA)->iterative_mode = false;
+        //invA  = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+
+        if (op.NumRowBlocks() > 1) // case when S is present
+        {
+            invC = new HypreBoomerAMG(*C);
+            ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+            ((HypreBoomerAMG*)invC)->iterative_mode = false;
+
+            //invC  = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
+        }
+    }
+
+
 
     prec = new BlockDiagonalPreconditioner(blkoffsets_true);
 
@@ -5848,7 +5867,8 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
     return;
 }
 
-
+// finds a prticular solution to a divergence constraint
+// by solving a Poisson equation
 ParGridFunction * FindParticularSolution(ParFiniteElementSpace * Hdiv_space,
                                          const HypreParMatrix & B, const Vector& rhs, bool verbose)
 {
