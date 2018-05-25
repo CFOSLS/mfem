@@ -3623,9 +3623,6 @@ int main(int argc, char *argv[])
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
                                       *constrfform_new, //Floc,
                                       HcurlSmoothers_lvls,
-#ifdef CHECK_CONSTR
-                                      *constrfform_new,
-#endif
                                       &LocalSolver_partfinder_lvls_new,
                                       CoarsestSolver_partfinder_new);
 
@@ -3639,13 +3636,10 @@ int main(int argc, char *argv[])
                                       Floc,
                                       HcurlSmoothers_lvls,
                                       //Smoothers_lvls,
-#ifdef CHECK_CONSTR
-                                      Floc,
-#endif
                                       &LocalSolver_partfinder_lvls_new,
                                       //LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder_new);
-                                      //CoarsestSolver_partfinder);
+                                      CoarsestSolver_partfinder_new, verbose);
+                                      //CoarsestSolver_partfinder, verbose);
 #endif
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);

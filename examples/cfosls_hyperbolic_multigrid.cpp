@@ -25,10 +25,6 @@
 // via a separated class called LocalProblemSolver
 #define SOLVE_WITH_LOCALSOLVERS
 
-// activates constraint residual check after each iteration of the minimization solver
-#define CHECK_CONSTR
-
-
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
@@ -153,14 +149,6 @@ int main(int argc, char *argv[])
 #else
     if (verbose)
         std::cout << "SOLVE_WITH_LOCALSOLVERS passive \n";
-#endif
-
-#ifdef CHECK_CONSTR
-    if (verbose)
-        std::cout << "CHECK_CONSTR active \n";
-#else
-    if (verbose)
-        std::cout << "CHECK_CONSTR passive \n";
 #endif
 
     std::cout << std::flush;
@@ -836,8 +824,8 @@ int main(int argc, char *argv[])
     std::vector<Array<int>* > dtd_row_offsets(num_levels);
     std::vector<Array<int>* > dtd_col_offsets(num_levels);
 
-    std::vector<Array<int>* > el2dofs_row_offsets(num_levels);
-    std::vector<Array<int>* > el2dofs_col_offsets(num_levels);
+    std::vector<Array<int>* > el2dofs_row_offsets(num_levels - 1);
+    std::vector<Array<int>* > el2dofs_col_offsets(num_levels - 1);
 
     Array<SparseMatrix*> Constraint_mat_lvls_mg(num_levels);
     Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels);
@@ -846,9 +834,6 @@ int main(int argc, char *argv[])
     {
         dtd_row_offsets[l] = new Array<int>();
         dtd_col_offsets[l] = new Array<int>();
-
-        el2dofs_row_offsets[l] = new Array<int>();
-        el2dofs_col_offsets[l] = new Array<int>();
 
         if (l < num_levels - 1)
         {
@@ -923,6 +908,9 @@ int main(int argc, char *argv[])
             int size = BlockOps_mg_plus[l]->Height();
 
             bool optimized_localsolve = true;
+
+            el2dofs_row_offsets[l] = new Array<int>();
+            el2dofs_col_offsets[l] = new Array<int>();
 
             SparseMatrix * P_L2_T = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0) // S is present
@@ -1058,15 +1046,19 @@ int main(int argc, char *argv[])
                 ("tdof", space_names_funct, essbdr_attribs, l);
     }
 
-#ifdef CHECK_CONSTR
     FunctionCoefficient * rhs_coeff = problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs();
     ParLinearForm * constrfform_new = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
     constrfform_new->AddDomainIntegrator(new DomainLFIntegrator(*rhs_coeff));
     constrfform_new->Assemble();
-#endif
+    Vector ConstrRhs(hierarchy->GetSpace(SpaceName::L2, 0)->TrueVSize());
+    constrfform_new->ParallelAssemble(ConstrRhs);
+    delete constrfform_new;
 
-    DivConstraintSolver PartSolFinder_new(*problem, *hierarchy);
+    // newer constructor
+    DivConstraintSolver PartsolFinder(*problem, *hierarchy, verbose);
 
+    // older alternative constructor
+    /*
     DivConstraintSolver PartsolFinder(comm, num_levels,
                                       AE_e_lvls,
                                       BlockP_mg_nobnd_plus,
@@ -1074,13 +1066,11 @@ int main(int argc, char *argv[])
                                       essbdr_tdofs_funct_lvls,
                                       Ops_mg_special,
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
-                                      *constrfform_new,
+                                      ConstrRhs, // *constrfform_new,
                                       HcurlSmoothers_lvls,
-#ifdef CHECK_CONSTR
-                                      *constrfform_new,
-#endif
                                       &LocalSolver_partfinder_lvls_new,
-                                      CoarsestSolver_partfinder_new);
+                                      CoarsestSolver_partfinder_new, verbose);
+    */
 
 #endif
     chrono.Stop();
@@ -1093,7 +1083,12 @@ int main(int argc, char *argv[])
     ParticSol = 0.0;
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
-    PartsolFinder.Mult(*Xinit_truedofs, ParticSol);
+    //PartsolFinder.Mult(*Xinit_truedofs, ParticSol);
+    PartsolFinder.FindParticularSolution(*Xinit_truedofs, ParticSol, ConstrRhs, verbose);
+
+    //std::cout << "ParticSol norm = " << ParticSol.Norml2() / sqrt (ParticSol.Size()) << "\n";
+    //MPI_Finalize();
+    //return 0;
 #else
     Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif

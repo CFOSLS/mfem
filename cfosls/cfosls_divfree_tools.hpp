@@ -426,7 +426,6 @@ private:
     mutable bool setup_finished;
 
 protected:
-    mutable int print_level;
 
     FOSLSProblem* problem;
     GeneralHierarchy* hierarchy;
@@ -438,7 +437,9 @@ protected:
     Array<int> row_offsets_coarse, col_offsets_coarse;
     std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
     std::vector<Array<int>* > essbdr_dofs_funct_coarse;
-
+    std::vector<Array<int>* > el2dofs_row_offsets;
+    std::vector<Array<int>* > el2dofs_col_offsets;
+    std::vector<Array<int>* > fullbdr_attribs;
 
     const bool own_data;
 
@@ -470,14 +471,6 @@ protected:
     std::vector<Operator*> Func_global_lvls;
     mutable HypreParMatrix * Constr_global;
 
-    // stores Functional matrix on all levels except the finest
-    // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
-
-    // The same as xblock and yblock but on true dofs
-    mutable BlockVector* xblock_truedofs;
-    mutable BlockVector* yblock_truedofs;
-    mutable BlockVector* tempblock_truedofs;
-
     mutable Array<BlockVector*> truetempvec_lvls;
     mutable Array<BlockVector*> truetempvec2_lvls;
     mutable Array<BlockVector*> trueresfunc_lvls;
@@ -486,9 +479,9 @@ protected:
     mutable Array<LocalProblemSolver*> LocalSolvers_lvls;
     mutable CoarsestProblemSolver* CoarseSolver;
 
-#ifdef CHECK_CONSTR
-    mutable Vector * Constr_rhs_global;
-#endif
+    mutable bool verbose;
+
+protected:
 
 
     // Allocates current level-related data and computes coarser matrices for the functional
@@ -511,7 +504,7 @@ protected:
 public:
     ~DivConstraintSolver();
 
-    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_);
+    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_, bool verbose_);
 
     DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                            Array< SparseMatrix*> &AE_to_e,
@@ -522,20 +515,25 @@ public:
                            HypreParMatrix& Constr_Global,
                            Vector& ConstrRhsVec,
                            Array<Operator*>& Smoothers_Lvls,
-#ifdef CHECK_CONSTR
-                           Vector & Constr_Rhs_global,
-#endif
                            Array<LocalProblemSolver*>* LocalSolvers,
-                           CoarsestProblemSolver* CoarsestSolver);
+                           CoarsestProblemSolver* CoarsestSolver, bool verbose_);
 
+    // deprecated, should not be called
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const
     {
         // x and y will be accessed through its viewers
-        xblock_truedofs->Update(x.GetData(), TrueP_Func[0]->RowOffsets());
-        yblock_truedofs->Update(y.GetData(), TrueP_Func[0]->RowOffsets());
+        const BlockVector xblock_viewer(x.GetData(), TrueP_Func[0]->RowOffsets());
+        BlockVector yblock_viewer(y.GetData(), TrueP_Func[0]->RowOffsets());
 
-        FindParticularSolution(*xblock_truedofs, *yblock_truedofs, *ConstrRhs, print_level);
+        if (ConstrRhs)
+            FindParticularSolution(xblock_viewer, yblock_viewer, *ConstrRhs, verbose);
+        else
+        {
+            std::cout << "ConstrRhs is not set, cannot call Mult() for DivConstraintSolver in"
+                         " this case. Probably you wanted to call FindParticularSolution instead \n";\
+            MFEM_ABORT("See the message above \n");
+        }
     }
 
     // existence of this method is required by the (abstract) base class Solver
@@ -544,7 +542,7 @@ public:
     void FindParticularSolution(const BlockVector& truestart_guess, BlockVector& particular_solution, const Vector& ConstrRhs, bool verbose) const;
 
     // have to define these to mimic useful routines from IterativeSolver class
-    void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
+    //void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
 
 };
 
@@ -806,9 +804,7 @@ private:
 protected:
     const BlockVector& Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
-    // The same as xblock and yblock but on true dofs
-    mutable BlockVector* xblock_truedofs;
-    mutable BlockVector* yblock_truedofs;
+    // A temporary vector defined on true dofs of the finest level
     mutable BlockVector* tempblock_truedofs;
 
     // stores the initial guess for the solver

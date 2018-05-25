@@ -1912,10 +1912,6 @@ void LocalProblemSolverWithS::SolveLocalProblemOpt(DenseMatrixInverse * inv_AorA
 
 DivConstraintSolver::~DivConstraintSolver()
 {
-    delete xblock_truedofs;
-    delete yblock_truedofs;
-    delete tempblock_truedofs;
-
     for (int i = 0; i < truetempvec_lvls.Size(); ++i)
         delete truetempvec_lvls[i];
     for (int i = 0; i < truetempvec2_lvls.Size(); ++i)
@@ -1929,24 +1925,63 @@ DivConstraintSolver::~DivConstraintSolver()
     {
         for (int i = 0; i < AE_e.Size(); ++i)
             delete AE_e[i];
+
+        for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
+            delete essbdr_tdofs_funct_coarse[i];
+
+        for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
+            delete essbdr_dofs_funct_coarse[i];
+
+        for (unsigned int i = 0; i < el2dofs_row_offsets.size(); ++i)
+            delete el2dofs_row_offsets[i];
+
+        for (unsigned int i = 0; i < el2dofs_col_offsets.size(); ++i)
+            delete el2dofs_col_offsets[i];
+
+        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+            delete fullbdr_attribs[i];
+
+        for (unsigned int i = 0; i < offsets_funct.size(); ++i)
+            delete offsets_funct[i];
+
+        for (int i = 0; i < BlockOps_lvls.Size(); ++i)
+            delete BlockOps_lvls[i];
+
+        for (unsigned int i = 0; i < offsets_sp_funct.size(); ++i)
+            delete offsets_sp_funct[i];
+
+        for (int i = 0; i < Funct_mat_lvls.Size(); ++i)
+            delete Funct_mat_lvls[i];
+
+        for (int i = 0; i < Constraint_mat_lvls.Size(); ++i)
+            delete Constraint_mat_lvls[i];
+
+        for (int i = 0; i < Smoothers_lvls.Size(); ++i)
+            delete Smoothers_lvls[i];
+
+        for (int i = 0; i < LocalSolvers_lvls.Size(); ++i)
+            delete LocalSolvers_lvls[i];
     }
 }
 
-DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_)
-    : Solver(),
+DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_, bool verbose_)
+    : Solver(problem_.GlobalTrueProblemSize()),
       setup_finished(false),
       problem(&problem_),
       hierarchy(&hierarchy_),
       own_data(true),
       num_levels(hierarchy->Nlevels()),
       comm(problem->GetComm()),
-      numblocks(problem->GetFEformulation().Nblocks())
+      numblocks(problem->GetFEformulation().Nblocks()),
+      verbose(verbose_)
 {
     P_L2.SetSize(num_levels - 1);
     AE_e.SetSize(num_levels - 1);
 
     const Array<SpaceName>* space_names_funct =
             problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+
+    int numblocks_funct = space_names_funct->Size();
 
     const Array<SpaceName>* space_names_problem =
             problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
@@ -1971,13 +2006,29 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     delete Divblock;
 
     Smoothers_lvls.SetSize(num_levels - 1);
-    Array<int> SweepsNum(space_names_funct->Size());
+    Array<int> SweepsNum(numblocks_funct);
 
     const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
     std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
     BlockOps_lvls.SetSize(num_levels);
     BlockOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
+    Func_global_lvls.resize(num_levels);
+    Func_global_lvls[0] = BlockOps_lvls[0];
+
+    bool optimized_localsolve = true;
+
+    LocalSolvers_lvls.SetSize(num_levels - 1);
+    el2dofs_row_offsets.resize(num_levels - 1);
+    el2dofs_col_offsets.resize(num_levels - 1);
+
+    fullbdr_attribs.resize(numblocks_funct);
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+    {
+        fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
+        (*fullbdr_attribs[i]) = 1;
+    }
+
 
     for (int l = 0; l < num_levels - 1; ++l)
     {
@@ -1990,6 +2041,9 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
 
         BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
                 *BlockOps_lvls[l], *TrueP_Func[l], *offsets_funct[l + 1]);
+
+        Func_global_lvls[l + 1] = BlockOps_lvls[l + 1];
+
 
         std::vector<Array<int>* > &essbdr_tdofs_funct =
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
@@ -2015,6 +2069,45 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         Funct_mat_lvls[l + 1] = RAP(*P_Funct, *Funct_mat_lvls[l], *P_Funct);
 
         delete P_Funct;
+
+
+        int size = BlockOps_lvls[l]->Height();
+
+        el2dofs_row_offsets[l] = new Array<int>();
+        el2dofs_col_offsets[l] = new Array<int>();
+
+        if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
+        {
+            LocalSolvers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
+                                                     *Constraint_mat_lvls[l],
+                                                     hierarchy->GetDofTrueDof(*space_names_funct, l),
+                                                     *AE_e[l],
+                                                     *hierarchy->GetElementToDofs(*space_names_funct, l,
+                                                                                 *el2dofs_row_offsets[l],
+                                                                                 *el2dofs_col_offsets[l]),
+                                                     *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                                                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                              fullbdr_attribs, l),
+                                                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                              essbdr_attribs, l),
+                                                     optimized_localsolve);
+        }
+        else // no S -> Hdiv-L2 formulation
+        {
+            LocalSolvers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls[l],
+                                                              *Constraint_mat_lvls[l],
+                                                              hierarchy->GetDofTrueDof(*space_names_funct, l),
+                                                              *AE_e[l],
+                                                              *hierarchy->GetElementToDofs(*space_names_funct, l,
+                                                                                          *el2dofs_row_offsets[l],
+                                                                                          *el2dofs_col_offsets[l]),
+                                                              *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                                                              hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                       fullbdr_attribs, l),
+                                                              hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                       essbdr_attribs, l),
+                                                              optimized_localsolve);
+        }
     }
 
     essbdr_tdofs_funct_coarse = hierarchy->GetEssBdrTdofsOrDofs
@@ -2040,8 +2133,19 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     CoarseSolver->SetRelTol(1.0e-18);
     CoarseSolver->ResetSolverParams();
 
+    Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 
-    MFEM_ABORT("Don't forget to set parameters in Solver() constructor's call \n");
+    truesolupdate_lvls.SetSize(num_levels);
+    truesolupdate_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+
+    truetempvec_lvls.SetSize(num_levels);
+    truetempvec_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+    truetempvec2_lvls.SetSize(num_levels);
+    truetempvec2_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+    trueresfunc_lvls.SetSize(num_levels);
+    trueresfunc_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
+
+    Setup();
 }
 
 
@@ -2054,11 +2158,8 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                        HypreParMatrix &Constr_Global,
                        Vector& ConstrRhsVec,
                        Array<Operator*>& Smoothers_Lvls,
-#ifdef CHECK_CONSTR
-                       Vector & Constr_Rhs_global,
-#endif
                        Array<LocalProblemSolver*>* LocalSolvers,
-                       CoarsestProblemSolver* CoarsestSolver)
+                       CoarsestProblemSolver* CoarsestSolver, bool verbose_)
      : Solver(Func_Global_lvls[0]->Height(), Func_Global_lvls[0]->Width()),
        setup_finished(false),
        problem(NULL),
@@ -2073,10 +2174,8 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
        ConstrRhs(&ConstrRhsVec),
        //Smoothers_lvls(Smoothers_Lvls),
        //Func_global_lvls(Func_Global_lvls),
-       Constr_global(&Constr_Global)
-#ifdef CHECK_CONSTR
-       ,Constr_rhs_global(&Constr_Rhs_global)
-#endif
+       Constr_global(&Constr_Global),
+       verbose(verbose_)
 {
     Func_global_lvls.resize(Func_Global_lvls.size());
     for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
@@ -2098,10 +2197,6 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
     for (int i = 0; i < Smoothers_lvls.Size(); ++i)
         Smoothers_lvls[i] = Smoothers_Lvls[i];
 
-    xblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
-    yblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
-    tempblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
-
     truesolupdate_lvls.SetSize(num_levels);
     truesolupdate_lvls[0] = new BlockVector(TrueP_Func[0]->RowOffsets());
 
@@ -2116,8 +2211,6 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
         CoarseSolver = CoarsestSolver;
     else
         CoarseSolver = NULL;
-
-    SetPrintLevel(0);
 
     LocalSolvers_lvls.SetSize(num_levels - 1);
     for (int l = 0; l < num_levels - 1; ++l)
@@ -2144,12 +2237,14 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     if ( ComputeMPIVecNorm(comm, rhs_constr,"", verbose) > 1.0e-14 )
     {
         if (verbose)
-            std::cout << "Initial vector does not satisfy the divergence constraint. \n";
+            std::cout << "Initial vector does not satisfy the divergence constraint. "
+                         "A V-cycle will be performed to find the particular solution. \n";
     }
     else
     {
         if (verbose)
-            std::cout << "Initial vector already satisfies divergence constraint. \n";
+            std::cout << "Initial vector already satisfies divergence constraint. "
+                         "No need to perform a V-cycle \n";
         particular_solution = truestart_guess;
         return;
     }
@@ -2191,10 +2286,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
             //truetempvec2_lvls[l]->Print();
 
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
-#ifdef CHECK_CONSTR
-            if (l == 0)
-                CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), *Constr_global, NULL, "for the smoother level 0 update");
-#endif
+
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
 
@@ -2234,7 +2326,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
 
 #ifdef CHECK_CONSTR
     CheckConstrRes(particular_solution.GetBlock(0), *Constr_global,
-                    Constr_rhs_global, "for the particular solution inside in the end");
+                    &constr_rhs, "for the particular solution inside in the end");
 #endif
 
 }
@@ -3062,8 +3154,6 @@ void HcurlGSSSmoother::Setup() const
 
 GeneralMinConstrSolver::~GeneralMinConstrSolver()
 {
-    delete xblock_truedofs;
-    delete yblock_truedofs;
     delete tempblock_truedofs;
     delete init_guess;
 
@@ -3227,8 +3317,6 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
 
     TrueProj_Func[0]->RowOffsets();
 
-    xblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
-    yblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
     tempblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     truesolupdate_lvls.SetSize(num_levels);
@@ -3350,10 +3438,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     current_iteration = 0;
     converged = 0;
 
-    // x will be accessed through xblock_truedofs as its view
-    xblock_truedofs->Update(x.GetData(), TrueP_Func[0]->RowOffsets());
-    // y will be accessed through yblock_truedofs as its view
-    yblock_truedofs->Update(y.GetData(), TrueP_Func[0]->RowOffsets());
+    // x and y will be accessed through these viewers as BlockVectors
+    const BlockVector x_viewer(x.GetData(), TrueP_Func[0]->RowOffsets());
+    BlockVector y_viewer(y.GetData(), TrueP_Func[0]->RowOffsets());
 
     if (preconditioner_mode)
         *init_guess = 0.0;
@@ -3375,13 +3462,9 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
      }
 #endif
 
-
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
     {
-#ifdef DEBUG_INFO
-        std::cout << "i = " << i << " (iter) \n";
-#endif
         MFEM_ASSERT(i == current_iteration, "Iteration counters mismatch!");
 
 #ifdef CHECK_BNDCND
@@ -3410,7 +3493,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         //std::cout << "righthand side on the entrance to Solve() \n";
         //xblock_truedofs->Print();
 
-        Solve(*xblock_truedofs, *tempblock_truedofs, *yblock_truedofs);
+        Solve(x_viewer, *tempblock_truedofs, y_viewer);
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -3421,11 +3504,11 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
-           MFEM_ASSERT(CheckConstrRes(yblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "for the initial guess"),"");
+           MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, Constr_rhs_global, "after the iteration"),"");
         }
         else
         {
-            MFEM_ASSERT(CheckConstrRes(yblock_truedofs->GetBlock(0), *Constr_global, NULL, "for the initial guess"),"");
+            MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, NULL, "after the iteration"),"");
         }
 #endif
         // monitoring convergence
@@ -3488,7 +3571,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
             // resetting the input and output vectors for the next iteration
 
-            *tempblock_truedofs = *yblock_truedofs;
+            *tempblock_truedofs = y_viewer;
         }
 
     } // end of main iterative loop
@@ -3631,14 +3714,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             //std::cout << "LocalSmoother * r, x, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
-
-#ifdef DEBUG_INFO
-            next_sol += *truesolupdate_lvls[0];
-            if (!preconditioner_mode)
-                funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
-                                     "after the localsolve update: ", 1);
-            next_sol -= *truesolupdate_lvls[0];
-#endif
         }
 
 #ifdef TIMING
@@ -3667,13 +3742,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // smooth
         if (Smoothers_lvls[l])
         {
-#ifdef DEBUG_INFO
-            next_sol += *truesolupdate_lvls[0];
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
-                                     "before the smoother update: ", 1);
-            next_sol -= *truesolupdate_lvls[0];
-#endif
-
 #ifdef NO_PRESMOOTH
             *truetempvec2_lvls[l] = 0.0;
 #else
@@ -3727,13 +3795,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
             chrono.Start();
 #endif
 
-
-#ifdef DEBUG_INFO
-            next_sol += *truesolupdate_lvls[0];
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
-                                     "after the smoother update: ", 1);
-            next_sol -= *truesolupdate_lvls[0];
-#endif
         }
 
         //std::cout << "correction after smoothing, old GenMinConstr, "
@@ -3821,18 +3882,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
     MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL, "after fw and bottom updates"),"");
-    next_sol -= *truesolupdate_lvls[0];
-    *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
-#endif
-
-#ifdef DEBUG_INFO
-    TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
-
-
-    *truesolupdate_lvls[0] += *truetempvec_lvls[0];
-    next_sol += *truesolupdate_lvls[0];
-    funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
-                             "after the coarsest level update: ", 1);
     next_sol -= *truesolupdate_lvls[0];
     *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
 #endif
