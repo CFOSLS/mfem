@@ -228,8 +228,9 @@ void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
 FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint)
     : dim(dimension),
       numblocks(num_blocks), unknowns_number(num_unknowns),
-      have_constraint(do_have_constraint)
-{
+      have_constraint(do_have_constraint),
+      space_names(NULL), space_names_funct(NULL)
+{    
     blfis.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
@@ -258,14 +259,18 @@ void CFOSLSFormulation_HdivL2Hyper::InitBlkStructure()
     blk_structure[1] = std::make_pair<int,int>(-1,-1);
 }
 
-const Array<SpaceName> &CFOSLSFormulation_HdivL2Hyper::GetSpacesDescriptor() const
+void CFOSLSFormulation_HdivL2Hyper::ConstructSpacesDescriptor() const
 {
-    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+    space_names = new Array<SpaceName>(numblocks);
 
-    (*res)[0] = SpaceName::HDIV;
-    (*res)[1] = SpaceName::L2;
+    (*space_names)[0] = SpaceName::HDIV;
+    (*space_names)[1] = SpaceName::L2;
+}
 
-    return *res;
+void CFOSLSFormulation_HdivL2Hyper::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(1);
+    (*space_names_funct)[0] = SpaceName::HDIV;
 }
 
 CFOSLSFormulation_HdivH1Hyper::CFOSLSFormulation_HdivH1Hyper (int dimension, int num_solution, bool verbose)
@@ -289,17 +294,22 @@ void CFOSLSFormulation_HdivH1Hyper::InitBlkStructure()
     blk_structure[2] = std::make_pair<int,int>(-1,-1);
 }
 
-const Array<SpaceName> &CFOSLSFormulation_HdivH1Hyper::GetSpacesDescriptor() const
+void CFOSLSFormulation_HdivH1Hyper::ConstructSpacesDescriptor() const
 {
-    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+    space_names = new Array<SpaceName>(numblocks);
 
-    (*res)[0] = SpaceName::HDIV;
-    (*res)[1] = SpaceName::H1;
-    (*res)[2] = SpaceName::L2;
-
-    return *res;
+    (*space_names)[0] = SpaceName::HDIV;
+    (*space_names)[1] = SpaceName::H1;
+    (*space_names)[2] = SpaceName::L2;
 }
 
+void CFOSLSFormulation_HdivH1Hyper::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(2);
+
+    (*space_names_funct)[0] = SpaceName::HDIV;
+    (*space_names_funct)[1] = SpaceName::H1;
+}
 
 CFOSLSFormulation_HdivH1DivfreeHyp::CFOSLSFormulation_HdivH1DivfreeHyp (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 2, 2, false), numsol(num_solution), test(dim, numsol)
@@ -319,45 +329,20 @@ void CFOSLSFormulation_HdivH1DivfreeHyp::InitBlkStructure()
     blk_structure[1] = std::make_pair<int,int>(1,-1);
 }
 
-const Array<SpaceName> &CFOSLSFormulation_HdivH1DivfreeHyp::GetSpacesDescriptor() const
+void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructSpacesDescriptor() const
 {
-    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
+    space_names = new Array<SpaceName>(numblocks);
 
-    (*res)[0] = SpaceName::HCURL;
-    (*res)[1] = SpaceName::H1;
-
-    return *res;
+    (*space_names)[0] = SpaceName::HCURL;
+    (*space_names)[1] = SpaceName::H1;
 }
 
-/*
-CFOSLSFormulation_PartSol::CFOSLSFormulation_PartSol (int dimension, int num_solution, bool verbose)
-    : FOSLSFormulation(dimension, 2, 2, false), numsol(num_solution), test(dim, numsol)
+
+void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructFunctSpacesDescriptor() const
 {
-    blfis(0,0) = new CurlCurlIntegrator();
-    blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
-    blfis(1,0) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
-
-    lfis[1] = new DomainLFIntegrator(*test.GetRhs());
-
-    InitBlkStructure();
+    space_names_funct = new Array<SpaceName>(1);
+    (*space_names_funct)[0] = SpaceName::HCURL;
 }
-
-void CFOSLSFormulation_PartSol::InitBlkStructure()
-{
-    blk_structure[0] = std::make_pair<int,int>(1,0);
-    blk_structure[1] = std::make_pair<int,int>(1,-1);
-}
-
-const Array<SpaceName> &CFOSLSFormulation_PartSol::GetSpacesDescriptor() const
-{
-    Array<SpaceName> * res = new Array<SpaceName>(numblocks);
-
-    (*res)[0] = SpaceName::HDIV;
-    (*res)[1] = SpaceName::L2;
-
-    return *res;
-}
-*/
 
 // FE formulations
 
@@ -458,7 +443,7 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 {
     estimators.SetSize(0);
 
-    InitSpacesFromHierarchy(*hierarchy, level, fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitSpacesFromHierarchy(*hierarchy, level, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
 
@@ -689,7 +674,7 @@ BlockVector * FOSLSProblem::GetTrueInitialCondition()
             Vector exsol_tdofs(pfes[blk]->TrueVSize());
             exsol_pgfun->ParallelProject(exsol_tdofs);
 
-            Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+            const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
             Array<int> ess_tdofs;
             pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
@@ -742,7 +727,7 @@ BlockVector * FOSLSProblem::GetTrueInitialConditionFunc()
             Vector exsol_tdofs(pfes[blk]->TrueVSize());
             exsol_pgfun->ParallelProject(exsol_tdofs);
 
-            Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+            const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
             Array<int> ess_tdofs;
             pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
@@ -899,7 +884,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
                     //pbforms.diag(i)->EliminateEssentialBC(*struct_formul.essbdr_attrs[i],
                             //x->GetBlock(i), *plforms[i]);
 
-                    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
+                    const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 
                     Vector dummy(pbforms.diag(i)->Height());
                     dummy = 0.0;
@@ -945,7 +930,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
                                                                           //x->GetBlock(exist_col), *plforms[exist_row]);
                     //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
 
-                    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(exist_col);
+                    const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(exist_col);
 
                     Vector dummy(pbforms.offd(exist_row,exist_col)->Height());
                     dummy = 0.0;
@@ -953,7 +938,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
 
                     pbforms.offd(exist_row,exist_col)->EliminateTrialDofs(essbdr_attrs, x->GetBlock(exist_col), dummy);
 
-                    Array<int>& essbdr_attrs2 = bdr_conds.GetBdrAttribs(exist_row);
+                    const Array<int>& essbdr_attrs2 = bdr_conds.GetBdrAttribs(exist_row);
 
                     //pbforms.offd(exist_row,exist_col)->EliminateTestDofs(*struct_formul.essbdr_attrs[exist_row]);
                     pbforms.offd(exist_row,exist_col)->EliminateTestDofs(essbdr_attrs2);
@@ -1007,7 +992,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
    // restoring correct boundary values for boundary tdofs
    for (int i = 0; i < numblocks; ++i)
    {
-       Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
+       const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 
        Array<int> ess_bnd_tdofs;
        pfes[i]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -1070,7 +1055,7 @@ void FOSLSProblem::ComputeBndError(const Vector& vec, int blk) const
     Vector exsol_tdofs(pfes[blk]->TrueVSize());
     exsol_pgfun->ParallelProject(exsol_tdofs);
 
-    Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+    const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
     Array<int> essbnd_tdofs;
     pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
@@ -1124,7 +1109,7 @@ void FOSLSProblem::ComputeBndError(const Vector& vec) const
         Vector exsol_tdofs(pfes[blk]->TrueVSize());
         exsol_pgfun->ParallelProject(exsol_tdofs);
 
-        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+        const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> essbnd_tdofs;
         pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, essbnd_tdofs);
@@ -1347,7 +1332,7 @@ void FOSLSProblem::ZeroBndValues(Vector& vec) const
     int numblocks = fe_formul.Nblocks();
     for (int i = 0; i < numblocks; ++i)
     {
-        Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
+        const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 
         Array<int> ess_bnd_tdofs;
         pfes[i]->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -1380,7 +1365,7 @@ void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
     }
 }
 
-BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
+BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
 {
     int num_unknowns = fe_formul.GetFormulation()->Nunknowns();
 
@@ -1398,7 +1383,7 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
                     //pbforms.diag(i)->Assemble();
                     //pbforms.diag(i)->Finalize();
 
-                    funct_blocks(i,j) = pbforms.diag(i)->LoseMat();
+                    funct_blocks(i,j) = &pbforms.diag(i)->SpMat();
                 }
             }
             else // off-diagonal
@@ -1419,20 +1404,28 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
 
                     //pbforms.offd(exist_row,exist_col)->Update();
                     //pbforms.offd(exist_row,exist_col)->Assemble();
-
                     //pbforms.offd(exist_row,exist_col)->Finalize();
 
-                    funct_blocks(exist_row, exist_col) = pbforms.offd(exist_row,exist_col)->LoseMat();
+                    //funct_blocks(exist_row, exist_col) = pbforms.offd(exist_row,exist_col)->LoseMat();
+                    funct_blocks(exist_row, exist_col) = &pbforms.offd(exist_row,exist_col)->SpMat();
                     funct_blocks(exist_col, exist_row) = Transpose(*funct_blocks(exist_row, exist_col));
                 }
             }
         }
 
-    offsets.SetSize(num_unknowns + 1);
-    offsets[0] = 0;
-    for (int i = 0; i < num_unknowns; ++i)
-        offsets[i + 1] = funct_blocks(i,i)->Height();
-    offsets.PartialSum();
+    /*
+    if (!offsets)
+    {
+        offsets = new Array<int>*[1];
+        *offsets = new Array<int>();
+        (*offsets)->SetSize(num_unknowns + 1);
+
+        (*(*offsets))[0] = 0;
+        for (int i = 0; i < num_unknowns; ++i)
+            (*(*offsets))[i + 1] = funct_blocks(i,i)->Height();
+        (*offsets)->PartialSum();
+    }
+    */
 
     BlockMatrix * res = new BlockMatrix(offsets);
 
@@ -1443,6 +1436,21 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(Array<int>& offsets)
     res->owns_blocks = true;
 
     return res;
+}
+
+BlockOperator* FOSLSProblem::GetFunctOp(const Array<int> &offsets)
+{
+    BlockOperator * funct_op = new BlockOperator(offsets);
+
+    int numblocks = offsets.Size() - 1;
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            if (!CFOSLSop->IsZeroBlock(i,j))
+                funct_op->SetBlock(i,j, (HypreParMatrix*)(&CFOSLSop->GetBlock(i,j)));
+
+    funct_op->owns_blocks = false;
+    return funct_op;
 }
 
 
@@ -1986,7 +1994,7 @@ void FOSLSDivfreeProblem::ConstructDivfreeHpMats()
     divfree_hpmat->CopyRowStarts();
     delete temp;
 
-    Array<int> & essbdr_attribs = bdr_conds.GetBdrAttribs(0);
+    const Array<int> & essbdr_attribs = bdr_conds.GetBdrAttribs(0);
 
     Array<int> essbdr_tdofs_Hcurl;
     pfes[0]->GetEssentialTrueDofs(essbdr_attribs, essbdr_tdofs_Hcurl);
@@ -2051,15 +2059,12 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
         invA = new HypreBoomerAMG(A);
         ((HypreBoomerAMG*)invA)->SetPrintLevel(0);
         ((HypreBoomerAMG*)invA)->iterative_mode = false;
-        //invA  = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
 
         if (op.NumRowBlocks() > 1) // case when S is present
         {
             invC = new HypreBoomerAMG(*C);
             ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
             ((HypreBoomerAMG*)invC)->iterative_mode = false;
-
-            //invC  = new HypreSmoother(*C, HypreSmoother::Type::l1GS, 1);
         }
     }
 
@@ -3433,7 +3438,7 @@ void GeneralHierarchy::ConstructDofTrueDofs()
 }
 
 
-const Array<int>& GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+const Array<int>* GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {
     Array<int> * res = new Array<int>(space_names.Size() + 1);
 
@@ -3442,10 +3447,10 @@ const Array<int>& GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, con
         (*res)[i + 1] = GetSpace(space_names[i], level)->TrueVSize();
     res->PartialSum();
 
-    return *res;
+    return res;
 }
 
-const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+const Array<int>* GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
 {
     Array<int> * res = new Array<int>(space_names.Size() + 1);
 
@@ -3454,7 +3459,7 @@ const Array<int>& GeneralHierarchy::ConstructOffsetsforFormul(int level, const A
         (*res)[i + 1] = GetSpace(space_names[i], level)->GetVSize();
     res->PartialSum();
 
-    return *res;
+    return res;
 }
 
 
@@ -3486,12 +3491,12 @@ BlockMatrix* GeneralHierarchy::ConstructPforFormul(int level, const Array<SpaceN
 BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
                                                          const Array<int>& row_offsets, const Array<int>& col_offsets)
 {
-    const Array<SpaceName> & space_names  = formul.GetSpacesDescriptor();
-    return ConstructTruePforFormul(level, space_names, row_offsets, col_offsets);
+    const Array<SpaceName> * space_names  = formul.GetSpacesDescriptor();
+    return ConstructTruePforFormul(level, *space_names, row_offsets, col_offsets);
 }
 
 Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
-                                                         SpaceName space_name, Array<int>& essbdr_attribs,
+                                                         SpaceName space_name, const Array<int>& essbdr_attribs,
                                                          int level) const
 {
     MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,

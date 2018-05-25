@@ -4,6 +4,7 @@
 #ifndef MFEM_CFOSLS_TOOLS
 #define MFEM_CFOSLS_TOOLS
 
+// some constants used for vtk visualization
 #define VTKTETRAHEDRON 10
 #define VTKWEDGE 13
 #define VTKTRIANGLE 5
@@ -12,13 +13,13 @@
 using namespace std;
 using namespace mfem;
 
+/// TODO: Replace references by pointers for return arguments to the
+/// TODO: dynamically allocated objects (e.g., bdr attributes)
+
 namespace mfem
 {
 
 class FOSLSEstimator;
-
-//HypreParMatrix * CopyRAPHypreParMatrix (HypreParMatrix& inputmat)
-//HypreParMatrix * CopyHypreParMatrix (HypreParMatrix& inputmat)
 
 template<typename T> void ConvertSTDvecToArray(std::vector<T>& stdvector, Array<int>& array_);
 
@@ -92,7 +93,7 @@ protected:
     ParMesh& pmesh;
     bool initialized;
 protected:
-    std::vector<std::vector<int> > bdr_attribs;
+    std::vector<Array<int>* > bdr_attribs;
 
 public:
     BdrConditions(ParMesh& pmesh_, int nblocks)
@@ -101,118 +102,25 @@ public:
         bdr_attribs.resize(numblocks);
         for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
         {
-            bdr_attribs[i].resize(pmesh.bdr_attributes.Max());
-            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
-                bdr_attribs[i][j] = -1;
+            bdr_attribs[i] = new Array<int>(pmesh.bdr_attributes.Max());
+            for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
+                (*bdr_attribs[i])[j] = -1;
         }
     }
 
     std::vector< Array<int>* >& GetAllBdrAttribs()
     {
         MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-
-        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(numblocks);
-        for (int i = 0; i < numblocks; ++i)
-        {
-            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
-            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
-            {
-                (*(*res)[i])[j] = bdr_attribs[i][j];
-            }
-        }
-
-        return *res;
+        return bdr_attribs;
     }
 
-    std::vector< Array<int>* >& GetFullBdrAttribs()
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-
-        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(numblocks);
-        for (int i = 0; i < numblocks; ++i)
-        {
-            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
-            *(*res)[i] = 1;
-        }
-
-        return *res;
-    }
-
-    /*
-    // deprecated
-    std::vector<std::vector<int> >* GetAllBdrAttribs()
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-        return &bdr_attribs;
-    }
-    */
-
-    /*
-    // deprecated
-    std::vector<int> * GetBdrAttribs(int blk)
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-        MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
-        return &(bdr_attribs[blk]);
-    }
-    */
-
-    Array<int>& GetBdrAttribs(int blk)
+    const Array<int>& GetBdrAttribs(int blk)
     {
         MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
         MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
 
-        Array<int> * res = new Array<int>(bdr_attribs[blk].size());
-        for (unsigned int i = 0; i < bdr_attribs[blk].size(); ++i)
-            (*res)[i] = bdr_attribs[blk][i];
-
-        return * res;
+        return *bdr_attribs[blk];
     }
-
-    /*
-    // deprecated
-    std::vector<std::vector<int> > & GetBdrAttribs(Array<int>& blks)
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-
-        std::vector< std::vector<int> > * res = new std::vector< std::vector<int> >(blks.Size());
-        for (int i = 0; i < blks.Size(); ++i)
-        {
-            int blk = blks[i];
-            MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
-
-            (*res)[i].resize(pmesh.bdr_attributes.Max());
-            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
-            {
-                (*res)[i][j] = bdr_attribs[blk][j];
-            }
-
-        }
-
-        return *res;
-    }
-    */
-
-    std::vector<Array<int>* > & GetBdrAttribs(Array<int>& blks)
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-
-        std::vector< Array<int>* > * res = new std::vector< Array<int>* >(blks.Size());
-        for (int i = 0; i < blks.Size(); ++i)
-        {
-            int blk = blks[i];
-            MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
-
-            (*res)[i] = new Array<int>(pmesh.bdr_attributes.Max());
-            for (unsigned int j = 0; j < bdr_attribs[i].size(); ++j)
-            {
-                *((*res)[i])[j] = bdr_attribs[blk][j];
-            }
-        }
-
-        return *res;
-    }
-
 
     bool Initialized() const {return initialized;}
 };
@@ -223,12 +131,12 @@ public:
     BdrConditions_CFOSLS_HdivL2_Hyper(ParMesh& pmesh_)
         : BdrConditions(pmesh_, 2)
     {
-        for (unsigned int j = 0; j < bdr_attribs[0].size(); ++j)
-            bdr_attribs[0][j] = 0;
-        bdr_attribs[0][0] = 1;
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+        (*bdr_attribs[0])[0] = 1;
 
-        for (unsigned int j = 0; j < bdr_attribs[1].size(); ++j)
-            bdr_attribs[1][j] = 0;
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 0;
 
         initialized = true;
     }
@@ -241,15 +149,15 @@ public:
     BdrConditions_CFOSLS_HdivH1_Hyper(ParMesh& pmesh_)
         : BdrConditions(pmesh_, 3)
     {
-        for (unsigned int j = 0; j < bdr_attribs[0].size(); ++j)
-            bdr_attribs[0][j] = 0;
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
 
-        for (unsigned int j = 0; j < bdr_attribs[1].size(); ++j)
-            bdr_attribs[1][j] = 0;
-        bdr_attribs[1][0] = 1;
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 0;
+        (*bdr_attribs[1])[0] = 1;
 
-        for (unsigned int j = 0; j < bdr_attribs[2].size(); ++j)
-            bdr_attribs[2][j] = 0;
+        for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
+            (*bdr_attribs[2])[j] = 0;
 
         initialized = true;
     }
@@ -363,19 +271,19 @@ public:
 
     int Nlevels() const {return num_lvls;}
 
-    const Array<int>& ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    const Array<int>* ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names);
     BlockOperator* ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
     BlockOperator* ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
 
-    const Array<int>& ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    const Array<int>* ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
     BlockMatrix* ConstructPforFormul(int level, const Array<SpaceName>& space_names,
                                                              const Array<int>& row_offsets, const Array<int>& col_offsets);
 
 
     Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
-                                           Array<int>& essbdr_attribs, int level) const;
+                                           const Array<int>& essbdr_attribs, int level) const;
 
     std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<Array<int>*>& essbdr_attribs, int level) const;
@@ -581,18 +489,37 @@ protected:
     Array2D<BilinearFormIntegrator*> blfis;
     Array<LinearFormIntegrator*> lfis;
     std::vector<std::pair<int,int> > blk_structure;
+    mutable Array<SpaceName>* space_names;
+    mutable Array<SpaceName>* space_names_funct;
 protected:
     virtual void InitBlkStructure() = 0;
-
+    virtual void ConstructSpacesDescriptor() const = 0;
+    virtual void ConstructFunctSpacesDescriptor() const = 0;
 public:
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
-    virtual const Array<SpaceName>& GetSpacesDescriptor() const = 0;
+    const Array<SpaceName>* GetSpacesDescriptor() const
+    {
+        if (!space_names)
+            ConstructSpacesDescriptor();
+
+        return space_names;
+    }
+
+    const Array<SpaceName>* GetFunctSpacesDescriptor() const
+    {
+        if (!space_names_funct)
+            ConstructFunctSpacesDescriptor();
+
+        return space_names_funct;
+    }
 
     SpaceName GetSpaceName(int i) const
     {
-        const Array<SpaceName>& space_names = GetSpacesDescriptor();
-        return space_names[i];
+        if (!space_names)
+            ConstructSpacesDescriptor();
+
+        return (*space_names)[i];
     }
 
     virtual int GetUnknownWithInitCnd() const
@@ -635,11 +562,12 @@ protected:
     Hyper_test test;
 protected:
     void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
 public:
     CFOSLSFormulation_HdivL2Hyper(int dimension, int num_solution, bool verbose);
 
     FOSLS_test * GetTest() override {return &test;}
-    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 0;}
 
@@ -653,11 +581,12 @@ protected:
     Hyper_test test;
 protected:
     void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
 public:
     CFOSLSFormulation_HdivH1Hyper(int dimension, int num_solution, bool verbose);
 
     FOSLS_test * GetTest() override {return &test;}
-    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 
@@ -671,6 +600,8 @@ protected:
     Hyper_test test;
 protected:
     void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
 public:
     CFOSLSFormulation_HdivH1DivfreeHyp(int dimension, int num_solution, bool verbose);
 
@@ -678,29 +609,10 @@ public:
         : CFOSLSFormulation_HdivH1DivfreeHyp(hdivh1_formul.Dim(), hdivh1_formul.NumSol(), verbose) {}
 
     FOSLS_test * GetTest() override {return &test;}
-    const Array<SpaceName>& GetSpacesDescriptor() const override;
 
     int GetUnknownWithInitCnd() const override {return 1;}
 
 };
-
-/*
-struct CFOSLSFormulation_PartSol : public FOSLSFormulation
-{
-protected:
-    int numsol;
-    FOSLS_test test;
-protected:
-    void InitBlkStructure() override;
-public:
-    CFOSLSFormulation_PartSol(int dimension, int num_solution, bool verbose);
-
-    FOSLS_test * GetTest() override {return &test;}
-    const Array<SpaceName>& GetSpacesDescriptor() const override;
-
-    int GetUnknownWithInitCnd() const override {return 1;}
-};
-*/
 
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
@@ -957,6 +869,9 @@ public:
 
     BlockOperator* GetOp() { return CFOSLSop; }
 
+    // doesn't own its blocks (taken from CFOSLSop)
+    BlockOperator* GetFunctOp(const Array<int>& offsets);
+
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
     void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
@@ -1002,8 +917,8 @@ public:
     void ComputeExtraError() const
     { ComputeExtraError(*trueX); }
 
-    virtual BlockMatrix* ConstructFunctBlkMat(Array<int> &offsets);
-    //{ MFEM_ABORT("ConstructFunctBlkMat() is not implemented in the base class");}
+    // constructs the BlockMatrix and the offsets, if given NULL
+    virtual BlockMatrix* ConstructFunctBlkMat(const Array<int> &offsets);
 
     void CreateOffsetsRhsSol();
 };
@@ -1203,7 +1118,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
             Array<int>& blkoffsets_true_row = problems_lvls[l - 1]->GetTrueOffsets();
             Array<int>& blkoffsets_true_col = problems_lvls[l]->GetTrueOffsets();
 
-            const Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+            const Array<SpaceName>* space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
 
             TrueP_lvls[l - 1] = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
 
@@ -1211,7 +1126,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
 
             for (int blk = 0; blk < numblocks; ++blk)
             {
-                HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], l - 1);
+                HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace((*space_names)[blk], l - 1);
                 TrueP_lvls[l - 1]->SetBlock(blk, blk, TrueP_blk);
             }
         }
@@ -1242,14 +1157,14 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
     // create new interpolation block operator
     Array<int>& blkoffsets_true_row = problems_lvls[0]->GetTrueOffsets();
     Array<int>& blkoffsets_true_col = problems_lvls[1]->GetTrueOffsets();
-    const Array<SpaceName>& space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+    const Array<SpaceName>* space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
 
     BlockOperator * TrueP_new = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
 
     int numblocks = fe_formulation.Nblocks();
     for (int blk = 0; blk < numblocks; ++blk)
     {
-        HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace(space_names[blk], 0);
+        HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace((*space_names)[blk], 0);
         TrueP_new->SetBlock(blk, blk, TrueP_blk);
     }
 
@@ -1304,7 +1219,7 @@ Array<int>* FOSLSProblHierarchy<Problem, Hierarchy>::ConstructBndIndices(int lev
     int nbnd_indices = 0;
     for (int blk= 0; blk < numblocks; ++blk)
     {
-        Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+        const Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         Array<int> ess_bnd_tdofs;
         problems_lvls[level]->GetPfes(blk)->GetEssentialTrueDofs(essbdr_attrs, ess_bnd_tdofs);
@@ -1318,7 +1233,7 @@ Array<int>* FOSLSProblHierarchy<Problem, Hierarchy>::ConstructBndIndices(int lev
     int count = 0;
     for (int blk = 0; blk < numblocks; ++blk)
     {
-        Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+        const Array<int> &essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
         //essbdr_attrs.Print();
 
@@ -1374,7 +1289,7 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
     HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(i,i)));
 
-    Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(i);
+    const Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(i);
     Array<int> temp_i;
     problems_lvls[l + 1]->GetPfes(i)->GetEssentialTrueDofs(essbdr_attrs, temp_i);
 
@@ -1403,7 +1318,7 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
         HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
         HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
 
-        Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(j);
+        const Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(j);
 
         Array<int> temp_j;
         problems_lvls[l + 1]->GetPfes(j)->GetEssentialTrueDofs(essbdr_attrs, temp_j);
@@ -1757,6 +1672,7 @@ public:
         for (int i = 0; i < nblocks; ++i)
             SetBlock(i,i, &(P.GetBlock(i,i)));
 
+        // FIXME: Can't we just copy the pointer instead? Not sure what is the best.
         MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
         bnd_indices = new Array<int>(BndIndices_->Size());
         for (int i = 0; i < bnd_indices->Size(); ++i)

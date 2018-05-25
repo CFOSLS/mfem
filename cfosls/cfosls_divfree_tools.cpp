@@ -1924,18 +1924,136 @@ DivConstraintSolver::~DivConstraintSolver()
         delete trueresfunc_lvls[i];
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
+
+    if (own_data)
+    {
+        for (int i = 0; i < AE_e.Size(); ++i)
+            delete AE_e[i];
+    }
 }
 
+DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_)
+    : Solver(),
+      setup_finished(false),
+      problem(&problem_),
+      hierarchy(&hierarchy_),
+      own_data(true),
+      num_levels(hierarchy->Nlevels()),
+      comm(problem->GetComm()),
+      numblocks(problem->GetFEformulation().Nblocks())
+{
+    P_L2.SetSize(num_levels - 1);
+    AE_e.SetSize(num_levels - 1);
+
+    const Array<SpaceName>* space_names_funct =
+            problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+
+    const Array<SpaceName>* space_names_problem =
+            problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+
+    TrueP_Func.SetSize(num_levels - 1);
+    offsets_funct.resize(num_levels);
+    offsets_funct[0] = hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
+
+    offsets_sp_funct.resize(num_levels);
+    offsets_sp_funct[0] = hierarchy->ConstructOffsetsforFormul(0, *space_names_funct);
+
+    Funct_mat_lvls.SetSize(num_levels);
+    Funct_mat_lvls[0] = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
+
+    Constraint_mat_lvls.SetSize(num_levels);
+    ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                                              hierarchy->GetSpace(SpaceName::L2, 0));
+    Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+    Divblock->Assemble();
+    Divblock->Finalize();
+    Constraint_mat_lvls[0] = Divblock->LoseMat();
+    delete Divblock;
+
+    Smoothers_lvls.SetSize(num_levels - 1);
+    Array<int> SweepsNum(space_names_funct->Size());
+
+    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+    std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+
+    BlockOps_lvls.SetSize(num_levels);
+    BlockOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        P_L2[l] = hierarchy->GetPspace(SpaceName::L2, l);
+        AE_e[l] = Transpose(*P_L2[l]);
+
+        offsets_funct[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, *space_names_funct);
+        TrueP_Func[l] = hierarchy->ConstructTruePforFormul(l, *space_names_funct,
+                                                           *offsets_funct[l], *offsets_funct[l + 1]);
+
+        BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
+                *BlockOps_lvls[l], *TrueP_Func[l], *offsets_funct[l + 1]);
+
+        std::vector<Array<int>* > &essbdr_tdofs_funct =
+                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
+        EliminateBoundaryBlocks(*BlockOps_lvls[l], essbdr_tdofs_funct);
+
+        SweepsNum = ipow(1, l); // = 1
+        Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
+                                                 *hierarchy->GetDivfreeDop(l),
+                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                           essbdr_attribs_Hcurl, l),
+                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                                           *space_names_funct,
+                                                                           essbdr_attribs, l),
+                                                 &SweepsNum, *offsets_funct[l]);
+
+        offsets_sp_funct[l + 1] = hierarchy->ConstructOffsetsforFormul(l + 1, *space_names_funct);
+
+        Constraint_mat_lvls[l + 1] = RAP(*hierarchy->GetPspace(SpaceName::L2, l),
+                                        *Constraint_mat_lvls[l], *hierarchy->GetPspace(SpaceName::HDIV, l));
+
+        BlockMatrix * P_Funct = hierarchy->ConstructPforFormul
+                (l, *space_names_funct, *offsets_sp_funct[l], *offsets_sp_funct[l + 1]);
+        Funct_mat_lvls[l + 1] = RAP(*P_Funct, *Funct_mat_lvls[l], *P_Funct);
+
+        delete P_Funct;
+    }
+
+    essbdr_tdofs_funct_coarse = hierarchy->GetEssBdrTdofsOrDofs
+            ("tdof", *space_names_funct, essbdr_attribs, num_levels - 1);
+    essbdr_dofs_funct_coarse = hierarchy->GetEssBdrTdofsOrDofs
+            ("dof", *space_names_funct, essbdr_attribs, num_levels - 1);
+
+    int coarse_size = 0;
+    for (int i = 0; i < space_names_problem->Size(); ++i)
+        coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
+
+    CoarseSolver =  new CoarsestProblemSolver(coarse_size,
+                                              *Funct_mat_lvls[num_levels - 1],
+            *Constraint_mat_lvls[num_levels - 1],
+            hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
+                                     row_offsets_coarse, col_offsets_coarse),
+            *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse);
+
+    CoarseSolver->SetMaxIter(70000);
+    CoarseSolver->SetAbsTol(1.0e-18);
+    CoarseSolver->SetRelTol(1.0e-18);
+    CoarseSolver->ResetSolverParams();
+
+
+    MFEM_ABORT("Don't forget to set parameters in Solver() constructor's call \n");
+}
+
+
 DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
-                       const Array< SparseMatrix*> &AE_to_e,
-                       const Array< BlockOperator*>& TrueProj_Func,
-                       const Array< SparseMatrix*> &Proj_L2,
-                       const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
-                       const std::vector<Operator*> & Func_Global_lvls,
-                       const HypreParMatrix & Constr_Global,
-                       const Vector& ConstrRhsVec,
-                       const Array<Operator*>& Smoothers_Lvls,
-                       const BlockVector& Bdrdata_TrueDofs,
+                       Array< SparseMatrix*> &AE_to_e,
+                       Array< BlockOperator*>& TrueProj_Func,
+                       Array< SparseMatrix*> &Proj_L2,
+                       std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
+                       std::vector<Operator*> & Func_Global_lvls,
+                       HypreParMatrix &Constr_Global,
+                       Vector& ConstrRhsVec,
+                       Array<Operator*>& Smoothers_Lvls,
 #ifdef CHECK_CONSTR
                        Vector & Constr_Rhs_global,
 #endif
@@ -1943,21 +2061,42 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                        CoarsestProblemSolver* CoarsestSolver)
      : Solver(Func_Global_lvls[0]->Height(), Func_Global_lvls[0]->Width()),
        setup_finished(false),
+       problem(NULL),
+       hierarchy(NULL),
+       own_data(false),
        num_levels(NumLevels),
-       AE_e(AE_to_e),
+       //AE_e(AE_to_e),
        comm(Comm),
-       TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
+       //TrueP_Func(TrueProj_Func), P_L2(Proj_L2),
        essbdrtruedofs_Func(EssBdrTrueDofs_Func),
        numblocks(TrueProj_Func[0]->NumRowBlocks()),
-       ConstrRhs(ConstrRhsVec),
-       Smoothers_lvls(Smoothers_Lvls),
-       bdrdata_truedofs(Bdrdata_TrueDofs)
-       , Func_global_lvls(Func_Global_lvls),
-       Constr_global(Constr_Global)
+       ConstrRhs(&ConstrRhsVec),
+       //Smoothers_lvls(Smoothers_Lvls),
+       //Func_global_lvls(Func_Global_lvls),
+       Constr_global(&Constr_Global)
 #ifdef CHECK_CONSTR
        ,Constr_rhs_global(&Constr_Rhs_global)
 #endif
 {
+    Func_global_lvls.resize(Func_Global_lvls.size());
+    for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
+        Func_global_lvls[i] = Func_Global_lvls[i];
+
+    AE_e.SetSize(AE_to_e.Size());
+    for (int i = 0; i < AE_e.Size(); ++i)
+        AE_e[i] = AE_to_e[i];
+
+    TrueP_Func.SetSize(TrueProj_Func.Size());
+    for (int i = 0; i < TrueP_Func.Size(); ++i)
+        TrueP_Func[i] = TrueProj_Func[i];
+
+    P_L2.SetSize(Proj_L2.Size());
+    for (int i = 0; i < P_L2.Size(); ++i)
+        P_L2[i] = Proj_L2[i];
+
+    Smoothers_lvls.SetSize(Smoothers_Lvls.Size());
+    for (int i = 0; i < Smoothers_lvls.Size(); ++i)
+        Smoothers_lvls[i] = Smoothers_Lvls[i];
 
     xblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
     yblock_truedofs = new BlockVector(TrueP_Func[0]->RowOffsets());
@@ -1997,8 +2136,8 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
                                                          BlockVector& particular_solution, const Vector &constr_rhs, bool verbose) const
 {
     // checking if the given initial vector satisfies the divergence constraint
-    Vector rhs_constr(Constr_global.Height());
-    Constr_global.Mult(truestart_guess.GetBlock(0), rhs_constr);
+    Vector rhs_constr(Constr_global->Height());
+    Constr_global->Mult(truestart_guess.GetBlock(0), rhs_constr);
     rhs_constr -= constr_rhs;
     rhs_constr *= -1.0;
     // 3.1 if not, computing the particular solution
@@ -2014,14 +2153,6 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
         particular_solution = truestart_guess;
         return;
     }
-
-#ifdef CHECK_BNDCND
-    for (int blk = 0; blk < numblocks; ++blk)
-    {
-        MFEM_ASSERT(CheckBdrError(truestart_guess.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
-                              "for the initial guess");
-    }
-#endif
 
     // variable-size vectors (initialized with the finest level sizes) on dofs
     Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
@@ -2062,7 +2193,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
             *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
 #ifdef CHECK_CONSTR
             if (l == 0)
-                CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), Constr_global, NULL, "for the smoother level 0 update");
+                CheckConstrRes(truetempvec2_lvls[l]->GetBlock(0), *Constr_global, NULL, "for the smoother level 0 update");
 #endif
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
         }
@@ -2102,7 +2233,7 @@ void DivConstraintSolver::FindParticularSolution(const BlockVector& truestart_gu
     particular_solution += *truesolupdate_lvls[0];
 
 #ifdef CHECK_CONSTR
-    CheckConstrRes(particular_solution.GetBlock(0), Constr_global,
+    CheckConstrRes(particular_solution.GetBlock(0), *Constr_global,
                     Constr_rhs_global, "for the particular solution inside in the end");
 #endif
 
@@ -2113,12 +2244,9 @@ void DivConstraintSolver::Setup(bool verbose) const
     if (verbose)
         std::cout << "Starting solver setup \n";
 
-    // 1. copying the given initial vector to the internal variable
-    CheckFunctValue(comm, *Func_global_lvls[0], NULL, bdrdata_truedofs,
-            "for initial vector at the beginning of solver setup: ", print_level);
-    // 2. setting up the required internal data at all levels
+    // setting up the required internal data at all levels
 
-    // 2.1 all levels except the coarsest
+    // for all levels except the coarsest
     for (int l = 0; l < num_levels - 1; ++l)
     {
         //sets up the current level and prepares operators for the next one

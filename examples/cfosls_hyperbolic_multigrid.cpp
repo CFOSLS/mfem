@@ -330,7 +330,7 @@ int main(int argc, char *argv[])
     BlockVector * Xinit_truedofs = problem->GetTrueInitialConditionFunc();
 
     // defining space names for the original problem, for the functional and the related divfree problem
-    const Array<SpaceName>& space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+    const Array<SpaceName>* space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
 
     Array<SpaceName> space_names_funct(numblocks_funct);
     space_names_funct[0] = SpaceName::HDIV;
@@ -343,9 +343,15 @@ int main(int argc, char *argv[])
         space_names_divfree[1] = SpaceName::H1;
 
     // extracting the boundary attributes
-    Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
     std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
-    std::vector<Array<int>*>& fullbdr_attribs = problem->GetBdrConditions().GetFullBdrAttribs();
+
+    std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+    {
+        fullbdr_attribs[i] = new Array<int>(pmesh->bdr_attributes.Max());
+        (*fullbdr_attribs[i]) = 1;
+    }
 
     if (verbose)
     {
@@ -361,7 +367,7 @@ int main(int argc, char *argv[])
     Array<int>& offsets_problem = problem->GetTrueOffsets();
     Array<int>& offsets_func = problem->GetTrueOffsetsFunc();
     std::vector<const Array<int> *> divfree_offsets(nlevels);
-    divfree_offsets[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_divfree);
+    divfree_offsets[0] = hierarchy->ConstructTrueOffsetsforFormul(0, space_names_divfree);
 
     HypreParMatrix * Constraint_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0));
 
@@ -615,7 +621,7 @@ int main(int argc, char *argv[])
     {
         if (l < num_levels - 1)
         {
-            divfree_offsets[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
+            divfree_offsets[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
             P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                         *hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                             *divfree_offsets[l], *divfree_offsets[l + 1]),
@@ -757,12 +763,12 @@ int main(int argc, char *argv[])
     chrono.Start();
 
     std::vector<const Array<int> *> offsets_hdivh1(nlevels);
-    offsets_hdivh1[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_funct);
+    offsets_hdivh1[0] = hierarchy->ConstructTrueOffsetsforFormul(0, space_names_funct);
 
     std::vector<const Array<int> *> offsets_sp_hdivh1(nlevels);
-    offsets_sp_hdivh1[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_funct);
+    offsets_sp_hdivh1[0] = hierarchy->ConstructOffsetsforFormul(0, space_names_funct);
 
-    Array<int> offsets_funct_hdivh1;
+    //Array<int> offsets_funct_hdivh1;
 
     // manually truncating the original problem's operator into the operator
     // which correspond to the functional (dropping the constraint)
@@ -846,7 +852,7 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
-            offsets_hdivh1[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_funct);
+            offsets_hdivh1[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_funct);
             BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, space_names_funct,
                                                                          *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
             P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
@@ -879,11 +885,11 @@ int main(int argc, char *argv[])
 
             //offsets_sp_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_funct);
 
-            Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(offsets_funct_hdivh1);
+            Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(*offsets_sp_hdivh1[0]/*offsets_funct_hdivh1*/);
         }
         else
         {
-            offsets_sp_hdivh1[l] = &hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
+            offsets_sp_hdivh1[l] = hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
 
             Constraint_mat_lvls_mg[l] = RAP(*hierarchy->GetPspace(SpaceName::L2, l - 1),
                                             *Constraint_mat_lvls_mg[l - 1], *hierarchy->GetPspace(SpaceName::HDIV, l - 1));
@@ -952,6 +958,9 @@ int main(int argc, char *argv[])
                                                                   optimized_localsolve);
             }
 
+            // FIXME: doesn't this cause undefined behavior because P_l2_T
+            // is used as AE_e in the LocalProblemSolver?
+            // No, it's used nly during the setup and then the newly created AE_eintdofs are used later
             delete P_L2_T;
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
@@ -1007,8 +1016,8 @@ int main(int argc, char *argv[])
 
     // Creating the coarsest problem solver
     int coarse_size = 0;
-    for (int i = 0; i < space_names_problem.Size(); ++i)
-        coarse_size += hierarchy->GetSpace(space_names_problem[i], num_levels - 1)->TrueVSize();
+    for (int i = 0; i < space_names_problem->Size(); ++i)
+        coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
 
     Array<int> row_offsets_coarse, col_offsets_coarse;
 
@@ -1056,6 +1065,8 @@ int main(int argc, char *argv[])
     constrfform_new->Assemble();
 #endif
 
+    DivConstraintSolver PartSolFinder_new(*problem, *hierarchy);
+
     DivConstraintSolver PartsolFinder(comm, num_levels,
                                       AE_e_lvls,
                                       BlockP_mg_nobnd_plus,
@@ -1065,7 +1076,6 @@ int main(int argc, char *argv[])
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
                                       *constrfform_new,
                                       HcurlSmoothers_lvls,
-                                      *Xinit_truedofs,
 #ifdef CHECK_CONSTR
                                       *constrfform_new,
 #endif

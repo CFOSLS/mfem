@@ -49,8 +49,8 @@ public:
           pmeshcyl(Pmeshcyl), cyl_hierarchy(NULL),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
-        const Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
-        init_cond_space = spacenames[init_cond_block];
+        const Array<SpaceName>* spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        init_cond_space = (*spacenames)[init_cond_block];
         ConstructTdofLink();
 
         temp_vec1 = new Vector(GlobalTrueProblemSize());
@@ -63,8 +63,8 @@ public:
           pmeshcyl(*Hierarchy.GetPmeshcyl(level)), cyl_hierarchy(&Hierarchy),
           init_cond_block(fe_formul.GetFormulation()->GetUnknownWithInitCnd())
     {
-        const Array<SpaceName>& spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
-        init_cond_space = spacenames[init_cond_block];
+        const Array<SpaceName>* spacenames = fe_formul.GetFormulation()->GetSpacesDescriptor();
+        init_cond_space = (*spacenames)[init_cond_block];
         tdofs_link = *cyl_hierarchy->GetTdofsLink(level, init_cond_space);
 
         temp_vec1 = new Vector(GlobalTrueProblemSize());

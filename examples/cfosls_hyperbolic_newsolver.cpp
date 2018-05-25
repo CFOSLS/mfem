@@ -1729,11 +1729,16 @@ int main(int argc, char *argv[])
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
 
-    Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
 
     std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
-    std::vector<Array<int>*>& fullbdr_attribs = problem->GetBdrConditions().GetFullBdrAttribs();
+    std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+    {
+        fullbdr_attribs[i] = new Array<int>(pmesh->bdr_attributes.Max());
+        (*fullbdr_attribs[i]) = 1;
+    }
 
     Array<SpaceName> space_names_funct(numblocks_funct);
     space_names_funct[0] = SpaceName::HDIV;
@@ -1781,7 +1786,7 @@ int main(int argc, char *argv[])
     Operator* CoarseSolver_mg;
 
     std::vector<const Array<int> *> offsets(nlevels);
-    offsets[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_divfree);
+    offsets[0] = hierarchy->ConstructTrueOffsetsforFormul(0, space_names_divfree);
 
     BlockOperator * orig_op = problem->GetOp();
     const HypreParMatrix * divfree_dop = hierarchy->GetDivfreeDop(0);
@@ -1825,7 +1830,7 @@ int main(int argc, char *argv[])
     {
         if (l < num_levels - 1)
         {
-            offsets[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
+            offsets[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
             P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                         *hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                             *offsets[l], *offsets[l + 1]),
@@ -3194,12 +3199,12 @@ int main(int argc, char *argv[])
 
 //#ifdef NEW_INTERFACE2
     std::vector<const Array<int> *> offsets_hdivh1(nlevels);
-    offsets_hdivh1[0] = &hierarchy->ConstructTrueOffsetsforFormul(0, space_names_funct);
+    offsets_hdivh1[0] = hierarchy->ConstructTrueOffsetsforFormul(0, space_names_funct);
 
     std::vector<const Array<int> *> offsets_sp_hdivh1(nlevels);
-    offsets_sp_hdivh1[0] = &hierarchy->ConstructOffsetsforFormul(0, space_names_funct);
+    offsets_sp_hdivh1[0] = hierarchy->ConstructOffsetsforFormul(0, space_names_funct);
 
-    Array<int> offsets_funct_hdivh1;
+    //Array<int> offsets_funct_hdivh1;
 
     // manually truncating the original problem's operator into hdiv-h1 operator
     BlockOperator * hdivh1_op = new BlockOperator(*offsets_hdivh1[0]);
@@ -3282,7 +3287,7 @@ int main(int argc, char *argv[])
 
         if (l < num_levels - 1)
         {
-            offsets_hdivh1[l + 1] = &hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_funct);
+            offsets_hdivh1[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_funct);
             BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, space_names_funct,
                                                                          *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
             P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
@@ -3315,11 +3320,11 @@ int main(int argc, char *argv[])
 
             //offsets_sp_hdivh1[l + 1] = &hierarchy->ConstructOffsetsforFormul(l + 1, space_names_funct);
 
-            Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(offsets_funct_hdivh1);
+            Funct_mat_lvls_mg[0] = problem->ConstructFunctBlkMat(*offsets_sp_hdivh1[0]/* offsets_funct_hdivh1*/);
         }
         else
         {
-            offsets_sp_hdivh1[l] = &hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
+            offsets_sp_hdivh1[l] = hierarchy->ConstructOffsetsforFormul(l, space_names_funct);
 
             Constraint_mat_lvls_mg[l] = RAP(*hierarchy->GetPspace(SpaceName::L2, l - 1),
                                             *Constraint_mat_lvls_mg[l - 1], *hierarchy->GetPspace(SpaceName::HDIV, l - 1));
@@ -3547,10 +3552,11 @@ int main(int argc, char *argv[])
     }
 
     // Creating the coarsest problem solver
-    const Array<SpaceName>& space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+    FOSLSFormulation * formulation_alias = problem->GetFEformulation().GetFormulation();
+    const Array<SpaceName>* space_names_problem = formulation_alias->GetSpacesDescriptor();
     int coarse_size = 0;
-    for (int i = 0; i < space_names_problem.Size(); ++i)
-        coarse_size += hierarchy->GetSpace(space_names_problem[i], num_levels - 1)->TrueVSize();
+    for (int i = 0; i < space_names_problem->Size(); ++i)
+        coarse_size += hierarchy->GetSpace(formulation_alias->GetSpaceName(i), num_levels - 1)->TrueVSize();
 
     Array<int> row_offsets_coarse, col_offsets_coarse;
 
@@ -3617,7 +3623,6 @@ int main(int argc, char *argv[])
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
                                       *constrfform_new, //Floc,
                                       HcurlSmoothers_lvls,
-                                      *xinit_new,
 #ifdef CHECK_CONSTR
                                       *constrfform_new,
 #endif
@@ -3634,7 +3639,6 @@ int main(int argc, char *argv[])
                                       Floc,
                                       HcurlSmoothers_lvls,
                                       //Smoothers_lvls,
-                                      Xinit_truedofs,
 #ifdef CHECK_CONSTR
                                       Floc,
 #endif

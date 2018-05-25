@@ -428,37 +428,47 @@ private:
 protected:
     mutable int print_level;
 
+    FOSLSProblem* problem;
+    GeneralHierarchy* hierarchy;
+    mutable std::vector<const Array<int> *> offsets_funct;
+    Array<BlockOperator*> BlockOps_lvls; // same as Func_global_lvls from the older part
+    mutable std::vector<const Array<int> *> offsets_sp_funct;
+    Array<BlockMatrix*> Funct_mat_lvls;
+    Array<SparseMatrix*> Constraint_mat_lvls;
+    Array<int> row_offsets_coarse, col_offsets_coarse;
+    std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
+    std::vector<Array<int>* > essbdr_dofs_funct_coarse;
+
+
+    const bool own_data;
+
     int num_levels;
 
     // Relation tables which represent agglomerated elements-to-elements relation at each level
     // used in ProjectFinerL2ToCoarser (and further in ComputeLocalRhsConstr)
-    const Array< SparseMatrix*>& AE_e;
+    Array< SparseMatrix*> AE_e;
 
     const MPI_Comm comm;
 
     // Projectors for the variables related to the functional and constraint
-    const Array< BlockOperator*>& TrueP_Func;
-    const Array< SparseMatrix*>& P_L2; // used for operators coarsening and in ComputeLocalRhsConstr (via ProjectFinerL2ToCoarser)
+    Array< BlockOperator*> TrueP_Func;
+    Array< SparseMatrix*> P_L2; // used for operators coarsening and in ComputeLocalRhsConstr (via ProjectFinerL2ToCoarser)
 
     // for each level and for each variable in the functional stores a vector
     // which defines if a dof is at the boundary / essential part of the boundary
     // or not
-    const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func;
+    std::vector<std::vector<Array<int>* > > essbdrtruedofs_Func;
 
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
 
     // righthand side of  the divergence contraint on dofs (= on true dofs for L2)
-    const Vector& ConstrRhs;
+    mutable Vector* ConstrRhs;
 
-    const Array<Operator*>& Smoothers_lvls;
+    Array<Operator*> Smoothers_lvls;
 
-    // a given blockvector (on true dofs) which satisfies
-    // essential bdr conditions imposed for the initial problem
-    const BlockVector& bdrdata_truedofs;
-
-    const std::vector<Operator*> & Func_global_lvls;
-    const HypreParMatrix & Constr_global;
+    std::vector<Operator*> Func_global_lvls;
+    mutable HypreParMatrix * Constr_global;
 
     // stores Functional matrix on all levels except the finest
     // so that Funct_levels[0] = Functional matrix on level 1 (not level 0!)
@@ -500,16 +510,18 @@ protected:
 
 public:
     ~DivConstraintSolver();
+
+    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_);
+
     DivConstraintSolver(MPI_Comm Comm, int NumLevels,
-                           const Array< SparseMatrix*> &AE_to_e,
-                           const Array< BlockOperator*>& TrueProj_Func,
-                           const Array< SparseMatrix*> &Proj_L2,
-                           const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
-                           const std::vector<Operator*> & Func_Global_lvls,
-                           const HypreParMatrix & Constr_Global,
-                           const Vector& ConstrRhsVec,
-                           const Array<Operator*>& Smoothers_Lvls,
-                           const BlockVector& Bdrdata_TrueDofs,
+                           Array< SparseMatrix*> &AE_to_e,
+                           Array< BlockOperator*>& TrueProj_Func,
+                           Array< SparseMatrix*> &Proj_L2,
+                           std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
+                           std::vector<Operator*> & Func_Global_lvls,
+                           HypreParMatrix& Constr_Global,
+                           Vector& ConstrRhsVec,
+                           Array<Operator*>& Smoothers_Lvls,
 #ifdef CHECK_CONSTR
                            Vector & Constr_Rhs_global,
 #endif
@@ -523,7 +535,7 @@ public:
         xblock_truedofs->Update(x.GetData(), TrueP_Func[0]->RowOffsets());
         yblock_truedofs->Update(y.GetData(), TrueP_Func[0]->RowOffsets());
 
-        FindParticularSolution(*xblock_truedofs, *yblock_truedofs, ConstrRhs, print_level);
+        FindParticularSolution(*xblock_truedofs, *yblock_truedofs, *ConstrRhs, print_level);
     }
 
     // existence of this method is required by the (abstract) base class Solver
