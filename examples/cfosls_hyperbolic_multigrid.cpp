@@ -1055,7 +1055,8 @@ int main(int argc, char *argv[])
     delete constrfform_new;
 
     // newer constructor
-    DivConstraintSolver PartsolFinder(*problem, *hierarchy, verbose);
+    bool opt_localsolvers = true;
+    DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers, verbose);
 
     // older alternative constructor
     /*

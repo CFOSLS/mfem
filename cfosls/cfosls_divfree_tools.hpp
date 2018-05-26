@@ -1,4 +1,5 @@
 #include <iostream>
+#include <deque>
 #include "testhead.hpp"
 
 #ifndef MFEM_CFOSLS_DIVFREETOOLS
@@ -19,21 +20,16 @@ namespace mfem
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 //#define CHECK_LOCALSOLVE
 
-// activates some additional checks
-//#define DEBUG_INFO
-
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
 #undef CHECK_CONSTR
 #undef CHECK_BNDCND
-#undef DEBUG_INFO
 #endif
 
 #ifndef MFEM_DEBUG
 #undef CHECK_LOCALSOLVE
 #undef CHECK_CONSTR
 #undef CHECK_BNDCND
-#undef DEBUG_INFO
 #endif
 
 // shouldn't be used anymore, we need a monolithic smoother
@@ -418,28 +414,26 @@ public:
 };
 
 // class for finding a particular solution to a divergence constraint
-class DivConstraintSolver : public Solver
+class DivConstraintSolver
 {
-private:
-    // a flag which indicates whether the solver setup was called
-    // before trying to solve anything
-    mutable bool setup_finished;
-
 protected:
+    mutable int size;
 
     FOSLSProblem* problem;
     GeneralHierarchy* hierarchy;
-    mutable std::vector<const Array<int> *> offsets_funct;
+    mutable std::deque<const Array<int> *> offsets_funct;
     Array<BlockOperator*> BlockOps_lvls; // same as Func_global_lvls from the older part
-    mutable std::vector<const Array<int> *> offsets_sp_funct;
+    mutable std::deque<const Array<int> *> offsets_sp_funct;
     Array<BlockMatrix*> Funct_mat_lvls;
     Array<SparseMatrix*> Constraint_mat_lvls;
     Array<int> row_offsets_coarse, col_offsets_coarse;
     std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
     std::vector<Array<int>* > essbdr_dofs_funct_coarse;
-    std::vector<Array<int>* > el2dofs_row_offsets;
-    std::vector<Array<int>* > el2dofs_col_offsets;
+    std::deque<Array<int>* > el2dofs_row_offsets;
+    std::deque<Array<int>* > el2dofs_col_offsets;
     std::vector<Array<int>* > fullbdr_attribs;
+    mutable bool optimized_localsolvers;
+    mutable int update_counter;
 
     const bool own_data;
 
@@ -447,7 +441,7 @@ protected:
 
     // Relation tables which represent agglomerated elements-to-elements relation at each level
     // used in ProjectFinerL2ToCoarser (and further in ComputeLocalRhsConstr)
-    Array< SparseMatrix*> AE_e;
+    Array<SparseMatrix*> AE_e;
 
     const MPI_Comm comm;
 
@@ -468,7 +462,7 @@ protected:
 
     Array<Operator*> Smoothers_lvls;
 
-    std::vector<Operator*> Func_global_lvls;
+    std::deque<Operator*> Func_global_lvls;
     mutable HypreParMatrix * Constr_global;
 
     mutable Array<BlockVector*> truetempvec_lvls;
@@ -482,15 +476,6 @@ protected:
     mutable bool verbose;
 
 protected:
-
-
-    // Allocates current level-related data and computes coarser matrices for the functional
-    // and the constraint.
-    // Called only during the SetUpSolver()
-    virtual void SetUpFinerLvl(int lvl) const;
-
-    virtual void Setup(bool verbose = false) const;
-
     virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
@@ -504,7 +489,7 @@ protected:
 public:
     ~DivConstraintSolver();
 
-    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_, bool verbose_);
+    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_, bool optimized_localsolvers_, bool verbose_);
 
     DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                            Array< SparseMatrix*> &AE_to_e,
@@ -518,32 +503,17 @@ public:
                            Array<LocalProblemSolver*>* LocalSolvers,
                            CoarsestProblemSolver* CoarsestSolver, bool verbose_);
 
-    // deprecated, should not be called
-    // Operator application: `y=A(x)`.
-    virtual void Mult(const Vector &x, Vector &y) const
-    {
-        // x and y will be accessed through its viewers
-        const BlockVector xblock_viewer(x.GetData(), TrueP_Func[0]->RowOffsets());
-        BlockVector yblock_viewer(y.GetData(), TrueP_Func[0]->RowOffsets());
+    // a necessary routine to update the internal problem pointer
+    // usually must be called before Update() by the user.
+    void UpdateProblem(FOSLSProblem& problem_) {problem = &problem_;}
 
-        if (ConstrRhs)
-            FindParticularSolution(xblock_viewer, yblock_viewer, *ConstrRhs, verbose);
-        else
-        {
-            std::cout << "ConstrRhs is not set, cannot call Mult() for DivConstraintSolver in"
-                         " this case. Probably you wanted to call FindParticularSolution instead \n";\
-            MFEM_ABORT("See the message above \n");
-        }
-    }
-
-    // existence of this method is required by the (abstract) base class Solver
-    virtual void SetOperator(const Operator &op) override{}
+    // in case when the solver is based on hierarchy and problem and hence owns the data,
+    // this routine updates the solver when the hierarchy is updated (new levels appear)
+    void Update(bool recoarsen = true);
 
     void FindParticularSolution(const BlockVector& truestart_guess, BlockVector& particular_solution, const Vector& ConstrRhs, bool verbose) const;
 
-    // have to define these to mimic useful routines from IterativeSolver class
-    //void SetPrintLevel(int PrintLevel) const {print_level = PrintLevel;}
-
+    int Size() const {return size;}
 };
 
 class HcurlGSSSmoother : public BlockOperator

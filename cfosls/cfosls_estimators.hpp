@@ -84,11 +84,12 @@ public:
 };
 
 template <class Problem, class Hierarchy>
-FOSLSEstimatorOnHier<Problem, Hierarchy>::FOSLSEstimatorOnHier(FOSLSProblHierarchy<Problem, Hierarchy> & prob_hierarchy_,                                           int level_,
-                                           std::vector<std::pair<int,int> > & grfuns_descriptor_,
-                                           Array<ParGridFunction *> *extra_grfuns_,
-                                           Array2D<BilinearFormIntegrator*>& integrators,
-                                           bool verbose_)
+FOSLSEstimatorOnHier<Problem, Hierarchy>::FOSLSEstimatorOnHier(FOSLSProblHierarchy<Problem, Hierarchy> & prob_hierarchy_,
+                                                               int level_,
+                                                               std::vector<std::pair<int,int> > & grfuns_descriptor_,
+                                                               Array<ParGridFunction *> *extra_grfuns_,
+                                                               Array2D<BilinearFormIntegrator*>& integrators,
+                                                               bool verbose_)
     : FOSLSEstimator(*prob_hierarchy_.GetProblem(level_), grfuns_descriptor_,
                      extra_grfuns_, integrators, verbose_),
       prob_hierarchy(prob_hierarchy_), level(level_),
@@ -103,6 +104,8 @@ const Vector & FOSLSEstimatorOnHier<Problem, Hierarchy>::GetLocalErrors()
     int hierarchy_upd_cnt = prob_hierarchy.GetUpdateCounter();
     if (update_counter != hierarchy_upd_cnt)
     {
+        MFEM_ASSERT(update_counter == hierarchy_upd_cnt - 1,
+                    "Current implementation allows the update counters to differ no more than by one");
         RedefineGrFuns();
         ComputeEstimates();
         update_counter = hierarchy_upd_cnt;

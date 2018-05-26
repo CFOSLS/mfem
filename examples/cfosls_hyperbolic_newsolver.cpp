@@ -3695,7 +3695,7 @@ int main(int argc, char *argv[])
         CoarsestSolver_partfinder->PrintSolverParams();
     }
 
-    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+    PartsolFinder.FindParticularSolution(Xinit_truedofs, ParticSol, Floc, verbose);
 
     //std::cout << "partic sol norm = " << ParticSol.Norml2() / sqrt (ParticSol.Size()) << "\n";
     //MPI_Finalize();
