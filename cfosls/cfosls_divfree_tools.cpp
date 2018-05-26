@@ -2055,12 +2055,8 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
 
 
         std::vector<Array<int>* > &essbdr_tdofs_funct =
-                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
-        EliminateBoundaryBlocks(*BlockOps_lvls[l], essbdr_tdofs_funct);
-
-        MFEM_ABORT("Check why here EliminateBoundaryBlocks is called for the l-th level? is it correct?"
-                   " also look into the similar place in cfosls_hyperbolic_multigrid and newsolver examples \n");
-
+                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
+        EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
 
         SweepsNum = ipow(1, l); // = 1
         Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
@@ -2318,10 +2314,6 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         TrueP_Func.Prepend(TrueP_Func_new);
 
-        std::vector<Array<int>* > &essbdr_tdofs_funct =
-                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0);
-        EliminateBoundaryBlocks(*BlockOps_lvls[0], essbdr_tdofs_funct);
-
         HcurlGSSSmoother * Smoother_new = new HcurlGSSSmoother(*BlockOps_lvls[0], *hierarchy->GetDivfreeDop(0),
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
@@ -2369,6 +2361,11 @@ void DivConstraintSolver::Update(bool recoarsen)
             {
                 BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
                         *BlockOps_lvls[l], *TrueP_Func[l], *offsets_funct[l + 1]);
+
+                std::vector<Array<int>* > &essbdr_tdofs_funct =
+                        hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
+                EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
+
                 Func_global_lvls[l + 1] = BlockOps_lvls[l + 1];
 
                 Constraint_mat_lvls[l + 1] = RAP(*hierarchy->GetPspace(SpaceName::L2, l),
