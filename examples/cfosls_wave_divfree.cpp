@@ -394,7 +394,6 @@ template<double (*S)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vect
         void (*opdivfreevec)(const Vector&, Vector& )>
         void minsigmahatTemplate(const Vector& xt, Vector& sigmahatv);
 
-
 class Wave_test_divfree
 {
 protected:

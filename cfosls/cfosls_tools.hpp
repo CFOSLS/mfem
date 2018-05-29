@@ -164,6 +164,48 @@ public:
 
 };
 
+struct BdrConditions_CFOSLS_HdivH1_Parab : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_HdivH1_Parab(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 1;
+        (*bdr_attribs[1])[bdr_attribs[1]->Size() - 1] = 0;
+
+        for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
+            (*bdr_attribs[2])[j] = 0;
+
+        initialized = true;
+    }
+};
+
+struct BdrConditions_CFOSLS_HdivH1_Wave : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_HdivH1_Wave(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+        (*bdr_attribs[0])[0] = 1;
+
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 1;
+        (*bdr_attribs[1])[bdr_attribs[1]->Size() - 1] = 0;
+
+        for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
+            (*bdr_attribs[2])[j] = 0;
+
+        initialized = true;
+    }
+
+};
+
 enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
 
 class FOSLSFormulation;
@@ -614,6 +656,44 @@ public:
 
 };
 
+struct CFOSLSFormulation_HdivH1Parab : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Parab_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_HdivH1Parab(int dimension, int num_solution, bool verbose);
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+
+    int NumSol() const override {return numsol;}
+};
+
+struct CFOSLSFormulation_HdivH1Wave : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Wave_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_HdivH1Wave(int dimension, int num_solution, bool verbose);
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+
+    int NumSol() const override {return numsol;}
+};
+
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
 struct FOSLSFEFormulation
@@ -667,16 +747,26 @@ public:
     CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order);
 };
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivL2L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1DivfreeHyper : FOSLSFEFormulation
 {
 public:
     CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order);
 };
 
+/// FIXME: See previous FIXME messages
+struct CFOSLSFEFormulation_HdivH1Parab : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivH1Parab(FOSLSFormulation& formulation, int fe_order);
+};
 
+/// FIXME: See previous FIXME messages
+struct CFOSLSFEFormulation_HdivH1Wave : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivH1Wave(FOSLSFormulation& formulation, int fe_order);
+};
 
 class BlockProblemForms
 {
@@ -974,6 +1064,69 @@ public:
     }
 
     FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+};
+
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivH1L2 problem but take
+/// a general FOSLSFEFormulation as an input.
+class FOSLSProblem_HdivH1parab : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_HdivH1parab(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivH1parab(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+};
+
+
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivH1L2 problem but take
+/// a general FOSLSFEFormulation as an input.
+class FOSLSProblem_HdivH1wave : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_HdivH1wave(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivH1wave(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
     {

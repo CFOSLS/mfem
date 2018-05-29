@@ -1,7 +1,9 @@
 #include "testhead.hpp"
 
+
 namespace mfem
 {
+
 
 double uFunTest_ex(const Vector& xt)
 {
@@ -475,7 +477,209 @@ bool Hyper_test::CheckTestConfig()
         return false;
 }
 
+Parab_test::Parab_test(int dimension, int num_solution)
+    : FOSLS_test(dimension, 2, 1, 0), numsol(num_solution)
+{
+    Init();
+}
 
+void Parab_test::Init()
+{
+    if ( CheckTestConfig() == false )
+        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    else
+    {
+        if (numsol == -3) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_laplace, &uFunTest_ex_gradx>();
+        }
+        if (numsol == -33) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_laplace, &uFunTestNh_ex_gradx>();
+        }
+        if (numsol == -4) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_laplace, &uFunTest_ex_gradx>();
+        }
+        if (numsol == -44) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_laplace, &uFunTestNh_ex_gradx>();
+        }
+
+        if (numsol == 0)
+        {
+            //std::cout << "The domain should be either a unit rectangle or cube" << std::endl << std::flush;
+            SetTestCoeffs<&uFun_ex_parab, &uFun_ex_parab_dt, &uFun_ex_parab_laplace, &uFun_ex_parab_gradx>();
+        }
+        if (numsol == 1)
+        {
+            //std::cout << "The domain should be either a unit rectangle or cube" << std::endl << std::flush;
+            SetTestCoeffs<&uFun1_ex_parab, &uFun1_ex_parab_dt, &uFun1_ex_parab_laplace, &uFun1_ex_parab_gradx>();
+        }
+        if (numsol == 2)
+        {
+            SetTestCoeffs<&uFun2_ex_parab, &uFun2_ex_parab_dt, &uFun2_ex_parab_laplace, &uFun2_ex_parab_gradx>();
+        }
+        if (numsol == 3)
+        {
+            SetTestCoeffs<&uFun3_ex_parab, &uFun3_ex_parab_dt, &uFun3_ex_parab_laplace, &uFun3_ex_parab_gradx>();
+        }
+        if (numsol == -34)
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_laplace, &uFunTest_ex_gradx>();
+        }
+
+    } // end of setting test coefficients in correct case
+}
+
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt),
+         double (*Slaplace)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx)> \
+void Parab_test::SetTestCoeffs ( )
+{
+    SetScalarSFun(S);
+    SetSigmaVec<S,Sgradxvec>();
+    SetDivSigma<S, dSdt, Slaplace>();
+    return;
+}
+
+bool Parab_test::CheckTestConfig()
+{
+    if (dim == 4 || dim == 3)
+    {
+        if (numsol == -3 && dim == 3)
+            return true;
+        if (numsol == -4 && dim == 4)
+            return true;
+        if (numsol == -33 && dim == 3)
+            return true;
+        if (numsol == -44 && dim == 4)
+            return true;
+        if (numsol == 0 || numsol == 1)
+            return true;
+        if (numsol == 2 && dim == 4)
+            return true;
+        if (numsol == 3 && dim == 3)
+            return true;
+        if (numsol == -34 && (dim == 3 || dim == 4))
+            return true;
+        return false;
+    }
+    else
+        return false;
+}
+
+Wave_test::Wave_test(int dimension, int num_solution)
+    : FOSLS_test(dimension, 2, 1, 0), numsol(num_solution)
+{
+    Init();
+}
+
+void Wave_test::Init()
+{
+    if ( CheckTestConfig() == false )
+        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    else
+    {
+        if (numsol == -3) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_dt2, &uFunTest_ex_laplace, &uFunTest_ex_dtlaplace,
+                    &uFunTest_ex_gradx, &uFunTest_ex_dtgradx>();
+        }
+        if (numsol == -33) // 3D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_dt2, &uFunTestNh_ex_laplace, &uFunTestNh_ex_dtlaplace,
+                    &uFunTestNh_ex_gradx, &uFunTestNh_ex_dtgradx>();
+        }
+        if (numsol == -4) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_dt2, &uFunTest_ex_laplace, &uFunTest_ex_dtlaplace,
+                    &uFunTest_ex_gradx, &uFunTest_ex_dtgradx>();
+        }
+        if (numsol == -44) // 4D test for the paper
+        {
+            SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_dt2, &uFunTestNh_ex_laplace, &uFunTestNh_ex_dtlaplace,
+                    &uFunTestNh_ex_gradx, &uFunTestNh_ex_dtgradx>();
+        }
+
+        if (numsol == -34)
+        {
+            SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_dt2, &uFunTest_ex_laplace, &uFunTest_ex_dtlaplace,
+                    &uFunTest_ex_gradx, &uFunTest_ex_dtgradx>();
+        }
+        if (numsol == 0)
+        {
+            SetTestCoeffs<&uFun_ex_wave, &uFun_ex_wave_dt, &uFun_ex_wave_dt2, &uFun_ex_wave_laplace,
+                    &uFun_ex_wave_dtlaplace, &uFun_ex_wave_gradx, &uFun_ex_wave_dtgradx>();
+        }
+        if (numsol == 1)
+        {
+            SetTestCoeffs<&uFun1_ex_wave, &uFun1_ex_wave_dt, &uFun1_ex_wave_dt2, &uFun1_ex_wave_laplace, &uFun1_ex_wave_dtlaplace,
+                    &uFun1_ex_wave_gradx, &uFun1_ex_wave_dtgradx>();
+        }
+        if (numsol == 2)
+        {
+            SetTestCoeffs<&uFun2_ex_wave, &uFun2_ex_wave_dt, &uFun2_ex_wave_dt2, &uFun2_ex_wave_laplace, &uFun2_ex_wave_dtlaplace,
+                    &uFun2_ex_wave_gradx, &uFun2_ex_wave_dtgradx>();
+        }
+        if (numsol == 3)
+        {
+            SetTestCoeffs<&uFun3_ex_wave, &uFun3_ex_wave_dt, &uFun3_ex_wave_dt2, &uFun3_ex_wave_laplace,
+                    &uFun3_ex_wave_dtlaplace, &uFun3_ex_wave_gradx, &uFun3_ex_wave_dtgradx>();
+        }
+        if (numsol == 4)
+        {
+            SetTestCoeffs<&uFun4_ex_wave, &uFun4_ex_wave_dt, &uFun4_ex_wave_dt2, &uFun4_ex_wave_laplace,
+                    &uFun4_ex_wave_dtlaplace, &uFun4_ex_wave_gradx, &uFun4_ex_wave_dtgradx>();
+        }
+        if (numsol == 5)
+        {
+            SetTestCoeffs<&uFun5_ex_wave, &uFun5_ex_wave_dt, &uFun5_ex_wave_dt2, &uFun5_ex_wave_laplace,
+                    &uFun5_ex_wave_dtlaplace, &uFun5_ex_wave_gradx, &uFun5_ex_wave_dtgradx>();
+        }
+    } // end of setting test coefficients in correct case
+}
+
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), double (*d2Sdt2)(const Vector & xt),\
+         double (*Slaplace)(const Vector & xt), double (*dSdtlaplace)(const Vector & xt), \
+         void(*Sgradxvec)(const Vector & x, Vector & gradx), void (*dSdtgradxvec)(const Vector&, Vector& ) > \
+void Wave_test::SetTestCoeffs()
+{
+    SetScalarSFun(S);
+    SetSigmaVec<dSdt,Sgradxvec>();
+    SetDivSigma<S, d2Sdt2, Slaplace>();
+    return;
+}
+
+bool Wave_test::CheckTestConfig()
+{
+    if (dim == 4 || dim == 3)
+    {
+        if (numsol == -3 && dim == 3)
+            return true;
+        if (numsol == -4 && dim == 4)
+            return true;
+        if (numsol == -33 && dim == 3)
+            return true;
+        if (numsol == -44 && dim == 4)
+            return true;
+
+        if (numsol == 0 || numsol == 1)
+            return true;
+        if (numsol == 2 && dim == 4)
+            return true;
+        if (numsol == 3 && dim == 3)
+            return true;
+        if (numsol == 4 && dim == 3)
+            return true;
+        if (numsol == 5 && dim == 3)
+            return true;
+        if (numsol == -34 && (dim == 3 || dim == 4))
+            return true;
+        return false;
+    }
+    else
+        return false;
+}
 
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx),  \
@@ -670,37 +874,6 @@ Transport_test_divfree::Transport_test_divfree (int Dim, int NumSol, int NumCurl
             else
                 SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex, &zerovecMat4D_ex, &zerovec_ex>();
         }
-        /*
-        if (numsol == 1)
-        {
-            if (numcurl == 1)
-                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
-            else if (numcurl == 2)
-                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
-            else
-                SetTestCoeffs<&uFun1_ex, &uFun1_ex_dt, &uFun1_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
-        }
-        if (numsol == 2)
-        {
-            //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
-            if (numcurl == 1)
-                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
-            else if (numcurl == 2)
-                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
-            else
-                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
-        }
-        if (numsol == 4)
-        {
-            //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
-            if (numcurl == 1)
-                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_ex, &curlhcurlFun3D_ex>();
-            else if (numcurl == 2)
-                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &hcurlFun3D_2_ex, &curlhcurlFun3D_2_ex>();
-            else
-                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex, &zerovec_ex, &zerovec_ex>();
-        }
-        */
     } // end of setting test coefficients in correct case
 }
 
@@ -728,7 +901,7 @@ void bbTTemplate(const Vector& xt, DenseMatrix& bbT)
 
 
 template <double (*S)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )> \
-void sigmaTemplate(const Vector& xt, Vector& sigma)
+void sigmaTemplate_hyper(const Vector& xt, Vector& sigma)
 {
     Vector b;
     bvecfunc(xt, b);
@@ -762,7 +935,7 @@ double minbTbSnonhomoTemplate(const Vector& xt)
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
          void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-double divsigmaTemplate(const Vector& xt)
+double divsigmaTemplate_hyper(const Vector& xt)
 {
     Vector b;
     bvec(xt,b);
@@ -789,7 +962,7 @@ void bfTemplate(const Vector& xt, Vector& bf)
     Vector b;
     bvec(xt,b);
 
-    double f = divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>(xt);
+    double f = divsigmaTemplate_hyper<S, dSdt, Sgradxvec, bvec, divbfunc>(xt);
 
     for (int i = 0; i < bf.Size(); ++i)
         bf(i) = f * b(i);
@@ -804,7 +977,7 @@ void bdivsigmaTemplate(const Vector& xt, Vector& bdivsigma)
     Vector b;
     bvec(xt,b);
 
-    double divsigma = divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>(xt);
+    double divsigma = divsigmaTemplate_hyper<S, dSdt, Sgradxvec, bvec, divbfunc>(xt);
 
     for (int i = 0; i < bdivsigma.Size(); ++i)
         bdivsigma(i) = divsigma * b(i);
@@ -899,6 +1072,56 @@ template<double (*S)(const Vector & xt) > double SnonhomoTemplate(const Vector& 
     return S(xt0);
 }
 
+
+template <double (*S)(const Vector&), void (*Sgradxvec)(const Vector&, Vector& )> \
+void sigmaTemplate_parab(const Vector& xt, Vector& sigma)
+{
+    sigma.SetSize(xt.Size());
+
+    Vector gradS;
+    Sgradxvec(xt,gradS);
+
+    sigma(xt.Size()-1) = S(xt);
+    for (int i = 0; i < xt.Size()-1; i++)
+        sigma(i) = - gradS(i);
+
+    return;
+}
+
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), double (*Slaplace)(const Vector & xt) > \
+double divsigmaTemplate_parab(const Vector& xt)
+{
+    Vector xt0(xt.Size());
+    xt0 = xt;
+    xt0 (xt0.Size() - 1) = 0;
+
+    return dSdt(xt) - Slaplace(xt);
+}
+
+template <double (*dSdt)(const Vector&), void (*Sgradxvec)(const Vector&, Vector& )> \
+void sigmaTemplate_wave(const Vector& xt, Vector& sigma)
+{
+    sigma.SetSize(xt.Size());
+
+    Vector gradS;
+    Sgradxvec(xt,gradS);
+
+    sigma(xt.Size()-1) = dSdt(xt);
+    for (int i = 0; i < xt.Size()-1; i++)
+        sigma(i) = - gradS(i);
+
+    return;
+}
+
+template<double (*S)(const Vector & xt), double (*d2Sdt2)(const Vector & xt), double (*Slaplace)(const Vector & xt) > \
+double divsigmaTemplate_wave(const Vector& xt)
+{
+    Vector xt0(xt.Size());
+    xt0 = xt;
+    xt0 (xt0.Size() - 1) = 0;
+
+    return d2Sdt2(xt) - Slaplace(xt);
+}
 
 double uFunTestNh_ex(const Vector& xt)
 {
@@ -1314,6 +1537,796 @@ void curlhcurlFun3D_2_ex(const Vector& xt, Vector& vecvalue)
 
     return;
 }
+
+/////// from parabolic example
+double uFun_ex_parab(const Vector & xt)
+{
+    const double PI = 3.141592653589793;
+    double xi(xt(0));
+    double yi(xt(1));
+    double zi(0.0);
+    double vi(0.0);
+
+    if (xt.Size() == 3)
+    {
+        zi = xt(2);
+        return sin(PI*xi)*sin(PI*yi)*zi;
+    }
+    if (xt.Size() == 4)
+    {
+        zi = xt(2);
+        vi = xt(3);
+        //cout << "sol for 4D" << endl;
+        return sin(PI*xi)*sin(PI*yi)*sin(PI*zi)*vi;
+    }
+
+    return 0.0;
+}
+
+
+double uFun_ex_parab_dt(const Vector & xt)
+{
+    const double PI = 3.141592653589793;
+    double xi(xt(0));
+    double yi(xt(1));
+    double zi(0.0);
+
+    if (xt.Size() == 3)
+        return sin(PI*xi)*sin(PI*yi);
+    if (xt.Size() == 4)
+    {
+        zi = xt(2);
+        return sin(PI*xi)*sin(PI*yi)*sin(PI*zi);
+    }
+
+    return 0.0;
+}
+
+double uFun_ex_parab_laplace(const Vector & xt)
+{
+    const double PI = 3.141592653589793;
+    return (-(xt.Size()-1) * PI * PI) *uFun_ex_parab(xt);
+}
+
+void uFun_ex_parab_gradx(const Vector& xt, Vector& gradx )
+{
+    const double PI = 3.141592653589793;
+
+    double x = xt(0);
+    double y = xt(1);
+    double z(0.0);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    if (xt.Size() == 3)
+    {
+        gradx(0) = t * PI * cos (PI * x) * sin (PI * y);
+        gradx(1) = t * PI * sin (PI * x) * cos (PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        z = xt(2);
+        gradx(0) = t * PI * cos (PI * x) * sin (PI * y) * sin (PI * z);
+        gradx(1) = t * PI * sin (PI * x) * cos (PI * y) * sin (PI * z);
+        gradx(2) = t * PI * sin (PI * x) * sin (PI * y) * cos (PI * z);
+    }
+
+}
+
+
+double fFun(const Vector & x)
+{
+    const double PI = 3.141592653589793;
+    double xi(x(0));
+    double yi(x(1));
+    double zi(0.0);
+    double vi(0.0);
+    if (x.Size() == 3)
+    {
+     zi = x(2);
+       return 2*PI*PI*sin(PI*xi)*sin(PI*yi)*zi+sin(PI*xi)*sin(PI*yi);
+    }
+
+    if (x.Size() == 4)
+    {
+     zi = x(2);
+         vi = x(3);
+         //cout << "rhand for 4D" << endl;
+       return 3*PI*PI*sin(PI*xi)*sin(PI*yi)*sin(PI*zi)*vi + sin(PI*xi)*sin(PI*yi)*sin(PI*zi);
+    }
+
+    return 0.0;
+}
+
+void sigmaFun_ex(const Vector & x, Vector & u)
+{
+    const double PI = 3.141592653589793;
+    double xi(x(0));
+    double yi(x(1));
+    double zi(0.0);
+    double vi(0.0);
+    if (x.Size() == 3)
+    {
+        zi = x(2);
+        u(0) = - PI * cos (PI * xi) * sin (PI * yi) * zi;
+        u(1) = - PI * cos (PI * yi) * sin (PI * xi) * zi;
+        u(2) = uFun_ex_parab(x);
+        return;
+    }
+
+    if (x.Size() == 4)
+    {
+        zi = x(2);
+        vi = x(3);
+        u(0) = - PI * cos (PI * xi) * sin (PI * yi) * sin(PI * zi) * vi;
+        u(1) = - sin (PI * xi) * PI * cos (PI * yi) * sin(PI * zi) * vi;
+        u(2) = - sin (PI * xi) * sin(PI * yi) * PI * cos (PI * zi) * vi;
+        u(3) = uFun_ex_parab(x);
+        return;
+    }
+
+    if (x.Size() == 2)
+    {
+        u(0) =  exp(-PI*PI*yi)*PI*cos(PI*xi);
+        u(1) = -sin(PI*xi)*exp(-1*PI*PI*yi);
+        return;
+    }
+
+    return;
+}
+
+
+
+double uFun1_ex_parab(const Vector & xt)
+{
+    double tmp = (xt.Size() == 4) ? sin(M_PI*xt(2)) : 1.0;
+    return exp(-xt(xt.Size()-1))*sin(M_PI*xt(0))*sin(M_PI*xt(1))*tmp;
+}
+
+double uFun1_ex_parab_dt(const Vector & xt)
+{
+    return - uFun1_ex_parab(xt);
+}
+
+double uFun1_ex_parab_laplace(const Vector & xt)
+{
+    return (- (xt.Size() - 1) * M_PI * M_PI ) * uFun1_ex_parab(xt);
+}
+
+void uFun1_ex_parab_gradx(const Vector& xt, Vector& gradx )
+{
+    const double PI = 3.141592653589793;
+
+    double x = xt(0);
+    double y = xt(1);
+    double z(0.0);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    if (xt.Size() == 3)
+    {
+        gradx(0) = exp(-t) * PI * cos (PI * x) * sin (PI * y);
+        gradx(1) = exp(-t) * PI * sin (PI * x) * cos (PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        z = xt(2);
+        gradx(0) = exp(-t) * PI * cos (PI * x) * sin (PI * y) * sin (PI * z);
+        gradx(1) = exp(-t) * PI * sin (PI * x) * cos (PI * y) * sin (PI * z);
+        gradx(2) = exp(-t) * PI * sin (PI * x) * sin (PI * y) * cos (PI * z);
+    }
+
+}
+
+double fFun1(const Vector & x)
+{
+    return ( (x.Size()-1)*M_PI*M_PI - 1. ) * uFun1_ex_parab(x);
+}
+
+void sigmaFun1_ex(const Vector & x, Vector & sigma)
+{
+    sigma.SetSize(x.Size());
+    sigma(0) = -M_PI*exp(-x(x.Size()-1))*cos(M_PI*x(0))*sin(M_PI*x(1));
+    sigma(1) = -M_PI*exp(-x(x.Size()-1))*sin(M_PI*x(0))*cos(M_PI*x(1));
+    if (x.Size() == 4)
+    {
+        sigma(0) *= sin(M_PI*x(2));
+        sigma(1) *= sin(M_PI*x(2));
+        sigma(2) = -M_PI*exp(-x(x.Size()-1))*sin(M_PI*x(0))
+                *sin(M_PI*x(1))*cos(M_PI*x(2));
+    }
+    sigma(x.Size()-1) = uFun1_ex_parab(x);
+
+    return;
+}
+
+double uFun2_ex_parab(const Vector & xt)
+{
+    if (xt.Size() != 4)
+        cout << "Error, this is only 4-d solution" << endl;
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    return exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+}
+
+double uFun2_ex_parab_dt(const Vector & xt)
+{
+    return - uFun2_ex_parab(xt);
+}
+
+double uFun2_ex_parab_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    double res = 0.0;
+    res += exp(-t) * (2.0 * M_PI * cos(M_PI * x) - x * M_PI * M_PI * sin (M_PI * x)) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+    res += exp(-t) * x * sin (M_PI * x) * (2.0 * M_PI * cos(M_PI * y) - (1 + y) * M_PI * M_PI * sin(M_PI * y)) * (2 - z) * sin (M_PI * z);
+    res += exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (2.0 * (-1) * M_PI * cos(M_PI * z) - (2 - z) * M_PI * M_PI * sin(M_PI * z));
+    return res;
+}
+
+void uFun2_ex_parab_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(-t) * (sin (M_PI * x) + x * M_PI * cos(M_PI * x)) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+    gradx(1) = exp(-t) * x * sin (M_PI * x) * (sin (M_PI * y) + (1 + y) * M_PI * cos(M_PI * y)) * (2 - z) * sin (M_PI * z);
+    gradx(2) = exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (- sin (M_PI * z) + (2 - z) * M_PI * cos(M_PI * z));
+}
+
+double uFun3_ex_parab(const Vector & xt)
+{
+    if (xt.Size() != 3)
+        cout << "Error, this is only 3-d = 2-d + time solution" << endl;
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y);
+}
+
+double uFun3_ex_parab_dt(const Vector & xt)
+{
+    return - uFun3_ex_parab(xt);
+}
+
+double uFun3_ex_parab_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    double res = 0.0;
+    res += exp(-t) * (2.0 * M_PI * cos(M_PI * x) - x * M_PI * M_PI * sin (M_PI * x)) * (1 + y) * sin (M_PI * y);
+    res += exp(-t) * x * sin (M_PI * x) * (2.0 * M_PI * cos(M_PI * y) - (1 + y) * M_PI * M_PI * sin(M_PI * y));
+    return res;
+}
+
+void uFun3_ex_parab_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(-t) * (sin (M_PI * x) + x * M_PI * cos(M_PI * x)) * (1 + y) * sin (M_PI * y);
+    gradx(1) = exp(-t) * x * sin (M_PI * x) * (sin (M_PI * y) + (1 + y) * M_PI * cos(M_PI * y));
+}
+////////////////////////////
+
+/////////// from the wave example
+
+double uFun_ex_wave(const Vector & xt)
+{
+    const double PI = 3.141592653589793;
+    double xi(xt(0));
+    double yi(xt(1));
+    double zi(0.0);
+    double vi(0.0);
+
+    if (xt.Size() == 3)
+    {
+        double t = xt(2);
+        return sin(PI*xi)*sin(PI*yi) * t * t;
+        //return sin(PI*xi)*sin(PI*yi);
+        //return sin(PI*xi)*sin(PI*yi) * t;
+    }
+    if (xt.Size() == 4)
+    {
+        zi = xt(2);
+        vi = xt(3);
+        //cout << "sol for 4D" << endl;
+        return sin(PI*xi)*sin(PI*yi)*sin(PI*zi)*vi;
+    }
+
+    return 0.0;
+}
+
+double uFun_ex_wave_dt(const Vector & xt)
+{
+    const double PI = 3.141592653589793;
+    double xi(xt(0));
+    double yi(xt(1));
+    double zi(0.0);
+
+
+    if (xt.Size() == 3)
+    {
+        double t(xt(2));
+        return sin(PI*xi)*sin(PI*yi)*2*t;
+        //return 1.0;
+        //return 0.0;
+        //return sin(PI*xi)*sin(PI*yi);
+    }
+    if (xt.Size() == 4)
+    {
+        zi = xt(2);
+        return sin(PI*xi)*sin(PI*yi)*sin(PI*zi);
+    }
+
+
+    return 0.0;
+}
+
+double uFun_ex_wave_dt2(const Vector & xt)
+{
+    double xi(xt(0));
+    double yi(xt(1));
+//    double zi(0.0);
+
+    if (xt.Size() == 3)
+    {
+        return sin(M_PI*xi)*sin(M_PI*yi)*2.0;
+        //return 0.0;
+    }
+
+    return 0.0;
+
+}
+
+double uFun_ex_wave_laplace(const Vector & xt)
+{
+    return (-(xt.Size()-1) * M_PI * M_PI) *uFun_ex_wave(xt);
+    //return 0.0;
+}
+
+double uFun_ex_wave_dtlaplace(const Vector & xt)
+{
+    double xi(xt(0));
+    double yi(xt(1));
+//    double zi(0.0);
+    double t(xt(xt.Size() - 1));
+    //return (-(xt.Size()-1) * PI * PI) *uFun_ex_wave(xt);
+    //return (-(xt.Size()-1) * M_PI * M_PI) *sin(M_PI*xi)*sin(M_PI*yi);         // for t * sin x * sin y
+    return (-(xt.Size()-1) * M_PI * M_PI) *sin(M_PI*xi)*sin(M_PI*yi) * 2.0 * t; // for t^2 * sin x * sin y
+    return 0.0;
+}
+
+void uFun_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+//    double z(0.0);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+
+    if (xt.Size() == 3)
+    {
+        gradx(0) = t * t * M_PI * cos (M_PI * x) * sin (M_PI * y);
+        gradx(1) = t * t * M_PI * sin (M_PI * x) * cos (M_PI * y);
+    }
+
+    /*
+    if (xt.Size() == 4)
+    {
+        z = xt(2);
+        gradx(0) = t * PI * cos (PI * x) * sin (PI * y) * sin (PI * z);
+        gradx(1) = t * PI * sin (PI * x) * cos (PI * y) * sin (PI * z);
+        gradx(2) = t * PI * sin (PI * x) * sin (PI * y) * cos (PI * z);
+    }
+    */
+
+
+    /*
+    if (xt.Size() == 3)
+    {
+        gradx(0) = M_PI * cos (M_PI * x) * sin (M_PI * y);
+        gradx(1) = M_PI * sin (M_PI * x) * cos (M_PI * y);
+    }
+    */
+
+
+    /*
+    if (xt.Size() == 3)
+    {
+        gradx(0) = t * M_PI * cos (M_PI * x) * sin (M_PI * y);
+        gradx(1) = t * M_PI * sin (M_PI * x) * cos (M_PI * y);
+    }
+    */
+
+
+}
+
+void uFun_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+//    double z(0.0);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    // for t * sin x * sin y
+    /*
+    if (xt.Size() == 3)
+    {
+        gradx(0) = M_PI * cos (M_PI * x) * sin (M_PI * y);
+        gradx(1) = M_PI * sin (M_PI * x) * cos (M_PI * y);
+    }
+    */
+
+    // for t^2 * sin x * sin y
+    if (xt.Size() == 3)
+    {
+        gradx(0) = M_PI * cos (M_PI * x) * sin (M_PI * y) * 2.0 * t;
+        gradx(1) = M_PI * sin (M_PI * x) * cos (M_PI * y) * 2.0 * t;
+    }
+
+}
+
+double uFun1_ex_wave(const Vector & xt)
+{
+    double tmp = (xt.Size() == 4) ? sin(M_PI*xt(2)) : 1.0;
+    return exp(-xt(xt.Size()-1))*sin(M_PI*xt(0))*sin(M_PI*xt(1))*tmp;
+}
+
+double uFun1_ex_wave_dt(const Vector & xt)
+{
+    return - uFun1_ex_wave(xt);
+}
+
+double uFun1_ex_wave_dt2(const Vector & xt)
+{
+    return uFun1_ex_wave(xt);
+}
+
+double uFun1_ex_wave_laplace(const Vector & xt)
+{
+    return (- (xt.Size() - 1) * M_PI * M_PI ) * uFun1_ex_wave(xt);
+}
+
+double uFun1_ex_wave_dtlaplace(const Vector & xt)
+{
+    return -uFun1_ex_wave_laplace(xt);
+}
+
+void uFun1_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z(0.0);
+    double t = xt(xt.Size()-1);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    if (xt.Size() == 3)
+    {
+        gradx(0) = exp(-t) * M_PI * cos (M_PI * x) * sin (M_PI * y);
+        gradx(1) = exp(-t) * M_PI * sin (M_PI * x) * cos (M_PI * y);
+    }
+    if (xt.Size() == 4)
+    {
+        z = xt(2);
+        gradx(0) = exp(-t) * M_PI * cos (M_PI * x) * sin (M_PI * y) * sin (M_PI * z);
+        gradx(1) = exp(-t) * M_PI * sin (M_PI * x) * cos (M_PI * y) * sin (M_PI * z);
+        gradx(2) = exp(-t) * M_PI * sin (M_PI * x) * sin (M_PI * y) * cos (M_PI * z);
+    }
+
+}
+
+void uFun1_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    gradx.SetSize(xt.Size() - 1);
+
+    Vector gradS;
+    uFun1_ex_wave_gradx(xt,gradS);
+
+    for ( int d = 0; d < xt.Size() - 1; ++d)
+        gradx(d) = - gradS(d);
+}
+
+double uFun2_ex_wave(const Vector & xt)
+{
+    if (xt.Size() != 4)
+        cout << "Error, this is only 4-d = 3-d + time solution" << endl;
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    return exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+}
+
+double uFun2_ex_wave_dt(const Vector & xt)
+{
+    return - uFun2_ex_wave(xt);
+}
+
+double uFun2_ex_wave_dt2(const Vector & xt)
+{
+    return uFun2_ex_wave(xt);
+}
+
+double uFun2_ex_wave_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    double res = 0.0;
+    res += exp(-t) * (2.0 * M_PI * cos(M_PI * x) - x * M_PI * M_PI * sin (M_PI * x)) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+    res += exp(-t) * x * sin (M_PI * x) * (2.0 * M_PI * cos(M_PI * y) - (1 + y) * M_PI * M_PI * sin(M_PI * y)) * (2 - z) * sin (M_PI * z);
+    res += exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (2.0 * (-1) * cos(M_PI * z) - (2 - z) * M_PI * M_PI * sin(M_PI * z));
+    return res;
+}
+
+double uFun2_ex_wave_dtlaplace(const Vector & xt)
+{
+    return -uFun2_ex_wave_laplace(xt);
+}
+
+void uFun2_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double t = xt(3);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(-t) * (sin (M_PI * x) + x * M_PI * cos(M_PI * x)) * (1 + y) * sin (M_PI * y) * (2 - z) * sin (M_PI * z);
+    gradx(1) = exp(-t) * x * sin (M_PI * x) * (sin (M_PI * y) + (1 + y) * M_PI * cos(M_PI * y)) * (2 - z) * sin (M_PI * z);
+    gradx(2) = exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y) * (- sin (M_PI * z) + (2 - z) * M_PI * cos(M_PI * z));
+}
+
+void uFun2_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    gradx.SetSize(xt.Size() - 1);
+
+    Vector gradS;
+    uFun2_ex_wave_gradx(xt,gradS);
+
+    for ( int d = 0; d < xt.Size() - 1; ++d)
+        gradx(d) = - gradS(d);
+}
+
+double uFun4_ex_wave(const Vector & xt)
+{
+    if (xt.Size() != 3)
+        cout << "Error, this is only 3-d solution" << endl;
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * x * (x - 1) * y * (y - 1) * t * t;
+}
+
+double uFun4_ex_wave_dt(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * x * (x - 1) * y * (y - 1) * 2.0 * t;
+}
+
+double uFun4_ex_wave_dt2(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+//    double t = xt(2);
+
+    return 16.0 * x * (x - 1) * y * (y - 1) * 2.0;
+}
+
+double uFun4_ex_wave_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * (2.0 * y * (y - 1) + 2.0 * x * (x - 1)) * t * t;
+}
+
+double uFun4_ex_wave_dtlaplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * (2.0 * y * (y - 1) + 2.0 * x * (x - 1)) * 2.0 * t;
+}
+
+void uFun4_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = 16.0 * (2.0 * x - 1) * y * (y - 1) * t * t;
+    gradx(1) = 16.0 * x * (x - 1) * (2.0 * y - 1) * t * t;
+
+}
+
+void uFun4_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = 16.0 * (2.0 * x - 1) * y * (y - 1) * 2.0 * t;
+    gradx(1) = 16.0 * x * (x - 1) * (2.0 * y - 1) * 2.0 * t;
+}
+
+double uFun3_ex_wave(const Vector & xt)
+{
+    if (xt.Size() != 3)
+        cout << "Error, this is only 3-d = 2d + time solution" << endl;
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return exp(-t) * x * sin (M_PI * x) * (1 + y) * sin (M_PI * y);
+}
+
+double uFun3_ex_wave_dt(const Vector & xt)
+{
+    return - uFun3_ex_wave(xt);
+}
+
+double uFun3_ex_wave_dt2(const Vector & xt)
+{
+    return uFun3_ex_wave(xt);
+}
+
+double uFun3_ex_wave_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    double res = 0.0;
+    res += exp(-t) * (2.0 * M_PI * cos(M_PI * x) - x * M_PI * M_PI * sin (M_PI * x)) * (1 + y) * sin (M_PI * y);
+    res += exp(-t) * x * sin (M_PI * x) * (2.0 * M_PI * cos(M_PI * y) - (1 + y) * M_PI * M_PI * sin(M_PI * y));
+    return res;
+}
+
+double uFun3_ex_wave_dtlaplace(const Vector & xt)
+{
+    return -uFun3_ex_wave_laplace(xt);
+}
+
+void uFun3_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = exp(-t) * (sin (M_PI * x) + x * M_PI * cos(M_PI * x)) * (1 + y) * sin (M_PI * y);
+    gradx(1) = exp(-t) * x * sin (M_PI * x) * (sin (M_PI * y) + (1 + y) * M_PI * cos(M_PI * y));
+}
+
+void uFun3_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = - exp(-t) * (sin (M_PI * x) + x * M_PI * cos(M_PI * x)) * (1 + y) * sin (M_PI * y);
+    gradx(1) = - exp(-t) * x * sin (M_PI * x) * (sin (M_PI * y) + (1 + y) * M_PI * cos(M_PI * y));
+}
+
+
+double uFun5_ex_wave(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * x * x * (x - 1) * (x - 1) * y * y * (y - 1) * (y - 1) * t * t;
+}
+
+double uFun5_ex_wave_dt(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * x * x * (x - 1) * (x - 1) * y * y * (y - 1) * (y - 1) * 2.0 * t;
+}
+
+double uFun5_ex_wave_dt2(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+//    double t = xt(2);
+
+    return 16.0 * x * x * (x - 1) * (x - 1) * y * y * (y - 1) * (y - 1) * 2.0;
+}
+
+double uFun5_ex_wave_laplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * (2.0 * ((x-1)*(2*x-1) + x*(2*x-1) + 2*x*(x-1)) * y * (y - 1) * y * (y - 1)\
+                   + 2.0 * ((y-1)*(2*y-1) + y*(2*y-1) + 2*y*(y-1)) * x * (x - 1) * x * (x - 1)) * t * t;
+}
+
+double uFun5_ex_wave_dtlaplace(const Vector & xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    return 16.0 * (2.0 * ((x-1)*(2*x-1) + x*(2*x-1) + 2*x*(x-1)) * y * (y - 1) * y * (y - 1)\
+                   + 2.0 * ((y-1)*(2*y-1) + y*(2*y-1) + 2*y*(y-1)) * x * (x - 1) * x * (x - 1)) * 2.0 * t;
+}
+
+void uFun5_ex_wave_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = 16.0 * 2.0 * x * (x - 1) * (2.0 * x - 1) * y * (y - 1) * y * (y - 1) * t * t;
+    gradx(1) = 16.0 * x * (x - 1) * x * (x - 1) * 2.0 * y * (y - 1) * (2.0 * y - 1) * t * t;
+
+}
+
+void uFun5_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(2);
+
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = 16.0 * 2.0 * x * (x - 1) * (2.0 * x - 1) * y * (y - 1) * y * (y - 1) * 2.0 * t;
+    gradx(1) = 16.0 * x * (x - 1) * x * (x - 1) * 2.0 * y * (y - 1) * (2.0 * y - 1) * 2.0 * t;
+}
+
+
+////////////////////////////
+
 
 
 } // for namespace mfem
