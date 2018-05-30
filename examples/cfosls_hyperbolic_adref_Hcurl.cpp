@@ -36,6 +36,8 @@
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
 //#define USE_GS_PREC
 
+#define MULTILEVEL_PARTSOL
+
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
@@ -221,6 +223,13 @@ int main(int argc, char *argv[])
         std::cout << "USE_GS_PREC passive \n";
 #endif
 
+#ifdef MULTILEVEL_PARTSOL
+    if (verbose)
+        std::cout << "MULTILEVEL_PARTSOL active \n";
+#else
+    if (verbose)
+        std::cout << "MULTILEVEL_PARTSOL passive \n";
+#endif
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
@@ -332,6 +341,8 @@ int main(int argc, char *argv[])
    */
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
+   hierarchy->ConstructDofTrueDofs();
+   hierarchy->ConstructDivfreeDops();
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>(*hierarchy, 1, *bdr_conds,
                                                               *fe_formulat, prec_option, verbose);
@@ -344,6 +355,12 @@ int main(int argc, char *argv[])
                                                                       *fe_formulat_divfree, prec_option, verbose);
 
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+
+#ifdef MULTILEVEL_PARTSOL
+   bool optimized_localsolvers = true;
+   DivConstraintSolver * partsol_finder = new DivConstraintSolver(*problem, *hierarchy, optimized_localsolvers, verbose);
+#endif
+
 #endif
 
    Hyper_test* Mytest = dynamic_cast<Hyper_test*>
@@ -515,14 +532,25 @@ int main(int argc, char *argv[])
        bool compute_error = true;
 
 #ifdef DIVFREE_ESTIMATOR
+       BlockVector true_partsol(problem->GetTrueOffsets());
+       true_partsol = 0.0;
+#ifdef MULTILEVEL_PARTSOL
+       Vector partsol_init(partsol_finder->Size());
+       partsol_init = 0.0;
+       BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
+       MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
+       Vector& div_rhs = problem->GetRhs().GetBlock(2);
+       partsol_finder->FindParticularSolution(partsol_init, partsol_vec, div_rhs, verbose);
+
+       for (int i = 0; i < numblocks_funct; ++i)
+           true_partsol.GetBlock(i) = partsol_vec.GetBlock(i);
+#else
        // finding a particular solution
        HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(2,0));
        Vector& div_rhs = problem->GetRhs().GetBlock(2);
        ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, div_rhs, verbose);
-       BlockVector true_partsol(problem->GetTrueOffsets());
-       true_partsol = 0.0;
        partsigma->ParallelProject(true_partsol.GetBlock(0));
-
+#endif
        // creating the operator for the div-free problem
        problem_divfree->ConstructDivfreeHpMats();
        problem_divfree->CreateOffsetsRhsSol();
@@ -659,6 +687,10 @@ int main(int argc, char *argv[])
 #ifdef DIVFREE_ESTIMATOR
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+#ifdef MULTILEVEL_PARTSOL
+       partsol_finder->UpdateProblem(*problem);
+       partsol_finder->Update();
+#endif
 #endif
 
        if (fosls_func_version == 2)
@@ -686,7 +718,9 @@ int main(int argc, char *argv[])
        }
 
 #ifdef DIVFREE_ESTIMATOR
+#ifndef MULTILEVEL_PARTSOL
        delete partsigma;
+#endif
 #endif
 
        // checking #dofs after the refinement

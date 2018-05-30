@@ -511,7 +511,7 @@ public:
     // this routine updates the solver when the hierarchy is updated (new levels appear)
     void Update(bool recoarsen = true);
 
-    void FindParticularSolution(const BlockVector& truestart_guess, BlockVector& particular_solution, const Vector& ConstrRhs, bool verbose) const;
+    void FindParticularSolution(const Vector &start_guess, Vector &partsol, const Vector& ConstrRhs, bool verbose) const;
 
     int Size() const {return size;}
 };

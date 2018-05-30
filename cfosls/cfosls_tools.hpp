@@ -1572,7 +1572,7 @@ public:
 
     void Mult(const Vector & x, Vector & y) const override
     {
-        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
+        std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
         smoo_snd.Mult(x, y);
 
         //std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
@@ -1580,13 +1580,16 @@ public:
         //Vector temp(y.Size());
         //temp = y;
 
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        std::cout << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
 
         smoo_fst.Mult(x, *tmp1);
 
-        //std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+        std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+        MPI_Barrier(MPI_COMM_WORLD);
+        std::cout << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
 
         //MPI_Barrier(MPI_COMM_WORLD);
         //std::cout << "I am here \n";
@@ -1611,7 +1614,11 @@ public:
 
         y -= *tmp1;
 
-        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+        std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        std::cout << std::flush;
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 
     void MultTranspose(const Vector & x, Vector & y) const override
