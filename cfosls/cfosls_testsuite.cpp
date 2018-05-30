@@ -681,6 +681,51 @@ bool Wave_test::CheckTestConfig()
         return false;
 }
 
+Laplace_test::Laplace_test(int dimension, int num_solution)
+    : FOSLS_test(dimension, 2, 1, 0), numsol(num_solution)
+{
+    Init();
+}
+
+void Laplace_test::Init()
+{
+    if ( CheckTestConfig() == false )
+        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    else
+    {
+        if (numsol == -3 || numsol == -4 || numsol == -34)
+        {
+            SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
+        }
+    } // end of setting test coefficients in correct case
+}
+
+template<double (*S)(const Vector & xt), void(*Sfullgrad)(const Vector & xt, Vector & gradx),
+         double (*Slaplace)(const Vector & xt)> \
+void Laplace_test::SetTestCoeffs ()
+{
+    SetScalarSFun(S);
+    SetSigmaVec<Sfullgrad>();
+    SetdivSigma<Slaplace>();
+    return;
+}
+
+
+bool Laplace_test::CheckTestConfig()
+{
+    if (dim == 4 || dim == 3)
+    {
+        if (numsol == -3 && dim == 3)
+            return true;
+        if (numsol == -4 && dim == 4)
+            return true;
+        if (numsol == -34 && (dim == 3 || dim == 4))
+            return true;
+        return false;
+    }
+    else
+        return false;
+}
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx),  \
          void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
@@ -1122,6 +1167,23 @@ double divsigmaTemplate_wave(const Vector& xt)
 
     return d2Sdt2(xt) - Slaplace(xt);
 }
+
+template <void (*Sfullgrad)(const Vector&, Vector& )> \
+void sigmaTemplate_lapl(const Vector& xt, Vector& sigma)
+{
+    sigma.SetSize(xt.Size());
+    Sfullgrad(xt, sigma);
+    sigma *= -1;
+    return;
+}
+
+
+template<double (*Slaplace)(const Vector & xt)> \
+double divsigmaTemplate_lapl(const Vector& xt)
+{
+    return (-1) * Slaplace(xt);
+}
+
 
 double uFunTestNh_ex(const Vector& xt)
 {

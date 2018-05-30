@@ -206,6 +206,25 @@ public:
 
 };
 
+struct BdrConditions_CFOSLS_Laplace : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_Laplace(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 1;
+
+        for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
+            (*bdr_attribs[2])[j] = 0;
+
+        initialized = true;
+    }
+};
+
 enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
 
 class FOSLSFormulation;
@@ -694,6 +713,26 @@ public:
     int NumSol() const override {return numsol;}
 };
 
+// Hdiv-H1 formulation
+struct CFOSLSFormulation_Laplace : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Laplace_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_Laplace(int dimension, int num_solution, bool verbose);
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+
+    int NumSol() const override {return numsol;}
+};
+
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
 struct FOSLSFEFormulation
@@ -735,7 +774,17 @@ public:
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order);
+    CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        fecolls[1] = new L2_FECollection(feorder, dim);
+    }
 };
 
 /// FIXME: Looks like this shouldn't have happened
@@ -744,29 +793,112 @@ public:
 struct CFOSLSFEFormulation_HdivH1Hyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order);
+    CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        if (dim == 4)
+            fecolls[1] = new LinearFECollection;
+        else
+            fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+        fecolls[2] = new L2_FECollection(feorder, dim);
+    }
 };
 
 /// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1DivfreeHyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order);
+    CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+
+        if (dim == 4)
+            fecolls[0] = new DivSkew1_4DFECollection;
+        else
+            fecolls[0] = new ND_FECollection(feorder + 1, dim);
+
+        if (dim == 4)
+            fecolls[1] = new LinearFECollection;
+        else
+            fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+    }
 };
 
 /// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1Parab : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Parab(FOSLSFormulation& formulation, int fe_order);
+    CFOSLSFEFormulation_HdivH1Parab(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        if (dim == 4)
+            fecolls[1] = new LinearFECollection;
+        else
+            fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+        fecolls[2] = new L2_FECollection(feorder, dim);
+    }
 };
 
 /// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1Wave : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Wave(FOSLSFormulation& formulation, int fe_order);
+    CFOSLSFEFormulation_HdivH1Wave(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        if (dim == 4)
+            fecolls[1] = new LinearFECollection;
+        else
+            fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+        fecolls[2] = new L2_FECollection(feorder, dim);
+    }
 };
+
+/// FIXME: See previous FIXME messages
+struct CFOSLSFEFormulation_Laplace : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_Laplace(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        if (dim == 4)
+            fecolls[1] = new LinearFECollection;
+        else
+            fecolls[1] = new H1_FECollection(feorder + 1, dim);
+
+        fecolls[2] = new L2_FECollection(feorder, dim);
+    }
+};
+
 
 class BlockProblemForms
 {
@@ -1127,6 +1259,35 @@ public:
     }
 
     FOSLSProblem_HdivH1wave(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+};
+
+/// FIXME: See the previous FIXME messages
+class FOSLSProblem_lapl : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_lapl(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_lapl(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
     {

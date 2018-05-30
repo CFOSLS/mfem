@@ -1081,7 +1081,7 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                         delete LocalAE_Matrices(blk1,blk2);
         } // end of if AE is bigger than single fine grid element
         else
-            std::cout << "side case AE == e \n" << std::flush; why side case is happening in multigrid example? looks like AE_e is not what I thought
+            std::cout << "side case AE == e \n" << std::flush; //why side case is happening in multigrid example? looks like AE_e is not what I thought
 
     } // end of loop over AEs
 

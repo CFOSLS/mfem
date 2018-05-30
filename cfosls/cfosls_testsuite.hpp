@@ -78,6 +78,13 @@ void uFun5_ex_wave_gradx(const Vector& xt, Vector& gradx );
 void uFun5_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
 ///////////////////////////////////////////////////////////
 
+///// for laplace equation
+double uFunTestLap_ex(const Vector& xt);
+double uFunTestLap_lap(const Vector& xt);
+void uFunTestLap_grad(const Vector& xt, Vector& grad );
+/////////////////////////////////////
+
+///// tests which can be used for any problem
 double uFunTest_ex(const Vector& x); // Exact Solution
 double uFunTest_ex_dt(const Vector& xt);
 double uFunTest_ex_dt2(const Vector & xt);
@@ -96,6 +103,7 @@ void uFunTestNh_ex_gradx(const Vector& xt, Vector& grad);
 void uFunTestNh_ex_gradxt(const Vector& xt, Vector& gradxt);
 void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx );
 
+////// additional functions (mainly for the hyperbolic problems)
 double uFunCylinder_ex(const Vector& xt);
 double uFunCylinder_ex_dt(const Vector& xt);
 void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
@@ -131,6 +139,7 @@ void curlhcurlFun3D_2_ex(const Vector& xt, Vector& vecvalue);
 void DivmatFun4D_ex(const Vector& xt, Vector& vecvalue);
 void DivmatDivmatFun4D_ex(const Vector& xt, Vector& vecvalue);
 
+// templates for all problems
 template <double (*Sfunc)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )>
     void sigmaTemplate_hyper(const Vector& xt, Vector& sigma);
 template <void (*bvecfunc)(const Vector&, Vector& )>
@@ -162,6 +171,11 @@ template<double (*S)(const Vector & xt), double (*d2Sdt2)(const Vector & xt), do
 template <double (*dSdt)(const Vector&), void(*Sgradxvec)(const Vector & x, Vector & gradx) >
        void sigmaTemplate_wave(const Vector& xt, Vector& sigma);
 
+template<void (*Sfullgrad)(const Vector&, Vector& )>
+       void sigmaTemplate_lapl(const Vector& xt, Vector& sigma);
+
+template<double (*Slaplace)(const Vector & xt)> double divsigmaTemplate_lapl(const Vector& xt);
+
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
     void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
@@ -180,6 +194,7 @@ template<double (*S)(const Vector & xt), void (*bvecfunc)(const Vector&, Vector&
          void (*opdivfreevec)(const Vector&, Vector& )>
 void minsigmahatTemplate(const Vector& xt, Vector& sigmahatv);
 
+// main base class for FOSLS tests (which has wave, hyperbolic and parabolic tests as childs)
 class FOSLS_test
 {
 protected:
@@ -207,7 +222,7 @@ public:
     MatrixFunctionCoefficient * GetMatCoeff(int ind) {return mat_coeffs[ind];}
 };
 
-// TODO: After finishing, rename it to Transport_test and remove the older version of that from everywhere including examples
+// TODO: Rename it to Transport_test and remove the older version of that from everywhere including examples
 // func_coeffs:
 // [0] = u, scalar unknown
 // [1] = f
@@ -370,6 +385,47 @@ protected:
 
 public:
     Wave_test(int dimension, int num_solution);
+
+    FunctionCoefficient* GetU() override {return func_coeffs[0];}
+    VectorFunctionCoefficient* GetSigma() override {return vec_coeffs[0];}
+    FunctionCoefficient* GetRhs() override {return func_coeffs[1];}
+
+    int Numsol() const {return numsol;}
+};
+
+// func_coeffs:
+// [0] = u, scalar unknown
+// [1] = f
+// vec_coeffs:
+// [0] = sigma, vector unknown
+// mat_coeffs:
+// (empty)
+
+class Laplace_test : public FOSLS_test
+{
+protected:
+    int numsol;
+protected:
+    void Init();
+    bool CheckTestConfig();
+
+    template<double (*S)(const Vector & xt), void(*Sfullgrad)(const Vector & xt, Vector & gradx),
+             double (*Slaplace)(const Vector & xt)> \
+    void SetTestCoeffs ( );
+
+    void SetScalarSFun( double (*S)(const Vector & xt))
+    { func_coeffs[0] = new FunctionCoefficient(S);}
+
+    template<double (*Slaplace)(const Vector & xt)> \
+    void SetdivSigma()
+    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate_lapl<Slaplace>);}
+
+    template<void(*Sfullgrad)(const Vector & xt, Vector & vec)> \
+    void SetSigmaVec()
+    { vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate_lapl<Sfullgrad>); }
+
+public:
+    Laplace_test(int dimension, int num_solution);
 
     FunctionCoefficient* GetU() override {return func_coeffs[0];}
     VectorFunctionCoefficient* GetSigma() override {return vec_coeffs[0];}

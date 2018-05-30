@@ -418,86 +418,42 @@ void CFOSLSFormulation_HdivH1Wave::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[1] = SpaceName::H1;
 }
 
-// FE formulations
 
-CFOSLSFEFormulation_HdivL2Hyper::CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
-    : FOSLSFEFormulation(formulation, fe_order)
+CFOSLSFormulation_Laplace::CFOSLSFormulation_Laplace (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
 {
-    int dim = formul.Dim();
-    if (dim == 4)
-        fecolls[0] = new RT0_4DFECollection;
-    else
-        fecolls[0] = new RT_FECollection(feorder, dim);
+    blfis(0,0) = new VectorFEMassIntegrator;
+    blfis(1,1) = new DiffusionIntegrator;
+    blfis(0,1) = new MixedVectorGradientIntegrator;
+    blfis(2,0) = new VectorFEDivergenceIntegrator;
 
-    fecolls[1] = new L2_FECollection(feorder, dim);
+    lfis[2] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
 }
 
-CFOSLSFEFormulation_HdivH1Hyper::CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order)
-    : FOSLSFEFormulation(formulation, fe_order)
+void CFOSLSFormulation_Laplace::InitBlkStructure()
 {
-    int dim = formul.Dim();
-    if (dim == 4)
-        fecolls[0] = new RT0_4DFECollection;
-    else
-        fecolls[0] = new RT_FECollection(feorder, dim);
-
-    if (dim == 4)
-        fecolls[1] = new LinearFECollection;
-    else
-        fecolls[1] = new H1_FECollection(feorder + 1, dim);
-
-    fecolls[2] = new L2_FECollection(feorder, dim);
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(0,0);
+    blk_structure[2] = std::make_pair<int,int>(-1,-1);
 }
 
-CFOSLSFEFormulation_HdivH1DivfreeHyper::CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
-    : FOSLSFEFormulation(formulation, fe_order)
+void CFOSLSFormulation_Laplace::ConstructSpacesDescriptor() const
 {
-    int dim = formul.Dim();
+    space_names = new Array<SpaceName>(numblocks);
 
-    if (dim == 4)
-        fecolls[0] = new DivSkew1_4DFECollection;
-    else
-        fecolls[0] = new ND_FECollection(feorder + 1, dim);
-
-    if (dim == 4)
-        fecolls[1] = new LinearFECollection;
-    else
-        fecolls[1] = new H1_FECollection(feorder + 1, dim);
-
+    (*space_names)[0] = SpaceName::HDIV;
+    (*space_names)[1] = SpaceName::H1;
+    (*space_names)[2] = SpaceName::L2;
 }
 
-CFOSLSFEFormulation_HdivH1Parab::CFOSLSFEFormulation_HdivH1Parab(FOSLSFormulation& formulation, int fe_order)
-    : FOSLSFEFormulation(formulation, fe_order)
+void CFOSLSFormulation_Laplace::ConstructFunctSpacesDescriptor() const
 {
-    int dim = formul.Dim();
-    if (dim == 4)
-        fecolls[0] = new RT0_4DFECollection;
-    else
-        fecolls[0] = new RT_FECollection(feorder, dim);
+    space_names_funct = new Array<SpaceName>(2);
 
-    if (dim == 4)
-        fecolls[1] = new LinearFECollection;
-    else
-        fecolls[1] = new H1_FECollection(feorder + 1, dim);
-
-    fecolls[2] = new L2_FECollection(feorder, dim);
-}
-
-CFOSLSFEFormulation_HdivH1Wave::CFOSLSFEFormulation_HdivH1Wave(FOSLSFormulation& formulation, int fe_order)
-    : FOSLSFEFormulation(formulation, fe_order)
-{
-    int dim = formul.Dim();
-    if (dim == 4)
-        fecolls[0] = new RT0_4DFECollection;
-    else
-        fecolls[0] = new RT_FECollection(feorder, dim);
-
-    if (dim == 4)
-        fecolls[1] = new LinearFECollection;
-    else
-        fecolls[1] = new H1_FECollection(feorder + 1, dim);
-
-    fecolls[2] = new L2_FECollection(feorder, dim);
+    (*space_names_funct)[0] = SpaceName::HDIV;
+    (*space_names_funct)[1] = SpaceName::H1;
 }
 
 void BlockProblemForms::Update()
@@ -2413,6 +2369,176 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
 
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 100 for Gauss-Seidel for all blocks
+void FOSLSProblem_lapl::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        std::cout << "Diag(A) for H(div) \n";
+        std::cout << "BoomerAMG(C) for H1 \n";
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for the Lagrange multiplier \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
+
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver *invA, *invC, *invS;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        invC = new HypreSmoother(C, HypreSmoother::Type::l1GS, 1);
+        invS = new HypreSmoother(*Schur, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        invA = new HypreDiagScale(A);
+        invA->iterative_mode = false;
+
+        invC = new HypreBoomerAMG(C);
+        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
+        ((HypreBoomerAMG*)invC)->iterative_mode = false;
+
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
+
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+}
+
+void FOSLSProblem_lapl::ComputeExtraError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[2];
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&(vec_viewer.GetBlock(0)));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
+        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div / norm_div  << "\n";
+    }
+
+    ComputeFuncError(vec);
+}
+
+void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * H1_space = pfes[1];
+    ParFiniteElementSpace * L2_space = pfes[2];
+
+    Vector trueSigma(Hdiv_space->TrueVSize());
+    trueSigma = vec_viewer.GetBlock(0);
+
+    Vector MtrueSigma(Hdiv_space->TrueVSize());
+    MtrueSigma = 0.0;
+
+    HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    M->Mult(trueSigma, MtrueSigma);
+    double localFunctional = trueSigma * MtrueSigma;
+
+    Vector GtrueSigma(H1_space->TrueVSize());
+    GtrueSigma = 0.0;
+
+    HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
+    BT->Mult(trueSigma, GtrueSigma);
+    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+
+    Vector XtrueS(H1_space->TrueVSize());
+    XtrueS = 0.0;
+    HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    C->Mult(vec_viewer.GetBlock(1), XtrueS);
+    localFunctional += vec_viewer.GetBlock(1)*XtrueS;
+
+    double globalFunctional;
+    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+    }
+
+    ParLinearForm gform(L2_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
+                                                     GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+
+    Vector Rhs(L2_space->TrueVSize());
+    Rhs = *gform.ParallelAssemble();
+
+    double mass_loc = Rhs.Norml1();
+    double mass;
+    MPI_Reduce(&mass_loc, &mass, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        cout << "Sum of local mass = " << mass << "\n";
+
+    Vector DtrueSigma(L2_space->TrueVSize());
+    DtrueSigma = 0.0;
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    Bdiv->Mult(trueSigma, DtrueSigma);
+    DtrueSigma -= Rhs;
+    double mass_loss_loc = DtrueSigma.Norml1();
+    double mass_loss;
+    MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Sum of local mass loss = " << mass_loss << "\n";
+}
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)
