@@ -931,7 +931,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
             if (i == j)
                 pbforms.diag(i)->LoseMat();
             else
-                if (pbforms.offd(i,j))
+                //if (pbforms.offd(i,j))
                     pbforms.offd(i,j)->LoseMat();
 
     hpmats.SetSize(numblocks, numblocks);
@@ -1467,7 +1467,7 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
             funct_blocks(i,j) = NULL;
             if (i == j)
             {
-                if (pbforms.diag(i))
+                if (fe_formul.GetFormulation()->GetBlfi(0,0))
                 {
                     //pbforms.diag(i)->Update();
                     //pbforms.diag(i)->Assemble();
@@ -1478,10 +1478,13 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
             }
             else // off-diagonal
             {
-                if (pbforms.offd(i,j) || pbforms.offd(j,i))
+                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j) != NULL);
+                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i) != NULL);
+
+                if ( (ij_exist || ji_exist) && !funct_blocks(i,j))
                 {
                     int exist_row, exist_col;
-                    if (pbforms.offd(i,j))
+                    if (ij_exist) //pbforms.offd(i,j))
                     {
                         exist_row = i;
                         exist_col = j;
@@ -2780,13 +2783,13 @@ void GeneralMultigrid::MG_Cycle() const
         //std::cout << "residual before presmoothing, new MG \n";
         //residual_l.Print();
 
-        std::cout << "residual before smoothing, new MG, "
-                     "norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
+        //std::cout << "residual before smoothing, new MG, "
+                     //"norm = " << residual_l.Norml2() / sqrt (residual_l.Size()) << "\n";
 
         PreSmoother_l->Mult(residual_l, correction_l);
 
-        std::cout << "correction after smoothing, new MG, "
-                     "norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
+        //std::cout << "correction after smoothing, new MG, "
+                     //"norm = " << correction_l.Norml2() / sqrt (correction_l.Size()) << "\n";
 
         //std::cout << "correction after presmoothing, new MG \n";
         //correction_l.Print();

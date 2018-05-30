@@ -1669,17 +1669,20 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
             {
                 coarseop_lvl(i,j) = NULL;
 
-                HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_lvls[l - 1]->GetBlock(i,j));
-
-                if (i == j)
-                    coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
-                else
+                if (!CoarsenedOps_lvls[l - 1]->IsZeroBlock(i,j))
                 {
-                    coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+                    HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_lvls[l - 1]->GetBlock(i,j));
 
-                    coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
-                    coarseop_lvl(j,i)->CopyRowStarts();
-                    coarseop_lvl(j,i)->CopyColStarts();
+                    if (i == j)
+                        coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+                    else
+                    {
+                        coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+
+                        coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
+                        coarseop_lvl(j,i)->CopyRowStarts();
+                        coarseop_lvl(j,i)->CopyColStarts();
+                    }
                 }
 
             } // end of an iteration for fixed (i,j)
@@ -1687,7 +1690,8 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
 
         for (int i = 0; i < numblocks; ++i)
             for (int j = i; j < numblocks; ++j)
-                CoarsenedOps_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+                if (coarseop_lvl(i,j))
+                    CoarsenedOps_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
 
     } // end of loop over levels
 }
@@ -1709,34 +1713,37 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
             {
                 coarseop_lvl(i,j) = NULL;
 
-                HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_nobnd_lvls[l - 1]->GetBlock(i,j));
-
-                if (i == j)
+                if (!CoarsenedOps_nobnd_lvls[l - 1]->IsZeroBlock(i,j))
                 {
-                    coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_i);
-                    coarseop_lvl(i,j)->CopyRowStarts();
-                    coarseop_lvl(i,j)->CopyRowStarts();
+                    HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_nobnd_lvls[l - 1]->GetBlock(i,j));
+
+                    if (i == j)
+                    {
+                        coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_i);
+                        coarseop_lvl(i,j)->CopyRowStarts();
+                        coarseop_lvl(i,j)->CopyRowStarts();
+                    }
+                    else
+                    {
+                        HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l - 1]->GetBlock(j,j)));
+
+                        coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_j);
+                        coarseop_lvl(i,j)->CopyRowStarts();
+                        coarseop_lvl(i,j)->CopyRowStarts();
+
+                        coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
+                        coarseop_lvl(j,i)->CopyRowStarts();
+                        coarseop_lvl(j,i)->CopyColStarts();
+                    }
                 }
-                else
-                {
-                    HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l - 1]->GetBlock(j,j)));
-
-                    coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_j);
-                    coarseop_lvl(i,j)->CopyRowStarts();
-                    coarseop_lvl(i,j)->CopyRowStarts();
-
-                    coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
-                    coarseop_lvl(j,i)->CopyRowStarts();
-                    coarseop_lvl(j,i)->CopyColStarts();
-                }
-
             }
         } // end of an iteration for fixed (i,j)
         CoarsenedOps_nobnd_lvls[l] = new BlockOperator(problems_lvls[l]->GetTrueOffsets());
 
         for (int i = 0; i < numblocks; ++i)
             for (int j = i; j < numblocks; ++j)
-                CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+                if (coarseop_lvl(i,j))
+                    CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
 
     } // end of loop over levels
 }
@@ -1886,7 +1893,7 @@ public:
 
     void Mult(const Vector & x, Vector & y) const override
     {
-        std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
+        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
         smoo_snd.Mult(x, y);
 
         //std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
@@ -1894,16 +1901,16 @@ public:
         //Vector temp(y.Size());
         //temp = y;
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        std::cout << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
 
         smoo_fst.Mult(x, *tmp1);
 
-        std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
-        MPI_Barrier(MPI_COMM_WORLD);
-        std::cout << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
 
         //MPI_Barrier(MPI_COMM_WORLD);
         //std::cout << "I am here \n";
@@ -1928,11 +1935,11 @@ public:
 
         y -= *tmp1;
 
-        std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
+        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        std::cout << std::flush;
-        MPI_Barrier(MPI_COMM_WORLD);
+        //MPI_Barrier(MPI_COMM_WORLD);
+        //std::cout << std::flush;
+        //MPI_Barrier(MPI_COMM_WORLD);
     }
 
     void MultTranspose(const Vector & x, Vector & y) const override

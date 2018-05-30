@@ -829,6 +829,7 @@ int main(int argc, char *argv[])
 
     Array<SparseMatrix*> Constraint_mat_lvls_mg(num_levels);
     Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels);
+    Array<SparseMatrix*> AE_e_lvls(num_levels - 1);
 
     for (int l = 0; l < num_levels; ++l)
     {
@@ -912,13 +913,13 @@ int main(int argc, char *argv[])
             el2dofs_row_offsets[l] = new Array<int>();
             el2dofs_col_offsets[l] = new Array<int>();
 
-            SparseMatrix * P_L2_T = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
+            AE_e_lvls[l] = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0) // S is present
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
                                                          *Constraint_mat_lvls_mg[l],
                                                          hierarchy->GetDofTrueDof(space_names_funct, l),
-                                                         *P_L2_T,
+                                                         *AE_e_lvls[l],
                                                          *hierarchy->GetElementToDofs(space_names_funct, l,
                                                                                      *el2dofs_row_offsets[l],
                                                                                      *el2dofs_col_offsets[l]),
@@ -934,7 +935,7 @@ int main(int argc, char *argv[])
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls_mg[l],
                                                                   *Constraint_mat_lvls_mg[l],
                                                                   hierarchy->GetDofTrueDof(space_names_funct, l),
-                                                                  *P_L2_T,
+                                                                  *AE_e_lvls[l],
                                                                   *hierarchy->GetElementToDofs(space_names_funct, l,
                                                                                               *el2dofs_row_offsets[l],
                                                                                               *el2dofs_col_offsets[l]),
@@ -945,11 +946,6 @@ int main(int argc, char *argv[])
                                                                                            essbdr_attribs, l),
                                                                   optimized_localsolve);
             }
-
-            // FIXME: doesn't this cause undefined behavior because P_l2_T
-            // is used as AE_e in the LocalProblemSolver?
-            // No, it's used nly during the setup and then the newly created AE_eintdofs are used later
-            delete P_L2_T;
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
             Smoo_mg_plus[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
@@ -1030,21 +1026,9 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder_new->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder_new->ResetSolverParams();
 
-    Array< SparseMatrix*> P_L2_lvls(ref_levels);
-    Array< SparseMatrix*> AE_e_lvls(ref_levels);
-
-    for (int l = 0; l < ref_levels; ++l)
-    {
-        P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
-        AE_e_lvls[l] = Transpose(*P_L2_lvls[l]);
-    }
-
-    std::vector< std::vector<Array<int>* > > essbdr_tdofs_funct_lvls(num_levels);
-    for (int l = 0; l < num_levels; ++l)
-    {
-        essbdr_tdofs_funct_lvls[l] = hierarchy->GetEssBdrTdofsOrDofs
-                ("tdof", space_names_funct, essbdr_attribs, l);
-    }
+    // newer constructor
+    bool opt_localsolvers = true;
+    DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers, verbose);
 
     FunctionCoefficient * rhs_coeff = problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs();
     ParLinearForm * constrfform_new = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
@@ -1054,12 +1038,25 @@ int main(int argc, char *argv[])
     constrfform_new->ParallelAssemble(ConstrRhs);
     delete constrfform_new;
 
-    // newer constructor
-    bool opt_localsolvers = true;
-    DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers, verbose);
-
     // older alternative constructor
     /*
+
+    Array< SparseMatrix*> P_L2_lvls(ref_levels);
+    //Array< SparseMatrix*> AE_e_lvls(ref_levels); // declared and defined above
+
+    for (int l = 0; l < ref_levels; ++l)
+    {
+        P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
+        //AE_e_lvls[l] = Transpose(*P_L2_lvls[l]);
+    }
+
+    std::vector< std::vector<Array<int>* > > essbdr_tdofs_funct_lvls(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+    {
+        essbdr_tdofs_funct_lvls[l] = hierarchy->GetEssBdrTdofsOrDofs
+                ("tdof", space_names_funct, essbdr_attribs, l);
+    }
+
     DivConstraintSolver PartsolFinder(comm, num_levels,
                                       AE_e_lvls,
                                       BlockP_mg_nobnd_plus,

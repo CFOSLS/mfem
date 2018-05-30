@@ -882,6 +882,8 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
 
     if (rhs_constr)
     {
+        if (!(coarsetrueRhs->GetBlock(numblocks).Size() == rhs_constr->Size()))
+            std::cout << "Breakpoint \n";
         MFEM_ASSERT(coarsetrueRhs->GetBlock(numblocks).Size() == rhs_constr->Size(),
                     "Sizes mismatch when finalizing rhs at the coarsest level!\n");
         coarsetrueRhs->GetBlock(numblocks) = *rhs_constr;
@@ -985,11 +987,11 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     int nAE = AE_edofs_L2->Height();
     for( int AE = 0; AE < nAE; ++AE)
     {
-        std::cout << "AE = " << AE << " (nAE = " << nAE << ") \n";
+        //std::cout << "AE = " << AE << " (nAE = " << nAE << ") \n";
         // we don't need to solve any local problem if AE coincides with a single fine grid element
         if (AE_e.RowSize(AE) > 1)
         {
-            std::cout << "main case AE > e \n" << std::flush;
+            //std::cout << "main case AE > e \n" << std::flush;
             //std::cout << "AE = " << AE << "\n";
             bool is_degenerate = true;
             sub_Func_offsets[0] = 0;
@@ -1080,8 +1082,8 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                     if (compute_AEproblem_matrices(blk1,blk2))
                         delete LocalAE_Matrices(blk1,blk2);
         } // end of if AE is bigger than single fine grid element
-        else
-            std::cout << "side case AE == e \n" << std::flush; //why side case is happening in multigrid example? looks like AE_e is not what I thought
+        //else
+            //std::cout << "side case AE == e \n" << std::flush;
 
     } // end of loop over AEs
 
@@ -2408,6 +2410,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 
             //MFEM_ABORT("Not implemented \n");
         }
+
+        num_levels = hierarchy->Nlevels();
 
         update_counter = hierarchy_upd_cnt;
     }
