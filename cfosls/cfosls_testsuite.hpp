@@ -6,6 +6,78 @@
 namespace mfem
 {
 
+//// from parabolic example
+double uFun_ex_parab(const Vector & x); // Exact Solution
+double uFun_ex_parab_dt(const Vector & xt);
+double uFun_ex_parab_laplace(const Vector & xt);
+void uFun_ex_parab_gradx(const Vector& xt, Vector& gradx );
+
+double uFun1_ex_parab(const Vector & x); // Exact Solution
+double uFun1_ex_parab_dt(const Vector & xt);
+double uFun1_ex_parab_laplace(const Vector & xt);
+void uFun1_ex_parab_gradx(const Vector& xt, Vector& gradx );
+
+double uFun2_ex_parab(const Vector & x); // EWxact Solution
+double uFun2_ex_parab_dt(const Vector & xt);
+double uFun2_ex_parab_laplace(const Vector & xt);
+void uFun2_ex_parab_gradx(const Vector& xt, Vector& gradx );
+
+double uFun3_ex_parab(const Vector & x); // Exact Solution
+double uFun3_ex_parab_dt(const Vector & xt);
+double uFun3_ex_parab_laplace(const Vector & xt);
+void uFun3_ex_parab_gradx(const Vector& xt, Vector& gradx );
+////////////////////////////////////////
+
+//// from wave
+double uFun_ex_wave(const Vector & x); // Exact Solution
+double uFun_ex_wave_dt(const Vector & xt);
+double uFun_ex_wave_dt2(const Vector & xt);
+double uFun_ex_wave_laplace(const Vector & xt);
+double uFun_ex_wave_dtlaplace(const Vector & xt);
+void uFun_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+
+double uFun1_ex_wave(const Vector & x); // Exact Solution
+double uFun1_ex_wave_dt(const Vector & xt);
+double uFun1_ex_wave_dt2(const Vector & xt);
+double uFun1_ex_wave_laplace(const Vector & xt);
+double uFun1_ex_wave_dtlaplace(const Vector & xt);
+void uFun1_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun1_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+
+double uFun2_ex_wave(const Vector & x); // Exact Solution
+double uFun2_ex_wave_dt(const Vector & xt);
+double uFun2_ex_wave_dt2(const Vector & xt);
+double uFun2_ex_wave_laplace(const Vector & xt);
+double uFun2_ex_wave_dtlaplace(const Vector & xt);
+void uFun2_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun2_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+
+double uFun3_ex_wave(const Vector & x); // Exact Solution
+double uFun3_ex_wave_dt(const Vector & xt);
+double uFun3_ex_wave_dt2(const Vector & xt);
+double uFun3_ex_wave_laplace(const Vector & xt);
+double uFun3_ex_wave_dtlaplace(const Vector & xt);
+void uFun3_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun3_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+
+double uFun4_ex_wave(const Vector & x); // Exact Solution
+double uFun4_ex_wave_dt(const Vector & xt);
+double uFun4_ex_wave_dt2(const Vector & xt);
+double uFun4_ex_wave_laplace(const Vector & xt);
+double uFun4_ex_wave_dtlaplace(const Vector & xt);
+void uFun4_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun4_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+
+double uFun5_ex_wave(const Vector & x); // Exact Solution
+double uFun5_ex_wave_dt(const Vector & xt);
+double uFun5_ex_wave_dt2(const Vector & xt);
+double uFun5_ex_wave_laplace(const Vector & xt);
+double uFun5_ex_wave_dtlaplace(const Vector & xt);
+void uFun5_ex_wave_gradx(const Vector& xt, Vector& gradx );
+void uFun5_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
+///////////////////////////////////////////////////////////
+
 double uFunTest_ex(const Vector& x); // Exact Solution
 double uFunTest_ex_dt(const Vector& xt);
 double uFunTest_ex_dt2(const Vector & xt);
@@ -60,7 +132,7 @@ void DivmatFun4D_ex(const Vector& xt, Vector& vecvalue);
 void DivmatDivmatFun4D_ex(const Vector& xt, Vector& vecvalue);
 
 template <double (*Sfunc)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )>
-    void sigmaTemplate(const Vector& xt, Vector& sigma);
+    void sigmaTemplate_hyper(const Vector& xt, Vector& sigma);
 template <void (*bvecfunc)(const Vector&, Vector& )>
     void KtildaTemplate(const Vector& xt, DenseMatrix& Ktilda);
 template <void (*bvecfunc)(const Vector&, Vector& )>
@@ -71,18 +143,25 @@ template<void(*bvec)(const Vector & x, Vector & vec)>
     void minbTemplate(const Vector& xt, Vector& minb);
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-    double rhsideTemplate(const Vector& xt);
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
         void bfTemplate(const Vector& xt, Vector& bf);
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-        double divsigmaTemplate(const Vector& xt);
+        double divsigmaTemplate_hyper(const Vector& xt);
 
-template<double (*S)(const Vector & xt) > double uNonhomoTemplate(const Vector& xt);
+template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), double (*Slaplace)(const Vector & xt)> \
+       double divsigmaTemplate_parab(const Vector& xt);
+
+template <double (*ufunc)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )>
+       void sigmaTemplate_parab(const Vector& xt, Vector& sigma);
+
+template<double (*S)(const Vector & xt), double (*d2Sdt2)(const Vector & xt), double (*Slaplace)(const Vector & xt)> \
+       double divsigmaTemplate_wave(const Vector& xt);
+
+template <double (*dSdt)(const Vector&), void(*Sgradxvec)(const Vector & x, Vector & gradx) >
+       void sigmaTemplate_wave(const Vector& xt, Vector& sigma);
+
 
 template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
     void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
@@ -160,7 +239,7 @@ protected:
     template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
              void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
     void SetDivSigma()
-    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>);}
+    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate_hyper<S, dSdt, Sgradxvec, bvec, divbfunc>);}
 
     template< void(*bvec)(const Vector & x, Vector & vec)>  \
     void SetScalarBtB()
@@ -171,7 +250,7 @@ protected:
     template<double (*S)(const Vector & xt), void(*bvec)(const Vector & x, Vector & vec)> \
     void SetSigmaVec()
     {
-        vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate<S,bvec>);
+        vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate_hyper<S,bvec>);
     }
 
     void SetbVec( void(*bvec)(const Vector & x, Vector & vec))
@@ -216,7 +295,90 @@ public:
     int Numsol() const {return numsol;}
 };
 
+// func_coeffs:
+// [0] = u, scalar unknown
+// [1] = f
+// vec_coeffs:
+// [0] = sigma, vector unknown
+// mat_coeffs:
+// (empty)
 
+class Parab_test : public FOSLS_test
+{
+protected:
+    int numsol;
+protected:
+    void Init();
+    bool CheckTestConfig();
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt),
+             double (*Slaplace)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx)> \
+    void SetTestCoeffs ( );
+
+    void SetScalarSFun( double (*S)(const Vector & xt))
+    { func_coeffs[0] = new FunctionCoefficient(S);}
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), double (*Slaplace)(const Vector & xt)> \
+    void SetDivSigma()
+    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate_parab<S, dSdt, Slaplace>);}
+
+    template<double (*f1)(const Vector & xt), void(*f2)(const Vector & x, Vector & vec)> \
+    void SetSigmaVec()
+    { vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate_parab<f1,f2>); }
+
+public:
+    Parab_test(int dimension, int num_solution);
+
+    FunctionCoefficient* GetU() override {return func_coeffs[0];}
+    VectorFunctionCoefficient* GetSigma() override {return vec_coeffs[0];}
+    FunctionCoefficient* GetRhs() override {return func_coeffs[1];}
+
+    int Numsol() const {return numsol;}
+};
+
+// func_coeffs:
+// [0] = u, scalar unknown
+// [1] = f
+// vec_coeffs:
+// [0] = sigma, vector unknown
+// mat_coeffs:
+// (empty)
+
+class Wave_test : public FOSLS_test
+{
+protected:
+    int numsol;
+protected:
+    void Init();
+    bool CheckTestConfig();
+
+    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), double (*d2Sdt2)(const Vector & xt),\
+             double (*Slaplace)(const Vector & xt), double (*dSdtlaplace)(const Vector & xt), \
+             void(*Sgradxvec)(const Vector & x, Vector & gradx), void (*dSdtgradxvec)(const Vector&, Vector& ) > \
+    void SetTestCoeffs ( );
+
+    void SetScalarSFun( double (*S)(const Vector & xt))
+    { func_coeffs[0] = new FunctionCoefficient(S);}
+
+    template<double (*S)(const Vector & xt), double (*d2Sdt2)(const Vector & xt), double (*Slaplace)(const Vector & xt)> \
+    void SetDivSigma()
+    { func_coeffs[1] = new FunctionCoefficient(divsigmaTemplate_wave<S, d2Sdt2, Slaplace>);}
+
+    template<double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & vec)> \
+    void SetSigmaVec()
+    { vec_coeffs[0] = new VectorFunctionCoefficient(dim, sigmaTemplate_wave<dSdt,Sgradxvec>); }
+
+public:
+    Wave_test(int dimension, int num_solution);
+
+    FunctionCoefficient* GetU() override {return func_coeffs[0];}
+    VectorFunctionCoefficient* GetSigma() override {return vec_coeffs[0];}
+    FunctionCoefficient* GetRhs() override {return func_coeffs[1];}
+
+    int Numsol() const {return numsol;}
+};
+
+// the old class which should be removed whenever possible by Hyper_test (inheriting the FOSLS_test)
 class Transport_test
 {
 protected:
@@ -260,7 +422,7 @@ private:
     template<double (*S)(const Vector & xt), void(*bvec)(const Vector & x, Vector & vec)> \
     void SetSigmaVec()
     {
-        sigma = new VectorFunctionCoefficient(dim, sigmaTemplate<S,bvec>);
+        sigma = new VectorFunctionCoefficient(dim, sigmaTemplate_hyper<S,bvec>);
     }
 
     void SetbVec( void(*bvec)(const Vector & x, Vector & vec))
@@ -290,7 +452,7 @@ private:
     template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
              void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
     void SetDivSigma()
-    { scalardivsigma = new FunctionCoefficient(divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>);}
+    { scalardivsigma = new FunctionCoefficient(divsigmaTemplate_hyper<S, dSdt, Sgradxvec, bvec, divbfunc>);}
 
 };
 
@@ -348,7 +510,7 @@ private:
     template<double (*S)(const Vector & xt), void(*bvec)(const Vector & x, Vector & vec)> \
     void SetSigmaVec()
     {
-        sigma = new VectorFunctionCoefficient(dim, sigmaTemplate<S,bvec>);
+        sigma = new VectorFunctionCoefficient(dim, sigmaTemplate_hyper<S,bvec>);
     }
 
     template<void(*bvec)(const Vector & x, Vector & vec)> \
@@ -373,7 +535,7 @@ private:
     template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
              void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
     void SetdivSigma()
-    { scalardivsigma = new FunctionCoefficient(divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>);}
+    { scalardivsigma = new FunctionCoefficient(divsigmaTemplate_hyper<S, dSdt, Sgradxvec, bvec, divbfunc>);}
 
     template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
              void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \

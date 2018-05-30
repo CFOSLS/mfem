@@ -55,7 +55,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates)
 {
     /*
-     * using a simpler version
+     * using a simpler version, now can be avoided
     if  (sols.Size() == 1)
     {
         return FOSLSErrorEstimator(*blfis(0,0), *grfuns[0], error_estimates);

@@ -10,14 +10,15 @@ using namespace mfem;
 namespace mfem
 {
 
-// old implementation, now is a simplified form of the blocked case
+// old implementation, now it's a simplified form of the more general, blocked case
 // here FOSLS functional is given as a bilinear form(sigma, sigma)
 double FOSLSErrorEstimator(BilinearFormIntegrator &blfi,
                            GridFunction &sigma, Vector &error_estimates);
 
 
-// here FOSLS functional is given as a symmetric block matrix with bilinear forms for
-// different grid functions (each for all solution and rhs components)
+/// more general implementation of a class for FOSLS error estimator.
+/// The FOSLS functional is given as a symmetric block matrix with bilinear forms for
+/// different grid functions (for all solution and rhs components)
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates);
 
@@ -27,25 +28,28 @@ protected:
     MPI_Comm comm;
     const int numblocks;
     long current_sequence;
-    Array<ParGridFunction*> grfuns;
-    Array2D<BilinearFormIntegrator*> integs;
+    Array<ParGridFunction*> grfuns; // these are not owned by the estimator
+    Array2D<BilinearFormIntegrator*> integs; // those as well
     Vector error_estimates;
     double global_total_error;
     bool verbose;
 
-    /// Check if the mesh of the solution was modified.
+    /// Checks if the mesh of the solution was modified.
     bool MeshIsModified();
 
-    /// Compute the element error estimates.
+    /// Main function. Computes the element error estimates.
     void ComputeEstimates();
 public:
-    //~FOSLSEstimator() {}
-    //FOSLSEstimator(MPI_Comm& Comm, ParGridFunction &solution,
-                   //BilinearFormIntegrator &integrator, bool verbose_ = false);
-
+    // Constructor which explicitly takes all the grid functions as an input.
+    // The local error estimator is using the locally assembled forms provided
+    // as integrators in the input
     FOSLSEstimator(MPI_Comm Comm, Array<ParGridFunction*>& solutions,
                    Array2D<BilinearFormIntegrator*>& integrators, bool verbose_ = false);
 
+    // Constructor which takes some of the grid functions from the given FOSLS problem
+    // via grfuns descriptor and can additionally take extra grid functions (which are not present
+    // in the problem)
+    // The definition of grfuns_desciptor is given at the definition of this constructor
     FOSLSEstimator(FOSLSProblem& problem, std::vector<std::pair<int,int> > & grfuns_descriptor,
                    Array<ParGridFunction *> *extra_grfuns, Array2D<BilinearFormIntegrator*>& integrators,
                    bool verbose_ = false);
@@ -54,11 +58,16 @@ public:
     double GetEstimate() {ComputeEstimates(); return global_total_error;}
     virtual void Reset () override { current_sequence = -1; }
 
-    // this routine is called by the FOSLSProblem::Update() if the
+    // This routine is called by the FOSLSProblem::Update() if the
     // estimator was added via AddEstimator() to the problem
     void Update();
 };
 
+/// A templated class for a FOSLSEsrimator which lives on the hierarchy of problems(meshes)
+/// The difference with the base class is that when more levels are added to the hierarchy,
+/// the finest level problem is created on the fly, and thus one has to change the definition of the
+/// grid functions invlolved in the estimator. This is done automatically via RedefineGrFuns()
+/// With that, the user must update the extra grid functions (if used) manually
 template <class Problem, class Hierarchy>
 class FOSLSEstimatorOnHier : public FOSLSEstimator
 {
@@ -102,7 +111,7 @@ template <class Problem, class Hierarchy>
 const Vector & FOSLSEstimatorOnHier<Problem, Hierarchy>::GetLocalErrors()
 {
     int hierarchy_upd_cnt = prob_hierarchy.GetUpdateCounter();
-    if (update_counter != hierarchy_upd_cnt)
+    if (update_counter != hierarchy_upd_cnt) // if hierarchy was updated but the estimator not yet
     {
         MFEM_ASSERT(update_counter == hierarchy_upd_cnt - 1,
                     "Current implementation allows the update counters to differ no more than by one");
