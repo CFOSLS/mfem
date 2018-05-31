@@ -33,6 +33,10 @@
 // activates using the solution at the previous mesh as a starting guess for the next problem
 #define CLEVER_STARTING_GUESS
 
+// activates using the particular solution at the previous mesh as a starting guess
+// when finding the next particular solution (i.e., particular solution on the next mesh)
+#define CLEVER_STARTING_PARTSOL
+
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
 //#define USE_GS_PREC
 
@@ -214,6 +218,18 @@ int main(int argc, char *argv[])
         std::cout << "CLEVER_STARTING_GUESS passive \n";
 #endif
 
+#if defined(CLEVER_STARTING_PARTSOL) && !defined(MULTILEVEL_PARTSOL)
+    MFEM_ABORT("CLEVER_STARTING_PARTSOL cannot be active if MULTILEVEL_PARTSOL is not \n");
+#endif
+
+#ifdef CLEVER_STARTING_PARTSOL
+    if (verbose)
+        std::cout << "CLEVER_STARTING_PARTSOL active \n";
+#else
+    if (verbose)
+        std::cout << "CLEVER_STARTING_PARTSOL passive \n";
+#endif
+
 #ifdef USE_GS_PREC
     if (verbose)
         std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
@@ -344,21 +360,25 @@ int main(int argc, char *argv[])
    hierarchy->ConstructDofTrueDofs();
    hierarchy->ConstructDivfreeDops();
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
-           FOSLSProblHierarchy<ProblemType, GeneralHierarchy>(*hierarchy, 1, *bdr_conds,
-                                                              *fe_formulat, prec_option, verbose);
+           FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
+           (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
+   const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
+           GetFunctSpacesDescriptor();
+
 #ifdef DIVFREE_ESTIMATOR
-   FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy = new
-           FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>(*hierarchy, 1, *bdr_conds,
-                                                                      *fe_formulat_divfree, prec_option, verbose);
+   FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy =
+           new FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>
+           (*hierarchy, 1, *bdr_conds, *fe_formulat_divfree, prec_option, verbose);
 
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
 #ifdef MULTILEVEL_PARTSOL
    bool optimized_localsolvers = true;
-   DivConstraintSolver * partsol_finder = new DivConstraintSolver(*problem, *hierarchy, optimized_localsolvers, verbose);
+   DivConstraintSolver * partsol_finder = new DivConstraintSolver
+           (*problem, *hierarchy, optimized_localsolvers, verbose);
 #endif
 
 #endif
@@ -516,6 +536,10 @@ int main(int argc, char *argv[])
    BlockVector * coarse_guess;
 #endif
 
+#ifdef MULTILEVEL_PARTSOL
+   Vector * partsol_guess;
+#endif
+
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
    const int max_dofs = 200000;//1600000;
@@ -535,12 +559,19 @@ int main(int argc, char *argv[])
        BlockVector true_partsol(problem->GetTrueOffsets());
        true_partsol = 0.0;
 #ifdef MULTILEVEL_PARTSOL
-       Vector partsol_init(partsol_finder->Size());
-       partsol_init = 0.0;
+
+#ifdef CLEVER_STARTING_PARTSOL
+       if (it == 0)
+#endif
+       {
+           partsol_guess = new Vector(partsol_finder->Size());
+           *partsol_guess = 0.0;
+       }
+
        BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
        Vector& div_rhs = problem->GetRhs().GetBlock(2);
-       partsol_finder->FindParticularSolution(partsol_init, partsol_vec, div_rhs, verbose);
+       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
 
        for (int i = 0; i < numblocks_funct; ++i)
            true_partsol.GetBlock(i) = partsol_vec.GetBlock(i);
@@ -692,6 +723,19 @@ int main(int argc, char *argv[])
        partsol_finder->Update();
 #endif
 #endif
+
+#ifdef MULTILEVEL_PARTSOL
+       delete partsol_guess;
+#endif
+
+#ifdef CLEVER_STARTING_PARTSOL
+       partsol_guess = new Vector(partsol_finder->Size());
+       BlockVector partsol_guess_viewer(partsol_guess->GetData(), problem->GetTrueOffsetsFunc());
+       for (int blk = 0; blk < numblocks_funct; ++blk)
+           prob_hierarchy->GetHierarchy().GetTruePspace((*space_names_funct)[blk], 0)
+                   ->Mult(partsol_vec.GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
+#endif
+
 
        if (fosls_func_version == 2)
        {

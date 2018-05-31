@@ -10,11 +10,6 @@
 #include <list>
 #include <unistd.h>
 
-/// TODO:
-/// Next steps are:
-/// 5) If have time, also look into the simple parabolic example (especially on adding
-/// the parabolic test to FOSLStest setup
-
 #define WITH_DIVCONSTRAINT_SOLVER
 
 // switches on/off usage of smoother in the new minimization solver
@@ -320,6 +315,7 @@ int main(int argc, char *argv[])
     // defining space names for the original problem, for the functional and the related divfree problem
     const Array<SpaceName>* space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
 
+    //const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
     Array<SpaceName> space_names_funct(numblocks_funct);
     space_names_funct[0] = SpaceName::HDIV;
     if (strcmp(space_for_S,"H1") == 0)
