@@ -1181,6 +1181,26 @@ public:
     virtual BlockMatrix* ConstructFunctBlkMat(const Array<int> &offsets);
 
     void CreateOffsetsRhsSol();
+
+    void SetRelTol(double rtol) {solver->SetRelTol(rtol);}
+    void SetAbsTol(double atol) {solver->SetAbsTol(atol);}
+
+    void ResetPrec (int new_prec_option)
+    {
+        if (new_prec_option != prec_option)
+        {
+            if (prec)
+                delete prec;
+            CreatePrec(*CFOSLSop, new_prec_option, verbose);
+            UpdateSolverPrec();
+        }
+        else
+            if (!prec)
+            {
+                CreatePrec(*CFOSLSop, new_prec_option, verbose);
+                UpdateSolverPrec();
+            }
+    }
 };
 
 /// FIXME: Looks like this shouldn't have happened

@@ -31,19 +31,19 @@
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-#define DIVFREE_SETUP
+//#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 #define CLEVER_STARTING_GUESS
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
-#define CLEVER_STARTING_PARTSOL
+//#define CLEVER_STARTING_PARTSOL
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
-//#define USE_GS_PREC
+#define USE_GS_PREC
 
-#define MULTILEVEL_PARTSOL
+//#define MULTILEVEL_PARTSOL
 
 using namespace std;
 using namespace mfem;
@@ -248,7 +248,6 @@ int main(int argc, char *argv[])
 #ifdef USE_GS_PREC
     if (verbose)
         std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
-    prec_option = 100;
 #else
     if (verbose)
         std::cout << "USE_GS_PREC passive \n";
@@ -404,7 +403,7 @@ int main(int argc, char *argv[])
 
    int numfoslsfuns = -1;
 
-   int fosls_func_version = 2;
+   int fosls_func_version = 1;
    if (verbose)
     std::cout << "fosls_func_version = " << fosls_func_version << "\n";
 
@@ -504,7 +503,7 @@ int main(int argc, char *argv[])
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
-   refiner.SetTotalErrorFraction(0.5);
+   refiner.SetTotalErrorFraction(0.8); // 0.5
 
 #ifdef CLEVER_STARTING_GUESS
    BlockVector * coarse_guess;
@@ -522,7 +521,40 @@ int main(int argc, char *argv[])
    const int max_dofs = 400000;
 #endif
 
+   double fixed_rtol = 1.0e-12;
+   double fixed_atol = 1.0e-20;
+   /*
+   {
+        BlockVector res(problem->GetTrueOffsets());
+        problem->GetOp()->Mult(problem->GetSol(), res);
+        res -= problem->GetRhs();
+
+        double initial_res_norm = ComputeMPIVecNorm(comm, res, "", false);
+        if (verbose)
+            std::cout << "Initial res norm = " << initial_res_norm << "\n";
+
+       double local_res_norm_sq = res.Norml2() * res.Norml2();
+       double initial_res_norm;
+       MPI_Allreduce(&local_res_norm_sq, &initial_res_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+       int local_res_size = res.Size();
+       int initial_res_size;
+       MPI_Allreduce(&local_res_size, &initial_res_size, 1, MPI_INT, MPI_SUM, comm);
+
+       initial_res_norm = sqrt (initial_res_norm / initial_res_size);
+
+       if (verbose)
+           std::cout << "(alt) Initial res norm = " << initial_res_norm << "\n";
+   }
+
+   MPI_Finalize();
+   return 0;
+   */
+
+   double initial_res_norm = -1.0;
+
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
+   std::cout << "starting n_el = " << prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE() << "\n";
 
    for (int it = 0; ; it++)
    {
@@ -530,6 +562,19 @@ int main(int argc, char *argv[])
        {
           cout << "\nAMR iteration " << it << "\n";
           cout << "Number of unknowns: " << global_dofs << "\n";
+
+          /*
+          BlockOperator * problem_op = problem->GetOp();
+          for (int blk = 0; blk < problem_op->NumRowBlocks(); ++blk)
+              for (int col = 0; col < problem_op->NumColBlocks(); ++col)
+              {
+                  if (!problem_op->IsZeroBlock(blk, col))
+                  {
+                      std::cout << "blk = " << blk << ": size = " << problem_op->GetBlock(blk,col).Height() << "\n";
+                      break;
+                  }
+              }
+          */
        }
 
        bool compute_error = true;
@@ -593,6 +638,28 @@ int main(int argc, char *argv[])
        // if it's not the first iteration we reuse the previous solution as a starting guess
        if (it > 0)
            divfreeprob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem_divfree->GetSol());
+
+       // checking the residual
+       BlockVector res(problem_divfree->GetTrueOffsets());
+       problem_divfree->GetOp()->Mult(problem_divfree->GetSol(), res);
+       res -= rhs;
+
+       double res_norm = ComputeMPIVecNorm(comm, res, "", false);
+       if (it == 0)
+           initial_res_norm = res_norm;
+
+       if (verbose)
+           std::cout << "Initial res norm for div-free problem at iteration # "
+                     << it << " = " << res_norm << "\n";
+
+       double adjusted_rtol = fixed_rtol * initial_res_norm / res_norm;
+       if (verbose)
+           std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
+
+       problem_divfree->SetRelTol(adjusted_rtol);
+       problem_divfree->SetAbsTol(fixed_atol);
+
+
        problem_divfree->SolveProblem(rhs, problem_divfree->GetSol(), verbose, false);
 #else
        problem_divfree->SolveProblem(rhs, verbose, false);
@@ -632,6 +699,33 @@ int main(int argc, char *argv[])
        // if it's not the first iteration we reuse the previous solution as a starting guess
        if (it > 0)
            prob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem->GetSol());
+
+       // checking the residual
+       BlockVector res(problem->GetTrueOffsets());
+       problem->GetOp()->Mult(problem->GetSol(), res);
+       res -= problem->GetRhs();
+
+       double res_norm = ComputeMPIVecNorm(comm, res, "", false);
+       if (it == 0)
+           initial_res_norm = res_norm;
+
+       if (verbose)
+           std::cout << "Initial res norm at iteration # " << it << " = " << res_norm << "\n";
+
+       double adjusted_rtol = fixed_rtol * initial_res_norm / res_norm;
+       if (verbose)
+           std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
+
+       problem->SetRelTol(adjusted_rtol);
+       problem->SetAbsTol(fixed_atol);
+#ifdef USE_GS_PREC
+       if (it > 0)
+       {
+           prec_option = 100;
+           problem->ResetPrec(prec_option);
+       }
+#endif
+
        problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
 #else
        problem->Solve(verbose, false);
@@ -686,7 +780,36 @@ int main(int argc, char *argv[])
        //     used to determine if a stopping criterion was met.
 
 #ifdef AMR
+       int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
+       int nmarked_el = refiner.GetNumMarkedElements();
+       if (verbose)
+       {
+           std::cout << "Marked elements percentage = " << 100 * nmarked_el * 1.0 / nel_before << " % \n";
+           std::cout << "nmarked_el = " << nmarked_el << ", nel_before = " << nel_before << "\n";
+           int nel_after = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
+           std::cout << "nel_after = " << nel_after << "\n";
+           std::cout << "number of elements introduced = " << nel_after - nel_before << "\n";
+           std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
+                        100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n";
+       }
+
+       if (visualization)
+       {
+           const Vector& local_errors = estimator->GetLocalErrors();
+           MFEM_ASSERT(local_errors.Size() == problem->GetPfes(numblocks_funct)->TrueVSize(), "");
+
+           ParGridFunction * local_errors_pgfun = new ParGridFunction(problem->GetPfes(numblocks_funct));
+           local_errors_pgfun->SetFromTrueDofs(local_errors);
+           char vishost[] = "localhost";
+           int  visport   = 19916;
+
+           socketstream amr_sock(vishost, visport);
+           amr_sock << "parallel " << num_procs << " " << myid << "\n";
+           amr_sock << "solution\n" << *pmesh << *local_errors_pgfun <<
+                         "window_title 'local errors, AMR iter No." << it <<"'" << flush;
+       }
+
 #else
        prob_hierarchy->GetHierarchy().GetFinestParMesh()->UniformRefinement();
 #endif
@@ -756,6 +879,20 @@ int main(int argc, char *argv[])
 
        // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();
+
+       /*
+       BlockOperator * problem_op = problem->GetOp();
+       for (int blk = 0; blk < problem_op->NumRowBlocks(); ++blk)
+           for (int col = 0; col < problem_op->NumColBlocks(); ++col)
+           {
+               if (!problem_op->IsZeroBlock(blk, col))
+               {
+                   std::cout << "blk = " << blk << ": size = " << problem_op->GetBlock(blk,col).Height() << "\n";
+                   break;
+               }
+           }
+       */
+
        if (global_dofs > max_dofs)
        {
           if (verbose)

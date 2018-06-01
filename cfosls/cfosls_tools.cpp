@@ -1571,7 +1571,6 @@ BlockOperator* FOSLSProblem::GetFunctOp(const Array<int> &offsets)
     return funct_op;
 }
 
-
 void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const
 {
     MFEM_ASSERT(solver_initialized, "Solver is not initialized \n");
@@ -1843,6 +1842,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+        std::cout << "|| sigma_h - L(S_h) || = " << sqrt(globalFunctional) << "\n";
         std::cout << "Energy Error = " << sqrt(globalFunctional + err_div * err_div) << "\n";
         std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
                      / norm_div << "\n";
@@ -2757,7 +2757,7 @@ void FOSLSDivfreeProblem::ChangeSolver()
     new_solver->SetOperator(*CFOSLSop);
     if (prec)
          new_solver->SetPreconditioner(*prec);
-    new_solver->SetPrintLevel(0);
+    new_solver->SetPrintLevel(1);
 
     delete solver;
     solver = new_solver;
