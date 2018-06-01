@@ -503,7 +503,7 @@ int main(int argc, char *argv[])
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
-   refiner.SetTotalErrorFraction(0.8); // 0.5
+   refiner.SetTotalErrorFraction(0.5); // 0.5
 
 #ifdef CLEVER_STARTING_GUESS
    BlockVector * coarse_guess;
@@ -523,33 +523,6 @@ int main(int argc, char *argv[])
 
    double fixed_rtol = 1.0e-12;
    double fixed_atol = 1.0e-20;
-   /*
-   {
-        BlockVector res(problem->GetTrueOffsets());
-        problem->GetOp()->Mult(problem->GetSol(), res);
-        res -= problem->GetRhs();
-
-        double initial_res_norm = ComputeMPIVecNorm(comm, res, "", false);
-        if (verbose)
-            std::cout << "Initial res norm = " << initial_res_norm << "\n";
-
-       double local_res_norm_sq = res.Norml2() * res.Norml2();
-       double initial_res_norm;
-       MPI_Allreduce(&local_res_norm_sq, &initial_res_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-
-       int local_res_size = res.Size();
-       int initial_res_size;
-       MPI_Allreduce(&local_res_size, &initial_res_size, 1, MPI_INT, MPI_SUM, comm);
-
-       initial_res_norm = sqrt (initial_res_norm / initial_res_size);
-
-       if (verbose)
-           std::cout << "(alt) Initial res norm = " << initial_res_norm << "\n";
-   }
-
-   MPI_Finalize();
-   return 0;
-   */
 
    double initial_res_norm = -1.0;
 
@@ -562,19 +535,6 @@ int main(int argc, char *argv[])
        {
           cout << "\nAMR iteration " << it << "\n";
           cout << "Number of unknowns: " << global_dofs << "\n";
-
-          /*
-          BlockOperator * problem_op = problem->GetOp();
-          for (int blk = 0; blk < problem_op->NumRowBlocks(); ++blk)
-              for (int col = 0; col < problem_op->NumColBlocks(); ++col)
-              {
-                  if (!problem_op->IsZeroBlock(blk, col))
-                  {
-                      std::cout << "blk = " << blk << ": size = " << problem_op->GetBlock(blk,col).Height() << "\n";
-                      break;
-                  }
-              }
-          */
        }
 
        bool compute_error = true;
@@ -658,12 +618,30 @@ int main(int argc, char *argv[])
 
        problem_divfree->SetRelTol(adjusted_rtol);
        problem_divfree->SetAbsTol(fixed_atol);
-
+#ifdef USE_GS_PREC
+       if (it > 0)
+       {
+           prec_option = 100;
+           problem_divfree->ResetPrec(prec_option);
+       }
+#endif
 
        problem_divfree->SolveProblem(rhs, problem_divfree->GetSol(), verbose, false);
 #else
        problem_divfree->SolveProblem(rhs, verbose, false);
 #endif
+
+       // checking the residual afterwards
+       {
+           BlockVector res(problem_divfree->GetTrueOffsets());
+           problem_divfree->GetOp()->Mult(problem_divfree->GetSol(), res);
+           res -= rhs;
+
+           double res_norm = ComputeMPIVecNorm(comm, res, "", false);
+           if (verbose)
+               std::cout << "Res norm after solving the div-free problem at iteration # "
+                         << it << " = " << res_norm << "\n";
+       }
 
        /// converting the solution back into sigma from Hdiv inside the problem
        /// (adding a particular solution as a part of the process)
@@ -727,6 +705,19 @@ int main(int argc, char *argv[])
 #endif
 
        problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
+
+       // checking the residual afterwards
+       {
+           BlockVector res(problem->GetTrueOffsets());
+           problem->GetOp()->Mult(problem->GetSol(), res);
+           res -= problem->GetRhs();
+
+           double res_norm = ComputeMPIVecNorm(comm, res, "", false);
+           if (verbose)
+               std::cout << "Res norm after solving the problem at iteration # "
+                         << it << " = " << res_norm << "\n";
+       }
+
 #else
        problem->Solve(verbose, false);
 #endif
@@ -879,19 +870,6 @@ int main(int argc, char *argv[])
 
        // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();
-
-       /*
-       BlockOperator * problem_op = problem->GetOp();
-       for (int blk = 0; blk < problem_op->NumRowBlocks(); ++blk)
-           for (int col = 0; col < problem_op->NumColBlocks(); ++col)
-           {
-               if (!problem_op->IsZeroBlock(blk, col))
-               {
-                   std::cout << "blk = " << blk << ": size = " << problem_op->GetBlock(blk,col).Height() << "\n";
-                   break;
-               }
-           }
-       */
 
        if (global_dofs > max_dofs)
        {
