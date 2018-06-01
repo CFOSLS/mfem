@@ -675,6 +675,27 @@ public:
 
 };
 
+struct CFOSLSFormulation_HdivL2DivfreeHyp : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Hyper_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_HdivL2DivfreeHyp(int dimension, int num_solution, bool verbose);
+
+    CFOSLSFormulation_HdivL2DivfreeHyp(CFOSLSFormulation_HdivL2Hyper& hdivl2_formul, bool verbose)
+        : CFOSLSFormulation_HdivL2DivfreeHyp(hdivl2_formul.Dim(), hdivl2_formul.NumSol(), verbose) {}
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int GetUnknownWithInitCnd() const override {return 1;}
+
+};
+
 struct CFOSLSFormulation_HdivH1Parab : public FOSLSFormulation
 {
 protected:
@@ -832,6 +853,23 @@ public:
 
     }
 };
+
+/// FIXME: See previous FIXME messages
+struct CFOSLSFEFormulation_HdivL2DivfreeHyper : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivL2DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+
+        if (dim == 4)
+            fecolls[0] = new DivSkew1_4DFECollection;
+        else
+            fecolls[0] = new ND_FECollection(feorder + 1, dim);
+    }
+};
+
 
 /// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1Parab : FOSLSFEFormulation
@@ -1330,6 +1368,7 @@ public:
 
     virtual void Update();
 
+    void ChangeSolver();
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) override;
 };
 

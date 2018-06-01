@@ -2424,6 +2424,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
                                                          Vector& partsol, const Vector &constr_rhs, bool verbose) const
 {
+    if (!(start_guess.Size() == size && partsol.Size() == size))
+        std::cout << "Breakpoint \n";
     MFEM_ASSERT(start_guess.Size() == size && partsol.Size() == size,
                 "Sizes of all arguments must be equal to the size of the solver");
 

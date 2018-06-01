@@ -26,9 +26,12 @@
 #include <iomanip>
 #include <list>
 
+// if passive, the mesh is simply uniformly refined at each iteration
+#define AMR
+
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-#define DIVFREE_ESTIMATOR
+#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 #define CLEVER_STARTING_GUESS
@@ -53,7 +56,7 @@ BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, 
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 1;
+    bool visualization = 0;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -64,7 +67,7 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -3;
+    int numsol          = 8;
 
     int ser_ref_levels  = 0;
     int par_ref_levels  = 0;
@@ -78,7 +81,7 @@ int main(int argc, char *argv[])
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
- #ifdef DIVFREE_ESTIMATOR
+ #ifdef DIVFREE_SETUP
     using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
     using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
  #endif
@@ -89,6 +92,10 @@ int main(int argc, char *argv[])
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2L2hyp;
+#ifdef DIVFREE_SETUP
+    using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
+#endif
     */
 
     // solver options
@@ -191,10 +198,10 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    mesh_file = "../data/pmesh_check.mesh";
+    //mesh_file = "../data/pmesh_check.mesh";
     //mesh_file = "../data/cube_3d_moderate.mesh";
 
 
@@ -202,12 +209,20 @@ int main(int argc, char *argv[])
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
 
-#ifdef DIVFREE_ESTIMATOR
+#ifdef AMR
     if (verbose)
-        std::cout << "DIVFREE_ESTIMATOR active \n";
+        std::cout << "AMR active \n";
 #else
     if (verbose)
-        std::cout << "DIVFREE_ESTIMATOR passive \n";
+        std::cout << "AMR passive \n";
+#endif
+
+#ifdef DIVFREE_SETUP
+    if (verbose)
+        std::cout << "DIVFREE_SETUP active \n";
+#else
+    if (verbose)
+        std::cout << "DIVFREE_SETUP passive \n";
 #endif
 
 #ifdef CLEVER_STARTING_GUESS
@@ -331,7 +346,7 @@ int main(int argc, char *argv[])
    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
-#ifdef DIVFREE_ESTIMATOR
+#ifdef DIVFREE_SETUP
    DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
    DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
 #endif
@@ -368,7 +383,7 @@ int main(int argc, char *argv[])
    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
            GetFunctSpacesDescriptor();
 
-#ifdef DIVFREE_ESTIMATOR
+#ifdef DIVFREE_SETUP
    FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy =
            new FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat_divfree, prec_option, verbose);
@@ -491,47 +506,6 @@ int main(int argc, char *argv[])
    ThresholdRefiner refiner(*estimator);
    refiner.SetTotalErrorFraction(0.5);
 
-#if 0
-#ifdef DIVFREE_ESTIMATOR
-   std::vector<std::pair<int,int> > grfuns_descriptor_divfree(numblocks_funct);
-
-   Array2D<BilinearFormIntegrator *> integs_divfree(numblocks_funct, numblocks_funct);
-   for (int i = 0; i < integs_divfree.NumRows(); ++i)
-       for (int j = 0; j < integs_divfree.NumCols(); ++j)
-           integs_divfree(i,j) = NULL;
-
-   /// Not needed after the discussion with Panayot. The error should
-   /// be estimated by the initial error estimator for the problem
-   /// involving the H(div) space
-   FOSLSEstimator * estimator_divfree;
-
-   // this works
-   grfuns_descriptor_divfree[0] = std::make_pair<int,int>(1, 0);
-   if (strcmp(space_for_S,"H1") == 0)
-        grfuns_descriptor_divfree[1] = std::make_pair<int,int>(1, 1);
-
-   if (strcmp(space_for_S,"H1") == 0)
-   {
-       integs_divfree(0,0) = new CurlCurlIntegrator;
-       integs_divfree(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
-       // untested integrator, actually
-       integs_divfree(1,0) = new MixedVectorFECurlVQScalarIntegrator(*Mytest->GetMinB());
-   }
-   else
-       integs_divfree(0,0) = new CurlCurlIntegrator(*Mytest->GetKtilda());
-
-   estimator_divfree = new FOSLSEstimator(*problem_divfree, grfuns_descriptor_divfree, NULL, integs_divfree, verbose);
-
-   problem_divfree->AddEstimator(*estimator_divfree);
-
-   ThresholdRefiner refiner_divfree(*estimator_divfree);
-   refiner_divfree.SetTotalErrorFraction(0.5);
-
-   //MPI_Finalize();
-   //return 0;
-#endif
-#endif
-
 #ifdef CLEVER_STARTING_GUESS
    BlockVector * coarse_guess;
 #endif
@@ -542,7 +516,12 @@ int main(int argc, char *argv[])
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
+#ifdef AMR
    const int max_dofs = 200000;//1600000;
+#else
+   const int max_dofs = 400000;
+#endif
+
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
 
    for (int it = 0; ; it++)
@@ -555,7 +534,7 @@ int main(int argc, char *argv[])
 
        bool compute_error = true;
 
-#ifdef DIVFREE_ESTIMATOR
+#ifdef DIVFREE_SETUP
        BlockVector true_partsol(problem->GetTrueOffsets());
        true_partsol = 0.0;
 #ifdef MULTILEVEL_PARTSOL
@@ -570,7 +549,7 @@ int main(int argc, char *argv[])
 
        BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
-       Vector& div_rhs = problem->GetRhs().GetBlock(2);
+       Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
        partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
 
        for (int i = 0; i < numblocks_funct; ++i)
@@ -593,6 +572,7 @@ int main(int argc, char *argv[])
        problem_divfree->InitSolver(verbose);
        // creating a preconditioner for the divfree problem
        problem_divfree->CreatePrec(*problem_divfree->GetOp(), prec_option, verbose);
+       problem_divfree->ChangeSolver();
        problem_divfree->UpdateSolverPrec();
 
        //  creating the solution and right hand side for the divfree problem
@@ -641,7 +621,7 @@ int main(int argc, char *argv[])
        problem_sol += true_partsol;
 
        if (compute_error)
-           problem->ComputeError(problem_sol, verbose, true);
+           problem->ComputeError(problem_sol, verbose, false);
 
        // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
        // though for now its coordination already happens in ComputeError()
@@ -660,6 +640,9 @@ int main(int argc, char *argv[])
       BlockVector& problem_sol = problem->GetSol();
       if (compute_error)
           problem->ComputeError(problem_sol, verbose, true);
+
+      //MPI_Finalize();
+      //return 0;
 
 #ifdef CLEVER_STARTING_GUESS
        if (it > 0)
@@ -702,7 +685,11 @@ int main(int argc, char *argv[])
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
 
+#ifdef AMR
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
+#else
+       prob_hierarchy->GetHierarchy().GetFinestParMesh()->UniformRefinement();
+#endif
 
        if (refiner.Stop())
        {
@@ -715,7 +702,7 @@ int main(int argc, char *argv[])
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
 
-#ifdef DIVFREE_ESTIMATOR
+#ifdef DIVFREE_SETUP
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 #ifdef MULTILEVEL_PARTSOL
@@ -761,7 +748,7 @@ int main(int argc, char *argv[])
            extra_grfuns[0]->SetFromTrueDofs(true_temp2);
        }
 
-#ifdef DIVFREE_ESTIMATOR
+#ifdef DIVFREE_SETUP
 #ifndef MULTILEVEL_PARTSOL
        delete partsigma;
 #endif

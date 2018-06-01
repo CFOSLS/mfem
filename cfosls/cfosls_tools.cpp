@@ -317,9 +317,6 @@ CFOSLSFormulation_HdivH1DivfreeHyp::CFOSLSFormulation_HdivH1DivfreeHyp (int dime
     blfis(0,0) = new CurlCurlIntegrator();
     blfis(1,1) = new H1NormIntegrator(*test.GetBBt(), *test.GetBtB());
 
-    //MFEM_ABORT("Set the correct linear forms, or decide whether it is needed at all \n");
-    //lfis[1] = new GradDomainLFIntegrator(*test.GetBf());
-
     InitBlkStructure();
 }
 
@@ -339,6 +336,34 @@ void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructSpacesDescriptor() const
 
 
 void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(1);
+    (*space_names_funct)[0] = SpaceName::HCURL;
+}
+
+
+CFOSLSFormulation_HdivL2DivfreeHyp::CFOSLSFormulation_HdivL2DivfreeHyp (int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 1, 1, false), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new CurlCurlIntegrator();
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_HdivL2DivfreeHyp::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+}
+
+void CFOSLSFormulation_HdivL2DivfreeHyp::ConstructSpacesDescriptor() const
+{
+    space_names = new Array<SpaceName>(numblocks);
+
+    (*space_names)[0] = SpaceName::HCURL;
+}
+
+
+void CFOSLSFormulation_HdivL2DivfreeHyp::ConstructFunctSpacesDescriptor() const
 {
     space_names_funct = new Array<SpaceName>(1);
     (*space_names_funct)[0] = SpaceName::HCURL;
@@ -1561,19 +1586,22 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bo
     if (verbose)
     {
        if (solver->GetConverged())
-          std::cout << "MINRES converged in " << solver->GetNumIterations()
+          std::cout << "Iterative solver converged in " << solver->GetNumIterations()
                     << " iterations with a residual norm of " << solver->GetFinalNorm() << ".\n";
        else
-          std::cout << "MINRES did not converge in " << solver->GetNumIterations()
+          std::cout << "Iterative solver did not converge in " << solver->GetNumIterations()
                     << " iterations. Residual norm is " << solver->GetFinalNorm() << ".\n";
-       std::cout << "MINRES solver took " << chrono.RealTime() << "s. \n";
+       std::cout << "Iterative solver took " << chrono.RealTime() << "s. \n";
     }
 }
 
 void FOSLSProblem::SolveProblem(const Vector& rhs, bool verbose, bool compute_error) const
 {
     *trueX = 0.0;
+    //std::cout << "rhs norm = " << rhs.Norml2() / sqrt (rhs.Size()) << "\n";
+    //std::cout << "trueX norm before = " << trueX->Norml2() / sqrt (trueX->Size()) << "\n";
     SolveProblem(rhs, *trueX, verbose, compute_error);
+    //std::cout << "trueX norm after = " << trueX->Norml2() / sqrt (trueX->Size()) << "\n";
 
     DistributeSolution();
 
@@ -1613,8 +1641,12 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 
     if (verbose)
     {
-        std::cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div / norm_div  << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
     }
 
     ParBilinearForm *Cblock = new ParBilinearForm(L2_space);
@@ -1799,15 +1831,11 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     double norm_div = ComputeGlobalLpNorm(2, *fe_formul.GetFormulation()->GetTest()
                                           ->GetRhs(), pmesh, irs);
 
-    Vector trueSigma(Hdiv_space->TrueVSize());
-    trueSigma = vec_viewer.GetBlock(0);
-
-    Vector MtrueSigma(Hdiv_space->TrueVSize());
-    MtrueSigma = 0.0;
+    Vector MSigma(Hdiv_space->TrueVSize());
 
     HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
-    M->Mult(trueSigma, MtrueSigma);
-    double localFunctional = trueSigma * MtrueSigma;
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional = vec_viewer.GetBlock(0) * MSigma;
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
@@ -1835,12 +1863,11 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
-    Vector DtrueSigma(L2_space->TrueVSize());
-    DtrueSigma = 0.0;
+    Vector TempL2(L2_space->TrueVSize());
     HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
-    Bdiv->Mult(trueSigma, DtrueSigma);
-    DtrueSigma -= Rhs;
-    double mass_loss_loc = DtrueSigma.Norml1();
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+    TempL2 -= Rhs;
+    double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -1852,42 +1879,49 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
 // computes || sigma - L(S) || only, no term with || div bS - f
 void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
 {
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
     ParFiniteElementSpace * H1_space = pfes[1];
     ParFiniteElementSpace * L2_space = pfes[2];
 
-    Vector trueSigma(Hdiv_space->TrueVSize());
-    trueSigma = vec_viewer.GetBlock(0);
-
-    Vector MtrueSigma(Hdiv_space->TrueVSize());
-    MtrueSigma = 0.0;
+    Vector MSigma(Hdiv_space->TrueVSize());
 
     HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
-    M->Mult(trueSigma, MtrueSigma);
-    double localFunctional = trueSigma * MtrueSigma;
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional1 = vec_viewer.GetBlock(0) * MSigma;
 
-    Vector GtrueSigma(H1_space->TrueVSize());
-    GtrueSigma = 0.0;
-
+    Vector GSigma(H1_space->TrueVSize());
     HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
-    BT->Mult(trueSigma, GtrueSigma);
-    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+    BT->Mult(vec_viewer.GetBlock(0), GSigma);
+    localFunctional1 += 2.0 * (vec_viewer.GetBlock(1)*GSigma);
 
+    ParBilinearForm * cform_mass = new ParBilinearForm(H1_space);
+    cform_mass->AddDomainIntegrator(new MassIntegrator(*test->GetBtB()));
+    cform_mass->Assemble();
+    cform_mass->Finalize();
+    HypreParMatrix * C_mass = cform_mass->ParallelAssemble();
+    delete cform_mass;
+
+    //HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    //C->Mult(vec_viewer.GetBlock(1), XtrueS);
     Vector XtrueS(H1_space->TrueVSize());
-    XtrueS = 0.0;
-    HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
-    C->Mult(vec_viewer.GetBlock(1), XtrueS);
-    localFunctional += vec_viewer.GetBlock(1)*XtrueS;
+    C_mass->Mult(vec_viewer.GetBlock(1), XtrueS);
+    localFunctional1 += vec_viewer.GetBlock(1)*XtrueS;
 
-    double globalFunctional;
-    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+    double globalFunctional1;
+    MPI_Reduce(&localFunctional1, &globalFunctional1, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     if (verbose)
     {
-        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional1 << "\n";
+        std::cout << "|| sigma_h - L(S_h) || = " << sqrt(globalFunctional1) << "\n";
     }
+
+    delete C_mass;
 
     ParLinearForm gform(L2_space);
     gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
@@ -1901,15 +1935,110 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // approach through a linear form
+
+    ParMixedBilinearForm * special_form = new ParMixedBilinearForm(H1_space, L2_space);
+    special_form->AddDomainIntegrator(new MixedDirectionalDerivativeIntegrator(*test->GetMinB()));
+    special_form->Assemble();
+    special_form->Finalize();
+    HypreParMatrix * Special = special_form->ParallelAssemble();
+    delete special_form;
+
+    Vector Vec2(L2_space->TrueVSize());
+    // Vec2 = f.e. grid function of coefficients of div bu in f.e. L2
+    Special->Mult(vec_viewer.GetBlock(1), Vec2);
+    delete Special;
+
+    // Vec2 = coefficients of (div bu - f) in f.e. L2
+    Vec2 -= Rhs;
+
+    double localFunctional2 = Vec2 * Vec2;
+
+    double globalFunctional2;
+    MPI_Reduce(&localFunctional2, &globalFunctional2, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+
+
+    // algebraic approach
+    /*
+    // problem here is that first term is computed from a vector on H^1 and the others on L2 space
+    // which makes the terms very different
+
+    ParBilinearForm * cform_diff = new ParBilinearForm(H1_space);
+    cform_diff->AddDomainIntegrator(new DiffusionIntegrator(*test->GetBBt()));
+    cform_diff->Assemble();
+    cform_diff->Finalize();
+    HypreParMatrix * C_diff = cform_diff->ParallelAssemble();
+    delete cform_diff;
+
+    Vector Vec1(H1_space->TrueVSize());
+    C_diff->Mult(vec_viewer.GetBlock(1), Vec1);
+    double local_part1_diff = Vec1 * vec_viewer.GetBlock(1);
+    double global_part1_diff;
+    MPI_Reduce(&local_part1_diff, &global_part1_diff, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    delete C_diff;
+
+    ParMixedBilinearForm * special_form = new ParMixedBilinearForm(H1_space, L2_space);
+    special_form->AddDomainIntegrator(new MixedDirectionalDerivativeIntegrator(*test->GetMinB()));
+    special_form->Assemble();
+    special_form->Finalize();
+    HypreParMatrix * Special = special_form->ParallelAssemble();
+    delete special_form;
+
+    Vector Vec2(L2_space->TrueVSize());
+    Special->Mult(vec_viewer.GetBlock(1), Vec2);
+    double local_part2 = Rhs * Vec2;
+    local_part2 *= 2.0;
+    double global_part2;
+    MPI_Reduce(&local_part2, &global_part2, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    delete Special;
+
+    double local_part3 = Rhs * Rhs;
+    double global_part3;
+    MPI_Reduce(&local_part3, &global_part3, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    std::cout << "global_part1 = " << global_part1_diff << ", part2 = " << global_part2 << ", part3 = " << global_part3 << "\n";
+    double globalFunctional2 = global_part1_diff + global_part2 + global_part3;
+    */
+
+    /*
+     * non-algebraic approach, not completed, don't know how to do b * grad u
+     * for a f.e. grid function representation of grad u
+    DiscreteLinearOperator Grad(H1_space, L2_space);
+    Grad.AddDomainInterpolator(new GradientInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Grad.Assemble();
+    Grad.Mult(u, GradU);
+    */
+
+
+    if (verbose)
+    {
+        std::cout << "|| div bu - f ||^2 = " << globalFunctional2 << "\n";
+        std::cout << "|| div bu - f || = " << sqrt(globalFunctional2) << "\n";
+    }
+
+
+    if (verbose)
+    {
+        std::cout << "global functional sq error = " << globalFunctional1 + globalFunctional2 << "\n";
+        std::cout << "global functional error = " << sqrt(globalFunctional1 + globalFunctional2) << "\n";
+    }
+
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
-    Vector DtrueSigma(L2_space->TrueVSize());
-    DtrueSigma = 0.0;
+    Vector TempL2(L2_space->TrueVSize());
     HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
-    Bdiv->Mult(trueSigma, DtrueSigma);
-    DtrueSigma -= Rhs;
-    double mass_loss_loc = DtrueSigma.Norml1();
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+    TempL2 -= Rhs;
+    double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -1955,8 +2084,12 @@ void FOSLSProblem_HdivH1L2hyp::ComputeExtraError(const Vector& vec) const
     if (verbose)
     {
         //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
-        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div / norm_div  << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
     }
 
     ComputeFuncError(vec);
@@ -2126,8 +2259,12 @@ void FOSLSProblem_HdivH1parab::ComputeExtraError(const Vector& vec) const
     if (verbose)
     {
         //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
-        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div / norm_div  << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
     }
 
     ComputeFuncError(vec);
@@ -2141,26 +2278,18 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
     ParFiniteElementSpace * H1_space = pfes[1];
     ParFiniteElementSpace * L2_space = pfes[2];
 
-    Vector trueSigma(Hdiv_space->TrueVSize());
-    trueSigma = vec_viewer.GetBlock(0);
-
-    Vector MtrueSigma(Hdiv_space->TrueVSize());
-    MtrueSigma = 0.0;
-
     HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
-    M->Mult(trueSigma, MtrueSigma);
-    double localFunctional = trueSigma * MtrueSigma;
-
-    Vector GtrueSigma(H1_space->TrueVSize());
-    GtrueSigma = 0.0;
+    Vector MSigma(Hdiv_space->TrueVSize());
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional = vec_viewer.GetBlock(0) * MSigma;
 
     HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
-    BT->Mult(trueSigma, GtrueSigma);
-    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+    Vector GSigma(H1_space->TrueVSize());
+    BT->Mult(vec_viewer.GetBlock(0), GSigma);
+    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GSigma);
 
-    Vector XtrueS(H1_space->TrueVSize());
-    XtrueS = 0.0;
     HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    Vector XtrueS(H1_space->TrueVSize());
     C->Mult(vec_viewer.GetBlock(1), XtrueS);
     localFunctional += vec_viewer.GetBlock(1)*XtrueS;
 
@@ -2187,12 +2316,11 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
-    Vector DtrueSigma(L2_space->TrueVSize());
-    DtrueSigma = 0.0;
+    Vector TempL2(L2_space->TrueVSize());
     HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
-    Bdiv->Mult(trueSigma, DtrueSigma);
-    DtrueSigma -= Rhs;
-    double mass_loss_loc = DtrueSigma.Norml1();
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+    TempL2 -= Rhs;
+    double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -2298,8 +2426,12 @@ void FOSLSProblem_HdivH1wave::ComputeExtraError(const Vector& vec) const
     if (verbose)
     {
         //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
-        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div / norm_div  << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
     }
 
     ComputeFuncError(vec);
@@ -2313,26 +2445,18 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
     ParFiniteElementSpace * H1_space = pfes[1];
     ParFiniteElementSpace * L2_space = pfes[2];
 
-    Vector trueSigma(Hdiv_space->TrueVSize());
-    trueSigma = vec_viewer.GetBlock(0);
-
-    Vector MtrueSigma(Hdiv_space->TrueVSize());
-    MtrueSigma = 0.0;
-
     HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
-    M->Mult(trueSigma, MtrueSigma);
-    double localFunctional = trueSigma * MtrueSigma;
-
-    Vector GtrueSigma(H1_space->TrueVSize());
-    GtrueSigma = 0.0;
+    Vector MSigma(Hdiv_space->TrueVSize());
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional = vec_viewer.GetBlock(0) * MSigma;
 
     HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
-    BT->Mult(trueSigma, GtrueSigma);
-    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+    Vector GSigma(H1_space->TrueVSize());
+    BT->Mult(vec_viewer.GetBlock(0), GSigma);
+    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GSigma);
 
-    Vector XtrueS(H1_space->TrueVSize());
-    XtrueS = 0.0;
     HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    Vector XtrueS(H1_space->TrueVSize());
     C->Mult(vec_viewer.GetBlock(1), XtrueS);
     localFunctional += vec_viewer.GetBlock(1)*XtrueS;
 
@@ -2359,12 +2483,11 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
-    Vector DtrueSigma(L2_space->TrueVSize());
-    DtrueSigma = 0.0;
+    Vector TempL2(L2_space->TrueVSize());
     HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
-    Bdiv->Mult(trueSigma, DtrueSigma);
-    DtrueSigma -= Rhs;
-    double mass_loss_loc = DtrueSigma.Norml1();
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+    TempL2 -= Rhs;
+    double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -2469,8 +2592,12 @@ void FOSLSProblem_lapl::ComputeExtraError(const Vector& vec) const
     if (verbose)
     {
         //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
-        cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                  << err_div / norm_div  << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
     }
 
     ComputeFuncError(vec);
@@ -2484,26 +2611,18 @@ void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
     ParFiniteElementSpace * H1_space = pfes[1];
     ParFiniteElementSpace * L2_space = pfes[2];
 
-    Vector trueSigma(Hdiv_space->TrueVSize());
-    trueSigma = vec_viewer.GetBlock(0);
-
-    Vector MtrueSigma(Hdiv_space->TrueVSize());
-    MtrueSigma = 0.0;
-
     HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
-    M->Mult(trueSigma, MtrueSigma);
-    double localFunctional = trueSigma * MtrueSigma;
-
-    Vector GtrueSigma(H1_space->TrueVSize());
-    GtrueSigma = 0.0;
+    Vector MSigma(Hdiv_space->TrueVSize());
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional = vec_viewer.GetBlock(0) * MSigma;
 
     HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
-    BT->Mult(trueSigma, GtrueSigma);
-    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GtrueSigma);
+    Vector GSigma(H1_space->TrueVSize());
+    BT->Mult(vec_viewer.GetBlock(0), GSigma);
+    localFunctional += 2.0 * (vec_viewer.GetBlock(1)*GSigma);
 
-    Vector XtrueS(H1_space->TrueVSize());
-    XtrueS = 0.0;
     HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    Vector XtrueS(H1_space->TrueVSize());
     C->Mult(vec_viewer.GetBlock(1), XtrueS);
     localFunctional += vec_viewer.GetBlock(1)*XtrueS;
 
@@ -2530,12 +2649,11 @@ void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
-    Vector DtrueSigma(L2_space->TrueVSize());
-    DtrueSigma = 0.0;
+    Vector TempL2(L2_space->TrueVSize());
     HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
-    Bdiv->Mult(trueSigma, DtrueSigma);
-    DtrueSigma -= Rhs;
-    double mass_loss_loc = DtrueSigma.Norml1();
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+    TempL2 -= Rhs;
+    double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -2624,6 +2742,27 @@ void FOSLSDivfreeProblem::Update()
     if (divfree_hpmat_nobnd)
         delete divfree_hpmat_nobnd;
 }
+
+void FOSLSDivfreeProblem::ChangeSolver()
+{
+    CGSolver * new_solver = new CGSolver(GetComm());
+
+    int max_iter = 100000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
+
+    new_solver->SetAbsTol(sqrt(atol));
+    new_solver->SetRelTol(sqrt(rtol));
+    new_solver->SetMaxIter(max_iter);
+    new_solver->SetOperator(*CFOSLSop);
+    if (prec)
+         new_solver->SetPreconditioner(*prec);
+    new_solver->SetPrintLevel(0);
+
+    delete solver;
+    solver = new_solver;
+}
+
 
 void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool verbose)
 {

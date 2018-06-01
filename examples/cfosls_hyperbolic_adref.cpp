@@ -43,7 +43,7 @@ using std::make_shared;
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 1;
+    bool visualization = 0;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -3;
+    int numsol          = 8;
 
     int ser_ref_levels  = 0;
     int par_ref_levels  = 0;
@@ -182,10 +182,10 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    mesh_file = "../data/pmesh_check.mesh";
+    //mesh_file = "../data/pmesh_check.mesh";
     //mesh_file = "../data/cube_3d_moderate.mesh";
 
 
@@ -1375,6 +1375,9 @@ int main(int argc, char *argv[])
        }
 
        problem->Solve(verbose, true);
+
+       MPI_Finalize();
+       return 0;
 
        // 17. Send the solution by socket to a GLVis server.
        if (visualization)
