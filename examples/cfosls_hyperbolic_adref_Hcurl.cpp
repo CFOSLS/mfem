@@ -31,19 +31,19 @@
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-//#define DIVFREE_SETUP
+#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 #define CLEVER_STARTING_GUESS
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
-//#define CLEVER_STARTING_PARTSOL
+#define CLEVER_STARTING_PARTSOL
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
 #define USE_GS_PREC
 
-//#define MULTILEVEL_PARTSOL
+#define MULTILEVEL_PARTSOL
 
 using namespace std;
 using namespace mfem;
@@ -503,7 +503,7 @@ int main(int argc, char *argv[])
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
-   refiner.SetTotalErrorFraction(0.5); // 0.5
+   refiner.SetTotalErrorFraction(0.9); // 0.5
 
 #ifdef CLEVER_STARTING_GUESS
    BlockVector * coarse_guess;
@@ -521,7 +521,7 @@ int main(int argc, char *argv[])
    const int max_dofs = 400000;
 #endif
 
-   double fixed_rtol = 1.0e-12;
+   double fixed_rtol = 1.0e-12; // 1.0e-10
    double fixed_atol = 1.0e-20;
 
    double initial_res_norm = -1.0;
@@ -694,6 +694,18 @@ int main(int argc, char *argv[])
        if (verbose)
            std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
 
+       BlockVector ideal_res(problem->GetTrueOffsets());
+       BlockVector * exactsol = problem->GetExactSolProj();
+       problem->GetOp()->Mult(*exactsol, ideal_res);
+       ideal_res -= problem->GetRhs();
+
+       double ideal_res_norm = ComputeMPIVecNorm(comm, ideal_res, "", false);
+
+       if (verbose)
+           std::cout << "Ideal (for exact sol projections) res norm at iteration # "
+                     << it << " = " << ideal_res_norm << "\n";
+       delete exactsol;
+
        problem->SetRelTol(adjusted_rtol);
        problem->SetAbsTol(fixed_atol);
 #ifdef USE_GS_PREC
@@ -771,6 +783,83 @@ int main(int argc, char *argv[])
        //     used to determine if a stopping criterion was met.
 
 #ifdef AMR
+       // studying the missing factors as Jeff suggested
+       BlockVector * exact_sol_proj = problem->GetExactSolProj();
+       Vector true_errors(problem->GetParMesh()->GetNE());
+       true_errors = 0.0;
+       FOSLS_test * test = problem->GetFEformulation().GetFormulation()->GetTest();
+
+       for (int blk = 0; blk < problem->GetFEformulation().Nunknowns(); ++blk)
+       {
+           const FiniteElement *fe;
+           ElementTransformation *T;
+
+           ParFiniteElementSpace * pfes = problem->GetPfes(blk);
+           ParGridFunction * sol_blk_pgfun = new ParGridFunction(pfes);
+           sol_blk_pgfun->SetFromTrueDofs(exact_sol_proj->GetBlock(blk));
+
+           for (int i = 0; i < pfes->GetNE(); i++)
+           {
+              double error_i = 0.0;
+              fe = pfes->GetFE(i);
+              const IntegrationRule *ir;
+              int intorder = 2*fe->GetOrder() + 1; // <----------
+              ir = &(IntRules.Get(fe->GetGeomType(), intorder));
+
+              if (blk == 0) // ~ sigma
+              {
+                  DenseMatrix vals, exact_vals;
+                  Vector loc_errs;
+
+                  T = pfes->GetElementTransformation(i);
+                  sol_blk_pgfun->GetVectorValues(*T, *ir, vals);
+                  test->GetSigma()->Eval(exact_vals, *T, *ir);
+                  vals -= exact_vals;
+                  loc_errs.SetSize(vals.Width());
+                  // compute the lengths of the errors at the integration points
+                  // thus the vector norm is rotationally invariant
+                  vals.Norm2(loc_errs);
+
+                  for (int j = 0; j < ir->GetNPoints(); j++)
+                  {
+                     const IntegrationPoint &ip = ir->IntPoint(j);
+                     T->SetIntPoint(&ip);
+                     double err;
+                     err = loc_errs[j];
+
+                     err = pow(err, 2);
+                     error_i += ip.weight * T->Weight() * err;
+                  }
+
+              }
+              else // blk = 1 ~ u
+              {
+                  Vector vals;
+
+                  sol_blk_pgfun->GetValues(i, *ir, vals);
+                  T = pfes->GetElementTransformation(i);
+                  for (int j = 0; j < ir->GetNPoints(); j++)
+                  {
+                     const IntegrationPoint &ip = ir->IntPoint(j);
+                     T->SetIntPoint(&ip);
+                     double err;
+                     err = fabs(vals(j) - test->GetU()->Eval(*T, ip));
+
+                     err = pow(err, 2);
+                     error_i += ip.weight * T->Weight() * err;
+                  }
+
+              }
+
+              error_i = sqrt (error_i);
+
+              true_errors[i] += error_i;
+           }
+       }
+
+       //true_errors.Print();
+
+
        int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
        int nmarked_el = refiner.GetNumMarkedElements();
@@ -784,6 +873,24 @@ int main(int argc, char *argv[])
            std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n";
        }
+
+       // continue studying the missing factors as Jeff suggested
+       const Vector& local_errors = estimator->GetLocalErrors();
+
+       Vector ratios(local_errors.Size());
+       for (int i = 0; i < ratios.Size(); ++i)
+           if (fabs(true_errors[i]) > 1.0e-10 )
+               ratios[i] = local_errors[i] / true_errors[i];
+           else
+               ratios[i] = 0.0;
+
+       std::cout << "(estimator/error) ratios norm = " <<
+                    ratios.Norml2() / sqrt (ratios.Size()) << "\n";
+
+       for (int i = 0; i < local_errors.Size(); ++i)
+           std::cout << "i: " << i << ", local_error = " << local_errors[i] <<
+                        ", true_error = " << true_errors[i] <<
+                        ", ratio = " << ratios[i] << "\n";
 
        if (visualization)
        {
