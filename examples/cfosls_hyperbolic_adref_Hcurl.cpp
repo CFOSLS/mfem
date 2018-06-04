@@ -27,23 +27,23 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-#define DIVFREE_SETUP
+//#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
-#define CLEVER_STARTING_GUESS
+//#define CLEVER_STARTING_GUESS
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
-#define CLEVER_STARTING_PARTSOL
+//#define CLEVER_STARTING_PARTSOL
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
-#define USE_GS_PREC
+//#define USE_GS_PREC
 
-#define MULTILEVEL_PARTSOL
+//#define MULTILEVEL_PARTSOL
 
 using namespace std;
 using namespace mfem;
@@ -56,7 +56,7 @@ BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, 
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 0;
+    bool visualization = 1;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -67,15 +67,16 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 8;
+    int numsol          = -3;
 
     int ser_ref_levels  = 0;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
+    /*
     // Hdiv-H1 case
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
@@ -85,8 +86,8 @@ int main(int argc, char *argv[])
     using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
     using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
  #endif
+    */
 
-    /*
     // Hdiv-L2 case
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
@@ -96,7 +97,6 @@ int main(int argc, char *argv[])
     using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
     using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
 #endif
-    */
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -198,7 +198,7 @@ int main(int argc, char *argv[])
 
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
     //mesh_file = "../data/pmesh_check.mesh";
@@ -626,6 +626,9 @@ int main(int argc, char *argv[])
        }
 #endif
 
+       std::cout << "checking rhs norm for the first solve: " <<
+                    rhs.Norml2() /  sqrt (rhs.Size()) << "\n";
+
        problem_divfree->SolveProblem(rhs, problem_divfree->GetSol(), verbose, false);
 #else
        problem_divfree->SolveProblem(rhs, verbose, false);
@@ -642,6 +645,52 @@ int main(int argc, char *argv[])
                std::cout << "Res norm after solving the div-free problem at iteration # "
                          << it << " = " << res_norm << "\n";
        }
+
+       // special testing cheaper preconditioners!
+       /*
+       if (verbose)
+           std::cout << "Performing a special check for the preconditioners iteration counts! \n";
+
+       BlockVector special_guess(problem_divfree->GetTrueOffsets());
+       special_guess = problem_divfree->GetSol();
+
+       int el_index = problem_divfree->GetParMesh()->GetNE() / 2;
+       for (int blk = 0; blk < problem_divfree->GetFEformulation().Nblocks(); ++blk)
+       {
+           ParFiniteElementSpace * pfes = problem_divfree->GetPfes(blk);
+
+           Array<int> dofs;
+           MFEM_ASSERT(num_procs == 1, "This works only in serial");
+           pfes->GetElementDofs(el_index, dofs);
+
+           for (int i = 0; i < dofs.Size(); ++i)
+               //special_guess.GetBlock(blk)[dofs[i]] = 0.0;
+               special_guess.GetBlock(blk)[dofs[i]] = problem_divfree->GetSol().GetBlock(blk)[dofs[i]] * 0.5;
+       }
+
+       BlockVector check_diff(problem_divfree->GetTrueOffsets());
+       check_diff = special_guess;
+       check_diff -= problem_divfree->GetSol();
+       double check_diff_norm = ComputeMPIVecNorm(comm, check_diff, "", false);
+
+       if (verbose)
+           std::cout << "|| sol - special_guess || = " << check_diff_norm << "\n";
+
+       int nnz_count = 0;
+       for (int i = 0; i < check_diff.Size(); ++i)
+           if (fabs(check_diff[i]) > 1.0e-8)
+               ++nnz_count;
+
+       if (verbose)
+           std::cout << "nnz_count in the diff = " << nnz_count << "\n";
+
+       std::cout << "checking rhs norm for the second solve: " <<
+                    rhs.Norml2() /  sqrt (rhs.Size()) << "\n";
+       problem_divfree->SolveProblem(rhs, special_guess, verbose, false);
+
+       MPI_Finalize();
+       return 0;
+       */
 
        /// converting the solution back into sigma from Hdiv inside the problem
        /// (adding a particular solution as a part of the process)
@@ -694,27 +743,19 @@ int main(int argc, char *argv[])
        if (verbose)
            std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
 
-       BlockVector ideal_res(problem->GetTrueOffsets());
-       BlockVector * exactsol = problem->GetExactSolProj();
-       problem->GetOp()->Mult(*exactsol, ideal_res);
-       ideal_res -= problem->GetRhs();
-
-       double ideal_res_norm = ComputeMPIVecNorm(comm, ideal_res, "", false);
-
-       if (verbose)
-           std::cout << "Ideal (for exact sol projections) res norm at iteration # "
-                     << it << " = " << ideal_res_norm << "\n";
-       delete exactsol;
-
        problem->SetRelTol(adjusted_rtol);
        problem->SetAbsTol(fixed_atol);
 #ifdef USE_GS_PREC
        if (it > 0)
        {
            prec_option = 100;
+           std::cout << "Resetting prec with the Gauss-Seidel preconditioners \n";
            problem->ResetPrec(prec_option);
        }
 #endif
+
+       //std::cout << "checking rhs norm for the first solve: " <<
+                    //problem->GetRhs().Norml2() /  sqrt (problem->GetRhs().Size()) << "\n";
 
        problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
 
@@ -738,8 +779,91 @@ int main(int argc, char *argv[])
       if (compute_error)
           problem->ComputeError(problem_sol, verbose, true);
 
-      //MPI_Finalize();
-      //return 0;
+      // special testing cheaper preconditioners!
+      /*
+      if (verbose)
+          std::cout << "Performing a special check for the preconditioners iteration counts! \n";
+
+      prec_option = 100;
+      problem->ResetPrec(prec_option);
+
+      BlockVector special_guess(problem->GetTrueOffsets());
+      special_guess = problem->GetSol();
+
+      int special_num = 1;
+      Array<int> el_indices(special_num);
+      for (int i = 0; i < special_num; ++i)
+          el_indices[i] = problem->GetParMesh()->GetNE() / 2 + i;
+
+      std::cout << "Number of elements where the sol was changed: " <<
+                   special_num << "(" <<  special_num * 100.0 /
+                   problem->GetParMesh()->GetNE() << "%) \n";
+
+      for (int blk = 0; blk < problem->GetFEformulation().Nblocks(); ++blk)
+      {
+          ParFiniteElementSpace * pfes = problem->GetPfes(blk);
+
+          Array<int> dofs;
+          MFEM_ASSERT(num_procs == 1, "This works only in serial");
+
+          for (int elind = 0; elind < el_indices.Size(); ++elind)
+          {
+              pfes->GetElementDofs(el_indices[elind], dofs);
+
+              for (int i = 0; i < dofs.Size(); ++i)
+                  //special_guess.GetBlock(blk)[dofs[i]] = 0.0;
+                  special_guess.GetBlock(blk)[dofs[i]] =
+                    problem->GetSol().GetBlock(blk)[dofs[i]] * 0.9;
+          }
+      }
+
+      BlockVector check_diff(problem->GetTrueOffsets());
+      check_diff = special_guess;
+      check_diff -= problem->GetSol();
+      double check_diff_norm = ComputeMPIVecNorm(comm, check_diff, "", false);
+
+      if (verbose)
+          std::cout << "|| sol - special_guess || = " << check_diff_norm << "\n";
+
+      int nnz_count = 0;
+      for (int i = 0; i < check_diff.Size(); ++i)
+          if (fabs(check_diff[i]) > 1.0e-8)
+              ++nnz_count;
+
+      if (verbose)
+          std::cout << "nnz_count in the diff = " << nnz_count << "\n";
+
+      {
+          // checking the residual
+          BlockVector res(problem->GetTrueOffsets());
+          problem->GetOp()->Mult(special_guess, res);
+          res -= problem->GetRhs();
+
+          double res_norm = ComputeMPIVecNorm(comm, res, "", false);
+
+          if (verbose)
+              std::cout << "Initial res norm for the second solve = " << res_norm << "\n";
+
+          double adjusted_rtol = fixed_rtol * initial_res_norm / res_norm;
+          if (verbose)
+              std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
+
+          problem->SetRelTol(adjusted_rtol);
+          problem->SetAbsTol(fixed_atol);
+      }
+
+
+      std::cout << "checking rhs norm for the second solve: " <<
+                   problem->GetRhs().Norml2() /  sqrt (problem->GetRhs().Size()) << "\n";
+      problem->SolveProblem(problem->GetRhs(), special_guess, verbose, false);
+
+      //problem_sol = problem->GetSol();
+      //if (compute_error)
+          //problem->ComputeError(problem_sol, verbose, true);
+
+      MPI_Finalize();
+      return 0;
+      */
 
 #ifdef CLEVER_STARTING_GUESS
        if (it > 0)
@@ -784,6 +908,7 @@ int main(int argc, char *argv[])
 
 #ifdef AMR
        // studying the missing factors as Jeff suggested
+       /*
        BlockVector * exact_sol_proj = problem->GetExactSolProj();
        Vector true_errors(problem->GetParMesh()->GetNE());
        true_errors = 0.0;
@@ -858,9 +983,17 @@ int main(int argc, char *argv[])
        }
 
        //true_errors.Print();
+       */
 
 
        int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
+
+       // testing with only 1 element marked for refinement
+       //Array<int> els_to_refine(1);
+       //els_to_refine = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE() / 2;
+       //prob_hierarchy->GetHierarchy().GetFinestParMesh()->GeneralRefinement(els_to_refine);
+
+       // true AMR
        refiner.Apply(*prob_hierarchy->GetHierarchy().GetFinestParMesh());
        int nmarked_el = refiner.GetNumMarkedElements();
        if (verbose)
@@ -874,7 +1007,17 @@ int main(int argc, char *argv[])
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n";
        }
 
+       /*
+       if (it > 0)
+       {
+           std::cout << "Manually interrupting \n";
+           MPI_Finalize();
+           return 0;
+       }
+       */
+
        // continue studying the missing factors as Jeff suggested
+       /*
        const Vector& local_errors = estimator->GetLocalErrors();
 
        Vector ratios(local_errors.Size());
@@ -891,6 +1034,7 @@ int main(int argc, char *argv[])
            std::cout << "i: " << i << ", local_error = " << local_errors[i] <<
                         ", true_error = " << true_errors[i] <<
                         ", ratio = " << ratios[i] << "\n";
+       */
 
        if (visualization)
        {

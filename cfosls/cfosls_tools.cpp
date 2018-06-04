@@ -722,11 +722,54 @@ void FOSLSProblem::InitSolver(bool verbose)
          solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
 
-    if (verbose)
-        std::cout << "Here you should print out parameters of the linear solver \n";
+    //if (verbose)
+        //std::cout << "Here you should print out parameters of the linear solver \n";
 
     solver_initialized = true;
 }
+
+// actually, constructs a vector with exact solution
+// f.e. projections and 0's for Lagrange multiplier
+BlockVector * FOSLSProblem::GetExactSolProj()
+{
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    BlockVector * res = new BlockVector(blkoffsets_true);
+    *res = 0.0;
+    for (int blk = 0; blk < fe_formul.Nunknowns(); ++blk )
+    {
+        if (fe_formul.GetFormulation()->GetPair(blk).first != -1)
+        {
+            ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+            int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+            MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+            switch (fe_formul.GetFormulation()->GetPair(blk).first)
+            {
+            case 0: // function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+                break;
+            case 1: // vector function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+                break;
+            default:
+                {
+                    MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+                }
+                break;
+
+            }
+
+            exsol_pgfun->ParallelProject(res->GetBlock(blk));
+
+            delete exsol_pgfun;
+        }
+    }
+
+    return res;
+}
+
 
 BlockVector * FOSLSProblem::GetTrueInitialCondition()
 {
@@ -2757,7 +2800,7 @@ void FOSLSDivfreeProblem::ChangeSolver()
     new_solver->SetOperator(*CFOSLSop);
     if (prec)
          new_solver->SetPreconditioner(*prec);
-    new_solver->SetPrintLevel(1);
+    new_solver->SetPrintLevel(0);
 
     delete solver;
     solver = new_solver;
@@ -3656,8 +3699,8 @@ void CFOSLSHyperbolicProblem::InitSolver(bool verbose)
          solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
 
-    if (verbose)
-        std::cout << "Here you should print out parameters of the linear solver \n";
+    //if (verbose)
+        //std::cout << "Here you should print out parameters of the linear solver \n";
 }
 
 // this works only for hyperbolic case

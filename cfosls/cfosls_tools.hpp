@@ -1054,6 +1054,7 @@ public:
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
     BlockVector * GetTrueInitialConditionFunc();
+    BlockVector * GetExactSolProj();
 
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                  bool verbose_, bool assemble_system);
