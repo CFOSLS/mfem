@@ -1992,10 +1992,12 @@ DivConstraintSolver::~DivConstraintSolver()
 }
 
 DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_,
-                                         bool optimized_localsolvers_, bool verbose_)
+                                         bool optimized_localsolvers_,
+                                         bool with_hcurl_smoothers_, bool verbose_)
     : problem(&problem_),
       hierarchy(&hierarchy_),
       optimized_localsolvers(optimized_localsolvers_),
+      with_hcurl_smoothers(with_hcurl_smoothers_),
       update_counter(hierarchy->GetUpdateCounter()),
       own_data(true),
       num_levels(hierarchy->Nlevels()),
@@ -2041,6 +2043,9 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     delete Divblock;
 
     Smoothers_lvls.SetSize(num_levels - 1);
+    if (!with_hcurl_smoothers)
+        for (int i = 0; i < num_levels - 1; ++i)
+            Smoothers_lvls[i] = NULL;
     Array<int> SweepsNum(numblocks_funct);
 
     const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
@@ -2091,15 +2096,19 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
         EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
 
-        SweepsNum = ipow(1, l); // = 1
-        Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
-                                                 *hierarchy->GetDivfreeDop(l),
-                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                           essbdr_attribs_Hcurl, l),
-                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof",
-                                                                           *space_names_funct,
-                                                                           essbdr_attribs, l),
-                                                 &SweepsNum, *offsets_funct[l]);
+        if (with_hcurl_smoothers)
+        {
+            SweepsNum = ipow(1, l); // = 1
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
+                                                     *hierarchy->GetDivfreeDop(l),
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                               essbdr_attribs_Hcurl, l),
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                                               *space_names_funct,
+                                                                               essbdr_attribs, l),
+                                                     &SweepsNum, *offsets_funct[l]);
+        }
+
 
         offsets_sp_funct[l + 1] = hierarchy->ConstructOffsetsforFormul(l + 1, *space_names_funct);
 
@@ -2342,10 +2351,16 @@ void DivConstraintSolver::Update(bool recoarsen)
         BlockVector * trueresfunc_new = new BlockVector(TrueP_Func[0]->RowOffsets());
         trueresfunc_lvls.Prepend(trueresfunc_new);
 
-        HcurlGSSSmoother * Smoother_new = new HcurlGSSSmoother(*BlockOps_lvls[0], *hierarchy->GetDivfreeDop(0),
-                hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
-                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
-                &SweepsNum, *offsets_funct[0]);
+        HcurlGSSSmoother * Smoother_new;
+        if (with_hcurl_smoothers)
+        {
+            Smoother_new = new HcurlGSSSmoother(*BlockOps_lvls[0], *hierarchy->GetDivfreeDop(0),
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
+                    &SweepsNum, *offsets_funct[0]);
+        }
+        else
+            Smoother_new = NULL;
         Smoothers_lvls.Prepend(Smoother_new);
 
         Array<int>* el2dofs_row_offsets_new = new Array<int>();
@@ -2441,15 +2456,21 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     const BlockVector start_guess_viewer(start_guess.GetData(), *offsets);
     BlockVector partsol_viewer(partsol.GetData(), *offsets);
 
-    // old variant, doesn't work when there is only one level and thus TrueP_Func is empty.
-    //const BlockVector start_guess_viewer(start_guess.GetData(), TrueP_Func[0]->RowOffsets());
-    //BlockVector partsol_viewer(partsol.GetData(), TrueP_Func[0]->RowOffsets());
-
     // checking if the given initial vector satisfies the divergence constraint
     Vector rhs_constr(Constr_global->Height());
     Constr_global->Mult(start_guess_viewer.GetBlock(0), rhs_constr);
     rhs_constr -= constr_rhs;
     rhs_constr *= -1.0;
+
+    /*
+    std::cout << "rhs_constr size = " << rhs_constr.Size() << "\n";
+    for (int i = 0; i < rhs_constr.Size(); ++i)
+        if (fabs(rhs_constr[i]) > 1.0e-10)
+            std::cout << "nonzero at " << i << ": " << rhs_constr[i] << "\n";
+    std::cout << "\n";
+    //rhs_constr.Print();
+    */
+
     // 3.1 if not, computing the particular solution
     if ( ComputeMPIVecNorm(comm, rhs_constr,"", verbose) > 1.0e-14 )
     {
@@ -2482,6 +2503,9 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         *truesolupdate_lvls[l] = 0.0;
 
         ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, workfvec);
+
+        std::cout << "level " << l << ": rhs constr norm = " <<
+                     rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
 
         // solve local problems at level l
         if (LocalSolvers_lvls[l])
@@ -2517,13 +2541,19 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
 
-    // imposes boundary conditions and assembles coarsest level's
-    // righthand side (from rhsfunc) on true dofs
-
     //trueresfunc_lvls[num_levels - 1]->Print();
+
+    std::cout << "level " << num_levels - 1 << ": rhs constr norm = " <<
+                 rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
 
     // 2.5 solve coarse problem
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
+
+    for (int l = 0; l < num_levels; ++l)
+    {
+        std::cout << "Update at level " << l << " after downward loop, norm = "
+                  << truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls.Size()) << "\n";
+    }
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =

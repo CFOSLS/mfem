@@ -90,22 +90,59 @@ struct BdrConditions
 {
 protected:
     int numblocks;
-    ParMesh& pmesh;
+    int nattribs;
     bool initialized;
 protected:
     std::vector<Array<int>* > bdr_attribs;
 
 public:
     BdrConditions(ParMesh& pmesh_, int nblocks)
-    : numblocks(nblocks), pmesh(pmesh_), initialized(false)
+    : numblocks(nblocks), nattribs(pmesh_.bdr_attributes.Max()), initialized(false)
     {
         bdr_attribs.resize(numblocks);
         for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
         {
-            bdr_attribs[i] = new Array<int>(pmesh.bdr_attributes.Max());
+            bdr_attribs[i] = new Array<int>(nattribs);
             for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
                 (*bdr_attribs[i])[j] = -1;
         }
+
+    }
+
+    BdrConditions(const std::vector<Array<int>* >& bdr_attribs_)
+        : numblocks(bdr_attribs_.size())
+    {
+        MFEM_ASSERT(bdr_attribs_[0], "NULL check failed");
+        nattribs = bdr_attribs_[0]->Size();
+
+        bdr_attribs.resize(numblocks);
+        for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+        {
+            MFEM_VERIFY(bdr_attribs_[i]->Size() == nattribs,"");
+            bdr_attribs[i] = new Array<int>(nattribs);
+            for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
+                (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
+        }
+
+        initialized = true;
+    }
+
+    BdrConditions(const std::vector<const Array<int>* >& bdr_attribs_)
+        : numblocks(bdr_attribs_.size())
+    {
+        MFEM_ASSERT(bdr_attribs_[0], "NULL check failed");
+        nattribs = bdr_attribs_[0]->Size();
+
+        bdr_attribs.resize(numblocks);
+        for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+        {
+            MFEM_VERIFY(bdr_attribs_[i]->Size() == nattribs,"");
+            bdr_attribs[i] = new Array<int>(nattribs);
+            for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
+                (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
+        }
+
+        initialized = true;
     }
 
     std::vector< Array<int>* >& GetAllBdrAttribs()
@@ -117,12 +154,26 @@ public:
     const Array<int>& GetBdrAttribs(int blk)
     {
         MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-        MFEM_ASSERT(blk >= 0 && blk < numblocks, "Invalid block number in BdrConditions::GetBdrAttribs()");
+        if (!(blk >= 0 && blk < numblocks))
+            std::cout << "Breakpoint \n";
+        MFEM_ASSERT(blk >= 0 && blk < numblocks,
+                    "Invalid block number in BdrConditions::GetBdrAttribs()");
 
         return *bdr_attribs[blk];
     }
 
     bool Initialized() const {return initialized;}
+
+    // copies the provided bdr_attribs inside
+    void Set(const std::vector<Array<int>* >& bdr_attribs_);
+
+    void Reset()
+    {
+        MFEM_ASSERT(initialized, "Cannot reset bdr conditions which were not initialized");
+        for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+            delete bdr_attribs[i];
+        initialized = false;
+    }
 };
 
 struct BdrConditions_CFOSLS_HdivL2_Hyper : public BdrConditions
@@ -754,6 +805,25 @@ public:
     int NumSol() const override {return numsol;}
 };
 
+struct CFOSLSFormulation_MixedLaplace : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Laplace_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_MixedLaplace(int dimension, int num_solution, bool verbose);
+
+    int GetUnknownWithInitCnd() const override {return 0;}
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int NumSol() const override {return numsol;}
+};
+
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
 struct FOSLSFEFormulation
@@ -937,6 +1007,24 @@ public:
     }
 };
 
+/// FIXME: Looks like this shouldn't have happened
+/// that I create a specific HdivL2L2 problem but take
+/// a general FOSLSFEFormulation as an input.
+struct CFOSLSFEFormulation_MixedLaplace : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_MixedLaplace(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        fecolls[1] = new L2_FECollection(feorder, dim);
+    }
+};
 
 class BlockProblemForms
 {
@@ -1359,7 +1447,6 @@ public:
 
     void ComputeFuncError(const Vector& vec) const override;
 };
-
 
 // a regular FOSLS problem with additional routines for the divfree space
 class FOSLSDivfreeProblem : virtual public FOSLSProblem
@@ -2346,6 +2433,8 @@ double sprod(std::vector<double> vec1, std::vector<double> vec2);
 bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
 
 ParGridFunction * FindParticularSolution(ParFiniteElementSpace *Hdiv_space, const HypreParMatrix & B, const Vector& rhs, bool verbose);
+
+void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i);
 
 } // for namespace mfem
 

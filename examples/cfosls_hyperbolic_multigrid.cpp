@@ -1024,7 +1024,8 @@ int main(int argc, char *argv[])
 
     // newer constructor
     bool opt_localsolvers = true;
-    DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers, verbose);
+    bool with_hcurl_smoothers = true;
+    DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers, with_hcurl_smoothers, verbose);
 
     FunctionCoefficient * rhs_coeff = problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs();
     ParLinearForm * constrfform_new = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));

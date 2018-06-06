@@ -225,6 +225,21 @@ void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
     }
 }
 
+void BdrConditions::Set(const std::vector<Array<int>* >& bdr_attribs_)
+{
+    MFEM_ASSERT(!initialized, "BdrConditions are already initialized! "
+                              "If you intend to re-define them, call Reset() before Set() \n");
+
+    bdr_attribs.resize(bdr_attribs_.size());
+    for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+    {
+        bdr_attribs[i] = new Array<int>(bdr_attribs_[i]->Size());
+        for (int j = 0; j < bdr_attribs_[j]->Size(); ++j)
+            (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
+    }
+}
+
+
 FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint)
     : dim(dimension),
       numblocks(num_blocks), unknowns_number(num_unknowns),
@@ -479,6 +494,39 @@ void CFOSLSFormulation_Laplace::ConstructFunctSpacesDescriptor() const
 
     (*space_names_funct)[0] = SpaceName::HDIV;
     (*space_names_funct)[1] = SpaceName::H1;
+}
+
+CFOSLSFormulation_MixedLaplace::CFOSLSFormulation_MixedLaplace (
+        int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 2, 1, true), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new VectorFEMassIntegrator;
+    blfis(1,0) = new VectorFEDivergenceIntegrator;
+
+    lfis[1] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_MixedLaplace::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(-1,-1);
+}
+
+void CFOSLSFormulation_MixedLaplace::ConstructSpacesDescriptor() const
+{
+    space_names = new Array<SpaceName>(numblocks);
+
+    (*space_names)[0] = SpaceName::HDIV;
+    (*space_names)[1] = SpaceName::L2;
+}
+
+void CFOSLSFormulation_MixedLaplace::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(1);
+
+    (*space_names_funct)[0] = SpaceName::HDIV;
 }
 
 void BlockProblemForms::Update()
@@ -6720,6 +6768,39 @@ ParGridFunction * FindParticularSolution(ParFiniteElementSpace * Hdiv_space,
 
     return sigma_hat;
 }
+
+void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i)
+{
+    MFEM_ASSERT(!block_op.IsZeroBlock(i,i), "Replacement is not implemented for a NULL block");
+
+    HypreParMatrix & blk = (HypreParMatrix&)block_op.GetBlock(i, i);
+    SparseMatrix blk_diag;
+    blk.GetDiag(blk_diag);
+
+    int size = blk_diag.Height();
+    int * ia = new int[size + 1];
+    for (int i = 0; i <= size; ++i)
+        ia[i] = i;
+
+    int * ja = new int[size];
+    for (int i = 0; i < size; ++i)
+        ja[i] = i;
+
+    double * data = new double[size];
+    for (int i = 0; i < size; ++i)
+        data[i] = 1.0;
+
+    SparseMatrix * id_diag = new SparseMatrix(ia, ja, data, blk_diag.Height(), blk_diag.Width());
+    HypreParMatrix * id = new HypreParMatrix(blk.GetComm(), blk.GetGlobalNumCols(),
+                                             blk.GetRowStarts(), id_diag);
+    id->CopyColStarts();
+    id->CopyRowStarts();
+
+    delete (&blk);
+
+    block_op.SetBlock(i, i, id);
+}
+
 
 
 

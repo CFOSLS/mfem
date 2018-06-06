@@ -27,23 +27,26 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-//#define AMR
+#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-//#define DIVFREE_SETUP
+#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
-//#define CLEVER_STARTING_GUESS
-
-// activates using the particular solution at the previous mesh as a starting guess
-// when finding the next particular solution (i.e., particular solution on the next mesh)
-//#define CLEVER_STARTING_PARTSOL
+#define CLEVER_STARTING_GUESS
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
 //#define USE_GS_PREC
 
-//#define MULTILEVEL_PARTSOL
+// changes the particular solution problem to a pure div sigma = f problem
+//#define PUREDIVCONSTRAINT
+
+#define MULTILEVEL_PARTSOL
+
+// activates using the particular solution at the previous mesh as a starting guess
+// when finding the next particular solution (i.e., particular solution on the next mesh)
+#define CLEVER_STARTING_PARTSOL
 
 using namespace std;
 using namespace mfem;
@@ -56,7 +59,7 @@ BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, 
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 1;
+    bool visualization = 0;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -69,7 +72,7 @@ int main(int argc, char *argv[])
     int nDimensions     = 3;
     int numsol          = -3;
 
-    int ser_ref_levels  = 0;
+    int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -202,7 +205,7 @@ int main(int argc, char *argv[])
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
     //mesh_file = "../data/pmesh_check.mesh";
-    //mesh_file = "../data/cube_3d_moderate.mesh";
+    mesh_file = "../data/cube_3d_moderate.mesh";
 
 
     if (verbose)
@@ -391,9 +394,33 @@ int main(int argc, char *argv[])
 
 #ifdef MULTILEVEL_PARTSOL
    bool optimized_localsolvers = true;
-   DivConstraintSolver * partsol_finder = new DivConstraintSolver
-           (*problem, *hierarchy, optimized_localsolvers, verbose);
+   bool with_hcurl_smoothers = false;
+   DivConstraintSolver * partsol_finder;
+#ifdef PUREDIVCONSTRAINT
+   FOSLSFormulation * formulat_lapl = new CFOSLSFormulation_MixedLaplace(dim, numsol, verbose);
+   FOSLSFEFormulation * fe_formulat_lapl = new
+           CFOSLSFEFormulation_MixedLaplace(*formulat_lapl, feorder);
+   std::vector<const Array<int>*> bdr_conditions_laplace(2);
+   bdr_conditions_laplace[0] = &bdr_conds->GetBdrAttribs(0);
+   bdr_conditions_laplace[1] = &bdr_conds->GetBdrAttribs(1);
+   BdrConditions * bdr_conds_lapl = new BdrConditions(bdr_conditions_laplace);
+
+   FOSLSProblHierarchy<FOSLSProblem, GeneralHierarchy> * specialprob_hierarchy = new
+           FOSLSProblHierarchy<FOSLSProblem, GeneralHierarchy>
+           (*hierarchy, 1, *bdr_conds_lapl, *fe_formulat_lapl, 0, verbose);
+
+   FOSLSProblem * special_problem = specialprob_hierarchy->GetProblem(0);
+   ReplaceBlockByIdentityHpmat(*special_problem->GetOp(), 0);
+
+   partsol_finder = new DivConstraintSolver
+           (*special_problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
+
+#else // if using the original FOSLS problem when finding the particular solution
+   partsol_finder = new DivConstraintSolver
+           (*problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
 #endif
+
+#endif// endif for MULTILEVEL_PARTSOL
 
 #endif
 
@@ -529,19 +556,22 @@ int main(int argc, char *argv[])
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
    std::cout << "starting n_el = " << prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE() << "\n";
 
+   // Main loop (with AMR or uniform refinement depending on the predefined macros)
    for (int it = 0; ; it++)
    {
        if (verbose)
        {
           cout << "\nAMR iteration " << it << "\n";
-          cout << "Number of unknowns: " << global_dofs << "\n";
+          cout << "Number of unknowns: " << global_dofs << "\n\n";
        }
 
        bool compute_error = true;
 
+       // finding a particular solution
 #ifdef DIVFREE_SETUP
        BlockVector true_partsol(problem->GetTrueOffsets());
        true_partsol = 0.0;
+
 #ifdef MULTILEVEL_PARTSOL
 
 #ifdef CLEVER_STARTING_PARTSOL
@@ -552,20 +582,37 @@ int main(int argc, char *argv[])
            *partsol_guess = 0.0;
        }
 
+#ifdef PUREDIVCONSTRAINT
+       BlockVector partsol_vec(special_problem->GetTrueOffsetsFunc());
+       MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
+#else
        BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
+#endif
        Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
        partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
 
+#ifdef PUREDIVCONSTRAINT
+       true_partsol.GetBlock(0) = partsol_vec.GetBlock(0);
+#else
        for (int i = 0; i < numblocks_funct; ++i)
            true_partsol.GetBlock(i) = partsol_vec.GetBlock(i);
-#else
-       // finding a particular solution
+#endif
+
+#else // not a multilevel particular solution finder
        HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(2,0));
        Vector& div_rhs = problem->GetRhs().GetBlock(2);
        ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, div_rhs, verbose);
        partsigma->ParallelProject(true_partsol.GetBlock(0));
 #endif
+       // a check that the particular solution does satisfy the divergence constraint after all
+       HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks_funct, 0));
+       Vector tempc(Constr.Height());
+       Constr.Mult(partsol_vec.GetBlock(0), tempc);
+       tempc -= problem->GetRhs().GetBlock(numblocks_funct);
+       double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
+       MFEM_ASSERT (res_constr_norm < 1.0e-12, "");
+
        // creating the operator for the div-free problem
        problem_divfree->ConstructDivfreeHpMats();
        problem_divfree->CreateOffsetsRhsSol();
@@ -626,8 +673,8 @@ int main(int argc, char *argv[])
        }
 #endif
 
-       std::cout << "checking rhs norm for the first solve: " <<
-                    rhs.Norml2() /  sqrt (rhs.Size()) << "\n";
+       //std::cout << "checking rhs norm for the first solve: " <<
+                    //rhs.Norml2() /  sqrt (rhs.Size()) << "\n";
 
        problem_divfree->SolveProblem(rhs, problem_divfree->GetSol(), verbose, false);
 #else
@@ -643,7 +690,7 @@ int main(int argc, char *argv[])
            double res_norm = ComputeMPIVecNorm(comm, res, "", false);
            if (verbose)
                std::cout << "Res norm after solving the div-free problem at iteration # "
-                         << it << " = " << res_norm << "\n";
+                         << it << " = " << res_norm << "\n\n";
        }
 
        // special testing cheaper preconditioners!
@@ -1004,7 +1051,7 @@ int main(int argc, char *argv[])
            std::cout << "nel_after = " << nel_after << "\n";
            std::cout << "number of elements introduced = " << nel_after - nel_before << "\n";
            std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
-                        100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n";
+                        100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
 
        /*
@@ -1067,27 +1114,44 @@ int main(int argc, char *argv[])
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
 
+#ifdef PUREDIVCONSTRAINT
+       specialprob_hierarchy->Update(recoarsen);
+       special_problem = specialprob_hierarchy->GetProblem(0);
+       ReplaceBlockByIdentityHpmat(*special_problem->GetOp(), 0);
+#endif
+
+
 #ifdef DIVFREE_SETUP
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
-#ifdef MULTILEVEL_PARTSOL
+#ifdef      MULTILEVEL_PARTSOL
+#ifdef          PUREDIVCONSTRAINT
+       partsol_finder->UpdateProblem(*special_problem);
+#else
        partsol_finder->UpdateProblem(*problem);
+#endif
        partsol_finder->Update();
-#endif
-#endif
+#endif // endif for MULTILEVEL_PARTSOL
+#endif // endif for DIVFREE_SETUP
 
 #ifdef MULTILEVEL_PARTSOL
        delete partsol_guess;
-#endif
 
 #ifdef CLEVER_STARTING_PARTSOL
        partsol_guess = new Vector(partsol_finder->Size());
+
+#ifdef PUREDIVCONSTRAINT
+       specialprob_hierarchy->GetHierarchy().GetTruePspace((*space_names_funct)[0], 0)
+               ->Mult(partsol_vec.GetBlock(0), *partsol_guess);
+#else
        BlockVector partsol_guess_viewer(partsol_guess->GetData(), problem->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            prob_hierarchy->GetHierarchy().GetTruePspace((*space_names_funct)[blk], 0)
                    ->Mult(partsol_vec.GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
 #endif
+#endif // for CLEVER_STARTING_PARTSOL
 
+#endif // for MULTILEVEL_PARTSOL
 
        if (fosls_func_version == 2)
        {
@@ -1114,7 +1178,7 @@ int main(int argc, char *argv[])
        }
 
 #ifdef DIVFREE_SETUP
-#ifndef MULTILEVEL_PARTSOL
+#ifndef     MULTILEVEL_PARTSOL
        delete partsigma;
 #endif
 #endif

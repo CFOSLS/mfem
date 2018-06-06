@@ -433,6 +433,7 @@ protected:
     std::deque<Array<int>* > el2dofs_col_offsets;
     std::vector<Array<int>* > fullbdr_attribs;
     mutable bool optimized_localsolvers;
+    mutable bool with_hcurl_smoothers;
     mutable int update_counter;
 
     const bool own_data;
@@ -489,7 +490,8 @@ protected:
 public:
     ~DivConstraintSolver();
 
-    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_, bool optimized_localsolvers_, bool verbose_);
+    DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_,
+                        bool optimized_localsolvers_, bool with_hcurl_smoothers_, bool verbose_);
 
     DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                            Array< SparseMatrix*> &AE_to_e,
