@@ -393,7 +393,7 @@ int main(int argc, char *argv[])
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
 #ifdef MULTILEVEL_PARTSOL
-   bool optimized_localsolvers = true;
+   bool optimized_localsolvers = false;
    bool with_hcurl_smoothers = false;
    DivConstraintSolver * partsol_finder;
 #ifdef PUREDIVCONSTRAINT
@@ -423,6 +423,66 @@ int main(int argc, char *argv[])
 #endif// endif for MULTILEVEL_PARTSOL
 
 #endif
+
+   // testing DivConstraintSolver
+   {
+       Vector * partsol_guess = new Vector(partsol_finder->Size());
+       *partsol_guess = 0.0;
+       BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
+       Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
+       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+
+       {
+           HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks - 1, 0));
+           Vector tempc(Constr.Height());
+           Constr.Mult(partsol_vec.GetBlock(0), tempc);
+           tempc -= problem->GetRhs().GetBlock(numblocks - 1);
+           double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
+           MFEM_ASSERT (res_constr_norm < 1.0e-12, "first place");
+       }
+
+
+       // with uniform refinement it works
+       hierarchy->GetFinestParMesh()->UniformRefinement();
+
+       // with non-uniform refinement it doesn't work
+       /*
+       int nmarked = 5;
+       Array<int> els_to_refine(nmarked);
+       for (int i = 0; i < nmarked; ++i)
+           els_to_refine[i] = hierarchy->GetFinestParMesh()->GetNE()/2 + i;
+       hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
+       */
+
+       bool recoarsen = true;
+       prob_hierarchy->Update(recoarsen);
+       problem = prob_hierarchy->GetProblem(0);
+
+       divfreeprob_hierarchy->Update(false);
+       problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+
+       partsol_finder->UpdateProblem(*problem);
+       partsol_finder->Update();
+
+       Vector * partsol_guess2 = new Vector(partsol_finder->Size());
+       *partsol_guess2 = 0.0;
+       BlockVector partsol_vec2(problem->GetTrueOffsetsFunc());
+       Vector& div_rhs2 = problem->GetRhs().GetBlock(numblocks - 1);
+       partsol_finder->FindParticularSolution(*partsol_guess2, partsol_vec2, div_rhs2, verbose);
+
+       {
+           HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks - 1, 0));
+           Vector tempc(Constr.Height());
+           Constr.Mult(partsol_vec2.GetBlock(0), tempc);
+           tempc -= problem->GetRhs().GetBlock(numblocks - 1);
+           double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
+           MFEM_ASSERT (res_constr_norm < 1.0e-12, "second place");
+       }
+
+       MPI_Finalize();
+       return 0;
+   }
+
 
    Hyper_test* Mytest = dynamic_cast<Hyper_test*>
            (problem->GetFEformulation().GetFormulation()->GetTest());

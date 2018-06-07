@@ -3,6 +3,9 @@
 
 using namespace std;
 
+#define MYDEBUG
+
+
 namespace mfem
 {
 
@@ -104,6 +107,13 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
         //res_constr.Print();
         std::cout << "Constraint residual norm " << string << ": "
                   << constr_norm << " ... \n";
+#ifdef MYDEBUG
+        for (int i = 0; i < res_constr.Size(); ++i)
+            if (fabs(res_constr[i]) > 1.0e-14)
+                std::cout << "Nonzero in the constraint residual, entry " << i
+                          << ": val = " << res_constr[i] << "\n";
+        //res_constr.Print();
+#endif
         passed = false;
     }
 
@@ -985,11 +995,18 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
 
     // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2->Height();
+
+    for (int i = 0; i < AE_e.Height(); ++i)
+        if (AE_e.RowSize(i) > 1)
+            std::cout << "Found AE = " << i << " with " << AE_e.RowSize(i) << " > 1 elements \n";
+
     for( int AE = 0; AE < nAE; ++AE)
     {
         //std::cout << "AE = " << AE << " (nAE = " << nAE << ") \n";
+        //std::cout << "row size in AE_e = " << AE_e.RowSize(AE) << "\n";
         // we don't need to solve any local problem if AE coincides with a single fine grid element
         if (AE_e.RowSize(AE) > 1)
+        //if (true)
         {
             //std::cout << "main case AE > e \n" << std::flush;
             //std::cout << "AE = " << AE << "\n";
@@ -1216,7 +1233,8 @@ void LocalProblemSolver::SaveLocalLUFactors() const
     for( int AE = 0; AE < nAE; ++AE)
     {
         // we don't need to store anything if AE coincides with a single fine grid element
-        if (AE_e.RowSize(AE) > 1)
+        //if (AE_e.RowSize(AE) > 1)
+        //if (true)
         {
             // for each AE we will store A^(-1) and Schur^(-1)
             LUfactors[AE].resize(2);
@@ -1443,7 +1461,8 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
     {
         // we need to consider only AE's which are bigger than a single fine grid element
         // this matters, e.g., in AMR setting
-        if (AE_e.RowSize(AE) > 1)
+        //if (AE_e.RowSize(AE) > 1)
+        //if (true)
         //somehow this breaks the parallel example cfosls_hyperbolic_multigrid.cpp How?
         {
             // for each AE we will store A^(-1), Schur^(-1) or Atilda^(-1), C^(-1) and Schur^(-1)
@@ -2272,9 +2291,12 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
 
 void DivConstraintSolver::Update(bool recoarsen)
 {
-    // Update() is meaningless if the solver is not based on the hierarchy
     if (!hierarchy)
+    {
+        if (verbose)
+            std::cout << "Update() is meaningless if the solver is not based on the hierarchy \n";
         return;
+    }
 
     MFEM_ASSERT(problem->GetParMesh()->GetNE() == hierarchy->GetPmesh(0)->GetNE(),
                 "Given FOSLS problem must be defined on the finest level of the "
@@ -2421,12 +2443,75 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                 delete P_Funct;
 
+                /*
+                delete LocalSolvers_lvls[l + 1];
+                if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
+                {
+                    LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS(BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1],
+                                                                       *Constraint_mat_lvls[l + 1],
+                                                                       hierarchy->GetDofTrueDof(*space_names_funct, l  +1),
+                                                                       *AE_e[l  +1],
+                                                                       *hierarchy->GetElementToDofs(*space_names_funct, l + 1,
+                                                                                                    *el2dofs_row_offsets[l + 1],
+                                                                                                    *el2dofs_col_offsets[l + 1]),
+                                                                       *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
+                                                                       hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                                       fullbdr_attribs, l + 1),
+                                                                       hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                      essbdr_attribs, l + 1),
+                                                                       optimized_localsolvers);
+                }
+                else // no S -> Hdiv-L2 formulation
+                {
+                    LocalSolvers_lvls[l + 1] = new LocalProblemSolver(BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1],
+                                                                      *Constraint_mat_lvls[l + 1],
+                                                                      hierarchy->GetDofTrueDof(*space_names_funct, l + 1),
+                                                                      *AE_e[l  +1],
+                                                                      *hierarchy->GetElementToDofs(*space_names_funct, l + 1,
+                                                                                                  *el2dofs_row_offsets[l + 1],
+                                                                                                  *el2dofs_col_offsets[l + 1]),
+                                                                      *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
+                                                                      hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                               fullbdr_attribs, l + 1),
+                                                                      hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                               essbdr_attribs, l + 1),
+                                                                      optimized_localsolvers);
+                }
+                */
+
             }
 
             //MFEM_ABORT("Not implemented \n");
         }
 
         num_levels = hierarchy->Nlevels();
+
+        /*
+        if (recoarsen)
+        {
+            delete CoarseSolver;
+
+            const Array<SpaceName>* space_names_problem =
+                    problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+            int coarse_size = 0;
+            for (int i = 0; i < space_names_problem->Size(); ++i)
+                coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
+
+            CoarseSolver =  new CoarsestProblemSolver(coarse_size,
+                                                      *Funct_mat_lvls[num_levels - 1],
+                    *Constraint_mat_lvls[num_levels - 1],
+                    hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
+                                             row_offsets_coarse, col_offsets_coarse),
+                    *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
+                    essbdr_dofs_funct_coarse,
+                    essbdr_tdofs_funct_coarse);
+
+            CoarseSolver->SetMaxIter(70000);
+            CoarseSolver->SetAbsTol(1.0e-18);
+            CoarseSolver->SetRelTol(1.0e-18);
+            CoarseSolver->ResetSolverParams();
+        }
+        */
 
         update_counter = hierarchy_upd_cnt;
     }
@@ -2462,6 +2547,13 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     rhs_constr -= constr_rhs;
     rhs_constr *= -1.0;
 
+#ifdef MYDEBUG
+    MFEM_ASSERT(rhs_constr.Norml2() == constr_rhs.Norml2(), "Debugging check \n");
+
+    Vector temp1(constr_rhs.Size());
+    temp1 = rhs_constr;
+
+#endif
     /*
     std::cout << "rhs_constr size = " << rhs_constr.Size() << "\n";
     for (int i = 0; i < rhs_constr.Size(); ++i)
@@ -2504,6 +2596,10 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
 
         ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, workfvec);
 
+#ifdef MYDEBUG
+        temp1 -= rhs_constr;
+#endif
+
         std::cout << "level " << l << ": rhs constr norm = " <<
                      rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
 
@@ -2533,13 +2629,52 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
+#ifdef MYDEBUG
+        if (l == 0)
+        {
+            CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global,
+                            &rhs_constr, "for the level 0 update");
+        }
+#endif
+
         // setting up rhs from the functional for the next (coarser) level
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
     } // end of loop over finer levels
 
+#ifdef MYDEBUG
+    std::cout << "rhs_constr size = " << rhs_constr.Size() << "\n";
+    std::cout << "Qlminus1_f size = " << Qlminus1_f.Size() << "\n";
+
+#endif
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
+
+#ifdef MYDEBUG
+    if (num_levels > 1)
+    {
+        Vector copyvec(rhs_constr.Size());
+        copyvec = rhs_constr;
+
+        const SparseMatrix * ProjT = Transpose(*P_L2[0]);
+        SparseMatrix * temp_mat = mfem::Mult(*ProjT, *P_L2[0], NULL);
+
+        Vector diag;
+        temp_mat->GetDiag(diag);
+
+        MFEM_ASSERT(diag.Size() == copyvec.Size(), "");
+
+        for (int i = 0; i < diag.Size(); ++i)
+            copyvec[i] /= diag[i];
+
+        Vector temp2(temp1.Size());
+        P_L2[0]->Mult(copyvec, temp2);
+
+        temp1 -= temp2;
+        MFEM_ASSERT(temp1.Norml2() / sqrt (temp1.Size()) < 1.0e-14,
+                    "sum of the righthand sides doesn;t equal initial rhs_constr");
+    }
+#endif
 
     //trueresfunc_lvls[num_levels - 1]->Print();
 
@@ -2562,6 +2697,32 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     {
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
+
+#ifdef MYDEBUG
+        if (num_levels > 1)
+        {
+            Vector copyvec(rhs_constr.Size());
+            copyvec = rhs_constr;
+
+            const SparseMatrix * ProjT = Transpose(*P_L2[0]);
+            SparseMatrix * temp_mat = mfem::Mult(*ProjT, *P_L2[0], NULL);
+
+            Vector diag;
+            temp_mat->GetDiag(diag);
+
+            MFEM_ASSERT(diag.Size() == copyvec.Size(), "");
+
+            for (int i = 0; i < diag.Size(); ++i)
+                copyvec[i] /= diag[i];
+
+            Vector temp2(P_L2[0]->Height());
+            P_L2[0]->Mult(copyvec, temp2);
+
+            CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global,
+                            &temp2, "for the level 1 update");
+        }
+#endif
+
         *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
     }
 
@@ -2569,6 +2730,10 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     // setting temporarily tempvec[0] is actually the particular solution on dofs
 
     partsol = start_guess;
+#ifdef MYDEBUG
+    MFEM_ASSERT(partsol.Norml2() / sqrt (partsol.Size()) < 1.0e-14, "Debugging check") ;
+#endif
+
     partsol += *truesolupdate_lvls[0];
 
 #ifdef CHECK_CONSTR
@@ -2598,10 +2763,26 @@ void DivConstraintSolver::UpdateTrueResidual(int level, const BlockVector* rhs_l
         out_l += *rhs_l;
 }
 
+
+// Takes a vector on the level l and computes:
+// 1) ProjTin = P_l^T * in (live on the coarser level)
+// 2) out = P_l * inv(P_l^T P_l) * P_l^T * in which lives on the finer level l
+// but is a representation of the orthogonal L2-projection of the input onto the coarser level
 void DivConstraintSolver::ProjectFinerL2ToCoarser(int level, const Vector& in,
                                                          Vector& ProjTin, Vector &out) const
 {
     const SparseMatrix * Proj = P_L2[level];
+
+#ifdef MYDEBUG
+    const SparseMatrix * ProjT = Transpose(*Proj);
+    SparseMatrix * temp = mfem::Mult(*ProjT, *Proj, NULL);
+    Vector diag;
+    temp->GetDiag(diag);
+    for (int i = 0; i < diag.Size(); ++i)
+        if (fabs(diag[i] - AE_e[level]->RowSize(i)) > 1.0e-5)
+            std::cout << "Found a difference for i = " << i << ": "
+                      << diag[i] << " != " << AE_e[level]->RowSize(i) << "\n";
+#endif
 
     ProjTin.SetSize(Proj->Width());
     Proj->MultTranspose(in, ProjTin);
@@ -2637,7 +2818,8 @@ void DivConstraintSolver::ProjectFinerL2ToCoarser(int level, const Vector& in,
 // Output: Qlminus1_f, rhs_constr
 // Buffer: workfvec
 // (*) All vectors are on dofs
-void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f, Vector& rhs_constr, Vector& workfvec) const
+void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f,
+                                                Vector& rhs_constr, Vector& workfvec) const
 {
     // 1. rhs_constr = Q_{l-1,l} * Q_{l-1} * f = Q_l * f
     //    workfvec = P_l^T * Q_{l-1} * f
