@@ -19,10 +19,10 @@
 
 #define USE_TSL
 
+//#define NONUNIFORM_REFINE
+
 using namespace std;
 using namespace mfem;
-
-SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2);
 
@@ -39,9 +39,9 @@ int main(int argc, char *argv[])
 
    bool verbose = (myid == 0);
 
-   int nDimensions     = 4;
+   int nDimensions     = 3;
 
-   int ser_ref_levels  = 0;
+   int ser_ref_levels  = 1;
    int par_ref_levels  = 1;
 
    // 2. Parse command-line options.
@@ -387,19 +387,25 @@ int main(int argc, char *argv[])
 
    Array<HypreParMatrix*> TrueP_Hdiv(num_levels - 1);
    Array<HypreParMatrix*> TrueP_L2(num_levels - 1);
+#ifdef WITH_HDIVSKEW
    Array<HypreParMatrix*> TrueP_Hdivskew(num_levels - 1);
+#endif
    Array<HypreParMatrix*> TrueP_Hcurl(num_levels - 1);
    Array<HypreParMatrix*> TrueP_H1(num_levels - 1);
 
    Array< SparseMatrix* > P_Hdiv_lvls(num_levels - 1);
    Array< SparseMatrix* > P_L2_lvls(num_levels - 1);
+#ifdef WITH_HDIVSKEW
    Array< SparseMatrix* > P_Hdivskew_lvls(num_levels - 1);
+#endif
    Array< SparseMatrix* > P_Hcurl_lvls(num_levels - 1);
    Array< SparseMatrix* > P_H1_lvls(num_levels - 1);
 
    const SparseMatrix* P_Hdiv_local;
    const SparseMatrix* P_L2_local;
+#ifdef WITH_HDIVSKEW
    const SparseMatrix* P_Hdivskew_local;
+#endif
    const SparseMatrix* P_Hcurl_local;
    const SparseMatrix* P_H1_local;
 
@@ -413,7 +419,15 @@ int main(int argc, char *argv[])
        }
        else
        {
+#ifdef NONUNIFORM_REFINE
+           int nmarked = 5;
+           Array<int> els_to_refine(nmarked);
+           for (int i = 0; i < nmarked; ++i)
+               els_to_refine[i] = pmesh->GetNE()/2 + i;
+           pmesh->GeneralRefinement(els_to_refine);
+#else
            pmesh->UniformRefinement();
+#endif
            pmesh_lvls[l] = new ParMesh(*pmesh);
        }
        pmesh_lvls[l]->PrintInfo(std::cout); if(verbose) cout << endl;
@@ -1727,41 +1741,6 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-}
-
-SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
-{
-    int * I = in.GetI();
-    int * J = in.GetJ();
-    double * Data = in.GetData();
-    double * End = Data+in.NumNonZeroElems();
-
-    int nnz = 0;
-    for (double * data_ptr = Data; data_ptr != End; data_ptr++)
-    {
-        if (*data_ptr != 0)
-            nnz++;
-    }
-
-    int * outI = new int[in.Height()+1];
-    int * outJ = new int[nnz];
-    double * outData = new double[nnz];
-    nnz = 0;
-    for (int i = 0; i < in.Height(); i++)
-    {
-        outI[i] = nnz;
-        for (int j = I[i]; j < I[i+1]; j++)
-        {
-            if (Data[j] !=0)
-            {
-                outJ[nnz] = J[j];
-                outData[nnz++] = Data[j];
-            }
-        }
-    }
-    outI[in.Height()] = nnz;
-
-    return new SparseMatrix(outI, outJ, outData, in.Height(), in.Width());
 }
 
 void Compare_Offd_detailed(SparseMatrix& offd1, int * cmap1, SparseMatrix& offd2, int * cmap2)

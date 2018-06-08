@@ -2808,10 +2808,42 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
             P_L2[0]->MultTranspose(fine_temp5, coarse_temp2alt);
             MFEM_ASSERT(coarse_temp2alt.Norml2() / sqrt (coarse_temp2alt.Size()) < 1.0e-14, "2nd alt check failed");
 
-            // 5th alternative check
+            // 5th check: P_L2 * B * sigma_fine = B * P_Hdiv sigma_coarse?
+
+
+
+            // 6th alternative check
             Vector fine_temp55(fine_size);
+
+            // fine_temp55 = B * P * upd_1
             Constr_global->Mult(truetempvec_lvls[0]->GetBlock(0), fine_temp55);
 
+            // checking that Q_1 f is constant within each agglomerate
+            /*
+             * is true
+            for (int AE = 0; AE < coarse_size; ++AE)
+            {
+                double rowsum = 0.0;
+                int row_length = AE_e[0]->RowSize(AE);
+                int * elinds = AE_e[0]->GetRowColumns(AE);
+                for (int j = 0; j < row_length; ++j)
+                {
+                    rowsum += fabs(temp2[elinds[j]]);
+                }
+                if (rowsum > 1.0e-14)
+                {
+                    std::cout << "AE " << AE << ": \n";
+                    std::cout << "rowsum = " << rowsum << "\n";
+                    for (int j = 0; j < row_length; ++j)
+                    {
+                        std::cout << temp2[elinds[j]] << " ";
+                    }
+                    std::cout << "\n";
+                }
+            }
+            */
+
+            // checking that B * P * upd_1 is constant within each agglomerate
             if (fine_temp55.Norml2() / sqrt (fine_temp55.Size()) > 1.0e-14)
             {
                 for (int AE = 0; AE < coarse_size; ++AE)
@@ -2836,17 +2868,19 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
                     }
                 }
             }
-            MFEM_ASSERT(fine_temp5.Norml2() / sqrt (fine_temp5.Size()) < 1.0e-14, "5th alt check failed");
+
+            // fine_temp5 = B_0 * P * upd_1 - Q_1 f
+            MFEM_ASSERT(fine_temp5.Norml2() / sqrt (fine_temp5.Size()) < 1.0e-14, "6th alt check failed");
 
 
-            // 5th check
+            // 6th check
 
             // checking that B_0 * P update_1 = P * (inv PtP) rhs_1 \equiv Q_1 f,
             // since rhs_1 = Pt * Q_0 * f
             if (!CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global,
                             &temp2, "for the level 1 update"))
             {
-                MFEM_ABORT("5th check failed \n");
+                MFEM_ABORT("6th check failed \n");
             }
         }
 #endif

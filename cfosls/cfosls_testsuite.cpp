@@ -2390,6 +2390,50 @@ void uFun5_ex_wave_dtgradx(const Vector& xt, Vector& gradx )
 ////////////////////////////
 
 
+void testVectorFun(const Vector& xt, Vector& res)
+{
+    res.SetSize(xt.Size());
+    res = 1.0;
+}
+
+double testH1fun(Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size() - 1);
+
+    if (xt.Size() == 3)
+        return (x*x + y*y + 1.0);
+    if (xt.Size() == 4)
+        return (x*x + y*y + z*z + 1.0);
+    return 0.0;
+}
+
+void testHdivfun(const Vector& xt, Vector &res)
+{
+    res.SetSize(xt.Size());
+
+    double x = xt(0);
+    double y = xt(1);
+    double z;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size() - 1);
+
+    res = 0.0;
+
+    if (xt.Size() == 3)
+    {
+        res(2) = (x*x + y*y + 1.0);
+    }
+    if (xt.Size() == 4)
+    {
+        res(3) = (x*x + y*y + z*z + 1.0);
+    }
+}
 
 } // for namespace mfem
 

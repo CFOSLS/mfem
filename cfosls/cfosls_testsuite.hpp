@@ -121,7 +121,6 @@ void bFunCircle2D_ex (const Vector& xt, Vector& b);
 double  bFunCircle2Ddiv_ex(const Vector& xt);
 
 void testVectorFun(const Vector& xt, Vector& res);
-
 double testH1fun(Vector& xt);
 void testHdivfun(const Vector& xt, Vector& res);
 
