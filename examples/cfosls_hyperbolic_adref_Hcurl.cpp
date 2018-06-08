@@ -441,25 +441,19 @@ int main(int argc, char *argv[])
            MFEM_ASSERT (res_constr_norm < 1.0e-12, "first place");
        }
 
-
        // with uniform refinement it works
-       hierarchy->GetFinestParMesh()->UniformRefinement();
+       //hierarchy->GetFinestParMesh()->UniformRefinement();
 
        // with non-uniform refinement it doesn't work
-       /*
        int nmarked = 5;
        Array<int> els_to_refine(nmarked);
        for (int i = 0; i < nmarked; ++i)
            els_to_refine[i] = hierarchy->GetFinestParMesh()->GetNE()/2 + i;
        hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
-       */
 
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
-
-       divfreeprob_hierarchy->Update(false);
-       problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
        partsol_finder->UpdateProblem(*problem);
        partsol_finder->Update();

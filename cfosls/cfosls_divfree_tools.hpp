@@ -215,6 +215,7 @@ public:
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
 
+    // FIXME: Remove this?
     void DebugMult(Vector& rhs, Vector &sol) const;
 
     void Mult(const Vector &x, Vector &y, Vector* rhs_constr) const;
@@ -235,6 +236,8 @@ public:
         std::cout << "atol: " << atol << "\n";
         std::cout << std::flush;
     }
+
+    BlockOperator* GetOp() {return coarse_matrix;}
 };
 
 // ~ Non-overlapping Schwarz smoother based on agglomerated elements
@@ -516,6 +519,8 @@ public:
     void FindParticularSolution(const Vector &start_guess, Vector &partsol, const Vector& ConstrRhs, bool verbose) const;
 
     int Size() const {return size;}
+
+    const CoarsestProblemSolver* GetCoarseSolver() const {return CoarseSolver;}
 };
 
 class HcurlGSSSmoother : public BlockOperator

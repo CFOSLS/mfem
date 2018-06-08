@@ -107,6 +107,7 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
         //res_constr.Print();
         std::cout << "Constraint residual norm " << string << ": "
                   << constr_norm << " ... \n";
+        /*
 #ifdef MYDEBUG
         for (int i = 0; i < res_constr.Size(); ++i)
             if (fabs(res_constr[i]) > 1.0e-14)
@@ -114,6 +115,7 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
                           << ": val = " << res_constr[i] << "\n";
         //res_constr.Print();
 #endif
+        */
         passed = false;
     }
 
@@ -718,7 +720,8 @@ void CoarsestProblemSolver::Setup() const
         col_starts = ((HypreParMatrix&)d_td_funct->GetBlock(0,0)).GetRowStarts();
     else
         col_starts = (*dof_trueDof_blocks)[0]->GetRowStarts();
-    HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, Constr_spmat);
+    HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols,
+                                                    row_starts, col_starts, Constr_spmat);
     HypreParMatrix * Constr_global;
     if (using_blockop)
         Constr_global = RAP(&dof_trueDof_L2, temphpmat, (HypreParMatrix*)(&d_td_funct->GetBlock(0,0)));
@@ -760,12 +763,15 @@ void CoarsestProblemSolver::Setup() const
             }
 
 
-            HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols, row_starts, col_starts, &(Op_blkspmat->GetBlock(blk1, blk2)));
+            HypreParMatrix * temphpmat = new HypreParMatrix(comm, glob_num_rows, glob_num_cols,
+                                                            row_starts, col_starts,
+                                                            &(Op_blkspmat->GetBlock(blk1, blk2)));
             if (using_blockop)
                 Funct_global(blk1, blk2) = RAP((HypreParMatrix*)&d_td_funct->GetBlock(blk1,blk1), temphpmat,
                                                (HypreParMatrix*)&d_td_funct->GetBlock(blk2,blk2));
             else
-                Funct_global(blk1, blk2) = RAP((*dof_trueDof_blocks)[blk1], temphpmat, (*dof_trueDof_blocks)[blk2]);
+                Funct_global(blk1, blk2) = RAP((*dof_trueDof_blocks)[blk1],
+                                               temphpmat, (*dof_trueDof_blocks)[blk2]);
 
             Funct_global(blk1, blk2)->CopyRowStarts();
             Funct_global(blk1, blk2)->CopyColStarts();
@@ -996,9 +1002,13 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2->Height();
 
+    /*
+#ifdef MYDEBUG
     for (int i = 0; i < AE_e.Height(); ++i)
         if (AE_e.RowSize(i) > 1)
             std::cout << "Found AE = " << i << " with " << AE_e.RowSize(i) << " > 1 elements \n";
+#endif
+    */
 
     for( int AE = 0; AE < nAE; ++AE)
     {
@@ -2321,10 +2331,12 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         int numblocks_funct = space_names_funct->Size();
 
-        const Array<int> * offsets_funct_new = hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
+        const Array<int> * offsets_funct_new =
+                hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
         offsets_funct.push_front(offsets_funct_new);
 
-        const Array<int> * offsets_sp_funct_new = hierarchy->ConstructOffsetsforFormul(0, *space_names_funct);
+        const Array<int> * offsets_sp_funct_new =
+                hierarchy->ConstructOffsetsforFormul(0, *space_names_funct);
         offsets_sp_funct.push_front(offsets_sp_funct_new);
 
         BlockMatrix * Funct_mat_new = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
@@ -2486,9 +2498,11 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         num_levels = hierarchy->Nlevels();
 
-        /*
         if (recoarsen)
         {
+#ifdef MYDEBUG
+            std::cout << "Recoarsening the coarse solver in the divconstraint Update() \n";
+#endif
             delete CoarseSolver;
 
             const Array<SpaceName>* space_names_problem =
@@ -2511,7 +2525,6 @@ void DivConstraintSolver::Update(bool recoarsen)
             CoarseSolver->SetRelTol(1.0e-18);
             CoarseSolver->ResetSolverParams();
         }
-        */
 
         update_counter = hierarchy_upd_cnt;
     }
@@ -2701,6 +2714,21 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
 #ifdef MYDEBUG
         if (num_levels > 1)
         {
+            int fine_size = temp1.Size();
+            int coarse_size = rhs_constr.Size();
+
+            // 1st check (coarse update at the coarse level)
+            Vector coarse_res(coarse_size);
+
+            BlockOperator * coarse_op = CoarseSolver->GetOp();
+            HypreParMatrix& constr_coarse = (HypreParMatrix&)(coarse_op->GetBlock(numblocks - 1, 0));
+
+            constr_coarse.Mult(*truesolupdate_lvls[num_levels - 1], coarse_res);
+            coarse_res -= rhs_constr;
+
+            MFEM_ASSERT(coarse_res.Norml2() / sqrt (coarse_res.Size()) < 1.0e-14, "1st check failed");
+
+            // 2nd check (coarse update  back at the finest level)
             Vector copyvec(rhs_constr.Size());
             copyvec = rhs_constr;
 
@@ -2716,10 +2744,110 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
                 copyvec[i] /= diag[i];
 
             Vector temp2(P_L2[0]->Height());
+            // temp2 = P_l * inv (P_l^T * P_l) * rhs_1 = P_l * inv (P_l^T * P_l) * P_l^T * Q_0 *f = Q_1 * f
             P_L2[0]->Mult(copyvec, temp2);
 
-            CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global,
-                            &temp2, "for the level 1 update");
+            Vector fine_tempvec(fine_size);
+            // fine_tempvec = B_0 * P * update_1
+            Constr_global->Mult(*truetempvec_lvls[0], fine_tempvec);
+
+            Vector coarse_temp(coarse_size);
+            P_L2[0]->MultTranspose(fine_tempvec, coarse_temp);
+
+            // coarse_temp = P^T B_0 * P * update_1 - rhs_1 = P^T B_0 * P * update_1 - P^T Q_0 f
+            coarse_temp -= rhs_constr;
+
+            MFEM_ASSERT(coarse_temp.Norml2() / sqrt (coarse_temp.Size()) < 1.0e-14, "2nd check failed");
+
+            /*
+             * fails even for the uniform refinement case
+            // 3rd check
+            SparseMatrix fine_diag;
+            Constr_global->GetDiag(fine_diag);
+
+            SparseMatrix coarse_diag;
+            constr_coarse.GetDiag(coarse_diag);
+
+            HypreParMatrix& TrueP_Hdiv = (HypreParMatrix&)(TrueP_Func[0]->GetBlock(0,0));
+            SparseMatrix P_Hdiv;
+            TrueP_Hdiv.GetDiag(P_Hdiv);
+
+            SparseMatrix * coarsened_constr = mfem::RAP(*P_L2[0], fine_diag, P_Hdiv);
+            coarsened_constr->Add(-1.0, coarse_diag);
+
+            //coarsened_constr->Print();
+
+            if (coarsened_constr->MaxNorm() > 1.0e-14)
+                std::cout << "MaxNorm of (B_1 - coarsened B_0) = " <<
+                             coarsened_constr->MaxNorm() << "\n";
+
+            MFEM_ASSERT(coarsened_constr->MaxNorm() < 1.0e-14, "3rd check failed \n");
+            */
+
+            // 4rd check
+
+            Vector fine_tempvec4(fine_size);
+            fine_tempvec4 = temp2;
+
+            Vector coarse_temp4(coarse_size);
+            P_L2[0]->MultTranspose(fine_tempvec4, coarse_temp4);
+
+            // coarse_temp4 = P^T * Q_1 * f - P^T * Q_0 * f
+            coarse_temp4 -= rhs_constr;
+
+            MFEM_ASSERT(coarse_temp4.Norml2() / sqrt (coarse_temp4.Size()) < 1.0e-14, "4nd check failed");
+
+            // 2nd alt check
+            Vector fine_temp5(fine_size);
+            Constr_global->Mult(truetempvec_lvls[0]->GetBlock(0), fine_temp5);
+            // fine_temp5 = B_0 * P * upd_1 - Q_1 f
+            fine_temp5 -= temp2;
+
+            Vector coarse_temp2alt(coarse_size);
+            // coarse_temp2alt = P^T * fine_temp5 = P^T * (B_0 * P * upd_1 - Q_1 f)
+            P_L2[0]->MultTranspose(fine_temp5, coarse_temp2alt);
+            MFEM_ASSERT(coarse_temp2alt.Norml2() / sqrt (coarse_temp2alt.Size()) < 1.0e-14, "2nd alt check failed");
+
+            // 5th alternative check
+            Vector fine_temp55(fine_size);
+            Constr_global->Mult(truetempvec_lvls[0]->GetBlock(0), fine_temp55);
+
+            if (fine_temp55.Norml2() / sqrt (fine_temp55.Size()) > 1.0e-14)
+            {
+                for (int AE = 0; AE < coarse_size; ++AE)
+                {
+                    double rowsum = 0.0;
+                    int row_length = AE_e[0]->RowSize(AE);
+                    int * elinds = AE_e[0]->GetRowColumns(AE);
+                    for (int j = 0; j < row_length; ++j)
+                    {
+                        //std::cout << fine_temp5[elinds[j]] << " ";
+                        rowsum += fabs(fine_temp55[elinds[j]]);
+                    }
+                    if (rowsum > 1.0e-14)
+                    {
+                        std::cout << "AE " << AE << ": \n";
+                        std::cout << "rowsum = " << rowsum << "\n";
+                        for (int j = 0; j < row_length; ++j)
+                        {
+                            std::cout << fine_temp55[elinds[j]] << " ";
+                        }
+                        std::cout << "\n";
+                    }
+                }
+            }
+            MFEM_ASSERT(fine_temp5.Norml2() / sqrt (fine_temp5.Size()) < 1.0e-14, "5th alt check failed");
+
+
+            // 5th check
+
+            // checking that B_0 * P update_1 = P * (inv PtP) rhs_1 \equiv Q_1 f,
+            // since rhs_1 = Pt * Q_0 * f
+            if (!CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global,
+                            &temp2, "for the level 1 update"))
+            {
+                MFEM_ABORT("5th check failed \n");
+            }
         }
 #endif
 
