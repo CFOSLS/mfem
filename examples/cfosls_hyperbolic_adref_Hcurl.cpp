@@ -373,6 +373,7 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
+#if 0
    std::cout << "Special test! \n";
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
@@ -398,7 +399,15 @@ int main(int argc, char *argv[])
    // checking that B * P * coarse_sigma = constant within each coarse element
    // outside DivConstraintClass
 
-   HypreParMatrix& Divergence = (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
+   // this works
+   ParDiscreteLinearOperator div(hierarchy->GetSpace(SpaceName::HDIV,0), hierarchy->GetSpace(SpaceName::L2,0));
+   div.AddDomainInterpolator(new DivergenceInterpolator);
+   div.Assemble();
+   div.Finalize();
+   HypreParMatrix * Divergence = div.ParallelAssemble();
+
+   // works incorrectly, i.e., the chack fails
+   //HypreParMatrix* Divergence = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
    ParGridFunction * sigma_coarse_pgfun = new ParGridFunction(hierarchy->GetSpace(SpaceName::HDIV,1));
    //VectorFunctionCoefficient testvec_coeff(dim, testHdivfun);
@@ -407,10 +416,10 @@ int main(int argc, char *argv[])
    Vector sigma_c(hierarchy->GetSpace(SpaceName::HDIV,1)->TrueVSize());
    sigma_coarse_pgfun->ParallelProject(sigma_c);
 
-   Vector Psigma_c(Divergence.Width());
+   Vector Psigma_c(Divergence->Width());
    hierarchy->GetTruePspace(SpaceName::HDIV,0)->Mult(sigma_c, Psigma_c);
-   Vector BPsigma_c(Divergence.Height());
-   Divergence.Mult(Psigma_c, BPsigma_c);
+   Vector BPsigma_c(Divergence->Height());
+   Divergence->Mult(Psigma_c, BPsigma_c);
 
    SparseMatrix * AE_e = Transpose(*hierarchy->GetPspace(SpaceName::L2, 0));
 
@@ -452,8 +461,7 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-#if 0
-
+#endif
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
    hierarchy->ConstructDofTrueDofs();
@@ -539,6 +547,7 @@ int main(int argc, char *argv[])
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
 
+       /*
        // checking that B * P * coarse_sigma = constant within each coarse element
        // outside DivConstraintClass
        HypreParMatrix& Divergence = (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
@@ -593,6 +602,7 @@ int main(int argc, char *argv[])
 
        MPI_Finalize();
        return 0;
+       */
 
        partsol_finder->UpdateProblem(*problem);
        partsol_finder->Update();
@@ -1391,7 +1401,6 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-#endif
 }
 
 // works for HdivH1 and HdivL2 formulations

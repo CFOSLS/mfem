@@ -5,6 +5,7 @@ using namespace std;
 
 #define MYDEBUG
 
+//#define TEMP_CRUTCH
 
 namespace mfem
 {
@@ -2215,7 +2216,16 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     CoarseSolver->SetRelTol(1.0e-18);
     CoarseSolver->ResetSolverParams();
 
-    Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
+#ifdef TEMP_CRUTCH
+        ParDiscreteLinearOperator div(problem->GetPfes(0), problem->GetPfes(numblocks - 1));
+        div.AddDomainInterpolator(new DivergenceInterpolator);
+        div.Assemble();
+        div.Finalize();
+        Constr_global = div.ParallelAssemble();
+#else
+        std::cout << "This is incorrect for non-uniform refinement \n";
+        Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
+#endif
 }
 
 
@@ -2430,8 +2440,16 @@ void DivConstraintSolver::Update(bool recoarsen)
         el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
         el2dofs_col_offsets.push_front(el2dofs_col_offsets_new);
 
+#ifdef TEMP_CRUTCH
+        ParDiscreteLinearOperator div(problem->GetPfes(0), problem->GetPfes(numblocks - 1));
+        div.AddDomainInterpolator(new DivergenceInterpolator);
+        div.Assemble();
+        div.Finalize();
+        Constr_global = div.ParallelAssemble();
+#else
+        std::cout << "This is incorrect for non-uniform refinement \n";
         Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-
+#endif
         // recoarsening local and global matrices
         if (recoarsen)
         {
@@ -2711,6 +2729,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
 
+#if 0
 #ifdef MYDEBUG
         if (num_levels > 1)
         {
@@ -2883,6 +2902,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
                 MFEM_ABORT("6th check failed \n");
             }
         }
+#endif
 #endif
 
         *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];

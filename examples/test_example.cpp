@@ -8,7 +8,7 @@
 
 #define ZEROTOL (5.0e-14)
 
-//#define NONUNIFORM_REFINE
+#define NONUNIFORM_REFINE
 
 using namespace std;
 using namespace mfem;
@@ -116,6 +116,7 @@ int main(int argc, char *argv[])
    {
        mesh_file = "../data/cube_3d_moderate.mesh";
        //mesh_file = "../data/two_tets.mesh";
+       //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
    }
    else // 4D case
    {
@@ -301,9 +302,19 @@ int main(int argc, char *argv[])
 
    pmesh_lvls[0]->PrintInfo(std::cout); if(verbose) cout << endl;
 
-   // the check
+   // the check: B * P_div sigma_coarse is constant within coarse elements
+
+   /*
+    * this is incorrect
    ParMixedBilinearForm div(Hdiv_space_lvls[0], L2_space_lvls[0]);
    div.AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+   div.Assemble();
+   div.Finalize();
+   */
+
+   // this is correct (check is passed)
+   ParDiscreteLinearOperator div(Hdiv_space_lvls[0], L2_space_lvls[0]);
+   div.AddDomainInterpolator(new DivergenceInterpolator);
    div.Assemble();
    div.Finalize();
    HypreParMatrix * Div = div.ParallelAssemble();
@@ -348,13 +359,54 @@ int main(int argc, char *argv[])
            if (bad_row)
            {
                std::cout << "AE " << AE << ": \n";
-               std::cout << "rowsum = " << rowsum << "\n";
+               std::cout << "vertices: \n";
+               const Element * AEl = pmesh_lvls[1]->GetElement(AE);
+               int nverts = AEl->GetNVertices();
+               Array<int> AElverts;
+               AEl->GetVertices(AElverts);
+               for (int vno = 0; vno < nverts; ++vno)
+               {
+                   double * vert_coos = pmesh_lvls[1]->GetVertex(AElverts[vno]);
+                   std::cout << "(";
+                   for (int coo = 0; coo < dim; ++coo)
+                       if (coo < dim - 1)
+                           std::cout << vert_coos[coo] << ", ";
+                       else
+                           std::cout << vert_coos[coo] << ") ";
+               }
+               std::cout << "\n";
+
+               std::cout << "fine subelements: ";
+               for (int j = 0; j < row_length; ++j)
+                   std::cout << elinds[j] << " ";
+               std::cout << "\n";
+               for (int j = 0; j < row_length; ++j)
+               {
+                   std::cout << "fine subelement " << elinds[j] << "\n";
+                   std::cout << "vertices: \n";
+                   const Element * el = pmesh_lvls[0]->GetElement(elinds[j]);
+                   int nverts = el->GetNVertices();
+                   Array<int> elverts;
+                   el->GetVertices(elverts);
+                   for (int vno = 0; vno < nverts; ++vno)
+                   {
+                       double * vert_coos = pmesh_lvls[0]->GetVertex(elverts[vno]);
+                       std::cout << "(";
+                       for (int coo = 0; coo < dim; ++coo)
+                           if (coo < dim - 1)
+                               std::cout << vert_coos[coo] << ", ";
+                           else
+                               std::cout << vert_coos[coo] << ") ";
+                   }
+                   std::cout << "\n";
+               }
+               //std::cout << "rowsum = " << rowsum << "\n";
                std::cout << "row_av = " << row_av << "\n";
                for (int j = 0; j < row_length; ++j)
                {
                    std::cout << BPsigma_c[elinds[j]] << " ";
                }
-               std::cout << "\n";
+               std::cout << "\n \n";
 
            }
        }
