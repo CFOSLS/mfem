@@ -373,7 +373,7 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-#if 0
+//#if 0
    std::cout << "Special test! \n";
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
@@ -400,13 +400,23 @@ int main(int argc, char *argv[])
    // outside DivConstraintClass
 
    // this works
+   /*
    ParDiscreteLinearOperator div(hierarchy->GetSpace(SpaceName::HDIV,0), hierarchy->GetSpace(SpaceName::L2,0));
    div.AddDomainInterpolator(new DivergenceInterpolator);
    div.Assemble();
    div.Finalize();
    HypreParMatrix * Divergence = div.ParallelAssemble();
+   */
 
-   // works incorrectly, i.e., the chack fails
+   // works incorrectly, i.e., the check fails
+   ParMixedBilinearForm div(hierarchy->GetSpace(SpaceName::HDIV,0), hierarchy->GetSpace(SpaceName::L2,0));
+   div.AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+   div.Assemble();
+   div.Finalize();
+   HypreParMatrix * Divergence = div.ParallelAssemble();
+
+
+   // works incorrectly, i.e., the check fails
    //HypreParMatrix* Divergence = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
    ParGridFunction * sigma_coarse_pgfun = new ParGridFunction(hierarchy->GetSpace(SpaceName::HDIV,1));
@@ -461,8 +471,9 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-#endif
+//#endif
 
+#if 0
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
    hierarchy->ConstructDofTrueDofs();
    hierarchy->ConstructDivfreeDops();
@@ -1401,6 +1412,7 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
+#endif
 }
 
 // works for HdivH1 and HdivL2 formulations

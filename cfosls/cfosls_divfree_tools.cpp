@@ -2729,7 +2729,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
 
-#if 0
+//#if 0
 #ifdef MYDEBUG
         if (num_levels > 1)
         {
@@ -2903,7 +2903,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
             }
         }
 #endif
-#endif
+//#endif
 
         *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
     }
