@@ -3,10 +3,6 @@
 
 using namespace std;
 
-//#define MYDEBUG
-
-//#define TEMP_CRUTCH
-
 namespace mfem
 {
 
@@ -2217,16 +2213,7 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     CoarseSolver->SetRelTol(1.0e-18);
     CoarseSolver->ResetSolverParams();
 
-#ifdef TEMP_CRUTCH
-        ParDiscreteLinearOperator div(problem->GetPfes(0), problem->GetPfes(numblocks - 1));
-        div.AddDomainInterpolator(new DivergenceInterpolator);
-        div.Assemble();
-        div.Finalize();
-        Constr_global = div.ParallelAssemble();
-#else
-        std::cout << "This is incorrect for non-uniform refinement \n";
-        Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-#endif
+    Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 }
 
 
@@ -2455,16 +2442,8 @@ void DivConstraintSolver::Update(bool recoarsen)
         el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
         el2dofs_col_offsets.push_front(el2dofs_col_offsets_new);
 
-#ifdef TEMP_CRUTCH
-        ParDiscreteLinearOperator div(problem->GetPfes(0), problem->GetPfes(numblocks - 1));
-        div.AddDomainInterpolator(new DivergenceInterpolator);
-        div.Assemble();
-        div.Finalize();
-        Constr_global = div.ParallelAssemble();
-#else
-        std::cout << "This is incorrect for non-uniform refinement \n";
         Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-#endif
+
         // recoarsening local and global matrices
         if (recoarsen)
         {
@@ -2595,7 +2574,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     rhs_constr *= -1.0;
 
     // 3.1 if not, computing the particular solution
-    if ( ComputeMPIVecNorm(comm, rhs_constr,"", verbose) > 1.0e-14 )
+    if ( ComputeMPIVecNorm(comm, rhs_constr, "", false) > 1.0e-14 )
     {
         if (verbose)
             std::cout << "Initial vector does not satisfy the divergence constraint. "

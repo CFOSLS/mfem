@@ -528,6 +528,7 @@ int main(int argc, char *argv[])
 #endif
 
    // testing DivConstraintSolver
+#if 0
    {
        Vector * partsol_guess = new Vector(partsol_finder->Size());
        *partsol_guess = 0.0;
@@ -595,6 +596,7 @@ int main(int argc, char *argv[])
        MPI_Finalize();
        return 0;
    }
+#endif
 
 
    Hyper_test* Mytest = dynamic_cast<Hyper_test*>
@@ -722,7 +724,7 @@ int main(int argc, char *argv[])
 #endif
 
    double fixed_rtol = 1.0e-12; // 1.0e-10
-   double fixed_atol = 1.0e-20;
+   double fixed_atol = 1.0e-15;
 
    double initial_res_norm = -1.0;
 
