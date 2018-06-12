@@ -35,6 +35,8 @@ namespace mfem
 // shouldn't be used anymore, we need a monolithic smoother
 //#define BLKDIAG_SMOOTHER
 
+#define NEW_THING
+
 
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
@@ -435,6 +437,7 @@ protected:
     std::deque<Array<int>* > el2dofs_row_offsets;
     std::deque<Array<int>* > el2dofs_col_offsets;
     std::vector<Array<int>* > fullbdr_attribs;
+    Array<SparseMatrix*> Mass_mat_lvls;
     mutable bool optimized_localsolvers;
     mutable bool with_hcurl_smoothers;
     mutable int update_counter;
@@ -484,11 +487,21 @@ protected:
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
     // Should be called only during the first solver iterate (since it must be 0 at the next)
-    void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr, Vector &workfvec) const;
 
-    void ProjectFinerL2ToCoarser(int level, const Vector& in, Vector &ProjTin, Vector &out) const;
+#ifdef NEW_THING
+    void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
+                               Vector &coarser_lvl_proj, Vector& finer_buff) const;
+    void NewProjectFinerL2ToCoarser(int l, const Vector& in, Vector& PTout, Vector &out,
+                                    Vector& finer_buff) const;
+#else
+    void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
+                               Vector &workfvec) const;
+    void ProjectFinerL2ToCoarser(int level, const Vector& in, Vector &ProjTin,
+                                 Vector &out) const;
+#endif
 
-    void UpdateTrueResidual(int level, const BlockVector* rhs_l,  const BlockVector& solupd_l, BlockVector& out_l) const;
+    void UpdateTrueResidual(int level, const BlockVector* rhs_l, const BlockVector& solupd_l,
+                            BlockVector& out_l) const;
 
 public:
     ~DivConstraintSolver();

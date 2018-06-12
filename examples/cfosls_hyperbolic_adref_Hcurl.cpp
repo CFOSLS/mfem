@@ -373,7 +373,7 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-//#if 0
+#if 0
    std::cout << "Special test! \n";
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
@@ -471,9 +471,9 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-//#endif
+#endif
 
-#if 0
+//#if 0
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
    hierarchy->ConstructDofTrueDofs();
    hierarchy->ConstructDivfreeDops();
@@ -555,6 +555,21 @@ int main(int argc, char *argv[])
        hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
 
        bool recoarsen = true;
+       prob_hierarchy->Update(recoarsen);
+       problem = prob_hierarchy->GetProblem(0);
+       partsol_finder->UpdateProblem(*problem);
+       partsol_finder->Update();
+
+       // one more time
+       //hierarchy->GetFinestParMesh()->UniformRefinement();
+
+       // with non-uniform refinement it doesn't work
+       nmarked = 6;
+       els_to_refine.SetSize(nmarked);
+       for (int i = 0; i < nmarked; ++i)
+           els_to_refine[i] = hierarchy->GetFinestParMesh()->GetNE()/3 + i;
+       hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
+
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
 
@@ -1412,7 +1427,7 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-#endif
+//#endif
 }
 
 // works for HdivH1 and HdivL2 formulations
