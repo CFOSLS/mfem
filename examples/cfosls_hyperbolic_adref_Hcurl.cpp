@@ -496,8 +496,8 @@ int main(int argc, char *argv[])
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 
 #ifdef MULTILEVEL_PARTSOL
-   bool optimized_localsolvers = false;
-   bool with_hcurl_smoothers = false;
+   bool optimized_localsolvers = true;
+   bool with_hcurl_smoothers = true;
    DivConstraintSolver * partsol_finder;
 #ifdef PUREDIVCONSTRAINT
    FOSLSFormulation * formulat_lapl = new CFOSLSFormulation_MixedLaplace(dim, numsol, verbose);
@@ -572,63 +572,6 @@ int main(int argc, char *argv[])
 
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
-
-       /*
-       // checking that B * P * coarse_sigma = constant within each coarse element
-       // outside DivConstraintClass
-       HypreParMatrix& Divergence = (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
-
-       ParGridFunction * sigma_coarse_pgfun = new ParGridFunction(hierarchy->GetSpace(SpaceName::HDIV,1));
-       sigma_coarse_pgfun->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetSigma());
-       Vector sigma_c(hierarchy->GetSpace(SpaceName::HDIV,1)->TrueVSize());
-       sigma_coarse_pgfun->ParallelProject(sigma_c);
-
-       Vector Psigma_c(Divergence.Width());
-       hierarchy->GetTruePspace(SpaceName::HDIV,0)->Mult(sigma_c, Psigma_c);
-       Vector BPsigma_c(Divergence.Height());
-       Divergence.Mult(Psigma_c, BPsigma_c);
-
-       SparseMatrix * AE_e = Transpose(*hierarchy->GetPspace(SpaceName::L2, 0));
-
-       for (int AE = 0; AE < hierarchy->GetPmesh(1)->GetNE(); ++AE)
-       {
-           double row_av = 0.0;
-           double rowsum = 0.0;
-           int row_length = AE_e->RowSize(AE);
-           int * elinds = AE_e->GetRowColumns(AE);
-           for (int j = 0; j < row_length; ++j)
-               rowsum += BPsigma_c[elinds[j]];
-           row_av = rowsum / row_length;
-
-           if (rowsum > 1.0e-14)
-           {
-               bool bad_row = false;
-               for (int j = 0; j < row_length; ++j)
-                   if (fabs(BPsigma_c[elinds[j]] - row_av) > 1.0e-13)
-                   {
-                       bad_row = true;
-                       break;
-                   }
-
-               if (bad_row)
-               {
-                   std::cout << "AE " << AE << ": \n";
-                   std::cout << "rowsum = " << rowsum << "\n";
-                   std::cout << "row_av = " << row_av << "\n";
-                   for (int j = 0; j < row_length; ++j)
-                   {
-                       std::cout << BPsigma_c[elinds[j]] << " ";
-                   }
-                   std::cout << "\n";
-
-               }
-           }
-
-       }
-
-       MPI_Finalize();
-       return 0;
-       */
 
        partsol_finder->UpdateProblem(*problem);
        partsol_finder->Update();

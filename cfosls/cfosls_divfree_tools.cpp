@@ -96,8 +96,6 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
     bool passed = true;
     Vector res_constr(Constr.Height());
     Constr.Mult(sigma, res_constr);
-    //ofstream ofs("newsolver_out.txt");
-    //res_constr.Print(ofs,1);
     if (ConstrRhs)
         res_constr -= *ConstrRhs;
     double constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
@@ -107,13 +105,11 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
         std::cout << "Constraint residual norm " << string << ": "
                   << constr_norm << " ... \n";
         /*
-#ifdef MYDEBUG
         for (int i = 0; i < res_constr.Size(); ++i)
             if (fabs(res_constr[i]) > 1.0e-14)
                 std::cout << "Nonzero in the constraint residual, entry " << i
                           << ": val = " << res_constr[i] << "\n";
         //res_constr.Print();
-#endif
         */
         passed = false;
     }
@@ -1001,18 +997,11 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
     // loop over all AE, solving a local problem in each AE
     int nAE = AE_edofs_L2->Height();
 
-    /*
-#ifdef MYDEBUG
-    for (int i = 0; i < AE_e.Height(); ++i)
-        if (AE_e.RowSize(i) > 1)
-            std::cout << "Found AE = " << i << " with " << AE_e.RowSize(i) << " > 1 elements \n";
-#endif
-    */
-
     for( int AE = 0; AE < nAE; ++AE)
     {
         //std::cout << "AE = " << AE << " (nAE = " << nAE << ") \n";
         //std::cout << "row size in AE_e = " << AE_e.RowSize(AE) << "\n";
+
         // we don't need to solve any local problem if AE coincides with a single fine grid element
         if (AE_e.RowSize(AE) > 1)
         //if (true)
@@ -1242,7 +1231,7 @@ void LocalProblemSolver::SaveLocalLUFactors() const
     for( int AE = 0; AE < nAE; ++AE)
     {
         // we don't need to store anything if AE coincides with a single fine grid element
-        //if (AE_e.RowSize(AE) > 1)
+        if (AE_e.RowSize(AE) > 1)
         //if (true)
         {
             // for each AE we will store A^(-1) and Schur^(-1)
@@ -1470,7 +1459,7 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
     {
         // we need to consider only AE's which are bigger than a single fine grid element
         // this matters, e.g., in AMR setting
-        //if (AE_e.RowSize(AE) > 1)
+        if (AE_e.RowSize(AE) > 1)
         //if (true)
         //somehow this breaks the parallel example cfosls_hyperbolic_multigrid.cpp How?
         {
@@ -2499,6 +2488,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                 delete P_Funct;
 
+                // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
+                // TODO: The concern is that the Functional matrix is recoarsened and thus changes
                 /*
                 delete LocalSolvers_lvls[l + 1];
                 if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
@@ -2544,9 +2535,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         if (recoarsen)
         {
-#ifdef MYDEBUG
-            std::cout << "Recoarsening the coarse solver in the divconstraint Update() \n";
-#endif
+            if (verbose)
+                std::cout << "Recoarsening the coarse solver in the divconstraint Update() \n";
             delete CoarseSolver;
 
             const Array<SpaceName>* space_names_problem =
@@ -2604,22 +2594,6 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     rhs_constr -= constr_rhs;
     rhs_constr *= -1.0;
 
-#ifdef MYDEBUG
-    MFEM_ASSERT(rhs_constr.Norml2() == constr_rhs.Norml2(), "Debugging check \n");
-
-    Vector temp1(constr_rhs.Size());
-    temp1 = rhs_constr;
-
-#endif
-    /*
-    std::cout << "rhs_constr size = " << rhs_constr.Size() << "\n";
-    for (int i = 0; i < rhs_constr.Size(); ++i)
-        if (fabs(rhs_constr[i]) > 1.0e-10)
-            std::cout << "nonzero at " << i << ": " << rhs_constr[i] << "\n";
-    std::cout << "\n";
-    //rhs_constr.Print();
-    */
-
     // 3.1 if not, computing the particular solution
     if ( ComputeMPIVecNorm(comm, rhs_constr,"", verbose) > 1.0e-14 )
     {
@@ -2652,18 +2626,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         // solution updates will always satisfy homogeneous essential boundary conditions
         *truesolupdate_lvls[l] = 0.0;
 
-#ifdef NEW_THING
         ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, PtQlminus1_f, finer_buff);
-#else
-        ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, PtQlminus1_f);
-#endif
-
-#ifdef MYDEBUG
-        temp1 -= rhs_constr;
-#endif
-
-        std::cout << "level " << l << ": rhs constr norm = " <<
-                     rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
 
         // solve local problems at level l
         if (LocalSolvers_lvls[l])
@@ -2679,7 +2642,6 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         {
             //std::cout << "l = " << l << "\n";
             //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
-            MPI_Barrier(comm);
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
 
             //truetempvec2_lvls[l]->Print();
@@ -2691,68 +2653,16 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
 
         *trueresfunc_lvls[l] = *truetempvec_lvls[l];
 
-#ifdef MYDEBUG
-        if (l == 0)
-        {
-            CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global,
-                            &rhs_constr, "for the level 0 update");
-        }
-#endif
-
         // setting up rhs from the functional for the next (coarser) level
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
     } // end of loop over finer levels
 
-#ifdef MYDEBUG
-    std::cout << "rhs_constr size = " << rhs_constr.Size() << "\n";
-    std::cout << "Qlminus1_f size = " << Qlminus1_f.Size() << "\n";
-
-#endif
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
 
-    /*
-#ifdef MYDEBUG
-    if (num_levels > 1)
-    {
-        Vector copyvec(rhs_constr.Size());
-        copyvec = rhs_constr;
-
-        const SparseMatrix * ProjT = Transpose(*P_L2[0]);
-        SparseMatrix * temp_mat = mfem::Mult(*ProjT, *P_L2[0], NULL);
-
-        Vector diag;
-        temp_mat->GetDiag(diag);
-
-        MFEM_ASSERT(diag.Size() == copyvec.Size(), "");
-
-        for (int i = 0; i < diag.Size(); ++i)
-            copyvec[i] /= diag[i];
-
-        Vector temp2(temp1.Size());
-        P_L2[0]->Mult(copyvec, temp2);
-
-        temp1 -= temp2;
-        MFEM_ASSERT(temp1.Norml2() / sqrt (temp1.Size()) < 1.0e-14,
-                    "sum of the righthand sides doesn;t equal initial rhs_constr");
-    }
-#endif
-    */
-
-    //trueresfunc_lvls[num_levels - 1]->Print();
-
-    std::cout << "level " << num_levels - 1 << ": rhs constr norm = " <<
-                 rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
-
     // 2.5 solve coarse problem
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
-
-    for (int l = 0; l < num_levels; ++l)
-    {
-        std::cout << "Update at level " << l << " after downward loop, norm = "
-                  << truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls.Size()) << "\n";
-    }
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -2762,185 +2672,6 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
         TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
 
-#if 0
-#ifdef MYDEBUG
-        if (num_levels > 1)
-        {
-            int fine_size = temp1.Size();
-            int coarse_size = rhs_constr.Size();
-
-            // 1st check (coarse update at the coarse level)
-            Vector coarse_res(coarse_size);
-
-            BlockOperator * coarse_op = CoarseSolver->GetOp();
-            HypreParMatrix& constr_coarse = (HypreParMatrix&)(coarse_op->GetBlock(numblocks - 1, 0));
-
-            constr_coarse.Mult(*truesolupdate_lvls[num_levels - 1], coarse_res);
-            coarse_res -= rhs_constr;
-
-            MFEM_ASSERT(coarse_res.Norml2() / sqrt (coarse_res.Size()) < 1.0e-14, "1st check failed");
-
-            // 2nd check (coarse update  back at the finest level)
-            Vector copyvec(rhs_constr.Size());
-            copyvec = rhs_constr;
-
-            const SparseMatrix * ProjT = Transpose(*P_L2[0]);
-            SparseMatrix * temp_mat = mfem::Mult(*ProjT, *P_L2[0], NULL);
-
-            Vector diag;
-            temp_mat->GetDiag(diag);
-
-            MFEM_ASSERT(diag.Size() == copyvec.Size(), "");
-
-            for (int i = 0; i < diag.Size(); ++i)
-                copyvec[i] /= diag[i];
-
-            Vector temp2(P_L2[0]->Height());
-            // temp2 = P_l * inv (P_l^T * P_l) * rhs_1 = P_l * inv (P_l^T * P_l) * P_l^T * Q_0 *f = Q_1 * f
-            P_L2[0]->Mult(copyvec, temp2);
-
-            Vector fine_tempvec(fine_size);
-            // fine_tempvec = B_0 * P * update_1
-            Constr_global->Mult(*truetempvec_lvls[0], fine_tempvec);
-
-            Vector coarse_temp(coarse_size);
-            P_L2[0]->MultTranspose(fine_tempvec, coarse_temp);
-
-            // coarse_temp = P^T B_0 * P * update_1 - rhs_1 = P^T B_0 * P * update_1 - P^T Q_0 f
-            coarse_temp -= rhs_constr;
-
-            MFEM_ASSERT(coarse_temp.Norml2() / sqrt (coarse_temp.Size()) < 1.0e-14, "2nd check failed");
-
-            /*
-             * fails even for the uniform refinement case
-            // 3rd check
-            SparseMatrix fine_diag;
-            Constr_global->GetDiag(fine_diag);
-
-            SparseMatrix coarse_diag;
-            constr_coarse.GetDiag(coarse_diag);
-
-            HypreParMatrix& TrueP_Hdiv = (HypreParMatrix&)(TrueP_Func[0]->GetBlock(0,0));
-            SparseMatrix P_Hdiv;
-            TrueP_Hdiv.GetDiag(P_Hdiv);
-
-            SparseMatrix * coarsened_constr = mfem::RAP(*P_L2[0], fine_diag, P_Hdiv);
-            coarsened_constr->Add(-1.0, coarse_diag);
-
-            //coarsened_constr->Print();
-
-            if (coarsened_constr->MaxNorm() > 1.0e-14)
-                std::cout << "MaxNorm of (B_1 - coarsened B_0) = " <<
-                             coarsened_constr->MaxNorm() << "\n";
-
-            MFEM_ASSERT(coarsened_constr->MaxNorm() < 1.0e-14, "3rd check failed \n");
-            */
-
-            // 4rd check
-
-            Vector fine_tempvec4(fine_size);
-            fine_tempvec4 = temp2;
-
-            Vector coarse_temp4(coarse_size);
-            P_L2[0]->MultTranspose(fine_tempvec4, coarse_temp4);
-
-            // coarse_temp4 = P^T * Q_1 * f - P^T * Q_0 * f
-            coarse_temp4 -= rhs_constr;
-
-            MFEM_ASSERT(coarse_temp4.Norml2() / sqrt (coarse_temp4.Size()) < 1.0e-14, "4nd check failed");
-
-            // 2nd alt check
-            Vector fine_temp5(fine_size);
-            Constr_global->Mult(truetempvec_lvls[0]->GetBlock(0), fine_temp5);
-            // fine_temp5 = B_0 * P * upd_1 - Q_1 f
-            fine_temp5 -= temp2;
-
-            Vector coarse_temp2alt(coarse_size);
-            // coarse_temp2alt = P^T * fine_temp5 = P^T * (B_0 * P * upd_1 - Q_1 f)
-            P_L2[0]->MultTranspose(fine_temp5, coarse_temp2alt);
-            MFEM_ASSERT(coarse_temp2alt.Norml2() / sqrt (coarse_temp2alt.Size()) < 1.0e-14, "2nd alt check failed");
-
-            // 5th check: P_L2 * B * sigma_fine = B * P_Hdiv sigma_coarse?
-
-
-
-            // 6th alternative check
-
-            // checking that Q_1 f is constant within each agglomerate
-            /*
-            // is true
-            for (int AE = 0; AE < coarse_size; ++AE)
-            {
-                double rowsum = 0.0;
-                int row_length = AE_e[0]->RowSize(AE);
-                int * elinds = AE_e[0]->GetRowColumns(AE);
-                for (int j = 0; j < row_length; ++j)
-                {
-                    rowsum += fabs(temp2[elinds[j]]);
-                }
-                if (rowsum > 1.0e-14)
-                {
-                    std::cout << "AE " << AE << ": \n";
-                    std::cout << "rowsum = " << rowsum << "\n";
-                    for (int j = 0; j < row_length; ++j)
-                    {
-                        std::cout << temp2[elinds[j]] << " ";
-                    }
-                    std::cout << "\n";
-                }
-            }
-            */
-
-            // checking that B * P * upd_1 is constant within each agglomerate
-            /*
-            Vector fine_temp55(fine_size);
-
-            // fine_temp55 = B * P * upd_1
-            Constr_global->Mult(truetempvec_lvls[0]->GetBlock(0), fine_temp55);
-
-            if (fine_temp55.Norml2() / sqrt (fine_temp55.Size()) > 1.0e-14)
-            {
-                for (int AE = 0; AE < coarse_size; ++AE)
-                {
-                    double rowsum = 0.0;
-                    int row_length = AE_e[0]->RowSize(AE);
-                    int * elinds = AE_e[0]->GetRowColumns(AE);
-                    for (int j = 0; j < row_length; ++j)
-                    {
-                        //std::cout << fine_temp5[elinds[j]] << " ";
-                        rowsum += fabs(fine_temp55[elinds[j]]);
-                    }
-                    if (rowsum > 1.0e-14)
-                    {
-                        std::cout << "AE " << AE << ": \n";
-                        std::cout << "rowsum = " << rowsum << "\n";
-                        for (int j = 0; j < row_length; ++j)
-                        {
-                            std::cout << fine_temp55[elinds[j]] << " ";
-                        }
-                        std::cout << "\n";
-                    }
-                }
-            }
-            */
-
-            // fine_temp5 = B_0 * P * upd_1 - Q_1 f
-            MFEM_ASSERT(fine_temp5.Norml2() / sqrt (fine_temp5.Size()) < 1.0e-14, "6th alt check failed");
-
-
-            // 6th check
-
-            // checking that B_0 * P update_1 = P * (inv PtP) rhs_1 \equiv Q_1 f,
-            // since rhs_1 = Pt * Q_0 * f
-            if (!CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global,
-                            &temp2, "for the level 1 update"))
-            {
-                MFEM_ABORT("6th check failed \n");
-            }
-        }
-#endif
-#endif
-
         *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
     }
 
@@ -2948,9 +2679,6 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     // setting temporarily tempvec[0] is actually the particular solution on dofs
 
     partsol = start_guess;
-#ifdef MYDEBUG
-    MFEM_ASSERT(partsol.Norml2() / sqrt (partsol.Size()) < 1.0e-14, "Debugging check") ;
-#endif
 
     partsol += *truesolupdate_lvls[0];
 
@@ -2981,48 +2709,44 @@ void DivConstraintSolver::UpdateTrueResidual(int level, const BlockVector* rhs_l
         out_l += *rhs_l;
 }
 
-#ifdef NEW_THING
 // Takes a vector on the level l and computes:
-// 1) out = W * P_l * inv(P_l^T W P_l) * P_l^T * in (lives at finer level l)
+// out = W * P_l * inv(P_l^T W P_l) * P_l^T * in (lives at finer level l)
 // which represent an orthogonal L2 projection of the input vector onto the
 // coarser space (l-1) as a vector which still lives at the finer level l
-// 2) PTin = P_l^T * in (lives at coarser level (l-1))
+// Notice: change of finer_buff might be changed inside the function
+// Notice: out is used as an intermediate coarse level buffer
 // TODO: Optimize memory, for now matrices are allocated and deallocated inside
 // TODO: Implement this for the case of higher-order discretizations
 // TODO: Then P_l^T W P_l will be block-diagonal and requires block-by-block inversion
 void DivConstraintSolver::NewProjectFinerL2ToCoarser(int l, const Vector& in,
-                                                     Vector& PTin, Vector &out, Vector& finer_buff) const
+                                                     Vector &out, Vector& finer_buff) const
 {
     MFEM_ASSERT(Mass_mat_lvls[l], "The modified projector requires mass matrix to be defined at this level");
-
-    //Mass_mat_lvls[l]->Print();
 
     SparseMatrix * temp = mfem::RAP(*P_L2[l], *Mass_mat_lvls[l], *P_L2[l]);
     Vector diag;
     temp->GetDiag(diag);
     delete temp;
 
-    // PTin = P_l^T * in
-    PTin.SetSize(P_L2[l]->Width());
-    P_L2[l]->MultTranspose(in, PTin);
+    // temporarily using out as a coarse level buffer
+    // although in the end it will be a fine level vector
+    out.SetSize(P_L2[l]->Width());
+    P_L2[l]->MultTranspose(in, out);
 
     // inverting the P_l^T W P_l (assumed to be diagonal which will
     // not be true for higher-order f.e.)
     // PTin = inv(P_l^T W P_l) * P_l^T * in (temporarily)
-    for ( int i = 0; i < PTin.Size(); ++i)
-        PTin[i] /= diag[i];
+    for ( int i = 0; i < out.Size(); ++i)
+        out[i] /= diag[i];
 
     // finer_buff = P_l * inv(P_l^T W P_l) * P_l^T * in
     finer_buff.SetSize(P_L2[l]->Height());
-    P_L2[l]->Mult(PTin, finer_buff);
+    P_L2[l]->Mult(out, finer_buff);
 
+    // resizing out back to the finer level size and computing
     // out = W_l * finer_buff = W_l * P_l * inv(P_l^T W P_l) * P_l^T * in
     out.SetSize(Mass_mat_lvls[l]->Height());
     Mass_mat_lvls[l]->Mult(finer_buff, out);
-
-    // re-computing PTin = P_l^T * in (second output)
-    PTin.SetSize(P_L2[l]->Width());
-    P_L2[l]->MultTranspose(in, PTin);
 
     return;
 }
@@ -3030,121 +2754,48 @@ void DivConstraintSolver::NewProjectFinerL2ToCoarser(int l, const Vector& in,
 // (*) All vectors are on dofs
 //
 // NEW DESCRIPTION:
-// Input: finer_lvl_proj (lives at level l)
-// finer_lvl_proj is an orthogonal L2 projection of the initial contraint right hand
+// Input: finer_proj (lives at level l)
+// In usage:
+// finer_proj is an orthogonal L2 projection of the initial contraint right hand
 // side onto the space of level l viewed as level l vector (unlike Q_l f from the theory)
 //
-// Output 1: rhs_constr = Q_{l-1,l} finer_lvl_proj - finer_lvl_proj (lives at level l)
+// Output 1: rhs_constr = Q_{l-1,l} finer_proj - finer_proj (lives at level l)
 // where Q_{l-1,l} is orthogonal projection from level l to level (l-1), but the result
 // of the projection is viewed as a vector of the level l
 //
 // Q_{l-1,l} f action is computed by a call to NewProjectFinerL2ToCoarser
 //
-// Output 2: finer_lvl_proj = coarser_lvl_proj (lives at level l - 1) = P_l^T * Q_{l-1,l} finer_lvl_proj
-// which is a projection of the Q_{l-1,l} finer_lvl_proj (described above) onto the coarser
+// Output 2: finer_proj = coarser_proj (lives at level l - 1)
+//                          = P_l^T * Q_{l-1,l} finer_proj
+// which is a projection of the Q_{l-1,l} finer_proj (described above) onto the coarser
 // level (l-1)
 //
-// Buffers for intermediate results: coarser_lvl_proj and finer_buff
-// Notice: finer_lvl_proj, rhs_constr, finer_buff and coarser_lvl_proj change their sizes
+// Buffers for intermediate results: coarser_proj and finer_buff
+// Notice: finer_proj, rhs_constr, finer_buff and coarser_proj change their sizes
 
-void DivConstraintSolver::ComputeLocalRhsConstr(int l, Vector& finer_lvl_proj,
-                                                Vector& rhs_constr, Vector& coarser_lvl_proj,
+void DivConstraintSolver::ComputeLocalRhsConstr(int l, Vector& finer_proj,
+                                                Vector& rhs_constr, Vector& coarser_proj,
                                                 Vector& finer_buff) const
 {
-    // 1. rhs_constr = Q_{l-1,l} * finer_lvl_proj
-    /////////////// and coarser_lvl_proj = P_l^T * Q_l * f
-    NewProjectFinerL2ToCoarser(l, finer_lvl_proj, coarser_lvl_proj, rhs_constr, finer_buff);
+    // 1. rhs_constr = Q_{l-1,l} * finer_proj
+    NewProjectFinerL2ToCoarser(l, finer_proj, rhs_constr, finer_buff);
 
-    // coarser_lvl_proj = P_l^T  * Q_{l-1,l} * finer_lvl_proj
-    P_L2[l]->MultTranspose(rhs_constr, coarser_lvl_proj);
+    // coarser_proj = P_l^T  * Q_{l-1,l} * finer_proj
+    coarser_proj.SetSize(P_L2[l]->Width());
+    P_L2[l]->MultTranspose(rhs_constr, coarser_proj);
 
-    // 2. rhs_constr = Q_l f - Q_{l-1}f
-    rhs_constr -= finer_lvl_proj;
+    // 2. rhs_constr =  Q_{l-1,l} * finer_proj - finer_proj (finer_proj yet unchanged)
+    rhs_constr -= finer_proj;
 
-    // 3. rhs_constr (new) := - rhs_constr(old) (i.e. Q_{l-1} f - Q_l f)
+    // 3. sign switch for rhs_constr
     rhs_constr *= -1;
 
-    // 4. updating finer_lvl_proj (new) = coarser_lvl_proj
-    finer_lvl_proj.SetSize(coarser_lvl_proj.Size());
-    finer_lvl_proj = coarser_lvl_proj;
+    // 4. updating finer_proj (new) = coarser_proj
+    finer_proj.SetSize(coarser_proj.Size());
+    finer_proj = coarser_proj;
 
     return;
 }
-
-#else
-// Takes a vector on the level l and computes:
-// 1) ProjTin = P_l^T * in (live on the coarser level)
-// 2) out = P_l * inv(P_l^T P_l) * P_l^T * in which lives on the finer level l
-// but is a representation of the orthogonal L2-projection of the input onto the coarser level
-// UPD: The projector above works only when the mesh is uniform
-// UPD: Otherwise we need a modified projector:
-// UPD: out = W * P_l * inv(P_l^T W P_l) * P_l^T * in
-// TODO: Implement this for the case of higher-order discretizations
-// TODO: Then P_l^T W P_l will be block-diagonal and requires block-by-block inversion
-void DivConstraintSolver::ProjectFinerL2ToCoarser(int level, const Vector& in,
-                                                         Vector& ProjTin, Vector &out) const
-{
-    const SparseMatrix * Proj = P_L2[level];
-
-#ifdef MYDEBUG
-    const SparseMatrix * ProjT = Transpose(*Proj);
-    SparseMatrix * temp = mfem::Mult(*ProjT, *Proj, NULL);
-    Vector diag;
-    temp->GetDiag(diag);
-    for (int i = 0; i < diag.Size(); ++i)
-        if (fabs(diag[i] - AE_e[level]->RowSize(i)) > 1.0e-5)
-            std::cout << "Found a difference for i = " << i << ": "
-                      << diag[i] << " != " << AE_e[level]->RowSize(i) << "\n";
-#endif
-
-    ProjTin.SetSize(Proj->Width());
-    Proj->MultTranspose(in, ProjTin);
-
-    const SparseMatrix * AE_e_lvl = AE_e[level];
-    for ( int i = 0; i < ProjTin.Size(); ++i)
-        ProjTin[i] /= AE_e_lvl->RowSize(i) * 1.;
-
-    out.SetSize(Proj->Height());
-    Proj->Mult(ProjTin, out);
-
-    // We need either to use additional memory for storing
-    // result of the previous division in a temporary vector or
-    // to multiply the output (ProjTin) back as in the loop below
-    // in order to get correct output ProjTin in the end
-    for ( int i = 0; i < ProjTin.Size(); ++i)
-        ProjTin[i] *= AE_e_lvl->RowSize(i);
-
-    return;
-}
-
-// Righthand side at level l is of the form:
-//   rhs_l = (Q_l - Q_{l+1}) where Q_k is an orthogonal L2-projector: W -> W_k
-// or, equivalently,
-//   rhs_l = (I - Q_{l-1,l}) rhs_{l-1},
-// where Q_{k,k+1} is an orthogonal L2-projector W_{k+1} -> W_k,
-// and rhs_{l-1} = Q_{l-1} f (setting Q_0 = Id)
-// (*) Uses PtQlminus1_f as an intermediate buffer
-// Input: Qlminus1_f
-// Output: Qlminus1_f, rhs_constr
-// (*) All vectors are on dofs
-void DivConstraintSolver::ComputeLocalRhsConstr(int level, Vector& Qlminus1_f,
-                                                Vector& rhs_constr, Vector& PtQlminus1_f) const
-{
-    // 1. rhs_constr = Q_{l-1,l} * Q_{l-1} * f = Q_l * f
-    //    PtQlminus1_f = P_l^T * Q_{l-1} * f
-    ProjectFinerL2ToCoarser(level, Qlminus1_f, PtQlminus1_f, rhs_constr);
-
-    // 2. rhs_constr = Q_l f - Q_{l-1}f
-    rhs_constr -= Qlminus1_f;
-
-    // 3. rhs_constr (new) = - rhs_constr(old) = Q_{l-1} f - Q_l f
-    rhs_constr *= -1;
-
-    // 3. Q_{l-1} (new) = P_L2T[level] * f
-    Qlminus1_f = PtQlminus1_f;
-    return;
-}
-#endif
 
 #ifdef TIMING
 void HcurlGSSSmoother::ResetInternalTimings() const

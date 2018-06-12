@@ -35,9 +35,6 @@ namespace mfem
 // shouldn't be used anymore, we need a monolithic smoother
 //#define BLKDIAG_SMOOTHER
 
-#define NEW_THING
-
-
 // Checking routines used for debugging
 // Vector dot product assembled over MPI
 double ComputeMPIDotProduct(MPI_Comm comm, const Vector& vec1, const Vector& vec2);
@@ -486,19 +483,11 @@ protected:
     virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Computes rhs in the constraint for the finer levels (~ Q_l f - Q_lminus1 f)
-    // Should be called only during the first solver iterate (since it must be 0 at the next)
-
-#ifdef NEW_THING
     void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
                                Vector &coarser_lvl_proj, Vector& finer_buff) const;
-    void NewProjectFinerL2ToCoarser(int l, const Vector& in, Vector& PTout, Vector &out,
+
+    void NewProjectFinerL2ToCoarser(int l, const Vector& in, Vector &out,
                                     Vector& finer_buff) const;
-#else
-    void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
-                               Vector &workfvec) const;
-    void ProjectFinerL2ToCoarser(int level, const Vector& in, Vector &ProjTin,
-                                 Vector &out) const;
-#endif
 
     void UpdateTrueResidual(int level, const BlockVector* rhs_l, const BlockVector& solupd_l,
                             BlockVector& out_l) const;
