@@ -486,7 +486,7 @@ protected:
     void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
                                Vector &coarser_lvl_proj, Vector& finer_buff) const;
 
-public:
+protected:
     void NewProjectFinerL2ToCoarser(int l, const Vector& in, Vector &out,
                                     Vector& finer_buff) const;
 protected:
@@ -525,6 +525,14 @@ public:
     int Size() const {return size;}
 
     const CoarsestProblemSolver* GetCoarseSolver() const {return CoarseSolver;}
+
+    SparseMatrix * GetMassMatrix(int l)
+    {
+        if (own_data)
+            return Mass_mat_lvls[l];
+        else
+            return NULL;
+    }
 };
 
 class HcurlGSSSmoother : public BlockOperator

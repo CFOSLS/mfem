@@ -2179,9 +2179,9 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
     }
 
-    Mass_mat_lvls.SetSize(num_levels - 1);
+    Mass_mat_lvls.SetSize(num_levels);
 
-    for (int l = 0; l < num_levels - 1; ++l)
+    for (int l = 0; l < num_levels; ++l)
     {
         ParBilinearForm mass_form(hierarchy->GetSpace(SpaceName::L2, l));
         mass_form.AddDomainIntegrator(new MassIntegrator);
@@ -2248,7 +2248,7 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
     if (verbose)
         std::cout << "WARNING: Old DivConstraintSolver interface works only if at all levels mesh is uniform \n";
 
-    Mass_mat_lvls.SetSize(num_levels - 1);
+    Mass_mat_lvls.SetSize(num_levels);
     for (int i = 0; i < Mass_mat_lvls.Size(); ++i)
         Mass_mat_lvls[i] = NULL;
 

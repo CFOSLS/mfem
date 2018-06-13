@@ -476,6 +476,51 @@ int main(int argc, char *argv[])
    return 0;
 #endif
 
+#if 0
+   std::cout << "Special test 2! \n";
+
+   GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
+   hierarchy->ConstructDofTrueDofs();
+   hierarchy->ConstructDivfreeDops();
+
+   ParBilinearForm mass_coarse(hierarchy->GetSpace(SpaceName::L2, 0));
+   mass_coarse.AddDomainIntegrator(new MassIntegrator);
+   mass_coarse.Assemble();
+   mass_coarse.Finalize();
+   SparseMatrix * mass_coarse_spmat = mass_coarse.LoseMat();
+
+   // with uniform refinement it works
+   //hierarchy->GetFinestParMesh()->UniformRefinement();
+
+   // with non-uniform refinement it doesn't work
+   int nmarked = 5;
+   Array<int> els_to_refine(nmarked);
+   for (int i = 0; i < nmarked; ++i)
+       els_to_refine[i] = hierarchy->GetFinestParMesh()->GetNE()/2 + i;
+   hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
+
+   hierarchy->Update();
+
+
+   ParBilinearForm mass_fine(hierarchy->GetSpace(SpaceName::L2, 0));
+   mass_fine.AddDomainIntegrator(new MassIntegrator);
+   mass_fine.Assemble();
+   mass_fine.Finalize();
+   SparseMatrix * mass_fine_spmat = mass_fine.LoseMat();
+
+   SparseMatrix * P_L2 = hierarchy->GetPspace(SpaceName::L2, 0);
+
+   SparseMatrix * coarsened_mass_spmat = mfem::RAP(*P_L2, *mass_fine_spmat, *P_L2);
+
+   SparseMatrix diff(*coarsened_mass_spmat);
+   diff.Add(-1.0, *mass_coarse_spmat);
+
+   std::cout << "|| W_H - P^T W_h P || = " << diff.MaxNorm() << "\n";
+
+   MPI_Finalize();
+   return 0;
+#endif
+
 //#if 0
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
    hierarchy->ConstructDofTrueDofs();
@@ -716,6 +761,7 @@ int main(int argc, char *argv[])
 
 #ifdef MULTILEVEL_PARTSOL
    Vector * partsol_guess;
+   Vector * div_rhs;
 #endif
 
 #ifdef DEBUGGING_CASE
@@ -764,22 +810,32 @@ int main(int argc, char *argv[])
            *partsol_guess = 0.0;
        }
 
-       Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
+#ifdef PUREDIVCONSTRAINT
+       if (it == 0)
+       {
+           div_rhs = new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size());
+           *div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
+       }
+#else
+       div_rhs = &problem->GetRhs().GetBlock(numblocks - 1);
+#endif
+
+       //div_rhs = &problem->GetRhs().GetBlock(numblocks - 1);
 
        if (verbose && it == 0)
-           std::cout << "div_rhs norm = " << div_rhs.Norml2() / sqrt (div_rhs.Size()) << "\n";
+           std::cout << "div_rhs norm = " << div_rhs->Norml2() / sqrt (div_rhs->Size()) << "\n";
 
 #ifdef DEBUGGING_CASE
        if (it == 0)
        {
-           checkdiff = new Vector(div_rhs.Size());
-           *checkdiff = div_rhs;
+           checkdiff = new Vector(div_rhs->Size());
+           *checkdiff = *div_rhs;
        }
 
        if (it == 1)
        {
            Vector temp(hierarchy->GetTruePspace(SpaceName::L2,0)->Width());
-           hierarchy->GetTruePspace(SpaceName::L2,0)->MultTranspose(div_rhs, temp);
+           hierarchy->GetTruePspace(SpaceName::L2,0)->MultTranspose(*div_rhs, temp);
            *checkdiff -= temp;
 
            checkdiff->Print();
@@ -815,16 +871,16 @@ int main(int argc, char *argv[])
 #ifdef PUREDIVCONSTRAINT
        BlockVector partsol_vec(special_problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
-       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, *div_rhs, verbose);
        //if (it == 0)
-           //partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+           //partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, *div_rhs, verbose);
        //else
-           //partsol_finder->UpdateAtFinestLevel(*partsol_guess, partsol_vec, div_rhs, verbose);
+           //partsol_finder->UpdateAtFinestLevel(*partsol_guess, partsol_vec, *div_rhs, verbose);
        true_partsol.GetBlock(0) = partsol_vec.GetBlock(0);
 #else
        BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
-       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, *div_rhs, verbose);
 
        for (int i = 0; i < numblocks_funct; ++i)
            true_partsol.GetBlock(i) = partsol_vec.GetBlock(i);
@@ -833,14 +889,14 @@ int main(int argc, char *argv[])
 #else // not a multilevel particular solution finder
        HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(2,0));
        Vector& div_rhs = problem->GetRhs().GetBlock(2);
-       ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, div_rhs, verbose);
+       ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, *div_rhs, verbose);
        partsigma->ParallelProject(true_partsol.GetBlock(0));
 #endif
        // a check that the particular solution does satisfy the divergence constraint after all
        HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks_funct, 0));
        Vector tempc(Constr.Height());
        Constr.Mult(partsol_vec.GetBlock(0), tempc);
-       tempc -= problem->GetRhs().GetBlock(numblocks_funct);
+       tempc -= *div_rhs;//problem->GetRhs().GetBlock(numblocks_funct);
        double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
        MFEM_ASSERT (res_constr_norm < 1.0e-12, "");
 
@@ -1185,85 +1241,6 @@ int main(int argc, char *argv[])
        //     used to determine if a stopping criterion was met.
 
 #ifdef AMR
-       // studying the missing factors as Jeff suggested
-       /*
-       BlockVector * exact_sol_proj = problem->GetExactSolProj();
-       Vector true_errors(problem->GetParMesh()->GetNE());
-       true_errors = 0.0;
-       FOSLS_test * test = problem->GetFEformulation().GetFormulation()->GetTest();
-
-       for (int blk = 0; blk < problem->GetFEformulation().Nunknowns(); ++blk)
-       {
-           const FiniteElement *fe;
-           ElementTransformation *T;
-
-           ParFiniteElementSpace * pfes = problem->GetPfes(blk);
-           ParGridFunction * sol_blk_pgfun = new ParGridFunction(pfes);
-           sol_blk_pgfun->SetFromTrueDofs(exact_sol_proj->GetBlock(blk));
-
-           for (int i = 0; i < pfes->GetNE(); i++)
-           {
-              double error_i = 0.0;
-              fe = pfes->GetFE(i);
-              const IntegrationRule *ir;
-              int intorder = 2*fe->GetOrder() + 1; // <----------
-              ir = &(IntRules.Get(fe->GetGeomType(), intorder));
-
-              if (blk == 0) // ~ sigma
-              {
-                  DenseMatrix vals, exact_vals;
-                  Vector loc_errs;
-
-                  T = pfes->GetElementTransformation(i);
-                  sol_blk_pgfun->GetVectorValues(*T, *ir, vals);
-                  test->GetSigma()->Eval(exact_vals, *T, *ir);
-                  vals -= exact_vals;
-                  loc_errs.SetSize(vals.Width());
-                  // compute the lengths of the errors at the integration points
-                  // thus the vector norm is rotationally invariant
-                  vals.Norm2(loc_errs);
-
-                  for (int j = 0; j < ir->GetNPoints(); j++)
-                  {
-                     const IntegrationPoint &ip = ir->IntPoint(j);
-                     T->SetIntPoint(&ip);
-                     double err;
-                     err = loc_errs[j];
-
-                     err = pow(err, 2);
-                     error_i += ip.weight * T->Weight() * err;
-                  }
-
-              }
-              else // blk = 1 ~ u
-              {
-                  Vector vals;
-
-                  sol_blk_pgfun->GetValues(i, *ir, vals);
-                  T = pfes->GetElementTransformation(i);
-                  for (int j = 0; j < ir->GetNPoints(); j++)
-                  {
-                     const IntegrationPoint &ip = ir->IntPoint(j);
-                     T->SetIntPoint(&ip);
-                     double err;
-                     err = fabs(vals(j) - test->GetU()->Eval(*T, ip));
-
-                     err = pow(err, 2);
-                     error_i += ip.weight * T->Weight() * err;
-                  }
-
-              }
-
-              error_i = sqrt (error_i);
-
-              true_errors[i] += error_i;
-           }
-       }
-
-       //true_errors.Print();
-       */
-
-
        int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
 
        // testing with only 1 element marked for refinement
@@ -1284,35 +1261,6 @@ int main(int argc, char *argv[])
            std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
-
-       /*
-       if (it > 0)
-       {
-           std::cout << "Manually interrupting \n";
-           MPI_Finalize();
-           return 0;
-       }
-       */
-
-       // continue studying the missing factors as Jeff suggested
-       /*
-       const Vector& local_errors = estimator->GetLocalErrors();
-
-       Vector ratios(local_errors.Size());
-       for (int i = 0; i < ratios.Size(); ++i)
-           if (fabs(true_errors[i]) > 1.0e-10 )
-               ratios[i] = local_errors[i] / true_errors[i];
-           else
-               ratios[i] = 0.0;
-
-       std::cout << "(estimator/error) ratios norm = " <<
-                    ratios.Norml2() / sqrt (ratios.Size()) << "\n";
-
-       for (int i = 0; i < local_errors.Size(); ++i)
-           std::cout << "i: " << i << ", local_error = " << local_errors[i] <<
-                        ", true_error = " << true_errors[i] <<
-                        ", ratio = " << ratios[i] << "\n";
-       */
 
        if (visualization)
        {
@@ -1351,7 +1299,6 @@ int main(int argc, char *argv[])
        ReplaceBlockByIdentityHpmat(*special_problem->GetOp(), 0);
 #endif
 
-
 #ifdef DIVFREE_SETUP
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
@@ -1365,21 +1312,41 @@ int main(int argc, char *argv[])
 #endif // endif for MULTILEVEL_PARTSOL
 #endif // endif for DIVFREE_SETUP
 
+
 #ifdef MULTILEVEL_PARTSOL
        delete partsol_guess;
 
-#ifdef CLEVER_STARTING_PARTSOL
+#ifdef      CLEVER_STARTING_PARTSOL
        partsol_guess = new Vector(partsol_finder->Size());
 
-#ifdef PUREDIVCONSTRAINT
+#ifdef          PUREDIVCONSTRAINT
        specialprob_hierarchy->GetHierarchy().GetTruePspace((*space_names_funct)[0], 0)
                ->Mult(partsol_vec.GetBlock(0), *partsol_guess);
+       Vector tempvec(div_rhs->Size());
+       tempvec = *div_rhs;
+       delete div_rhs;
+       div_rhs = new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size());
+       // 1st
+       //Vector finer_buff(div_rhs->Size());
+       //partsol_finder->NewProjectFinerL2ToCoarser(0, tempvec, *div_rhs, finer_buff);
+       // 2nd
+       //specialprob_hierarchy->GetHierarchy().GetTruePspace(SpaceName::L2, 0)->Mult(tempvec, *div_rhs);
+       // 3rd
+       Vector mass_coarse_diag;
+       partsol_finder->GetMassMatrix(1)->GetDiag(mass_coarse_diag);
+       for (int i = 0; i < tempvec.Size(); ++i)
+           tempvec[i] /= mass_coarse_diag[i];
+       specialprob_hierarchy->GetHierarchy().GetTruePspace(SpaceName::L2, 0)->Mult(tempvec, *div_rhs);
+       Vector mass_fine_diag;
+       partsol_finder->GetMassMatrix(0)->GetDiag(mass_fine_diag);
+       for (int i = 0; i < div_rhs->Size(); ++i)
+           (*div_rhs)[i] *= mass_fine_diag[i];
 #else
        BlockVector partsol_guess_viewer(partsol_guess->GetData(), problem->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            prob_hierarchy->GetHierarchy().GetTruePspace((*space_names_funct)[blk], 0)
                    ->Mult(partsol_vec.GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
-#endif
+#endif // for PUREDIVCONSTRAINT
 #endif // for CLEVER_STARTING_PARTSOL
 
 #endif // for MULTILEVEL_PARTSOL
