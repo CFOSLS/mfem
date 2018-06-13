@@ -2635,13 +2635,24 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
         // setting up rhs from the functional for the next (coarser) level
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
+        if (verbose)
+            std::cout << "update at level " << l << " norm = " <<
+                         truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls[l]->Size()) << "\n";
+
     } // end of loop over finer levels
 
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
 
+    if (verbose)
+        std::cout << "coarse rhs_constr norm = " << rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
+
     // 2.5 solve coarse problem
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
+
+    if (verbose)
+        std::cout << "coarse update norm = " << truesolupdate_lvls[num_levels - 1]->Norml2()
+                     / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =

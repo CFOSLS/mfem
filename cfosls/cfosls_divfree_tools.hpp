@@ -486,8 +486,10 @@ protected:
     void ComputeLocalRhsConstr(int level, Vector &Qlminus1_f, Vector &rhs_constr,
                                Vector &coarser_lvl_proj, Vector& finer_buff) const;
 
+public:
     void NewProjectFinerL2ToCoarser(int l, const Vector& in, Vector &out,
                                     Vector& finer_buff) const;
+protected:
 
     void UpdateTrueResidual(int level, const BlockVector* rhs_l, const BlockVector& solupd_l,
                             BlockVector& out_l) const;

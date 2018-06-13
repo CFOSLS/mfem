@@ -40,13 +40,16 @@
 //#define USE_GS_PREC
 
 // changes the particular solution problem to a pure div sigma = f problem
-//#define PUREDIVCONSTRAINT
+#define PUREDIVCONSTRAINT
 
 #define MULTILEVEL_PARTSOL
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
 #define CLEVER_STARTING_PARTSOL
+
+#define DEBUGGING_CASE
+
 
 using namespace std;
 using namespace mfem;
@@ -715,6 +718,10 @@ int main(int argc, char *argv[])
    Vector * partsol_guess;
 #endif
 
+#ifdef DEBUGGING_CASE
+   Vector * checkdiff;
+#endif
+
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
@@ -757,19 +764,68 @@ int main(int argc, char *argv[])
            *partsol_guess = 0.0;
        }
 
+       Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
+
+       if (verbose && it == 0)
+           std::cout << "div_rhs norm = " << div_rhs.Norml2() / sqrt (div_rhs.Size()) << "\n";
+
+#ifdef DEBUGGING_CASE
+       if (it == 0)
+       {
+           checkdiff = new Vector(div_rhs.Size());
+           *checkdiff = div_rhs;
+       }
+
+       if (it == 1)
+       {
+           Vector temp(hierarchy->GetTruePspace(SpaceName::L2,0)->Width());
+           hierarchy->GetTruePspace(SpaceName::L2,0)->MultTranspose(div_rhs, temp);
+           *checkdiff -= temp;
+
+           checkdiff->Print();
+
+           if (verbose)
+               std::cout << "|| f_H - P^T f_h || " <<
+                            checkdiff->Norml2() / sqrt (checkdiff->Size()) << "\n";
+
+           /*
+           *checkdiff += temp;
+           Vector temp2;
+           Vector finer_buff;
+           // temp2 = Qh_1 f_h, living on the fine level
+           partsol_finder->NewProjectFinerL2ToCoarser(0, div_rhs, temp2, finer_buff);
+
+           // temp = P^T  * temp2
+           hierarchy->GetTruePspace(SpaceName::L2,0)->MultTranspose(temp2, temp);
+           *checkdiff -= temp;
+
+           if (verbose)
+               std::cout << "|| f_H - P^T Qh_1 f_h || " <<
+                            checkdiff->Norml2() / sqrt (checkdiff->Size()) << "\n";
+           */
+       }
+
+       if (it == 2)
+       {
+           MPI_Finalize();
+           return 0;
+       }
+#endif
+
 #ifdef PUREDIVCONSTRAINT
        BlockVector partsol_vec(special_problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
+       partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+       //if (it == 0)
+           //partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
+       //else
+           //partsol_finder->UpdateAtFinestLevel(*partsol_guess, partsol_vec, div_rhs, verbose);
+       true_partsol.GetBlock(0) = partsol_vec.GetBlock(0);
 #else
        BlockVector partsol_vec(problem->GetTrueOffsetsFunc());
        MFEM_ASSERT(partsol_vec.Size() == partsol_finder->Size(), "Something went wrong");
-#endif
-       Vector& div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
        partsol_finder->FindParticularSolution(*partsol_guess, partsol_vec, div_rhs, verbose);
 
-#ifdef PUREDIVCONSTRAINT
-       true_partsol.GetBlock(0) = partsol_vec.GetBlock(0);
-#else
        for (int i = 0; i < numblocks_funct; ++i)
            true_partsol.GetBlock(i) = partsol_vec.GetBlock(i);
 #endif
