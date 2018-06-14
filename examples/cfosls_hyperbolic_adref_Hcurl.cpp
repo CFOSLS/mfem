@@ -27,7 +27,7 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
@@ -50,6 +50,8 @@
 
 //#define DEBUGGING_CASE
 
+// is wrong, because the inflow for a rotation when the space domain is [-1,1]^2 is actually two corners
+// and one has to split bdr attributes for the faces, which is quite a pain
 #define CYLINDER_CUBE_TEST
 
 using namespace std;
@@ -74,12 +76,11 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -3;
+    int numsol          = -33;
 
 #ifdef CYLINDER_CUBE_TEST
     numsol = 8;
 #endif
-
 
     int ser_ref_levels  = 3;
     int par_ref_levels  = 0;
@@ -474,18 +475,27 @@ int main(int argc, char *argv[])
 
    if (strcmp(space_for_S,"L2") == 0)
    {
+       *bdr_attribs_data[0] = 1;
+       (*bdr_attribs_data[0])[5] = 0;
+       /*
        *bdr_attribs_data[0] = 0;
        (*bdr_attribs_data[0])[0] = 1;
        (*bdr_attribs_data[0])[2] = 1;
        (*bdr_attribs_data[0])[3] = 1;
+       */
    }
    else // S from H^1
    {
+       *bdr_attribs_data[0] = 0;
+       *bdr_attribs_data[1] = 1;
+       (*bdr_attribs_data[1])[5] = 0;
+       /*
        *bdr_attribs_data[0] = 0;
        *bdr_attribs_data[1] = 0;
        (*bdr_attribs_data[1])[0] = 1;
        (*bdr_attribs_data[1])[2] = 1;
        (*bdr_attribs_data[1])[3] = 1;
+       */
    }
    *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
 
@@ -1253,7 +1263,10 @@ int main(int argc, char *argv[])
 
       BlockVector& problem_sol = problem->GetSol();
       if (compute_error)
+      {
           problem->ComputeError(problem_sol, verbose, true);
+          problem->ComputeBndError(problem_sol);
+      }
 
       // special testing cheaper preconditioners!
       /*

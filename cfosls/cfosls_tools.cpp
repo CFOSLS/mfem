@@ -1972,7 +1972,8 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
         std::cout << "|| sigma_h - L(S_h) || = " << sqrt(globalFunctional) << "\n";
         std::cout << "Energy Error = " << sqrt(globalFunctional + err_div * err_div) << "\n";
-        std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
+        if (fabs(norm_div > 1.0e-13))
+            std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
                      / norm_div << "\n";
     }
 
@@ -1992,9 +1993,17 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
         cout << "Sum of local mass = " << mass << "\n";
 
     Vector TempL2(L2_space->TrueVSize());
-    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(1,0));
     Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+
+    /*
+    for (int i = 0; i < TempL2.Size(); ++i)
+        if (fabs(TempL2[i]) > 1.0e-13 || fabs(Rhs[i]) > 1.0e-13)
+            std::cout << "index " << i << ": div sigma = " << TempL2[i] << ", rhs = " << Rhs[i] << "\n";
+    */
+
     TempL2 -= Rhs;
+
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
