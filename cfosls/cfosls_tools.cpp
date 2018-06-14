@@ -2172,7 +2172,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
         cout << "Sum of local mass = " << mass << "\n";
 
     Vector TempL2(L2_space->TrueVSize());
-    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(2,0));
     Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
     TempL2 -= Rhs;
     double mass_loss_loc = TempL2.Norml1();
@@ -2454,7 +2454,7 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
         cout << "Sum of local mass = " << mass << "\n";
 
     Vector TempL2(L2_space->TrueVSize());
-    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(2,0));
     Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
     TempL2 -= Rhs;
     double mass_loss_loc = TempL2.Norml1();
@@ -2621,7 +2621,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
         cout << "Sum of local mass = " << mass << "\n";
 
     Vector TempL2(L2_space->TrueVSize());
-    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(2,0));
     Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
     TempL2 -= Rhs;
     double mass_loss_loc = TempL2.Norml1();
@@ -2787,7 +2787,7 @@ void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
         cout << "Sum of local mass = " << mass << "\n";
 
     Vector TempL2(L2_space->TrueVSize());
-    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop->GetBlock(2,0));
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(2,0));
     Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
     TempL2 -= Rhs;
     double mass_loss_loc = TempL2.Norml1();
