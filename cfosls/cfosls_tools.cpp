@@ -234,9 +234,11 @@ void BdrConditions::Set(const std::vector<Array<int>* >& bdr_attribs_)
     for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
     {
         bdr_attribs[i] = new Array<int>(bdr_attribs_[i]->Size());
-        for (int j = 0; j < bdr_attribs_[j]->Size(); ++j)
+        for (int j = 0; j < bdr_attribs_[i]->Size(); ++j)
             (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
     }
+
+    initialized = true;
 }
 
 
@@ -5470,14 +5472,6 @@ void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
 
     }
 }
-
-template<typename T> void ConvertSTDvecToArray(std::vector<T>& stdvector, Array<int>& array_)
-{
-    array_.SetSize((int) (stdvector.size()));
-    for (int i = 0; i < array_.Size(); ++i)
-        array_[i] = stdvector[i];
-}
-
 
 /*
 // self-written copy routine for HypreParMatrices

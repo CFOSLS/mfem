@@ -21,9 +21,6 @@ namespace mfem
 
 class FOSLSEstimator;
 
-template<typename T> void ConvertSTDvecToArray(std::vector<T>& stdvector, Array<int>& array_);
-
-
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
@@ -55,7 +52,7 @@ public:
 
 // a class for square block operators where each block is given as a HypreParMatrix
 // used as an interface to handle coarsened operators for multigrid
-// FIXME: Who should delete the matrices?
+// TODO: Who should delete the matrices?
 class BlkHypreOperator : public Operator
 {
 protected:

@@ -31,25 +31,26 @@
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-#define DIVFREE_SETUP
+//#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
-#define CLEVER_STARTING_GUESS
+//#define CLEVER_STARTING_GUESS
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
 //#define USE_GS_PREC
 
 // changes the particular solution problem to a pure div sigma = f problem
-#define PUREDIVCONSTRAINT
+//#define PUREDIVCONSTRAINT
 
-#define MULTILEVEL_PARTSOL
+//#define MULTILEVEL_PARTSOL
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
-#define CLEVER_STARTING_PARTSOL
+//#define CLEVER_STARTING_PARTSOL
 
-#define DEBUGGING_CASE
+//#define DEBUGGING_CASE
 
+#define CYLINDER_CUBE_TEST
 
 using namespace std;
 using namespace mfem;
@@ -62,7 +63,7 @@ BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, 
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 0;
+    bool visualization = 1;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -74,6 +75,11 @@ int main(int argc, char *argv[])
 
     int nDimensions     = 3;
     int numsol          = -3;
+
+#ifdef CYLINDER_CUBE_TEST
+    numsol = 8;
+#endif
+
 
     int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
@@ -210,6 +216,11 @@ int main(int argc, char *argv[])
     //mesh_file = "../data/pmesh_check.mesh";
     mesh_file = "../data/cube_3d_moderate.mesh";
 
+#ifdef CYLINDER_CUBE_TEST
+    if (verbose)
+        std::cout << "WARNING: CYLINDER_CUBE_TEST works only when the domain is a cube [0,1]! \n";
+#endif
+
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -265,6 +276,22 @@ int main(int argc, char *argv[])
 #else
     if (verbose)
         std::cout << "MULTILEVEL_PARTSOL passive \n";
+#endif
+
+#ifdef PUREDIVCONSTRAINT
+    if (verbose)
+        std::cout << "PUREDIVCONSTRAINT active \n";
+#else
+    if (verbose)
+        std::cout << "PUREDIVCONSTRAINT passive \n";
+#endif
+
+#ifdef CYLINDER_CUBE_TEST
+    if (verbose)
+        std::cout << "CYLINDER_CUBE_TEST active \n";
+#else
+    if (verbose)
+        std::cout << "CYLINDER_CUBE_TEST passive \n";
 #endif
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
@@ -327,13 +354,48 @@ int main(int argc, char *argv[])
        pmesh->UniformRefinement();
     }
 
+    int dim = nDimensions;
+
+#ifdef CYLINDER_CUBE_TEST
+    Vector vert_coos;
+    pmesh->GetVertices(vert_coos);
+    int nv = pmesh->GetNV();
+    for (int vind = 0; vind < nv; ++vind)
+    {
+        for (int j = 0; j < dim; ++j)
+        {
+            if (j < dim - 1) // shift only in space
+            {
+                // translation by -0.5 in space variables
+                vert_coos(j*nv + vind) -= 0.5;
+                // dilation so that the resulting mesh covers [-1,1] ^d in space
+                vert_coos(j*nv + vind) *= 2.0;
+            }
+        }
+    }
+    pmesh->SetVertices(vert_coos);
+
+    /*
+    std::stringstream fname;
+    fname << "checkmesh.mesh";
+    std::ofstream ofid(fname.str().c_str());
+    ofid.precision(8);
+    pmesh->Print(ofid);
+
+    MPI_Finalize();
+    return 0;
+    */
+
+#endif
+
+
+
     //if(dim==3) pmesh->ReorientTetMesh();
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
     // 6. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
-    int dim = nDimensions;
 
     int numblocks = 1;
 
@@ -351,6 +413,83 @@ int main(int argc, char *argv[])
    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+
+#ifdef CYLINDER_CUBE_TEST
+   delete bdr_conds;
+   MFEM_ASSERT(pmesh->bdr_attributes.Max() == 6, "For CYLINDER_CUBE_TEST there must be"
+                                                 " a bdr aittrbute for each face");
+
+   /*
+   for (int beind = 0; beind < pmesh->GetNBE(); ++beind)
+   {
+       Element * bel = pmesh->GetBdrElement(beind);
+       int nverts = bel->GetNVertices();
+       Array<int> belverts;
+       bel->GetVertices(belverts);
+
+       double vert_av[dim];
+
+       for (int coo = 0; coo < dim; ++coo)
+           vert_av[coo] = 0.0;
+
+       for (int i = 0; i < nverts; ++i)
+       {
+           double * vertcoos = pmesh->GetVertex(belverts[i]);
+           for (int coo = 0; coo < dim; ++coo)
+               vert_av[coo] += vertcoos[coo];
+       }
+
+       for (int coo = 0; coo < dim; ++coo)
+           vert_av[coo] /= nverts;
+
+       for (int coo = 0; coo < dim; ++coo)
+       {
+           bool found = true;
+           for (int i = 0; i < nverts; ++i)
+           {
+               double * vertcoos = pmesh->GetVertex(belverts[i]);
+               if (fabs(vert_av[coo] - vertcoos[coo]) > 1.0e-14)
+                   found = false;
+           }
+
+           if (found)
+           {
+               std::cout << "bdr attr: " << pmesh->GetBdrAttribute(beind) <<
+                            " coo No. " << coo << " is constant = " << vert_av[coo] << "\n";
+           }
+
+       }
+   }
+
+   MPI_Finalize();
+   return 0;
+   */
+
+   std::vector<Array<int>* > bdr_attribs_data(formulat->Nblocks());
+   for (int i = 0; i < formulat->Nblocks(); ++i)
+       bdr_attribs_data[i] = new Array<int>(pmesh->bdr_attributes.Max());
+
+   if (strcmp(space_for_S,"L2") == 0)
+   {
+       *bdr_attribs_data[0] = 0;
+       (*bdr_attribs_data[0])[0] = 1;
+       (*bdr_attribs_data[0])[2] = 1;
+       (*bdr_attribs_data[0])[3] = 1;
+   }
+   else // S from H^1
+   {
+       *bdr_attribs_data[0] = 0;
+       *bdr_attribs_data[1] = 0;
+       (*bdr_attribs_data[1])[0] = 1;
+       (*bdr_attribs_data[1])[2] = 1;
+       (*bdr_attribs_data[1])[3] = 1;
+   }
+   *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
+
+   bdr_conds = new BdrConditions(*pmesh, formulat->Nblocks());
+   bdr_conds->Set(bdr_attribs_data);
+#endif
+
 #ifdef DIVFREE_SETUP
    DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
    DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
