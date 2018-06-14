@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
 #endif
 
 
-    int ser_ref_levels  = 2;
+    int ser_ref_levels  = 3;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -371,6 +371,9 @@ int main(int argc, char *argv[])
                 // dilation so that the resulting mesh covers [-1,1] ^d in space
                 vert_coos(j*nv + vind) *= 2.0;
             }
+            // dilation in time so that final time interval is [0,2]
+            if (j == dim - 1)
+                vert_coos(j*nv + vind) *= 2.0;
         }
     }
     pmesh->SetVertices(vert_coos);

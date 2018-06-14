@@ -1758,7 +1758,32 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
 
     Vector trueS(C->Height());
 
+    /*
+    void CG(const Operator &A, const Vector &b, Vector &x,
+            int print_iter, int max_num_iter,
+            double RTOLERANCE, double ATOLERANCE)
+    {
+       CGSolver cg;
+       cg.SetPrintLevel(print_iter);
+       cg.SetMaxIter(max_num_iter);
+       cg.SetRelTol(sqrt(RTOLERANCE));
+       cg.SetAbsTol(sqrt(ATOLERANCE));
+       cg.SetOperator(A);
+       cg.Mult(b, x);
+    }
     CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+    */
+
+    CGSolver cg;
+    cg.SetPrintLevel(0);
+    cg.SetMaxIter(5000);
+    cg.SetRelTol(sqrt(1.0e-12));
+    cg.SetAbsTol(sqrt(1.0e-15));
+    cg.SetOperator(*C);
+    cg.iterative_mode = false;
+
+    cg.Mult(bTsigma, trueS);
+
 
     ParGridFunction S(L2_space);
     S.Distribute(trueS);
@@ -1814,7 +1839,17 @@ ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
 
     Vector trueS(C->Height());
 
-    CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+    //CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+    CGSolver cg;
+    cg.SetPrintLevel(0);
+    cg.SetMaxIter(5000);
+    cg.SetRelTol(sqrt(1.0e-12));
+    cg.SetAbsTol(sqrt(1.0e-15));
+    cg.SetOperator(*C);
+    cg.iterative_mode = false;
+
+    cg.Mult(bTsigma, trueS);
 
     ParGridFunction * S = new ParGridFunction(L2_space);
     S->Distribute(trueS);
