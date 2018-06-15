@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    int ser_ref_levels  = 4;
+    int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -139,7 +139,7 @@ int main(int argc, char *argv[])
     //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
     //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
 
-    int feorder         = 0;
+    int feorder         = 1;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
@@ -209,6 +209,13 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Running tests for the paper: \n";
 
+    if (feorder > 1)
+    {
+        if (verbose)
+            std::cout << "WARNING: For Nedelec f.e. we need to call ReorientTetMesh for the inital mesh "
+                         "when feorder > 1. However, current MFEM implementation then does not allow "
+                         "to call UniformRefinement(), the code fails inside STable3D::operator()";
+    }
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
@@ -392,9 +399,12 @@ int main(int argc, char *argv[])
 
 #endif
 
-
-
-    //if(dim==3) pmesh->ReorientTetMesh();
+    if (dim == 3 && feorder > 0)
+    {
+        if (verbose)
+            std::cout << "Calling ReorientTetMesh in 3D since feorder is more than 0 \n";
+        pmesh->ReorientTetMesh();
+    }
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
