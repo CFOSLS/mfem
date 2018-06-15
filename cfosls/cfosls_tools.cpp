@@ -572,6 +572,21 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
     initialized_forms = true;
 }
 
+/*
+MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
+                                                 bool optimized_localsolve)
+    : hierarchy(hierarchy_), problem
+{
+
+}
+
+void MultigridToolsHierarchy::Update(bool recoarsen)
+{
+    MFEM_ABORT("Not implemented \n");
+
+}
+*/
+
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),

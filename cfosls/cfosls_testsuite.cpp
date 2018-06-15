@@ -995,6 +995,9 @@ double divsigmaTemplate_hyper(const Vector& xt)
         res += b(i) * gradS(i);
     res += divbfunc(xt) * S(xt);
 
+    //if (fabs(res) > 1.0e-13)
+        //std::cout << "error if solution is the clyndric test \n";
+
     return res;
 }
 
@@ -1385,6 +1388,13 @@ double uFunCylinder_ex(const Vector& xt)
     Vector xvec(2);
     xvec(0) = r * cos (teta - t);
     xvec(1) = r * sin (teta - t);
+
+    double alt = exp( -100.0 * ( ( x*cos(t) + y*sin(t) -0.5)*( x*cos(t) + y*sin(t) -0.5)
+                                 + (y * cos(t) - x * sin(t) )*(y * cos(t) - x * sin(t) ) ));
+
+    if (fabs(GaussianHill(xvec) - alt) > 1.0e-13 )
+        std::cout << "Error \n";
+
     return GaussianHill(xvec);
 }
 

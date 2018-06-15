@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    int ser_ref_levels  = 3;
+    int ser_ref_levels  = 4;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"

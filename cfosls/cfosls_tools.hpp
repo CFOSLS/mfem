@@ -1059,6 +1059,21 @@ public:
     void Update();
 };
 
+/*
+class MultigridToolsHierarchy
+{
+protected:
+    GeneralHierarchy& hierarchy;
+    FOSLSProblem& problem;
+protected:
+    Array<LocalProblemSolver*> SchwarzSmoothers_lvls;
+    Array<HcurlGSSSmoother*> HcurlGSSSmoothers_lvls;
+public:
+    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_, bool optimized_localsolve);
+    void Update(bool recoarsen);
+};
+*/
+
 // class for general CFOSLS problem
 class FOSLSProblem
 {
