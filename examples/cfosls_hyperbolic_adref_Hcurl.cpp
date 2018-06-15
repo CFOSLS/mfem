@@ -27,7 +27,7 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-//#define AMR
+#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
@@ -208,14 +208,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Running tests for the paper: \n";
-
-    if (feorder > 1)
-    {
-        if (verbose)
-            std::cout << "WARNING: For Nedelec f.e. we need to call ReorientTetMesh for the inital mesh "
-                         "when feorder > 1. However, current MFEM implementation then does not allow "
-                         "to call UniformRefinement(), the code fails inside STable3D::operator()";
-    }
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
@@ -399,12 +391,18 @@ int main(int argc, char *argv[])
 
 #endif
 
+#ifdef DIVFREE_SETUP
     if (dim == 3 && feorder > 0)
     {
+        if (verbose)
+            std::cout << "WARNING: For Nedelec f.e. we need to call ReorientTetMesh for the inital mesh "
+                         "when feorder > 1. However, current MFEM implementation then does not allow "
+                         "to call UniformRefinement(), the code fails inside STable3D::operator()";
         if (verbose)
             std::cout << "Calling ReorientTetMesh in 3D since feorder is more than 0 \n";
         pmesh->ReorientTetMesh();
     }
+#endif
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
@@ -684,18 +682,26 @@ int main(int argc, char *argv[])
 #endif
 
 //#if 0
-   GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose);
+   bool with_hcurl = false;
+#ifdef DIVFREE_SETUP
+   with_hcurl = true;
+#endif
+
+   GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
+#ifdef DIVFREE_SETUP
    hierarchy->ConstructDofTrueDofs();
    hierarchy->ConstructDivfreeDops();
+#endif
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
+#ifdef MULTILEVEL_PARTSOL
    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
            GetFunctSpacesDescriptor();
-
+#endif
 
 
 #ifdef DIVFREE_SETUP
@@ -1405,6 +1411,15 @@ int main(int argc, char *argv[])
        //     refined and finally it modifies the mesh. The Stop() method can be
        //     used to determine if a stopping criterion was met.
 
+#ifdef DIVFREE_SETUP
+       if (feorder > 0)
+       {
+           MFEM_ABORT("feorder > 0 is not supported with divfree setup since Nedelec f.e. with"
+                      " feorder > 0 requires ReorientTetMesh() which prevents from using any kind "
+                      "of refinement afterwards \n");
+       }
+#endif
+
 #ifdef AMR
        int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
 
@@ -1430,9 +1445,19 @@ int main(int argc, char *argv[])
        if (visualization)
        {
            const Vector& local_errors = estimator->GetLocalErrors();
-           MFEM_ASSERT(local_errors.Size() == problem->GetPfes(numblocks_funct)->TrueVSize(), "");
+           if (feorder == 0)
+               MFEM_ASSERT(local_errors.Size() == problem->GetPfes(numblocks_funct)->TrueVSize(), "");
 
-           ParGridFunction * local_errors_pgfun = new ParGridFunction(problem->GetPfes(numblocks_funct));
+           FiniteElementCollection * l2_coll;
+           if (feorder > 0)
+               l2_coll = new L2_FECollection(0, dim);
+
+           ParFiniteElementSpace * L2_space;
+           if (feorder == 0)
+               L2_space = problem->GetPfes(numblocks_funct);
+           else
+               L2_space = new ParFiniteElementSpace(problem->GetParMesh(), l2_coll);
+           ParGridFunction * local_errors_pgfun = new ParGridFunction(L2_space);
            local_errors_pgfun->SetFromTrueDofs(local_errors);
            char vishost[] = "localhost";
            int  visport   = 19916;
@@ -1441,6 +1466,12 @@ int main(int argc, char *argv[])
            amr_sock << "parallel " << num_procs << " " << myid << "\n";
            amr_sock << "solution\n" << *pmesh << *local_errors_pgfun <<
                          "window_title 'local errors, AMR iter No." << it <<"'" << flush;
+
+           if (feorder > 0)
+           {
+               delete l2_coll;
+               delete L2_space;
+           }
        }
 
 #else

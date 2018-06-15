@@ -3917,8 +3917,8 @@ void CFOSLSHyperbolicProblem::Update()
         grfuns[i]->Update();
 }
 
-GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
-    : num_lvls(num_levels), pmesh(pmesh_),
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose, bool with_hcurl_)
+    : num_lvls(num_levels), pmesh(pmesh_), with_hcurl(with_hcurl_),
       divfreedops_constructed (false), doftruedofs_constructed (true),
       pmesh_ne(0), update_counter(0)
 {
@@ -3948,10 +3948,13 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
             MFEM_ABORT("Higher-order H1 elements are not implemented in 4D \n");
     }
 
-    if (dim == 4)
-        hcurl_coll = new ND1_4DFECollection;
-    else
-        hcurl_coll = new ND_FECollection(feorder + 1, dim);
+    if (with_hcurl)
+    {
+        if (dim == 4)
+            hcurl_coll = new ND1_4DFECollection;
+        else
+            hcurl_coll = new ND_FECollection(feorder + 1, dim);
+    }
 
     if (dim == 4)
         hdivskew_coll = new DivSkew1_4DFECollection;
@@ -3964,7 +3967,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
 
     H1_space = new ParFiniteElementSpace(&pmesh, h1_coll);
 
-    Hcurl_space = new ParFiniteElementSpace(&pmesh, hcurl_coll);
+    if (with_hcurl)
+        Hcurl_space = new ParFiniteElementSpace(&pmesh, hcurl_coll);
 
     if (dim == 4)
         Hdivskew_space = new ParFiniteElementSpace(&pmesh, hdivskew_coll);
@@ -3981,19 +3985,22 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
     Hdiv_space_lvls.SetSize(num_lvls);
     H1_space_lvls.SetSize(num_lvls);
     L2_space_lvls.SetSize(num_lvls);
-    Hcurl_space_lvls.SetSize(num_lvls);
+    if (with_hcurl)
+        Hcurl_space_lvls.SetSize(num_lvls);
     if (dim == 4)
         Hdivskew_space_lvls.SetSize(num_lvls);
     P_Hdiv_lvls.SetSize(num_lvls - 1);
     P_H1_lvls.SetSize(num_lvls - 1);
     P_L2_lvls.SetSize(num_lvls - 1);
-    P_Hcurl_lvls.SetSize(num_lvls - 1);
+    if (with_hcurl)
+        P_Hcurl_lvls.SetSize(num_lvls - 1);
     if (dim == 4)
         P_Hdivskew_lvls.SetSize(num_lvls - 1);
     TrueP_Hdiv_lvls.SetSize(num_lvls - 1);
     TrueP_H1_lvls.SetSize(num_lvls - 1);
     TrueP_L2_lvls.SetSize(num_lvls - 1);
-    TrueP_Hcurl_lvls.SetSize(num_lvls - 1);
+    if (with_hcurl)
+        TrueP_Hcurl_lvls.SetSize(num_lvls - 1);
     if (dim == 4)
         TrueP_Hdivskew_lvls.SetSize(num_lvls - 1);
 
@@ -4010,7 +4017,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
         Hdiv_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdiv_coll);
         L2_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], l2_coll);
         H1_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
-        Hcurl_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hcurl_coll);
+        if (with_hcurl)
+            Hcurl_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hcurl_coll);
         if (dim == 4)
             Hdivskew_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], hdivskew_coll);
 
@@ -4021,7 +4029,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
             Hdiv_space->Update();
             H1_space->Update();
             L2_space->Update();
-            Hcurl_space->Update();
+            if (with_hcurl)
+                Hcurl_space->Update();
             if (dim == 4)
                 Hdivskew_space->Update();
 
@@ -4063,17 +4072,21 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
 
             delete RP_L2_local;
 
-            P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
-            P_Hcurl_lvls[l] = RemoveZeroEntries(*P_Hcurl_local);
+            if (with_hcurl)
+            {
+                P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
+                P_Hcurl_lvls[l] = RemoveZeroEntries(*P_Hcurl_local);
 
-            auto d_td_coarse_Hcurl = Hcurl_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[l]->GetRestrictionMatrix(), *P_Hcurl_lvls[l]);
-            TrueP_Hcurl_lvls[l] = d_td_coarse_Hcurl->LeftDiagMult(
-                        *RP_Hcurl_local, Hcurl_space_lvls[l]->GetTrueDofOffsets());
-            TrueP_Hcurl_lvls[l]->CopyColStarts();
-            TrueP_Hcurl_lvls[l]->CopyRowStarts();
+                auto d_td_coarse_Hcurl = Hcurl_space_lvls[l + 1]->Dof_TrueDof_Matrix();
+                SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[l]->GetRestrictionMatrix(),
+                                                     *P_Hcurl_lvls[l]);
+                TrueP_Hcurl_lvls[l] = d_td_coarse_Hcurl->LeftDiagMult(
+                            *RP_Hcurl_local, Hcurl_space_lvls[l]->GetTrueDofOffsets());
+                TrueP_Hcurl_lvls[l]->CopyColStarts();
+                TrueP_Hcurl_lvls[l]->CopyRowStarts();
 
-            delete RP_Hcurl_local;
+                delete RP_Hcurl_local;
+            }
 
             if (dim == 4)
             {
@@ -4113,7 +4126,9 @@ void GeneralHierarchy::Update()
         ParFiniteElementSpace * Hdiv_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hdiv_coll);
         ParFiniteElementSpace * L2_space_new = new ParFiniteElementSpace(pmesh_lvls[0], l2_coll);
         ParFiniteElementSpace * H1_space_new = new ParFiniteElementSpace(pmesh_lvls[0], h1_coll);
-        ParFiniteElementSpace * Hcurl_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hcurl_coll);
+        ParFiniteElementSpace * Hcurl_space_new;
+        if (with_hcurl)
+            Hcurl_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hcurl_coll);
         ParFiniteElementSpace * Hdivskew_space_new;
         if (dim == 4)
             Hdivskew_space_new = new ParFiniteElementSpace(pmesh_lvls[0], hdivskew_coll);
@@ -4123,13 +4138,15 @@ void GeneralHierarchy::Update()
         Hdiv_space_lvls.Prepend(Hdiv_space_new);
         L2_space_lvls.Prepend(L2_space_new);
         H1_space_lvls.Prepend(H1_space_new);
-        Hcurl_space_lvls.Prepend(Hcurl_space_new);
+        if (with_hcurl)
+            Hcurl_space_lvls.Prepend(Hcurl_space_new);
         Hdivskew_space_lvls.Prepend(Hdivskew_space_new);
 
         Hdiv_space->Update();
         H1_space->Update();
         L2_space->Update();
-        Hcurl_space->Update();
+        if (with_hcurl)
+            Hcurl_space->Update();
         if (dim == 4)
             Hdivskew_space->Update();
 
@@ -4191,21 +4208,24 @@ void GeneralHierarchy::Update()
         delete RP_L2_local;
 
         // Hcurl
-        P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
+        if (with_hcurl)
+        {
+            P_Hcurl_local = (SparseMatrix *)Hcurl_space->GetUpdateOperator();
 
-        SparseMatrix * P_Hcurl_new = RemoveZeroEntries(*P_Hcurl_local);
-        P_Hcurl_lvls.Prepend(P_Hcurl_new);
+            SparseMatrix * P_Hcurl_new = RemoveZeroEntries(*P_Hcurl_local);
+            P_Hcurl_lvls.Prepend(P_Hcurl_new);
 
-        auto d_td_coarse_Hcurl = Hcurl_space_lvls[1]->Dof_TrueDof_Matrix();
-        SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[0]->GetRestrictionMatrix(), *P_Hcurl_lvls[0]);
+            auto d_td_coarse_Hcurl = Hcurl_space_lvls[1]->Dof_TrueDof_Matrix();
+            SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[0]->GetRestrictionMatrix(), *P_Hcurl_lvls[0]);
 
-        HypreParMatrix * TrueP_Hcurl_new = d_td_coarse_Hcurl->LeftDiagMult(
-                    *RP_Hcurl_local, Hcurl_space_lvls[0]->GetTrueDofOffsets());
-        TrueP_Hcurl_new->CopyColStarts();
-        TrueP_Hcurl_new->CopyRowStarts();
+            HypreParMatrix * TrueP_Hcurl_new = d_td_coarse_Hcurl->LeftDiagMult(
+                        *RP_Hcurl_local, Hcurl_space_lvls[0]->GetTrueDofOffsets());
+            TrueP_Hcurl_new->CopyColStarts();
+            TrueP_Hcurl_new->CopyRowStarts();
 
-        TrueP_Hcurl_lvls.Prepend(TrueP_Hcurl_new);
-        delete RP_Hcurl_local;
+            TrueP_Hcurl_lvls.Prepend(TrueP_Hcurl_new);
+            delete RP_Hcurl_local;
+        }
 
         // Hdivskew
         if (dim == 4)
@@ -4259,7 +4279,9 @@ void GeneralHierarchy::Update()
             HypreParMatrix * DofTrueDof_L2_new = L2_space_lvls[0]->Dof_TrueDof_Matrix();
             HypreParMatrix * DofTrueDof_H1_new = H1_space_lvls[0]->Dof_TrueDof_Matrix();
             HypreParMatrix * DofTrueDof_Hdiv_new = Hdiv_space_lvls[0]->Dof_TrueDof_Matrix();
-            HypreParMatrix * DofTrueDof_Hcurl_new = Hcurl_space_lvls[0]->Dof_TrueDof_Matrix();
+            HypreParMatrix * DofTrueDof_Hcurl_new;
+            if (with_hcurl)
+                DofTrueDof_Hcurl_new = Hcurl_space_lvls[0]->Dof_TrueDof_Matrix();
             HypreParMatrix * DofTrueDof_Hdivskew_new;
             if (dim == 4)
                 DofTrueDof_Hdivskew_new = Hdivskew_space_lvls[0]->Dof_TrueDof_Matrix();
@@ -4267,7 +4289,8 @@ void GeneralHierarchy::Update()
             DofTrueDof_L2_lvls.Prepend(DofTrueDof_L2_new);
             DofTrueDof_H1_lvls.Prepend(DofTrueDof_H1_new);
             DofTrueDof_Hdiv_lvls.Prepend(DofTrueDof_Hdiv_new);
-            DofTrueDof_Hcurl_lvls.Prepend(DofTrueDof_Hcurl_new);
+            if (with_hcurl)
+                DofTrueDof_Hcurl_lvls.Prepend(DofTrueDof_Hcurl_new);
             if (dim == 4)
                 DofTrueDof_Hdivskew_lvls.Prepend(DofTrueDof_Hdivskew_new);
         }
@@ -4292,6 +4315,12 @@ void GeneralHierarchy::ConstructDivfreeDops()
         ParDiscreteLinearOperator * Divfree_op;
         if (dim == 3)
         {
+            if (!with_hcurl)
+            {
+                MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                           " was not build in the hierarchy \n");
+            }
+
             Divfree_op = new ParDiscreteLinearOperator(Hcurl_space_lvls[l], Hdiv_space_lvls[l]);
             Divfree_op->AddDomainInterpolator(new CurlInterpolator);
         }
@@ -4318,7 +4347,8 @@ void GeneralHierarchy::ConstructDofTrueDofs()
     DofTrueDof_L2_lvls.SetSize(num_lvls);
     DofTrueDof_H1_lvls.SetSize(num_lvls);
     DofTrueDof_Hdiv_lvls.SetSize(num_lvls);
-    DofTrueDof_Hcurl_lvls.SetSize(num_lvls);
+    if (with_hcurl)
+        DofTrueDof_Hcurl_lvls.SetSize(num_lvls);
     if (dim == 4)
         DofTrueDof_Hdivskew_lvls.SetSize(num_lvls);
 
@@ -4327,7 +4357,8 @@ void GeneralHierarchy::ConstructDofTrueDofs()
         DofTrueDof_L2_lvls[l] = L2_space_lvls[l]->Dof_TrueDof_Matrix();
         DofTrueDof_H1_lvls[l] = H1_space_lvls[l]->Dof_TrueDof_Matrix();
         DofTrueDof_Hdiv_lvls[l] = Hdiv_space_lvls[l]->Dof_TrueDof_Matrix();
-        DofTrueDof_Hcurl_lvls[l] = Hcurl_space_lvls[l]->Dof_TrueDof_Matrix();
+        if (with_hcurl)
+            DofTrueDof_Hcurl_lvls[l] = Hcurl_space_lvls[l]->Dof_TrueDof_Matrix();
         if (dim == 4)
             DofTrueDof_Hdivskew_lvls[l] = Hdivskew_space_lvls[l]->Dof_TrueDof_Matrix();
     }
@@ -4411,6 +4442,11 @@ Array<int>& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
         pfes = L2_space_lvls[level];
         break;
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         pfes = Hcurl_space_lvls[level];
         break;
     case HDIVSKEW:
@@ -4460,6 +4496,11 @@ std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * t
             pfes = L2_space_lvls[level];
             break;
         case HCURL:
+            if (!with_hcurl)
+            {
+                MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                           " was not build in the hierarchy \n");
+            }
             pfes = Hcurl_space_lvls[level];
             break;
         case HDIVSKEW:
@@ -4545,6 +4586,11 @@ ParFiniteElementSpace * GeneralHierarchy::GetSpace(SpaceName space, int level)
     case L2:
         return L2_space_lvls[level];
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         return Hcurl_space_lvls[level];
     case HDIVSKEW:
         return Hdivskew_space_lvls[level];
@@ -4569,6 +4615,11 @@ HypreParMatrix * GeneralHierarchy::GetTruePspace(SpaceName space, int level)
     case L2:
         return TrueP_L2_lvls[level];
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         return TrueP_Hcurl_lvls[level];
     case HDIVSKEW:
         return TrueP_Hdivskew_lvls[level];
@@ -4593,6 +4644,11 @@ SparseMatrix * GeneralHierarchy::GetPspace(SpaceName space, int level)
     case L2:
         return P_L2_lvls[level];
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         return P_Hcurl_lvls[level];
     case HDIVSKEW:
         return P_Hdivskew_lvls[level];
@@ -4652,6 +4708,11 @@ SparseMatrix* GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level
         pfes = L2_space_lvls[level];
         break;
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         pfes = Hcurl_space_lvls[level];
         break;
     case HDIVSKEW:
@@ -4691,6 +4752,11 @@ BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_na
             pfess[i] = L2_space_lvls[level];
             break;
         case HCURL:
+            if (!with_hcurl)
+            {
+                MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                           " was not build in the hierarchy \n");
+            }
             pfess[i] = Hcurl_space_lvls[level];
             break;
         case HDIVSKEW:
@@ -4734,6 +4800,11 @@ HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
     case L2:
         return DofTrueDof_L2_lvls[level];
     case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
         return DofTrueDof_Hcurl_lvls[level];
     case HDIVSKEW:
         return DofTrueDof_Hdivskew_lvls[level];

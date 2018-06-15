@@ -327,6 +327,8 @@ protected:
     Array< HypreParMatrix* > DofTrueDof_Hcurl_lvls;
     Array< HypreParMatrix* > DofTrueDof_Hdivskew_lvls;
 
+    bool with_hcurl;
+
     bool divfreedops_constructed;
     bool doftruedofs_constructed;
 
@@ -335,7 +337,12 @@ protected:
     int update_counter;
 
 public:
-    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose);
+    // by default we construct div-free space (Hcurl) in 3D
+    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
+        : GeneralHierarchy(num_levels, pmesh_, feorder, verbose, true) {}
+    // but we might want not to do so, due to the limitations of higher-order Nedelec spaces
+    // w.r.t to further mesh refinement
+    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose, bool with_hcurl_);
 
     ParMesh* GetFinestParMesh() {return &pmesh;}
 
