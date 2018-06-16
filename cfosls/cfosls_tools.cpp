@@ -199,6 +199,187 @@ void CGSolver_mod::Mult(const Vector &b, Vector &x) const
    final_norm = sqrt(betanom);
 }
 
+void CGSolver_mod2::Mult(const Vector &b, Vector &x) const
+{
+   int i;
+   double r0, den, nom, nom0, betanom, alpha, beta;
+   double new_r_norm, new_r_norm0, new_betanom;
+
+   if (iterative_mode)
+   {
+      oper->Mult(x, r);
+      subtract(b, r, r); // r = b - A x
+   }
+   else
+   {
+      r = b;
+      x = 0.0;
+   }
+
+   if (prec)
+   {
+      prec->Mult(r, z); // z = B r
+      d = z;
+   }
+   else
+   {
+      d = r;
+   }
+   nom0 = nom = Dot(d, r);
+   new_r_norm0 = new_r_norm = Dot(r, r) / r.Size();
+   MFEM_ASSERT(IsFinite(nom), "nom = " << nom);
+
+   if (print_level == 1 || print_level == 3)
+   {
+      cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+           << nom << (print_level == 3 ? " ...\n" : "\n");
+      cout << "   Iteration : " << setw(3) << 0 << "  (r, r) = "
+           << new_r_norm << (print_level == 3 ? " ...\n" : "\n");
+      cout << "   Iteration : " << setw(3) << 0 << "  || r || = "
+           << sqrt(new_r_norm) << (print_level == 3 ? " ...\n" : "\n");
+   }
+
+   //r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol);
+   //if (nom <= r0)
+   r0 = std::max(new_r_norm*rel_tol*rel_tol, abs_tol*abs_tol);
+   if (new_r_norm <= r0)
+   {
+      converged = 1;
+      final_iter = 0;
+      //final_norm = sqrt(nom);
+      final_norm = sqrt(new_r_norm);
+      return;
+   }
+
+   oper->Mult(d, z);  // z = A d
+   den = Dot(z, d);
+   MFEM_ASSERT(IsFinite(den), "den = " << den);
+
+   if (print_level >= 0 && den < 0.0)
+   {
+      cout << "Negative denominator in step 0 of PCG: " << den << '\n';
+   }
+
+   if (den == 0.0)
+   {
+      converged = 0;
+      final_iter = 0;
+      //final_norm = sqrt(nom);
+      final_norm = sqrt(new_r_norm);
+      return;
+   }
+
+   // start iteration
+   converged = 0;
+   final_iter = max_iter;
+   for (i = 1; true; )
+   {
+      alpha = nom/den;
+      add(x,  alpha, d, x);     //  x = x + alpha d
+      add(r, -alpha, z, r);     //  r = r - alpha A d
+
+      if (prec)
+      {
+         prec->Mult(r, z);      //  z = B r
+         betanom = Dot(r, z);
+      }
+      else
+      {
+         betanom = Dot(r, r);
+      }
+      new_betanom = Dot(r, r) / r.Size();
+      MFEM_ASSERT(IsFinite(betanom), "betanom = " << betanom);
+
+      if (print_level == 1)
+      {
+         cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+              << betanom << '\n';
+         cout << "   Iteration : " << setw(3) << i << "  (r, r) = "
+              << new_betanom << '\n';
+         cout << "   Iteration : " << setw(3) << i << "  || r || = "
+              << sqrt(new_betanom) << '\n';
+      }
+
+      //if (betanom < r0)
+      if (new_betanom < r0)
+      {
+         if (print_level == 2)
+         {
+            cout << "Number of PCG iterations: " << i << '\n';
+         }
+         else if (print_level == 3)
+         {
+            cout << "   Iteration : " << setw(3) << i << "  (B r, r) = "
+                 << betanom << '\n';
+            cout << "   Iteration : " << setw(3) << i << "  (r, r) = "
+                 << new_betanom << '\n';
+            cout << "   Iteration : " << setw(3) << i << "  || r || = "
+                 << sqrt(new_betanom) << '\n';
+         }
+         converged = 1;
+         final_iter = i;
+         break;
+      }
+
+      if (++i > max_iter)
+      {
+         break;
+      }
+
+      beta = betanom/nom;
+      if (prec)
+      {
+         add(z, beta, d, d);   //  d = z + beta d
+      }
+      else
+      {
+         add(r, beta, d, d);
+      }
+      oper->Mult(d, z);       //  z = A d
+      den = Dot(d, z);
+      MFEM_ASSERT(IsFinite(den), "den = " << den);
+      if (den <= 0.0)
+      {
+         if (print_level >= 0 && Dot(d, d) > 0.0)
+            cout << "PCG: The operator is not positive definite. (Ad, d) = "
+                 << den << '\n';
+      }
+      nom = betanom;
+      new_r_norm = new_betanom;
+   }
+   if (print_level >= 0 && !converged)
+   {
+      if (print_level != 1)
+      {
+         if (print_level != 3)
+         {
+            cout << "   Iteration : " << setw(3) << 0 << "  (B r, r) = "
+                 << nom0 << " ...\n";
+            cout << "   Iteration : " << setw(3) << 0 << "  (r, r) = "
+                 << new_r_norm0 << " ...\n";
+            cout << "   Iteration : " << setw(3) << 0 << "  || r || = "
+                 << sqrt(new_r_norm0) << " ...\n";
+         }
+         cout << "   Iteration : " << setw(3) << final_iter << "  (B r, r) = "
+              << betanom << '\n';
+         cout << "   Iteration : " << setw(3) << final_iter << "  (r, r) = "
+              << new_betanom << '\n';
+         cout << "   Iteration : " << setw(3) << final_iter << "  || r || = "
+              << sqrt(new_betanom) << '\n';
+      }
+      cout << "PCG: No convergence!" << '\n';
+   }
+   if (print_level >= 1 || (print_level >= 0 && !converged))
+   {
+      cout << "Average reduction factor = "
+           << pow (betanom/nom0, 0.5/final_iter) << '\n';
+      cout << "Average reduction factor in true norm = "
+           << pow (new_betanom/new_r_norm0, 0.5/final_iter) << '\n';
+   }
+   //final_norm = sqrt(betanom);
+   final_norm = sqrt(new_betanom);
+}
+
 void BlkHypreOperator::Mult(const Vector &x, Vector &y) const
 {
     BlockVector x_viewer(x.GetData(), block_offsets);
@@ -531,6 +712,36 @@ void CFOSLSFormulation_MixedLaplace::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[0] = SpaceName::HDIV;
 }
 
+
+FOSLSFormulation_Laplace::FOSLSFormulation_Laplace (
+        int dimension, int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 1, 1, false), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new DiffusionIntegrator;
+
+    lfis[0] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
+}
+
+void FOSLSFormulation_Laplace::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(0,0);
+}
+
+void FOSLSFormulation_Laplace::ConstructSpacesDescriptor() const
+{
+    space_names = new Array<SpaceName>(numblocks);
+
+    (*space_names)[0] = SpaceName::H1;
+}
+
+void FOSLSFormulation_Laplace::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(1);
+    (*space_names_funct)[0] = SpaceName::H1;
+}
+
 void BlockProblemForms::Update()
 {
     MFEM_ASSERT(initialized_forms, "Cannot update forms which were not initialized \n");
@@ -789,6 +1000,8 @@ void FOSLSProblem::InitSolver(bool verbose)
 
     //if (verbose)
         //std::cout << "Here you should print out parameters of the linear solver \n";
+
+    solver->iterative_mode = true;
 
     solver_initialized = true;
 }
@@ -1984,8 +2197,8 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     if (verbose)
     {
-        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
-        std::cout << "|| sigma_h - L(S_h) || = " << sqrt(globalFunctional) << "\n";
+        std::cout << "|| sigma_h ||_M^2 = " << globalFunctional << "\n";
+        std::cout << "|| sigma_h ||_M = " << sqrt(globalFunctional) << "\n";
         std::cout << "Energy Error = " << sqrt(globalFunctional + err_div * err_div) << "\n";
         if (fabs(norm_div > 1.0e-13))
             std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
@@ -2651,7 +2864,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 100 for Gauss-Seidel for all blocks
-void FOSLSProblem_lapl::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_HdivH1lapl::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
@@ -2713,7 +2926,7 @@ void FOSLSProblem_lapl::CreatePrec(BlockOperator& op, int prec_option, bool verb
             cout << "No preconditioner is used. \n";
 }
 
-void FOSLSProblem_lapl::ComputeExtraError(const Vector& vec) const
+void FOSLSProblem_HdivH1lapl::ComputeExtraError(const Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
@@ -2755,7 +2968,7 @@ void FOSLSProblem_lapl::ComputeExtraError(const Vector& vec) const
     ComputeFuncError(vec);
 }
 
-void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
+void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
@@ -2812,6 +3025,323 @@ void FOSLSProblem_lapl::ComputeFuncError(const Vector& vec) const
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
+void FOSLSProblem_MixedLaplace::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        if (prec_option == 2)
+            std::cout << "ADS(A) for H(div) \n";
+        else
+             std::cout << "Diag(A) for H(div) or H1vec \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
+
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver * invA, *invS;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        invS = new HypreSmoother(*Schur, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        if (prec_option == 2)
+            invA = new HypreADS(A, pfes[0]);
+        else // using Diag(A);
+            invA = new HypreDiagScale(A);
+
+        invA->iterative_mode = false;
+
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
+void FOSLSProblem_MixedLaplace::ComputeExtraError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    Laplace_test * test = dynamic_cast<Laplace_test*>(fe_formul.GetFormulation()->GetTest());
+
+    if (!test && verbose)
+        std::cout << "Unsuccessful cast into Laplace_test \n";
+
+    if (test->Numsol() == -9)
+    {
+        std::cout << "For numsol = -9 no exact solution is known \n";
+        return;
+    }
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&(vec_viewer.GetBlock(0)));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        //std::cout << "err_div = " << err_div << ", norm_div = " << norm_div << "\n";
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
+    }
+
+    ComputeFuncError(vec);
+}
+
+void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    Laplace_test * test = dynamic_cast<Laplace_test*>(fe_formul.GetFormulation()->GetTest());
+
+    if (!test && verbose)
+        std::cout << "Unsuccessful cast into Laplace_test \n";
+
+    if (test->Numsol() == -9)
+    {
+        std::cout << "For numsol = -9 no exact solution is known \n";
+        return;
+    }
+
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&vec_viewer.GetBlock(0));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*fe_formul.GetFormulation()->GetTest()
+                                             ->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *fe_formul.GetFormulation()->GetTest()
+                                          ->GetRhs(), pmesh, irs);
+
+    Vector MSigma(Hdiv_space->TrueVSize());
+
+    HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional = vec_viewer.GetBlock(0) * MSigma;
+
+    double globalFunctional;
+    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| sigma_h ||_M^2 = " << globalFunctional << "\n";
+        std::cout << "|| sigma_h ||_M = " << sqrt(globalFunctional) << "\n";
+        std::cout << "Energy Error = " << sqrt(globalFunctional + err_div * err_div) << "\n";
+        if (fabs(norm_div > 1.0e-13))
+            std::cout << "Relative Energy Error = " << sqrt(globalFunctional + err_div * err_div)
+                     / norm_div << "\n";
+    }
+
+    ParLinearForm gform(L2_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
+                                                     GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+
+    Vector Rhs(L2_space->TrueVSize());
+    Rhs = *gform.ParallelAssemble();
+
+    double mass_loc = Rhs.Norml1();
+    double mass;
+    MPI_Reduce(&mass_loc, &mass, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        cout << "Sum of local mass = " << mass << "\n";
+
+    Vector TempL2(L2_space->TrueVSize());
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(1,0));
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
+
+    TempL2 -= Rhs;
+
+    double mass_loss_loc = TempL2.Norml1();
+    double mass_loss;
+    MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Sum of local mass loss = " << mass_loss << "\n";
+}
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for BoomerAMG (A)
+void FOSLSProblem_Laplace::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "BoomerAMG(A) for H1 \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+
+    Solver * invA;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        invA = new HypreBoomerAMG(A);
+        ((HypreBoomerAMG *)invA)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invA)->iterative_mode = false;
+    }
+
+    if (prec_option > 0)
+        prec = invA;
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
+void FOSLSProblem_Laplace::ComputeExtraError(const Vector& vec) const
+{
+    ComputeFuncError(vec);
+}
+
+void FOSLSProblem_Laplace::ComputeFuncError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    Laplace_test * test = dynamic_cast<Laplace_test*>(fe_formul.GetFormulation()->GetTest());
+
+    if (!test && verbose)
+        std::cout << "Unsuccessful cast into Laplace_test \n";
+
+    if (test->Numsol() == -9)
+    {
+        std::cout << "For numsol = -9 no exact solution is known \n";
+        return;
+    }
+
+    ParFiniteElementSpace * H1_space = pfes[0];
+
+    Vector Du(H1_space->TrueVSize());
+
+    HypreParMatrix * D = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    D->Mult(vec_viewer.GetBlock(0), Du);
+    double localFunctional = (vec_viewer.GetBlock(0) * Du);
+
+    std::cout << "local Functional = " << localFunctional << "\n";
+
+    ParLinearForm gform(H1_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+    Vector * Rhs = new Vector(H1_space->TrueVSize());
+    Rhs = gform.ParallelAssemble();
+
+    double second_term = vec_viewer.GetBlock(0) * (*Rhs);
+
+    std::cout << "second_term = " << second_term << "\n";
+
+    localFunctional -= second_term;
+
+    delete Rhs;
+
+    double globalFunctional;
+    MPI_Reduce(&localFunctional, &globalFunctional, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| u_h ||_M^2 = " << globalFunctional << "\n";
+        std::cout << "|| u_h ||_M = " << sqrt(globalFunctional) << "\n";
+    }
+}
+
+void FOSLSProblem_Laplace::ChangeSolver()
+{
+    CGSolver * new_solver = new CGSolver_mod2(GetComm());
+
+    MFEM_ABORT("Add rtol and atol as parameters. Unfortunately MFEM doesn't allow"
+               " to get them from the existing solver \n");
+
+    int max_iter = 100000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
+
+    new_solver->SetAbsTol(sqrt(atol));
+    new_solver->SetRelTol(sqrt(rtol));
+    new_solver->SetMaxIter(max_iter);
+    new_solver->SetOperator(*CFOSLSop);
+    if (prec)
+         new_solver->SetPreconditioner(*prec);
+    new_solver->SetPrintLevel(1);
+
+    delete solver;
+    solver = new_solver;
+}
+
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)

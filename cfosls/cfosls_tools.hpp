@@ -50,6 +50,23 @@ public:
 
 };
 
+/// Conjugate gradient method which stops based on the values of true residual in
+/// weighted L2 norm unlike MFEM's implementation which uses preconditioned residual
+class CGSolver_mod2 : public CGSolver
+{
+protected:
+public:
+   CGSolver_mod2() : CGSolver() {}
+
+#ifdef MFEM_USE_MPI
+   CGSolver_mod2(MPI_Comm _comm) : CGSolver(_comm) { }
+#endif
+
+   virtual void Mult(const Vector &b, Vector &x) const;
+};
+
+
+
 // a class for square block operators where each block is given as a HypreParMatrix
 // used as an interface to handle coarsened operators for multigrid
 // TODO: Who should delete the matrices?
@@ -254,10 +271,10 @@ public:
 
 };
 
-struct BdrConditions_CFOSLS_Laplace : public BdrConditions
+struct BdrConditions_CFOSLS_HdivH1Laplace : public BdrConditions
 {
 public:
-    BdrConditions_CFOSLS_Laplace(ParMesh& pmesh_)
+    BdrConditions_CFOSLS_HdivH1Laplace(ParMesh& pmesh_)
         : BdrConditions(pmesh_, 3)
     {
         for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
@@ -271,6 +288,38 @@ public:
 
         initialized = true;
     }
+};
+
+// one of the choices which is not from a singular problem
+struct BdrConditions_MixedLaplace : public BdrConditions
+{
+public:
+    BdrConditions_MixedLaplace(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 2)
+    {
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+        (*bdr_attribs[0])[0] = 1;
+
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 0;
+
+        initialized = true;
+    }
+
+};
+
+// one of the choices which is not from a singular problem
+struct BdrConditions_Laplace : public BdrConditions
+{
+public:
+    BdrConditions_Laplace(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 1)
+    {
+        *bdr_attribs[0] = 1;
+        initialized = true;
+    }
+
 };
 
 enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
@@ -828,6 +877,25 @@ public:
     int NumSol() const override {return numsol;}
 };
 
+struct FOSLSFormulation_Laplace : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Laplace_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    FOSLSFormulation_Laplace(int dimension, int num_solution, bool verbose);
+
+    int GetUnknownWithInitCnd() const override {return 0;}
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int NumSol() const override {return numsol;}
+};
+
 /// general class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
 struct FOSLSFEFormulation
@@ -990,10 +1058,10 @@ public:
 };
 
 /// FIXME: See previous FIXME messages
-struct CFOSLSFEFormulation_Laplace : FOSLSFEFormulation
+struct CFOSLSFEFormulation_HdivH1L2_Laplace : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_Laplace(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1L2_Laplace(FOSLSFormulation& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1011,9 +1079,7 @@ public:
     }
 };
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivL2L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_MixedLaplace : FOSLSFEFormulation
 {
 public:
@@ -1029,6 +1095,19 @@ public:
         fecolls[1] = new L2_FECollection(feorder, dim);
     }
 };
+
+/// FIXME: See previous FIXME messages
+struct FOSLSFEFormulation_Laplace : FOSLSFEFormulation
+{
+public:
+    FOSLSFEFormulation_Laplace(FOSLSFormulation& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        fecolls[0] = new H1_FECollection(feorder, dim);
+    }
+};
+
 
 class BlockProblemForms
 {
@@ -1309,6 +1388,8 @@ public:
                 UpdateSolverPrec();
             }
     }
+
+    Solver * GetPrec() {return prec;}
 };
 
 /// FIXME: Looks like this shouldn't have happened
@@ -1439,12 +1520,12 @@ public:
 };
 
 /// FIXME: See the previous FIXME messages
-class FOSLSProblem_lapl : virtual public FOSLSProblem
+class FOSLSProblem_HdivH1lapl : virtual public FOSLSProblem
 {
 protected:
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
-    FOSLSProblem_lapl(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivH1lapl(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
     {
@@ -1453,7 +1534,7 @@ public:
         UpdateSolverPrec();
     }
 
-    FOSLSProblem_lapl(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSProblem_HdivH1lapl(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
     {
@@ -1466,6 +1547,67 @@ public:
 
     void ComputeFuncError(const Vector& vec) const override;
 };
+
+/// FIXME: See the previous FIXME messages
+class FOSLSProblem_MixedLaplace : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_MixedLaplace(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_MixedLaplace(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+};
+
+/// FIXME: See the previous FIXME messages
+class FOSLSProblem_Laplace : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_Laplace(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_Laplace(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+
+    void ChangeSolver();
+};
+
 
 // a regular FOSLS problem with additional routines for the divfree space
 class FOSLSDivfreeProblem : virtual public FOSLSProblem

@@ -84,6 +84,9 @@ double uFunTestLap_lap(const Vector& xt);
 void uFunTestLap_grad(const Vector& xt, Vector& grad );
 /////////////////////////////////////
 
+double delta_center_ex(const Vector& xt);
+
+
 ///// tests which can be used for any problem
 double uFunTest_ex(const Vector& x); // Exact Solution
 double uFunTest_ex_dt(const Vector& xt);

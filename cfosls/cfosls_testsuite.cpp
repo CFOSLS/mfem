@@ -356,6 +356,34 @@ double uFunTestLap_lap(const Vector& xt)
     //return (-1) * 3.0 * M_PI * M_PI * uFunTestLap_ex(xt);
 }
 
+double delta_center_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double xcenter = 0.5;
+    double ycenter = 0.5;
+    double zcenter = 0.0;
+    if (xt.Size() == 4)
+        zcenter = 0.5;
+    double tcenter = 0.0;
+    if (xt.Size() >= 3)
+        tcenter = 0.5;
+
+    double side_len = 0.1;
+
+    if (fabs(x - xcenter) < side_len && fabs (y - ycenter) < side_len &&
+            fabs (z - zcenter) < side_len && fabs(t - tcenter) < side_len)
+        return 1.0 / pow(side_len, xt.Size());
+    else
+        return 0.0;
+
+}
+
 void uFunTestLap_grad(const Vector& xt, Vector& grad )
 {
     double x = xt(0);
@@ -694,9 +722,9 @@ void Laplace_test::Init()
     else
     {
         if (numsol == -3 || numsol == -4 || numsol == -34)
-        {
             SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
-        }
+        if (numsol == -9)
+            SetTestCoeffs<&zero_ex, &zerovec_ex, &delta_center_ex>();
     } // end of setting test coefficients in correct case
 }
 
@@ -720,6 +748,8 @@ bool Laplace_test::CheckTestConfig()
         if (numsol == -4 && dim == 4)
             return true;
         if (numsol == -34 && (dim == 3 || dim == 4))
+            return true;
+        if (numsol == -9 && dim == 3)
             return true;
         return false;
     }
@@ -2413,7 +2443,7 @@ double testH1fun(Vector& xt)
     double z;
     if (xt.Size() == 4)
         z = xt(2);
-    double t = xt(xt.Size() - 1);
+    //double t = xt(xt.Size() - 1);
 
     if (xt.Size() == 3)
         return (x*x + y*y + 1.0);
@@ -2431,7 +2461,7 @@ void testHdivfun(const Vector& xt, Vector &res)
     double z;
     if (xt.Size() == 4)
         z = xt(2);
-    double t = xt(xt.Size() - 1);
+    //double t = xt(xt.Size() - 1);
 
     res = 0.0;
 

@@ -27,7 +27,7 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 3;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -139,7 +139,7 @@ int main(int argc, char *argv[])
     //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
     //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
 
-    int feorder         = 1;
+    int feorder         = 0;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
@@ -1397,13 +1397,10 @@ int main(int argc, char *argv[])
            sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
                   << it <<"'" << flush;
 
-           if (strcmp(space_for_S,"H1") == 0)
-           {
-               socketstream s_sock(vishost, visport);
-               s_sock << "parallel " << num_procs << " " << myid << "\n";
-               s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
-                      << it <<"'" << flush;
-           }
+           socketstream s_sock(vishost, visport);
+           s_sock << "parallel " << num_procs << " " << myid << "\n";
+           s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
+                  << it <<"'" << flush;
        }
 
        // 18. Call the refiner to modify the mesh. The refiner calls the error

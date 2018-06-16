@@ -254,9 +254,9 @@ int main(int argc, char *argv[])
     int dim = nDimensions;
 
     using FormulType = CFOSLSFormulation_Laplace;
-    using FEFormulType = CFOSLSFEFormulation_Laplace;
-    using BdrCondsType = BdrConditions_CFOSLS_Laplace;
-    using ProblemType = FOSLSProblem_lapl;
+    using FEFormulType = CFOSLSFEFormulation_HdivH1L2_Laplace;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivH1Laplace;
+    using ProblemType = FOSLSProblem_HdivH1lapl;
 
     FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
     FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
