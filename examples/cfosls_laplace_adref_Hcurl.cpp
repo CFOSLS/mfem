@@ -400,7 +400,7 @@ int main(int argc, char *argv[])
 #endif
 
    const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
-   const double fixed_atol = 1.0e-2;
+   const double fixed_atol = 1.0e-3;
 
    const double initial_rtol = fixed_rtol;
    const double initial_atol = fixed_atol;
@@ -498,6 +498,8 @@ int main(int argc, char *argv[])
            std::cout << "Initial absolute tolerance: " << initial_atol << "\n";
        }
 
+       //adjusted_atol = initial_atol / 2.0 ;
+       adjusted_atol = initial_atol / pow(2, it);
        if (it == 0)
        {
            problem->SetRelTol(initial_rtol);
@@ -505,8 +507,6 @@ int main(int argc, char *argv[])
        }
        else
        {
-           //adjusted_atol = initial_atol / 2.0 ;
-           adjusted_atol = initial_atol / pow(2, it);
            problem->SetRelTol(1.0e-18);
            problem->SetAbsTol(adjusted_atol);
 
@@ -530,7 +530,7 @@ int main(int argc, char *argv[])
        //std::cout << "checking rhs norm for the first solve: " <<
                     //problem->GetRhs().Norml2() /  sqrt (problem->GetRhs().Size()) << "\n";
 
-       problem->ChangeSolver();
+       problem->ChangeSolver(initial_rtol, adjusted_atol);
        problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
 
        // checking the residual afterwards

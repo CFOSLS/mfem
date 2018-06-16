@@ -1605,7 +1605,7 @@ public:
 
     void ComputeFuncError(const Vector& vec) const override;
 
-    void ChangeSolver();
+    void ChangeSolver(double new_rtol, double new_atol);
 };
 
 

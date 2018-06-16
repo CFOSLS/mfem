@@ -3319,19 +3319,17 @@ void FOSLSProblem_Laplace::ComputeFuncError(const Vector& vec) const
     }
 }
 
-void FOSLSProblem_Laplace::ChangeSolver()
+void FOSLSProblem_Laplace::ChangeSolver(double new_rtol, double new_atol)
 {
     CGSolver * new_solver = new CGSolver_mod2(GetComm());
 
-    MFEM_ABORT("Add rtol and atol as parameters. Unfortunately MFEM doesn't allow"
-               " to get them from the existing solver \n");
+    //MFEM_ABORT("Add rtol and atol as parameters. Unfortunately MFEM doesn't allow"
+               //" to get them from the existing solver \n");
 
     int max_iter = 100000;
-    double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-14;//1e-9;//1e-12;
 
-    new_solver->SetAbsTol(sqrt(atol));
-    new_solver->SetRelTol(sqrt(rtol));
+    new_solver->SetAbsTol(new_atol);
+    new_solver->SetRelTol(new_rtol);
     new_solver->SetMaxIter(max_iter);
     new_solver->SetOperator(*CFOSLSop);
     if (prec)
