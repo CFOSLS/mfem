@@ -22,6 +22,9 @@
 
 #define FOSLS
 
+// doesn't work as designed, || f_H - P^T f_h || is still nonzero
+//#define USEALWAYS_COARSE_RHS
+
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
@@ -187,11 +190,16 @@ int main(int argc, char *argv[])
         std::cout << "USE_GS_PREC passive \n";
 #endif
 
-    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
-    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
-    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
+    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
+                "Formulation must be cfosls or fosls!\n");
+    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
+                "Space for S must be H1 or L2!\n");
+    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
+                "Space for sigma must be Hdiv or H1!\n");
 
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 &&
+                                                       strcmp(space_for_S,"H1") == 0),
+                "Sigma from H1vec must be coupled with S from H1!\n");
 
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
@@ -389,6 +397,7 @@ int main(int argc, char *argv[])
 #ifdef DEBUGGING_CASE
    Vector * rhs;
    Vector * checkdiff;
+   Vector * coarse_rhs;
 #endif
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
@@ -400,7 +409,7 @@ int main(int argc, char *argv[])
 #endif
 
    const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
-   const double fixed_atol = 1.0e-3;
+   const double fixed_atol = 1.0e-5;
 
    const double initial_rtol = fixed_rtol;
    const double initial_atol = fixed_atol;
@@ -421,9 +430,18 @@ int main(int argc, char *argv[])
        }
 
        bool compute_error = true;
+
 #ifdef DEBUGGING_CASE
 
+#ifdef USEALWAYS_COARSE_RHS
+       if (it == 0)
+       {
+           rhs = new Vector(problem->GetRhs().GetBlock(0).Size());
+           *rhs = problem->GetRhs().GetBlock(0);
+       }
+#else
        rhs = &problem->GetRhs().GetBlock(0);
+#endif
 
        if (verbose && it == 0)
            std::cout << "rhs norm = " << rhs->Norml2() / sqrt (rhs->Size()) << "\n";
@@ -431,6 +449,12 @@ int main(int argc, char *argv[])
        {
            checkdiff = new Vector(rhs->Size());
            *checkdiff = *rhs;
+       }
+
+       if (it == 0)
+       {
+           coarse_rhs = new Vector(rhs->Size());
+           *coarse_rhs = *rhs;
        }
 
        if (it > 0)
@@ -482,7 +506,7 @@ int main(int argc, char *argv[])
        // checking the residual
        BlockVector res(problem->GetTrueOffsets());
        problem->GetOp()->Mult(problem->GetSol(), res);
-       res -= problem->GetRhs();
+       res -= *rhs;
 
        double res_norm = ComputeMPIVecNorm(comm, res, "", false);
        if (it == 0)
@@ -494,6 +518,160 @@ int main(int argc, char *argv[])
        if (verbose)
        {
            std::cout << "Initial res norm at iteration # " << it << " = " << res_norm << "\n";
+           // checking theoretical decomposition of the residual
+#if 0
+           if (it > 0)
+           {
+               int fine_size = res.Size();
+               int coarse_size = prob_hierarchy->GetTrueP(0)->Width();
+
+               Vector mass_fine_diag;
+               ParBilinearForm mass_fine(hierarchy->GetSpace(SpaceName::H1,0));
+               mass_fine.AddDomainIntegrator(new MassIntegrator);
+               mass_fine.Assemble();
+               mass_fine.Finalize();
+               SparseMatrix * mass_fine_spmat = mass_fine.LoseMat();
+               mass_fine_spmat->GetDiag(mass_fine_diag);
+
+               SparseMatrix * PtWP = mfem::RAP(*hierarchy->GetPspace(SpaceName::H1,0), *mass_fine_spmat,
+                                               *hierarchy->GetPspace(SpaceName::H1,0));
+               Vector PtWP_diag;
+               PtWP->GetDiag(PtWP_diag);
+
+               SparseMatrix * Pt = Transpose(*hierarchy->GetPspace(SpaceName::H1,0));
+               SparseMatrix * PtP = mfem::Mult(*Pt, *hierarchy->GetPspace(SpaceName::H1,0));
+               //PtP->Print();
+               Vector PtP_diag;
+               PtP->GetDiag(PtP_diag);
+
+               Vector tempc(coarse_size);
+               Vector tempc2(coarse_size);
+               Vector tempf1(fine_size);
+               Vector tempf2(fine_size);
+
+               // sub-check
+               {
+                   Vector tmp1(fine_size);
+
+                   hierarchy->GetPspace(SpaceName::H1,0)->MultTranspose(res, tempc);
+
+                   /*
+                   for (int i = 0; i < tempc.Size(); ++i)
+                       tempc[i] /= PtWP_diag[i];
+
+                   // tempf1 = P * (Pt W P)^{-1} * P^T res
+                   hierarchy->GetPspace(SpaceName::H1,0)->Mult(tempc, tempf1);
+
+                   // tmp1 = W * P * (Pt W P)^{-1} * P^T * res
+                   mass_fine_spmat->Mult(tempf1, tmp1);
+                   */
+
+                   // tempc = (Pt P)^{-1} * P * res
+                   for (int i = 0; i < tempc.Size(); ++i)
+                       tempc[i] /= PtP_diag[i];
+
+                   // tmp1 = P * (Pt P)^{-1} * P^T res
+                   hierarchy->GetPspace(SpaceName::H1,0)->Mult(tempc, tmp1);
+
+                   Vector tmp2(fine_size);
+                   tmp2 = res;
+                   // tmp2 = (I - Q) res = res - tmp1
+                   tmp2 -= tmp1;
+
+                   double orto_check = tmp1 * tmp2;
+                   if (fabs(orto_check) > 1.0e-12)
+                       std::cout << "(tmp1, tmp2) = " << orto_check << "\n";
+                   //MFEM_ASSERT(fabs(orto_check) < 1.0e-12, "Orthogonality sub-check failed");
+
+                   Vector Wtmp1(fine_size);
+                   mass_fine_spmat->Mult(tmp1, Wtmp1);
+
+                   double orto_check2 = Wtmp1 * tmp2;
+                   if (fabs(orto_check2) > 1.0e-12)
+                       std::cout << "(W * tmp1, tmp2) = " << orto_check2 << "\n";
+                   //MFEM_ASSERT(fabs(orto_check2) < 1.0e-12, "Orthogonality sub-check failed");
+
+                   std::cout << "|| Q res || = " << tmp1.Norml2() / sqrt(tmp1.Size()) << "\n";
+                   std::cout << "|| (I - Q) res || = " << tmp2.Norml2() / sqrt(tmp2.Size()) << "\n";
+               }
+
+               Vector term1(fine_size);
+               tempc = *coarse_rhs;
+               hierarchy->GetPspace(SpaceName::H1,0)->MultTranspose(*rhs, tempc2);
+               // tempc = f_H - P^T f_h
+               tempc -= tempc2;
+
+               // tempc = (Pt W P)^{-1}  * (f_H - P^T f_h)
+               for (int i = 0; i < tempc.Size(); ++i)
+                   tempc[i] /= PtWP_diag[i];
+
+               // tempf = P * (Pt W P)^{-1} * (f_H - P^T f_h)
+               prob_hierarchy->GetTrueP(0)->Mult(tempc, tempf1);
+
+               // tempf2 = W * P * (Pt W P)^{-1} * (f_H - P^T f_h)
+               mass_fine_spmat->Mult(tempf1, tempf2);
+
+               term1 = tempf2;
+
+               /*
+               // tempc = (Pt P)^{-1}  * (f_H - P^T f_h)
+               for (int i = 0; i < tempc.Size(); ++i)
+                   tempc[i] /= PtP_diag[i];
+
+               // term1 = P * (Pt P)^{-1} * (f_H - P^T f_h)
+               prob_hierarchy->GetTrueP(0)->Mult(tempc, term1);
+               */
+
+               std::cout << "Norm of term 1 = " << term1.Norml2() / sqrt (term1.Size()) << "\n";
+
+               Vector term2(fine_size);
+               term2 = res;
+               // tempc = Pt * res
+               hierarchy->GetPspace(SpaceName::H1,0)->MultTranspose(term2, tempc);
+
+               // tempc = (Pt W P)^{-1} * Pt * res
+               for (int i = 0; i < tempc.Size(); ++i)
+                   tempc[i] /= PtWP_diag[i];
+
+               // tempf = P * (Pt W P)^{-1} * Pt * res
+               hierarchy->GetPspace(SpaceName::H1,0)->Mult(tempc, tempf1);
+
+               // tempf2 = W * P * (Pt W P)^{-1} * Pt * res
+               mass_fine_spmat->Mult(tempf1, tempf2);
+
+               term2 -= tempf2;
+
+               /*
+               // tempc = (Pt P)^{-1} * Pt * res
+               for (int i = 0; i < tempc.Size(); ++i)
+                   tempc[i] /= PtP_diag[i];
+
+               // tempf1 = P * (Pt P)^{-1} * Pt * res
+               hierarchy->GetPspace(SpaceName::H1,0)->Mult(tempc, tempf1);
+
+               term2 -= tempf1;
+               */
+
+               std::cout << "Norm of term 2 = " << term2.Norml2() / sqrt (term2.Size()) << "\n";
+
+               double orto_check = term1 * term2;
+               if (fabs(orto_check) > 1.0e-12)
+                   std::cout << "(term1, term2) = " << orto_check << "\n";
+               MFEM_ASSERT(fabs(orto_check) < 1.0e-12, "Orthogonality check failed");
+
+               Vector check(fine_size);
+               check = term1;
+               check += term2;
+               check -= res;
+               MFEM_ASSERT(check.Norml2() / sqrt (check.Size()) < 1.0e-13, "Something went wrong");
+
+
+               delete mass_fine_spmat;
+               delete PtWP;
+               delete Pt;
+               delete PtP;
+           }
+#endif
            std::cout << "Initial relative tolerance: " << initial_rtol << "\n";
            std::cout << "Initial absolute tolerance: " << initial_atol << "\n";
        }
@@ -531,13 +709,13 @@ int main(int argc, char *argv[])
                     //problem->GetRhs().Norml2() /  sqrt (problem->GetRhs().Size()) << "\n";
 
        problem->ChangeSolver(initial_rtol, adjusted_atol);
-       problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
+       problem->SolveProblem(*rhs, problem->GetSol(), verbose, false);
 
        // checking the residual afterwards
        {
            BlockVector res(problem->GetTrueOffsets());
            problem->GetOp()->Mult(problem->GetSol(), res);
-           res -= problem->GetRhs();
+           res -= *rhs;
 
            double res_norm = ComputeMPIVecNorm(comm, res, "", false);
            if (verbose)
@@ -547,6 +725,12 @@ int main(int argc, char *argv[])
 
 #else
        problem->Solve(verbose, false);
+#endif
+
+#ifdef DEBUGGING_CASE
+       delete coarse_rhs;
+       coarse_rhs = new Vector(rhs->Size());
+       *coarse_rhs = *rhs;
 #endif
 
       BlockVector& problem_sol = problem->GetSol();
@@ -779,6 +963,41 @@ int main(int argc, char *argv[])
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
+
+#ifdef DEBUGGING_CASE
+#ifdef USEALWAYS_COARSE_RHS
+       Vector tempvec(rhs->Size());
+       tempvec = *rhs;
+       delete rhs;
+       rhs = new Vector(problem->GetRhs().GetBlock(0).Size());
+       Vector mass_coarse_diag;
+       ParBilinearForm mass_coarse(hierarchy->GetSpace(SpaceName::H1,1));
+       mass_coarse.AddDomainIntegrator(new MassIntegrator);
+       mass_coarse.Assemble();
+       mass_coarse.Finalize();
+       SparseMatrix * mass_coarse_spmat = mass_coarse.LoseMat();
+       mass_coarse_spmat->GetDiag(mass_coarse_diag);
+
+       for (int i = 0; i < tempvec.Size(); ++i)
+           tempvec[i] /= mass_coarse_diag[i];
+       prob_hierarchy->GetHierarchy().GetTruePspace(SpaceName::H1, 0)->Mult(tempvec, *rhs);
+
+       Vector mass_fine_diag;
+       ParBilinearForm mass_fine(hierarchy->GetSpace(SpaceName::H1,0));
+       mass_fine.AddDomainIntegrator(new MassIntegrator);
+       mass_fine.Assemble();
+       mass_fine.Finalize();
+       SparseMatrix * mass_fine_spmat = mass_fine.LoseMat();
+       mass_fine_spmat->GetDiag(mass_fine_diag);
+
+       for (int i = 0; i < rhs->Size(); ++i)
+           (*rhs)[i] *= mass_fine_diag[i];
+
+       delete mass_coarse_spmat;
+       delete mass_fine_spmat;
+#endif
+#endif
+
 
        // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();

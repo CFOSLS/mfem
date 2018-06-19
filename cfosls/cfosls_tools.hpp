@@ -1,4 +1,5 @@
 #include <iostream>
+#include <deque>
 #include "testhead.hpp"
 
 #ifndef MFEM_CFOSLS_TOOLS
@@ -20,6 +21,10 @@ namespace mfem
 {
 
 class FOSLSEstimator;
+class LocalProblemSolver;
+class HcurlGSSSmoother;
+class CoarsestProblemSolver;
+class CoarsestProblemHcurlSolver;
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
@@ -1144,21 +1149,6 @@ public:
 
     void Update();
 };
-
-/*
-class MultigridToolsHierarchy
-{
-protected:
-    GeneralHierarchy& hierarchy;
-    FOSLSProblem& problem;
-protected:
-    Array<LocalProblemSolver*> SchwarzSmoothers_lvls;
-    Array<HcurlGSSSmoother*> HcurlGSSSmoothers_lvls;
-public:
-    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_, bool optimized_localsolve);
-    void Update(bool recoarsen);
-};
-*/
 
 // class for general CFOSLS problem
 class FOSLSProblem
@@ -2343,6 +2333,77 @@ public:
 
     void MultTranspose(const Vector &x, Vector &y) const override;
 };
+
+struct ComponentsDescriptor
+{
+    bool with_Schwarz;
+    bool optimized_Schwarz;
+    bool with_Hcurl;
+    bool with_coarsest_partfinder;
+    bool with_coarsest_hcurl;
+public:
+    ComponentsDescriptor() : ComponentsDescriptor(false, false, false, false, false) {}
+
+    ComponentsDescriptor(bool with_Schwarz_, bool optimized_Schwarz_, bool with_Hcurl_,
+                         bool with_coarsest_partfinder_, bool with_coarsest_hcurl_)
+        : with_Schwarz(with_Schwarz_), optimized_Schwarz(optimized_Schwarz_), with_Hcurl(with_Hcurl_),
+          with_coarsest_partfinder(with_coarsest_partfinder_), with_coarsest_hcurl(with_coarsest_hcurl_)
+    {}
+};
+
+class MultigridToolsHierarchy
+{
+protected:
+    GeneralHierarchy& hierarchy;
+    int nlevels;
+    FOSLSProblem* problem;
+    ComponentsDescriptor descr;
+protected:
+    Array<SparseMatrix*> AE_e_lvls;
+    Array<BlockOperator*> BlockP_nobnd_lvls;
+    Array<Operator*> P_bnd_lvls;
+    Array<BlockOperator*> FunctOps_lvls;
+    Array<Operator*> Ops_lvls;
+    Array<LocalProblemSolver*> SchwarzSmoothers_lvls;
+    Array<HcurlGSSSmoother*> HcurlSmoothers_lvls;
+    Array<Operator*> CombinedSmoothers_lvls;
+    CoarsestProblemSolver* CoarsestSolver_partfinder;
+    CoarsestProblemHcurlSolver* CoarsestSolver_hcurl;
+
+    std::deque<Array<int>* > coarsebnd_indces_funct_lvls;
+    std::deque<const Array<int>* > offsets_funct;
+    std::deque<const Array<int>* > offsets_sp_funct;
+    Array<SparseMatrix*> Mass_mat_lvls;
+    Array<BlockMatrix*> Funct_mat_lvls;
+    Array<SparseMatrix*> Constraint_mat_lvls;
+
+    std::deque<Array<int>* > el2dofs_row_offsets;
+    std::deque<Array<int>* > el2dofs_col_offsets;
+    /*
+    Array<int> row_offsets_coarse, col_offsets_coarse;
+    std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
+    std::vector<Array<int>* > essbdr_dofs_funct_coarse;
+    std::vector<Array<int>* > fullbdr_attribs;
+    */
+
+protected:
+    int update_counter;
+
+public:
+    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
+                            ComponentsDescriptor& descriptor_);
+    void Update(bool recoarsen);
+
+public:
+    Array<Operator*>& GetCombinedSmoothers() {return CombinedSmoothers_lvls;}
+    Array<BlockOperator*>& GetBlockOps() {return FunctOps_lvls;}
+    Array<Operator*>& GetOps() {return Ops_lvls;}
+    Array<Operator*>& GetPs_bnd() {return P_bnd_lvls;}
+    Array<BlockOperator*>& GetBlockPs_nobnd() {return BlockP_nobnd_lvls;}
+    CoarsestProblemSolver* GetCoarsestSolver_Partfinder() {return CoarsestSolver_partfinder;}
+    CoarsestProblemHcurlSolver* GetCoarsestSolver_Hcurl() {return CoarsestSolver_hcurl;}
+};
+
 
 //#####################################################################################
 

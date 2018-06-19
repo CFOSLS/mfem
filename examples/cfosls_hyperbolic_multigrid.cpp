@@ -975,8 +975,16 @@ int main(int argc, char *argv[])
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->SetRelTol(sqrt(1.0e-12));
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->ResetSolverParams();
 
+    // old, working interface
+    //GeneralMultigrid * GeneralMGprec_plus =
+            //new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
+
+    // newer interface using MultigridTools
+    ComponentsDescriptor descriptor(true, true, true, true, true);
+    MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, *problem, descriptor);
     GeneralMultigrid * GeneralMGprec_plus =
-            new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
+            new GeneralMultigrid(nlevels, mgtools_hierarchy->GetPs_bnd(), mgtools_hierarchy->GetOps(),
+                                 *mgtools_hierarchy->GetCoarsestSolver_Hcurl(), mgtools_hierarchy->GetCombinedSmoothers());
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
     if (verbose)

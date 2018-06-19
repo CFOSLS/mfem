@@ -783,11 +783,265 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
     initialized_forms = true;
 }
 
-/*
 MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
-                                                 bool optimized_localsolve)
-    : hierarchy(hierarchy_), problem
+                                                 ComponentsDescriptor& descriptor_)
+    : hierarchy(hierarchy_), nlevels(hierarchy.Nlevels()), problem(&problem_), descr(descriptor_),
+      update_counter(hierarchy.GetUpdateCounter())
 {
+    MFEM_ASSERT(problem->GetParMesh()->GetNE() == hierarchy.GetPmesh(0)->GetNE(),
+                "Given FOSLS problem must be defined on the finest level of the "
+                "hierarchy in the current implementation. Probably it was not updated "
+                "by a call to DivConstraintSolver::UpdateProblem() after the hierarchy was updated \n");
+
+    const Array<SpaceName>* space_names_problem = problem->GetFEformulation().
+            GetFormulation()->GetSpacesDescriptor();
+    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().
+            GetFormulation()->GetFunctSpacesDescriptor();
+
+    int numblocks_funct = space_names_funct->Size();
+
+    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+    std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+    std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+    {
+        fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
+        (*fullbdr_attribs[i]) = 1;
+    }
+
+
+    offsets_funct.resize(nlevels);
+    offsets_funct[0] = hierarchy.ConstructTrueOffsetsforFormul(0, *space_names_funct);
+    offsets_sp_funct.resize(nlevels);
+    offsets_sp_funct[0] = hierarchy.ConstructOffsetsforFormul(0, *space_names_funct);
+
+    FunctOps_lvls.SetSize(nlevels);
+    FunctOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
+
+    BlockP_nobnd_lvls.SetSize(nlevels - 1);
+    P_bnd_lvls.SetSize(nlevels - 1);
+
+    Ops_lvls.SetSize(nlevels);
+    Ops_lvls[0] = FunctOps_lvls[0];
+
+    if (descr.with_Schwarz)
+    {
+        Funct_mat_lvls.SetSize(nlevels);
+        Funct_mat_lvls[0] = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
+
+        Constraint_mat_lvls.SetSize(nlevels);
+        ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy.GetSpace(SpaceName::HDIV, 0),
+                                                                hierarchy.GetSpace(SpaceName::L2, 0));
+        Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+        Divblock->Assemble();
+        Divblock->Finalize();
+        Constraint_mat_lvls[0] = Divblock->LoseMat();
+        delete Divblock;
+
+        Mass_mat_lvls.SetSize(nlevels);
+        ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, 0));
+        mass_form.AddDomainIntegrator(new MassIntegrator);
+        mass_form.Assemble();
+        mass_form.Finalize();
+        Mass_mat_lvls[0] = mass_form.LoseMat();
+    }
+
+
+    coarsebnd_indces_funct_lvls.resize(nlevels);
+
+    for (int l = 0; l < nlevels - 1; ++l)
+    {
+        std::vector<Array<int>* > &essbdr_tdofs_funct =
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
+
+        int ncoarse_bndtdofs = 0;
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            ncoarse_bndtdofs += essbdr_tdofs_funct[blk]->Size();
+        }
+
+        coarsebnd_indces_funct_lvls[l] = new Array<int>(ncoarse_bndtdofs);
+
+        int shift_bnd_indices = 0;
+        int shift_tdofs_indices = 0;
+
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            for (int j = 0; j < essbdr_tdofs_funct[blk]->Size(); ++j)
+                (*coarsebnd_indces_funct_lvls[l])[j + shift_bnd_indices] =
+                    (*essbdr_tdofs_funct[blk])[j] + shift_tdofs_indices;
+
+            shift_bnd_indices += essbdr_tdofs_funct[blk]->Size();
+            shift_tdofs_indices += hierarchy.GetSpace((*space_names_funct)[blk], l + 1)->TrueVSize();
+        }
+
+    }
+
+    for (int l = 1; l < nlevels; ++l)
+    {
+        offsets_funct[l] = hierarchy.ConstructTrueOffsetsforFormul(l, *space_names_funct);
+        offsets_sp_funct[l] = hierarchy.ConstructOffsetsforFormul(l, *space_names_funct);
+
+        BlockP_nobnd_lvls[l - 1] = hierarchy.ConstructTruePforFormul(l - 1, *space_names_funct,
+                                                                     *offsets_funct[l - 1], *offsets_funct[l]);
+        P_bnd_lvls[l - 1] = new BlkInterpolationWithBNDforTranspose(*BlockP_nobnd_lvls[l - 1],
+                                                          *coarsebnd_indces_funct_lvls[l - 1],
+                                                          *offsets_funct[l - 1], *offsets_funct[l]);
+
+        FunctOps_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+                *FunctOps_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
+
+        std::vector<Array<int>* > &essbdr_tdofs_funct =
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
+        EliminateBoundaryBlocks(*FunctOps_lvls[l], essbdr_tdofs_funct);
+
+        Ops_lvls[l] = FunctOps_lvls[l];
+
+        if (descr.with_Schwarz)
+        {
+            Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
+                                            *Constraint_mat_lvls[l - 1], *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
+
+            BlockMatrix * P_Funct = hierarchy.ConstructPforFormul(l - 1, *space_names_funct,
+                                                                       *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
+            Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
+
+            delete P_Funct;
+
+            ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, l));
+            mass_form.AddDomainIntegrator(new MassIntegrator);
+            mass_form.Assemble();
+            mass_form.Finalize();
+            Mass_mat_lvls[l] = mass_form.LoseMat();
+        }
+    }
+
+    if (descr.with_Schwarz)
+    {
+        SchwarzSmoothers_lvls.SetSize(nlevels - 1);
+        AE_e_lvls.SetSize(nlevels - 1);
+        el2dofs_row_offsets.resize(nlevels - 1);
+        el2dofs_col_offsets.resize(nlevels - 1);
+    }
+    if (descr.with_Hcurl)
+        HcurlSmoothers_lvls.SetSize(nlevels - 1);
+
+    if (descr.with_Schwarz && descr.with_Hcurl)
+        CombinedSmoothers_lvls.SetSize(nlevels - 1);
+
+    for (int l = 0; l < nlevels; ++l)
+    {
+        if (l < nlevels - 1)
+        {
+            if (descr.with_Hcurl)
+            {
+                Array<int> SweepsNum(numblocks_funct);
+                SweepsNum = ipow(1, l);
+
+                HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*FunctOps_lvls[l],
+                                                         *hierarchy.GetDivfreeDop(l),
+                                                         hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                                   essbdr_attribs_Hcurl, l),
+                                                         hierarchy.GetEssBdrTdofsOrDofs("tdof",
+                                                                                   *space_names_funct,
+                                                                                   essbdr_attribs, l),
+                                                         &SweepsNum, *offsets_funct[l]);
+            }
+
+            if (descr.with_Schwarz)
+            {
+                int size = FunctOps_lvls[l]->Height();
+
+                bool optimized_localsolve = descr.optimized_Schwarz;
+
+                el2dofs_row_offsets[l] = new Array<int>();
+                el2dofs_col_offsets[l] = new Array<int>();
+
+                AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
+                if (numblocks_funct > 1) // S is present
+                {
+                    SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
+                                                             *Constraint_mat_lvls[l],
+                                                             hierarchy.GetDofTrueDof(*space_names_funct, l),
+                                                             *AE_e_lvls[l],
+                                                             *hierarchy.GetElementToDofs(*space_names_funct, l,
+                                                                                         *el2dofs_row_offsets[l],
+                                                                                         *el2dofs_col_offsets[l]),
+                                                             *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                                             hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                      fullbdr_attribs, l),
+                                                             hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                      essbdr_attribs, l),
+                                                             optimized_localsolve);
+                }
+                else // no S
+                {
+                    SchwarzSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls[l],
+                                                                      *Constraint_mat_lvls[l],
+                                                                      hierarchy.GetDofTrueDof(*space_names_funct, l),
+                                                                      *AE_e_lvls[l],
+                                                                      *hierarchy.GetElementToDofs(*space_names_funct, l,
+                                                                                                  *el2dofs_row_offsets[l],
+                                                                                                  *el2dofs_col_offsets[l]),
+                                                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                                                      hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                               fullbdr_attribs, l),
+                                                                      hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                               essbdr_attribs, l),
+                                                                      optimized_localsolve);
+                }
+            }
+
+            if (descr.with_Schwarz && descr.with_Hcurl)
+                CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+        }
+    }
+
+    // Creating the coarsest problem solver
+    int coarse_size = 0;
+    for (int i = 0; i < space_names_problem->Size(); ++i)
+        coarse_size += hierarchy.GetSpace((*space_names_problem)[i], nlevels - 1)->TrueVSize();
+
+    Array<int> row_offsets_coarse, col_offsets_coarse;
+
+    std::vector<Array<int>* > &essbdr_tdofs_funct_coarse =
+            hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, nlevels - 1);
+
+    std::vector<Array<int>* > &essbdr_dofs_funct_coarse =
+            hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, nlevels - 1);
+
+
+    if (descr.with_coarsest_partfinder)
+        CoarsestSolver_partfinder = new CoarsestProblemSolver(coarse_size,
+                                      *Funct_mat_lvls[nlevels - 1],
+            *Constraint_mat_lvls[nlevels - 1],
+            hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse, col_offsets_coarse),
+            *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse);
+    else
+        CoarsestSolver_partfinder = NULL;
+
+    if (descr.with_coarsest_hcurl)
+        CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver(FunctOps_lvls[nlevels - 1]->Height(),
+                                                     *FunctOps_lvls[nlevels - 1],
+                                                     *hierarchy.GetDivfreeDop(nlevels - 1),
+                                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
+                                                                                     fullbdr_attribs, nlevels - 1),
+                                                     hierarchy.GetEssBdrTdofsOrDofs("tdof",
+                                                                                     *space_names_funct,
+                                                                                     essbdr_attribs, nlevels - 1),
+                                                     hierarchy.GetEssBdrTdofsOrDofs("dof", SpaceName::HCURL,
+                                                                                     essbdr_attribs_Hcurl, nlevels - 1),
+                                                     hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                                     essbdr_attribs_Hcurl, nlevels - 1));
+    else
+        CoarsestSolver_partfinder = NULL;
+
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetRelTol(sqrt(1.0e-12));
+    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->ResetSolverParams();
 
 }
 
@@ -795,8 +1049,34 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 {
     MFEM_ABORT("Not implemented \n");
 
+    int hierarchy_upd_cnt = hierarchy.GetUpdateCounter();
+    if (update_counter != hierarchy_upd_cnt)
+    {
+        // ...
+        if (recoarsen)
+        {
+            for (int l = 0; l < nlevels; ++l)
+            {
+                delete FunctOps_lvls[l];
+                if (l < nlevels - 1)
+                {
+                    delete SchwarzSmoothers_lvls[l];
+                    delete HcurlSmoothers_lvls[l];
+                    delete CombinedSmoothers_lvls[l];
+                }
+                delete Mass_mat_lvls[l];
+                delete Funct_mat_lvls[l];
+                delete Constraint_mat_lvls[l];
+            }
+
+            FunctOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
+            // ...
+        }
+
+        nlevels = hierarchy.Nlevels();
+    }
+
 }
-*/
 
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
@@ -1558,8 +1838,9 @@ void FOSLSProblem::ComputeBndError(const Vector& vec) const
 
             if (fabs(value_ex - value_com) > MYZEROTOL)
             {
-                std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
-                          << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                std::cout << "bnd condition is violated for sigma, tdof = " <<
+                             tdof << " exact value = " << value_ex << ", value_com = "
+                          << value_com << ", diff = " << value_ex - value_com << "\n";
                 std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(blk)[tdof] << "\n";
             }
         }
@@ -1614,7 +1895,8 @@ void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd) 
         //double err = grfuns[blk]->ComputeL2Error(*(Mytest.sigma), irs);
         //double norm_exsol = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
         if (verbose)
-            cout << "component No. " << blk << ": || error || / || exact_sol || = " << err / norm_exsol << endl;
+            cout << "component No. " << blk << ": || error || / || exact_sol || = "
+                 << err / norm_exsol << endl;
 
         double projection_error = -1.0;
 
@@ -1693,7 +1975,8 @@ void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd, 
     //double err = grfuns[blk]->ComputeL2Error(*(Mytest.sigma), irs);
     //double norm_exsol = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
     if (verbose)
-        cout << "component No. " << blk << ": || error || / || exact_sol || = " << err / norm_exsol << endl;
+        cout << "component No. " << blk << ": || error || / || exact_sol || = "
+             << err / norm_exsol << endl;
 
     double projection_error = -1.0;
 
@@ -3369,7 +3652,8 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_cond
 }
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
-                FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll, ParFiniteElementSpace &Hdiv_space, bool verbose_)
+                FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll,
+                                         ParFiniteElementSpace &Hdiv_space, bool verbose_)
     : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false),
       hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space)
 {
@@ -3637,7 +3921,8 @@ void GeneralMultigrid::MG_Cycle() const
         P_l.MultTranspose(residual_l, *residual[current_level + 1]);
 
         //std::cout << "residual after coarsening, new MG, "
-                     //"norm = " << residual[current_level + 1]->Norml2() / sqrt (residual[current_level + 1]->Size()) << "\n";
+                     //"norm = " << residual[current_level + 1]->Norml2() /
+                     //sqrt (residual[current_level + 1]->Size()) << "\n";
 
         //std::cout << "residual after projecting onto coarser level, new MG \n";
         //residual[current_level + 1]->Print();
@@ -3682,8 +3967,8 @@ void GeneralMultigrid::MG_Cycle() const
 
 }
 
-RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_,
-                                             const Array<int>& Offsets)
+RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_,
+                                             BlockOperator &P_, const Array<int>& Offsets)
    : BlockOperator(Offsets),
      nblocks(A_.NumRowBlocks()),
      offsets(Offsets)
@@ -4081,8 +4366,9 @@ void CFOSLSHyperbolicProblem::ComputeError(bool verbose, bool checkbnd)
 
             if (fabs(value_ex - value_com) > MYZEROTOL)
             {
-                std::cout << "bnd condition is violated for sigma, tdof = " << tdof << " exact value = "
-                          << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                std::cout << "bnd condition is violated for sigma, tdof = " <<
+                             tdof << " exact value = " << value_ex << ", value_com = "
+                          << value_com << ", diff = " << value_ex - value_com << "\n";
                 std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(0)[tdof] << "\n";
             }
         }
@@ -4106,8 +4392,9 @@ void CFOSLSHyperbolicProblem::ComputeError(bool verbose, bool checkbnd)
 
                 if (fabs(value_ex - value_com) > MYZEROTOL)
                 {
-                    std::cout << "bnd condition is violated for S, tdof = " << tdof << " exact value = "
-                              << value_ex << ", value_com = " << value_com << ", diff = " << value_ex - value_com << "\n";
+                    std::cout << "bnd condition is violated for S, tdof = " <<
+                                 tdof << " exact value = " << value_ex << ", value_com = "
+                              << value_com << ", diff = " << value_ex - value_com << "\n";
                     std::cout << "rhs side at this tdof = " << trueRhs->GetBlock(1)[tdof] << "\n";
                 }
             }
@@ -4568,7 +4855,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
             P_Hdiv_lvls[l] = RemoveZeroEntries(*P_Hdiv_local);
 
             auto d_td_coarse_Hdiv = Hdiv_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(), *P_Hdiv_lvls[l]);
+            SparseMatrix * RP_Hdiv_local = Mult(*Hdiv_space_lvls[l]->GetRestrictionMatrix(),
+                                                *P_Hdiv_lvls[l]);
             TrueP_Hdiv_lvls[l] = d_td_coarse_Hdiv->LeftDiagMult(
                         *RP_Hdiv_local, Hdiv_space_lvls[l]->GetTrueDofOffsets());
             TrueP_Hdiv_lvls[l]->CopyColStarts();
@@ -4622,7 +4910,8 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
                 P_Hdivskew_lvls[l] = RemoveZeroEntries(*P_Hdivskew_local);
 
                 auto d_td_coarse_Hdivskew = Hdivskew_space_lvls[l + 1]->Dof_TrueDof_Matrix();
-                SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[l]->GetRestrictionMatrix(), *P_Hdivskew_lvls[l]);
+                SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[l]->GetRestrictionMatrix(),
+                                                        *P_Hdivskew_lvls[l]);
                 TrueP_Hdivskew_lvls[l] = d_td_coarse_Hdivskew->LeftDiagMult(
                             *RP_Hdivskew_local, Hdivskew_space_lvls[l]->GetTrueDofOffsets());
                 TrueP_Hdivskew_lvls[l]->CopyColStarts();
@@ -4643,7 +4932,8 @@ void GeneralHierarchy::Update()
     bool update_required = (pmesh.GetNE() != pmesh_ne);
     if (update_required)
     {
-        MFEM_ASSERT(pmesh.GetLastOperation() == Mesh::Operation::REFINE, "It is assumed that a refinement was done \n");
+        MFEM_ASSERT(pmesh.GetLastOperation() == Mesh::Operation::REFINE,
+                    "It is assumed that a refinement was done \n");
 
         // updating mesh
         ParMesh * pmesh_new = new ParMesh(pmesh);
@@ -4764,7 +5054,8 @@ void GeneralHierarchy::Update()
             P_Hdivskew_lvls.Prepend(P_Hdivskew_new);
 
             auto d_td_coarse_Hdivskew = Hdivskew_space_lvls[1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[0]->GetRestrictionMatrix(), *P_Hdivskew_lvls[0]);
+            SparseMatrix * RP_Hdivskew_local = Mult(*Hdivskew_space_lvls[0]->GetRestrictionMatrix(),
+                    *P_Hdivskew_lvls[0]);
 
             HypreParMatrix * TrueP_Hdivskew_new = d_td_coarse_Hdivskew->LeftDiagMult(
                         *RP_Hdivskew_local, Hdivskew_space_lvls[0]->GetTrueDofOffsets());
@@ -4894,7 +5185,8 @@ void GeneralHierarchy::ConstructDofTrueDofs()
 }
 
 
-const Array<int>* GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+const Array<int>* GeneralHierarchy::ConstructTrueOffsetsforFormul(int level,
+                                                                  const Array<SpaceName>& space_names)
 {
     Array<int> * res = new Array<int>(space_names.Size() + 1);
 
@@ -4906,7 +5198,8 @@ const Array<int>* GeneralHierarchy::ConstructTrueOffsetsforFormul(int level, con
     return res;
 }
 
-const Array<int>* GeneralHierarchy::ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names)
+const Array<int>* GeneralHierarchy::ConstructOffsetsforFormul(int level,
+                                                              const Array<SpaceName>& space_names)
 {
     Array<int> * res = new Array<int>(space_names.Size() + 1);
 
@@ -4920,7 +5213,8 @@ const Array<int>* GeneralHierarchy::ConstructOffsetsforFormul(int level, const A
 
 
 BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
-                                                         const Array<int>& row_offsets, const Array<int>& col_offsets)
+                                                         const Array<int>& row_offsets,
+                                                         const Array<int>& col_offsets)
 {
     BlockOperator * res = new BlockOperator(row_offsets, col_offsets);
 
@@ -4945,7 +5239,8 @@ BlockMatrix* GeneralHierarchy::ConstructPforFormul(int level, const Array<SpaceN
 
 
 BlockOperator* GeneralHierarchy::ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
-                                                         const Array<int>& row_offsets, const Array<int>& col_offsets)
+                                                         const Array<int>& row_offsets,
+                                                         const Array<int>& col_offsets)
 {
     const Array<SpaceName> * space_names  = formul.GetSpacesDescriptor();
     return ConstructTruePforFormul(level, *space_names, row_offsets, col_offsets);
@@ -5346,7 +5641,8 @@ HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
     return NULL;
 }
 
-std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names, int level) const
+std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names,
+                                                               int level) const
 {
     std::vector<HypreParMatrix*> * res = new std::vector<HypreParMatrix*>;
     res->resize(space_names.Size());
@@ -5501,7 +5797,8 @@ void GeneralCylHierarchy::ConstructTdofsLinks()
     }
 }
 
-HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace, std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
+HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
+                                   std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
 {
     if (strcmp(top_or_bot, "top") != 0 && strcmp(top_or_bot, "bot") != 0)
     {
@@ -5632,7 +5929,8 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 
     //std::cout << "Creating resT \n";
 
-    HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols, row_starts, col_starts, diag);
+    HypreParMatrix * resT = new HypreParMatrix(comm, global_num_rows, global_num_cols,
+                                               row_starts, col_starts, diag);
 
     //std::cout << "resT created \n";
 
@@ -5652,11 +5950,13 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 // which can be taken out of ParMeshCyl
 
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose)
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels,
+                                                         bool verbose)
 {
     if (strcmp(eltype, "linearH1") != 0 && strcmp(eltype, "RT0") != 0)
     {
-        MFEM_ABORT ("Provided eltype is not supported in CreateBotToTopDofsLink: must be linearH1 or RT0 strictly! \n");
+        MFEM_ABORT ("Provided eltype is not supported in CreateBotToTopDofsLink:"
+                    " must be linearH1 or RT0 strictly! \n");
     }
 
     int nbelpairs = bot_to_top_bels.size();
@@ -5741,7 +6041,8 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
 
             if (bel_dofs_first.Size() != nverts || bel_dofs_second.Size() != nverts)
             {
-                MFEM_ABORT("For linearH1 exactly #bel.vertices of dofs must correspond to each boundary element \n");
+                MFEM_ABORT("For linearH1 exactly #bel.vertices of dofs must "
+                           "correspond to each boundary element \n");
             }
 
             /*
@@ -5847,7 +6148,8 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
                 //int dofno_second = verts_perm_second_inverse[verts_permutation_first[dofno]];
                 int dofno_second = verts_permutation_second[verts_perm_first_inverse[dofno]];
 
-                if (res_set.find(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second])) == res_set.end())
+                if (res_set.find(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]))
+                        == res_set.end())
                 {
                     res_set.insert(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
                     res->push_back(std::pair<int,int>(bel_dofs_first[dofno], bel_dofs_second[dofno_second]));
@@ -5921,7 +6223,8 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
 // Eliminates all entries in the Operator acting in a pair of spaces,
 // assembled as a HypreParMatrix, which connect internal dofs to boundary dofs
 // Used to modife the Curl and Divskew operator for the new multigrid solver
-void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range )
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom,
+                        const Array<int>& EssBdrTrueDofs_range )
 {
     MPI_Comm comm = Op_hpmat.GetComm();
 
@@ -6057,7 +6360,8 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
                         */
                         if (truecolorig == truecol)
                         {
-                            //std::cout << "Changes made in off-d: row = " << row << ", col = " << col << ", truecol = " << truecolorig << "\n";
+                            //std::cout << "Changes made in off-d: row = " << row << ", col = "
+                                    //<< col << ", truecol = " << truecolorig << "\n";
                             C_offd.GetData()[C_offd.GetI()[row] + j] = 0.0;
 
                         }
@@ -6471,7 +6775,8 @@ void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double delt
 
 
         // deciding which time moments intersect the element if any
-        //if ( (eltmin > t0 && eltmin < t0 + (Nmoments-1) * deltat) ||  (eltmax > t0 && eltmax < t0 + (Nmoments-1) * deltat))
+        //if ( (eltmin > t0 && eltmin < t0 + (Nmoments-1) * deltat) ||
+                    // (eltmax > t0 && eltmax < t0 + (Nmoments-1) * deltat))
         if ( (eltmax > t0 && eltmin < t0 + (Nmoments-1) * deltat))
         {
             if (verbose)
@@ -6485,7 +6790,8 @@ void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double delt
                 cout << "magic number for low = " << (max(eltmin,t0) - t0) / deltat << endl;
                 cout << "magic number for top = " << (min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat << endl;
             }
-            for ( int k = ceil( (max(eltmin,t0) - t0) / deltat  ); k <= floor ((min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat) ; ++k)
+            for ( int k = ceil( (max(eltmin,t0) - t0) / deltat  );
+                  k <= floor ((min(eltmax,t0+(Nmoments-1)*deltat) - t0) / deltat) ; ++k)
             {
                 //if (myid == 0 )
                 if (verbose)
@@ -6520,8 +6826,10 @@ void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double delt
 // for a given element with index = elind.
 // updates the edgemarkers and vertex_count correspondingly
 // pvec defines the slice plane
-void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pvec, vector<vector<double> > & ipoints, vector<int>& edgemarkers,
-                             vector<vector<double> >& cellpnts, vector<int>& elvertslocal, int & nip, int & vertex_count )
+void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pvec,
+                       vector<vector<double> > & ipoints, vector<int>& edgemarkers,
+                       vector<vector<double> >& cellpnts, vector<int>& elvertslocal,
+                       int & nip, int & vertex_count )
 {
     bool verbose = false; // probably should be a function argument
     int dim = mesh.Dimension();
@@ -6746,7 +7054,8 @@ void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname, std::vector
 
 // reorders the cell vertices so as to have the cell vertex ordering compatible with VTK format
 // the output is the sorted elvertexes (which is also the input)
-void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts, std::vector<int> & elvertexes)
+void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts,
+                            std::vector<int> & elvertexes)
 {
     bool verbose = false;
     // used only for checking the orientation of tetrahedrons
@@ -7122,7 +7431,13 @@ bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation)
 
         int count = 0;
         vector<bool> el;
-        for(unsigned int m=0; m<dets.size(); m++) { if(fabs(dets[m]) < 1e-8) { count++; el.push_back(true); } else el.push_back(false); }
+        for(unsigned int m=0; m<dets.size(); m++)
+        {
+            if(fabs(dets[m]) < 1e-8)
+            { count++; el.push_back(true); }
+            else
+                el.push_back(false);
+        }
 
         if(count==2)
         {
@@ -7330,7 +7645,8 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
             computeSliceCell (mesh, elind, pvec, ipoints, edgemarkers, cellpnts, tempvec, nip, vertex_count);
 
             if ( (dim == 4 && (nip != 4 && nip != 6)) || (dim == 3 && (nip != 3 && nip != 4)) )
-                cout << "Strange nip =  " << nip << " for elind = " << elind << ", time = " << t0 + momentind * deltat << endl;
+                cout << "Strange nip =  " << nip << " for elind = " << elind << ", time = "
+                     << t0 + momentind * deltat << endl;
             else
             {
                 if (nip == 4) // tetrahedron in 3d or quadrilateral in 2d
