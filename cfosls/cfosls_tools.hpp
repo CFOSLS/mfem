@@ -25,6 +25,8 @@ class LocalProblemSolver;
 class HcurlGSSSmoother;
 class CoarsestProblemSolver;
 class CoarsestProblemHcurlSolver;
+class FOSLSProblem;
+class FOSLSFEFormulation;
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
@@ -354,6 +356,11 @@ protected:
     FiniteElementCollection *l2_coll;
     FiniteElementCollection *hdivskew_coll;
 
+    /// stores meshes at all levels
+    /// when the hierarchy gets more levels, new meshes are prepended
+    /// but not changed!
+    /// (*) for dynamic update of an aboject build on finest level of the hierarchy
+    /// one should use pmesh and corresponding spaces
     Array<ParMesh*> pmesh_lvls;
     Array<ParFiniteElementSpace* > Hdiv_space_lvls;
     Array<ParFiniteElementSpace* > Hcurl_space_lvls;
@@ -389,6 +396,8 @@ protected:
     int pmesh_ne;
 
     int update_counter;
+
+    Array<FOSLSProblem*> problems;
 
 public:
     // by default we construct div-free space (Hcurl) in 3D
@@ -428,6 +437,8 @@ public:
     HypreParMatrix * GetTrueP_Hcurl(int l) {return TrueP_Hcurl_lvls[l];}
 
     ParFiniteElementSpace *GetSpace(SpaceName space, int level);
+
+    ParFiniteElementSpace *GetFinestSpace(SpaceName space);
 
     HypreParMatrix * GetTruePspace(SpaceName space, int level);
 
@@ -474,7 +485,41 @@ public:
                                  Array<int>& row_offsets, Array<int>& col_offsets) const;
 
     int GetUpdateCounter() const {return update_counter;}
+
+    // constructs a FOSLSProblem of given (by template parameter) subtype
+    // using the spaces at level l (defined on pmesh_lvls[l])
+    template <class Problem> Problem* BuildStaticProblem(int l, BdrConditions& bdr_conditions,
+                                                         FOSLSFEFormulation& fe_formulation,
+                                                         int prec_option, bool verbose);
+
+    // constructs a FOSLSProblem of given (by template parameter) subtype
+    // using the spaces defines at pmesh (dynamically updated instance of the finest pmesh)
+    template <class Problem> Problem* BuildDynamicProblem(BdrConditions& bdr_conditions,
+                                                          FOSLSFEFormulation& fe_formulation,
+                                                          int prec_option, bool verbose);
+
+    // attaches a given problem living at the finest level to the problems (defined on pmesh)
+    // which is useful for updating the problem
+    void AttachProblem(FOSLSProblem* problem);
+
+    FOSLSProblem* GetProblem(int i) {return problems[i];}
+    int Nproblems() const {return problems.Size();}
 };
+
+template <class Problem> Problem*
+GeneralHierarchy::BuildStaticProblem(int l, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
+                                     int prec_option, bool verbose)
+{
+    return new Problem(*this, l, bdr_conditions, fe_formulation, prec_option, verbose);
+}
+
+template <class Problem> Problem*
+GeneralHierarchy::BuildDynamicProblem(BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
+                                      int prec_option, bool verbose)
+{
+    return new Problem(*this, bdr_conditions, fe_formulation, prec_option, verbose);
+}
+
 
 class GeneralCylHierarchy : public GeneralHierarchy
 {
@@ -1160,8 +1205,19 @@ protected:
 
     BdrConditions& bdr_conds;
 
-    GeneralHierarchy * hierarchy; // (optional)
-    int level_in_hierarchy;       // (optional)
+    /// (optional)
+    /// initialized only when the problem is related to a hierarchy
+    GeneralHierarchy * hierarchy;
+
+    /// (optional)
+    /// index of this Problem inside the hierarchy.problems (if attached)
+    /// or -1, otherwise
+    /// changed only in GeneralHierarchy::AttachProblem()
+    int attached_index;
+
+    /// true if Update() is possible when the underlying pmesh is updated
+    /// false, otherwise (if it was created as a "static" problem from the hierarchy)
+    bool is_dynamic;
 
     Array<FOSLSEstimator*> estimators; // (optional)
 
@@ -1204,6 +1260,9 @@ protected:
 
 protected:
     void InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, const Array<SpaceName> &spaces_descriptor);
+    /// the dynamically updated finest level f.e. spaces are used
+    /// (unlike the version with explicit specification of the level
+    void InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, const Array<SpaceName> &spaces_descriptor);
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
@@ -1232,15 +1291,34 @@ public:
     BlockVector * GetTrueInitialConditionFunc();
     BlockVector * GetExactSolProj();
 
+    /// builds a Problem on a given mesh, creating f.e. spaces and all the necessary data inside
+    /// (unlike constructors wghich take the hierarchy as an input argument)
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                  bool verbose_, bool assemble_system);
+
+    /// builds a "static" problem on the level l of the hierarchy
+    /// "static" means that the corresponding mesh and spaces are not updated
+    /// when the hierarchy gets more levels
     FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                  FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system);
 
+    /// builds a "dynamic" problem on the finesh level of the hierarchy
+    /// "dynamic" means that the corresponding mesh and spaces are updated
+    /// when the hierarchy gets more levels
+    FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system);
+
+    // shorter constructor versions
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_)
         : FOSLSProblem(pmesh_, bdr_conditions, fe_formulation, verbose_, true) {}
-    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation, bool verbose_)
+
+    FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_, true) {}
+
+    FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_, true) {}
 
     void Solve(bool verbose, bool compute_error) const
     { SolveProblem(*trueRhs, verbose, compute_error); }
@@ -1266,13 +1344,6 @@ public:
     int GlobalTrueProblemSize() const {return CFOSLSop->Height();}
 
     MPI_Comm GetComm() {return pmesh.GetComm();}
-
-    /*
-    virtual FOSLSEstimator& ExtractEstimator(bool verbose)
-    {
-        MFEM_ABORT("Cannot construct FOSLSEstimator in the base class");
-    }
-    */
 
     int GetNEstimators() const {return estimators.Size();}
 
@@ -1380,6 +1451,12 @@ public:
     }
 
     Solver * GetPrec() {return prec;}
+
+    bool IsDynamic() const {return is_dynamic;}
+
+    friend void GeneralHierarchy::AttachProblem(FOSLSProblem* problem);
+
+    int GetAttachedIndex() const {return attached_index;}
 };
 
 /// FIXME: Looks like this shouldn't have happened
@@ -1402,6 +1479,15 @@ public:
     FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1441,6 +1527,14 @@ public:
         UpdateSolverPrec();
     }
 
+    FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
     void ComputeExtraError(const Vector& vec) const override;
 
     void ComputeFuncError(const Vector& vec) const override;
@@ -1466,6 +1560,15 @@ public:
     FOSLSProblem_HdivH1parab(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivH1parab(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1504,6 +1607,15 @@ public:
         UpdateSolverPrec();
     }
 
+    FOSLSProblem_HdivH1wave(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
     void ComputeExtraError(const Vector& vec) const override;
 
     void ComputeFuncError(const Vector& vec) const override;
@@ -1527,6 +1639,15 @@ public:
     FOSLSProblem_HdivH1lapl(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivH1lapl(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1562,6 +1683,15 @@ public:
         UpdateSolverPrec();
     }
 
+    FOSLSProblem_MixedLaplace(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
     void ComputeExtraError(const Vector& vec) const override;
 
     void ComputeFuncError(const Vector& vec) const override;
@@ -1585,6 +1715,15 @@ public:
     FOSLSProblem_Laplace(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_Laplace(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1616,6 +1755,9 @@ public:
                         ParFiniteElementSpace& Hdiv_space, bool verbose_);
 
     FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                 FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose);
+
+    FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                  FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose);
 
     void ConstructDivfreeHpMats();
@@ -2390,11 +2532,19 @@ protected:
     int update_counter;
 
 public:
-    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
-                            ComponentsDescriptor& descriptor_);
+    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, int problem_index,
+                            ComponentsDescriptor& descriptor_)
+        : MultigridToolsHierarchy(hierarchy_, *hierarchy_.GetProblem(problem_index), descriptor_) {}
+
     void Update(bool recoarsen);
 
+protected:
+    // troubles with such a constructor is the implementation of Update(), in particular,
+    // for the problem when it is not attached to the hierarchy's finest level
+    MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
+                            ComponentsDescriptor& descriptor_);
 public:
+    /// Getters
     Array<Operator*>& GetCombinedSmoothers() {return CombinedSmoothers_lvls;}
     Array<BlockOperator*>& GetBlockOps() {return FunctOps_lvls;}
     Array<Operator*>& GetOps() {return Ops_lvls;}
@@ -2414,6 +2564,7 @@ public:
     std::deque<Array<int>* >& GetOffsets_El2dofs_row() {return el2dofs_row_offsets;}
     std::deque<Array<int>* >& GetOffsets_El2dofs_col() {return el2dofs_col_offsets;}
 
+    /// Getters for component description options
     bool With_Hcurl() {return descr.with_Hcurl;}
     bool With_Coarsest_partfinder() {return descr.with_coarsest_partfinder;}
     bool With_Schwarz() {return descr.with_Schwarz;}

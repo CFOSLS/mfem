@@ -788,10 +788,11 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     : hierarchy(hierarchy_), nlevels(hierarchy.Nlevels()), problem(&problem_), descr(descriptor_),
       update_counter(hierarchy.GetUpdateCounter())
 {
+    MFEM_ASSERT(problem->IsDynamic(), "Current implementation doesn't allow the problem to be `static'");
     MFEM_ASSERT(problem->GetParMesh()->GetNE() == hierarchy.GetPmesh(0)->GetNE(),
                 "Given FOSLS problem must be defined on the finest level of the "
                 "hierarchy in the current implementation. Probably it was not updated "
-                "by a call to DivConstraintSolver::UpdateProblem() after the hierarchy was updated \n");
+                "after the hierarchy was updated \n");
 
     const Array<SpaceName>* space_names_problem = problem->GetFEformulation().
             GetFormulation()->GetSpacesDescriptor();
@@ -1086,10 +1087,42 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
 }
 
+FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+             FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
+    : pmesh(*Hierarchy.GetFinestParMesh()), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
+      hierarchy(&Hierarchy), attached_index(-1), is_dynamic(true),
+      spaces_initialized(false), forms_initialized(false), system_assembled(false),
+      solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
+      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
+{
+    estimators.SetSize(0);
+
+    InitSpacesFromHierarchy(*hierarchy, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitForms();
+    InitGrFuns();
+
+    x = NULL;
+    trueX = NULL;
+    trueRhs = NULL;
+    trueBnd = NULL;
+    CreateOffsetsRhsSol();
+
+    CFOSLSop = NULL;
+    CFOSLSop_nobnd = NULL;
+
+    if (assemble_system)
+    {
+        AssembleSystem(verbose);
+        InitSolver(verbose);
+    }
+}
+
+
+
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(*Hierarchy.GetPmesh(level)), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
-      hierarchy(&Hierarchy), level_in_hierarchy(level),
+      hierarchy(&Hierarchy), attached_index(-1), is_dynamic(false),
       spaces_initialized(false), forms_initialized(false), system_assembled(false),
       solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
@@ -1119,7 +1152,7 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
                            FOSLSFEFormulation& fe_formulation, bool verbose_, bool assemble_system)
     : pmesh(pmesh_), fe_formul(fe_formulation), bdr_conds(bdr_conditions),
-      hierarchy(NULL), level_in_hierarchy(-1),
+      hierarchy(NULL), attached_index(-1), is_dynamic(true),
       spaces_initialized(false), forms_initialized(false), system_assembled(false),
       solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
       pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
@@ -1148,6 +1181,9 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
 
 void FOSLSProblem::Update()
 {
+    if (!is_dynamic && verbose)
+        std::cout << "WARNING: Calling FOSLSProblem::Update for a `static' problem \n";
+
     for (int i = 0; i < pfes.Size(); ++i)
     {
         pfes[i]->Update();
@@ -1240,6 +1276,18 @@ void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int leve
     for (int i = 0; i < fe_formul.Nblocks(); ++i)
     {
         pfes[i] = hierarchy.GetSpace(spaces_descriptor[i], level);
+    }
+
+    spaces_initialized = true;
+}
+
+void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, const Array<SpaceName> &spaces_descriptor)
+{
+    pfes.SetSize(fe_formul.Nblocks());
+
+    for (int i = 0; i < fe_formul.Nblocks(); ++i)
+    {
+        pfes[i] = hierarchy.GetFinestSpace(spaces_descriptor[i]);
     }
 
     spaces_initialized = true;
@@ -3643,6 +3691,17 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level,
     hdiv_fecoll = NULL;
 }
 
+FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+             FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)
+    : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose, false)
+{
+    int dim = pmesh.Dimension();
+    MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
+
+    hdiv_pfespace = Hierarchy.GetFinestSpace(SpaceName::HDIV);
+    hdiv_fecoll = NULL;
+}
+
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                 FOSLSFEFormulation& fe_formulation, bool verbose_)
     : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false)
@@ -5122,6 +5181,9 @@ void GeneralHierarchy::Update()
                 DofTrueDof_Hdivskew_lvls.Prepend(DofTrueDof_Hdivskew_new);
         }
 
+        for (int i = 0; i < problems.Size(); ++i)
+            problems[i]->Update();
+
         pmesh_ne = pmesh.GetNE();
 
         ++num_lvls;
@@ -5435,6 +5497,35 @@ ParFiniteElementSpace * GeneralHierarchy::GetSpace(SpaceName space, int level)
     return NULL;
 }
 
+ParFiniteElementSpace * GeneralHierarchy::GetFinestSpace(SpaceName space)
+{
+    switch(space)
+    {
+    case HDIV:
+        return Hdiv_space;
+    case H1:
+        return H1_space;
+    case L2:
+        return L2_space;
+    case HCURL:
+        if (!with_hcurl)
+        {
+            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                       " was not build in the hierarchy \n");
+        }
+        return Hcurl_space;
+    case HDIVSKEW:
+        return Hdivskew_space;
+    default:
+        {
+            MFEM_ABORT("Unknown or unsupported space name \n");
+            break;
+        }
+    }
+
+    return NULL;
+}
+
 HypreParMatrix * GeneralHierarchy::GetTruePspace(SpaceName space, int level)
 {
     switch(space)
@@ -5463,6 +5554,15 @@ HypreParMatrix * GeneralHierarchy::GetTruePspace(SpaceName space, int level)
 
     return NULL;
 }
+
+void GeneralHierarchy::AttachProblem(FOSLSProblem* problem)
+{
+    MFEM_ASSERT(problem->GetParMesh() == &pmesh, "Cannot attach a problem which is not defined"
+                                                 " on internal pmesh instance of the hierarchy");
+    problems.Append(problem);
+    problem->attached_index = problems.Size() - 1;
+}
+
 
 SparseMatrix * GeneralHierarchy::GetPspace(SpaceName space, int level)
 {

@@ -68,6 +68,7 @@ public:
 /// the finest level problem is created on the fly, and thus one has to change the definition of the
 /// grid functions invlolved in the estimator. This is done automatically via RedefineGrFuns()
 /// With that, the user must update the extra grid functions (if used) manually
+/// TODO: Refactor this class, its relations to hierarchy and problem classes look too weird
 template <class Problem, class Hierarchy>
 class FOSLSEstimatorOnHier : public FOSLSEstimator
 {

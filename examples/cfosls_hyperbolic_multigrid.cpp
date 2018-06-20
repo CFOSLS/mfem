@@ -306,9 +306,12 @@ int main(int argc, char *argv[])
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
 
+    FOSLSProblem* problem = hierarchy->BuildDynamicProblem<ProblemType>(*bdr_conds, *fe_formulat, prec_option, verbose);
+    hierarchy->AttachProblem(problem);
+
     // defining the original problem on the finest mesh
-    FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
-                                             *fe_formulat, prec_option, verbose);
+    //FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
+                                             //*fe_formulat, prec_option, verbose);
 
     BlockVector * Xinit_truedofs = problem->GetTrueInitialConditionFunc();
 
@@ -981,7 +984,7 @@ int main(int argc, char *argv[])
 
     // newer interface using MultigridTools
     ComponentsDescriptor descriptor(true, true, true, true, true);
-    MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, *problem, descriptor);
+    MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
     GeneralMultigrid * GeneralMGprec_plus =
             new GeneralMultigrid(nlevels, mgtools_hierarchy->GetPs_bnd(), mgtools_hierarchy->GetOps(),
                                  *mgtools_hierarchy->GetCoarsestSolver_Hcurl(), mgtools_hierarchy->GetCombinedSmoothers());
