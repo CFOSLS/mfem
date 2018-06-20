@@ -441,6 +441,9 @@ protected:
 
     const bool own_data;
 
+    MultigridToolsHierarchy* mgtools_hierarchy;
+    const bool built_on_mgtools;
+
     int num_levels;
 
     // Relation tables which represent agglomerated elements-to-elements relation at each level
@@ -498,6 +501,9 @@ public:
     ~DivConstraintSolver();
 
     DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_,
+                        bool optimized_localsolvers_, bool with_hcurl_smoothers_, bool verbose_);
+
+    DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierarchy,
                         bool optimized_localsolvers_, bool with_hcurl_smoothers_, bool verbose_);
 
     DivConstraintSolver(MPI_Comm Comm, int NumLevels,

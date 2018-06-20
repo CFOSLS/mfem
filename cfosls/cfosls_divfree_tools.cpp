@@ -2007,6 +2007,108 @@ DivConstraintSolver::~DivConstraintSolver()
     }
 }
 
+DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierarchy_,
+                    bool optimized_localsolvers_, bool with_hcurl_smoothers_, bool verbose_)
+    : problem(mgtools_hierarchy_.GetProblem()),
+      hierarchy(mgtools_hierarchy_.GetHierarchy()),
+      optimized_localsolvers(optimized_localsolvers_),
+      with_hcurl_smoothers(with_hcurl_smoothers_),
+      update_counter(hierarchy->GetUpdateCounter()),
+      own_data(false),
+      mgtools_hierarchy(&mgtools_hierarchy_),
+      built_on_mgtools(true),
+      num_levels(hierarchy->Nlevels()),
+      comm(problem->GetComm()),
+      numblocks(problem->GetFEformulation().Nblocks()),
+      verbose(verbose_)
+{
+    MFEM_ASSERT(mgtools_hierarchy->With_Coarsest_partfinder() &&
+                mgtools_hierarchy->With_Schwarz() && mgtools_hierarchy->With_Hcurl(),
+                "MultigridToolsHierarchy instance must have these components in order to be"
+                " used for constructing DivConstraintSolver");
+
+    P_L2.SetSize(num_levels - 1);
+    AE_e.SetSize(num_levels - 1);
+
+    const Array<SpaceName>* space_names_funct =
+            problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+
+    int numblocks_funct = space_names_funct->Size();
+
+    TrueP_Func.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        TrueP_Func[l] = mgtools_hierarchy->GetBlockPs_nobnd()[l];
+
+    offsets_funct.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        offsets_funct[l] = mgtools_hierarchy->GetOffsetsFunct()[l];
+    // hierarchy->ConstructTrueOffsetsforFormul(l, *space_names_funct);
+
+    size = (*offsets_funct[0])[numblocks_funct];
+
+    offsets_sp_funct.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        offsets_sp_funct[l] = mgtools_hierarchy->GetSpOffsetsFunct()[l];
+    //hierarchy->ConstructOffsetsforFormul(l, *space_names_funct);
+
+    Funct_mat_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Funct_mat_lvls[l] = mgtools_hierarchy->GetFunctBlockMats()[l];
+
+    Constraint_mat_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Constraint_mat_lvls[l] = mgtools_hierarchy->GetConstraintSpmats()[l];
+
+    Smoothers_lvls.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        if (with_hcurl_smoothers)
+            Smoothers_lvls[l] = mgtools_hierarchy->GetHcurlSmoothers()[l];
+        else
+            Smoothers_lvls[l] = NULL;
+
+    Mass_mat_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Mass_mat_lvls[l] = mgtools_hierarchy->GetMassSpmats()[l];
+
+    BlockOps_lvls.SetSize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        BlockOps_lvls[l] = mgtools_hierarchy->GetBlockOps()[l];
+
+    Func_global_lvls.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
+
+    LocalSolvers_lvls.SetSize(num_levels - 1);
+
+    truesolupdate_lvls.SetSize(num_levels);
+    truetempvec_lvls  .SetSize(num_levels);
+    truetempvec2_lvls .SetSize(num_levels);
+    trueresfunc_lvls  .SetSize(num_levels);
+
+    truesolupdate_lvls[0] = new BlockVector(*offsets_funct[0]);
+    truetempvec_lvls[0]   = new BlockVector(*offsets_funct[0]);
+    truetempvec2_lvls[0]  = new BlockVector(*offsets_funct[0]);
+    trueresfunc_lvls[0]   = new BlockVector(*offsets_funct[0]);
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        P_L2[l] = hierarchy->GetPspace(SpaceName::L2, l);
+        AE_e[l] = Transpose(*P_L2[l]);
+
+        LocalSolvers_lvls[l] = mgtools_hierarchy->GetSchwarzSmoothers()[l];
+
+        truesolupdate_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
+        truetempvec_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+        truetempvec2_lvls[l + 1]  = new BlockVector(*offsets_funct[l + 1]);
+        trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+    }
+
+    CoarseSolver =  mgtools_hierarchy->GetCoarsestSolver_Partfinder();
+
+    Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
+}
+
+
 DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_,
                                          bool optimized_localsolvers_,
                                          bool with_hcurl_smoothers_, bool verbose_)
@@ -2016,6 +2118,8 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
       with_hcurl_smoothers(with_hcurl_smoothers_),
       update_counter(hierarchy->GetUpdateCounter()),
       own_data(true),
+      mgtools_hierarchy(NULL),
+      built_on_mgtools(false),
       num_levels(hierarchy->Nlevels()),
       comm(problem->GetComm()),
       numblocks(problem->GetFEformulation().Nblocks()),
@@ -2233,6 +2337,8 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
        hierarchy(NULL),
        update_counter(0),
        own_data(false),
+       mgtools_hierarchy(NULL),
+       built_on_mgtools(false),
        num_levels(NumLevels),
        //AE_e(AE_to_e),
        comm(Comm),

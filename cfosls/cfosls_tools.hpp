@@ -2402,6 +2402,22 @@ public:
     Array<BlockOperator*>& GetBlockPs_nobnd() {return BlockP_nobnd_lvls;}
     CoarsestProblemSolver* GetCoarsestSolver_Partfinder() {return CoarsestSolver_partfinder;}
     CoarsestProblemHcurlSolver* GetCoarsestSolver_Hcurl() {return CoarsestSolver_hcurl;}
+    FOSLSProblem* GetProblem() {return problem;}
+    GeneralHierarchy* GetHierarchy() {return &hierarchy;}
+    Array<LocalProblemSolver*>& GetSchwarzSmoothers() {return SchwarzSmoothers_lvls;}
+    Array<HcurlGSSSmoother*>& GetHcurlSmoothers() {return HcurlSmoothers_lvls;}
+    Array<SparseMatrix*>& GetMassSpmats() {return Mass_mat_lvls;}
+    Array<BlockMatrix*>& GetFunctBlockMats() {return Funct_mat_lvls;}
+    Array<SparseMatrix*>& GetConstraintSpmats() {return Constraint_mat_lvls;}
+    std::deque<const Array<int>* > & GetOffsetsFunct() {return offsets_funct;}
+    std::deque<const Array<int>* > & GetSpOffsetsFunct() {return offsets_sp_funct;}
+    std::deque<Array<int>* >& GetOffsets_El2dofs_row() {return el2dofs_row_offsets;}
+    std::deque<Array<int>* >& GetOffsets_El2dofs_col() {return el2dofs_col_offsets;}
+
+    bool With_Hcurl() {return descr.with_Hcurl;}
+    bool With_Coarsest_partfinder() {return descr.with_coarsest_partfinder;}
+    bool With_Schwarz() {return descr.with_Schwarz;}
+    bool With_Coarsest_hcurl() {return descr.with_coarsest_hcurl;}
 };
 
 

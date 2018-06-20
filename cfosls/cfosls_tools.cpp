@@ -1012,6 +1012,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
 
     if (descr.with_coarsest_partfinder)
+    {
         CoarsestSolver_partfinder = new CoarsestProblemSolver(coarse_size,
                                       *Funct_mat_lvls[nlevels - 1],
             *Constraint_mat_lvls[nlevels - 1],
@@ -1019,10 +1020,18 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
             essbdr_dofs_funct_coarse,
             essbdr_tdofs_funct_coarse);
+
+        CoarsestSolver_partfinder->SetMaxIter(70000);
+        CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
+        CoarsestSolver_partfinder->SetRelTol(1.0e-18);
+        CoarsestSolver_partfinder->ResetSolverParams();
+    }
+
     else
         CoarsestSolver_partfinder = NULL;
 
     if (descr.with_coarsest_hcurl)
+    {
         CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver(FunctOps_lvls[nlevels - 1]->Height(),
                                                      *FunctOps_lvls[nlevels - 1],
                                                      *hierarchy.GetDivfreeDop(nlevels - 1),
@@ -1035,14 +1044,13 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
                                                                                      essbdr_attribs_Hcurl, nlevels - 1),
                                                      hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                      essbdr_attribs_Hcurl, nlevels - 1));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetRelTol(sqrt(1.0e-12));
+        ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->ResetSolverParams();
+    }
     else
         CoarsestSolver_partfinder = NULL;
-
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetRelTol(sqrt(1.0e-12));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->ResetSolverParams();
-
 }
 
 void MultigridToolsHierarchy::Update(bool recoarsen)
