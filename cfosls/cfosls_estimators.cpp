@@ -230,6 +230,8 @@ const Vector & FOSLSEstimator::GetLocalErrors()
     if (MeshIsModified())
         ComputeEstimates();
     return error_estimates;
+
+    current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
 }
 
 void FOSLSEstimator::ComputeEstimates()
@@ -248,7 +250,7 @@ void FOSLSEstimator::ComputeEstimates()
 
     // FIXME: Probably should be moved out of the ComputeEstimates
     // FIXME: in view of the inheriting classes which might not use current_sequence at all
-    current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
+    //current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
 }
 
 } // for namespace mfem
