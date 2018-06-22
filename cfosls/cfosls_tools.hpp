@@ -27,6 +27,7 @@ class CoarsestProblemSolver;
 class CoarsestProblemHcurlSolver;
 class FOSLSProblem;
 class FOSLSFEFormulation;
+class MonolithicGSBlockSmoother;
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
@@ -2482,13 +2483,18 @@ struct ComponentsDescriptor
     bool with_Hcurl;
     bool with_coarsest_partfinder;
     bool with_coarsest_hcurl;
+    bool with_monolithic_GS;
 public:
-    ComponentsDescriptor() : ComponentsDescriptor(false, false, false, false, false) {}
+    ComponentsDescriptor() : ComponentsDescriptor(false, false, false, false, false, false) {}
 
     ComponentsDescriptor(bool with_Schwarz_, bool optimized_Schwarz_, bool with_Hcurl_,
-                         bool with_coarsest_partfinder_, bool with_coarsest_hcurl_)
-        : with_Schwarz(with_Schwarz_), optimized_Schwarz(optimized_Schwarz_), with_Hcurl(with_Hcurl_),
-          with_coarsest_partfinder(with_coarsest_partfinder_), with_coarsest_hcurl(with_coarsest_hcurl_)
+                         bool with_coarsest_partfinder_, bool with_coarsest_hcurl_,
+                         bool with_monolithic_GS_)
+        : with_Schwarz(with_Schwarz_), optimized_Schwarz(optimized_Schwarz_),
+          with_Hcurl(with_Hcurl_),
+          with_coarsest_partfinder(with_coarsest_partfinder_),
+          with_coarsest_hcurl(with_coarsest_hcurl_),
+          with_monolithic_GS(with_monolithic_GS_)
     {}
 };
 
@@ -2508,6 +2514,7 @@ protected:
     Array<LocalProblemSolver*> SchwarzSmoothers_lvls;
     Array<HcurlGSSSmoother*> HcurlSmoothers_lvls;
     Array<Operator*> CombinedSmoothers_lvls;
+    Array<MonolithicGSBlockSmoother*> MonolithicGSSmoothers_lvls;
     CoarsestProblemSolver* CoarsestSolver_partfinder;
     CoarsestProblemHcurlSolver* CoarsestSolver_hcurl;
 
@@ -2562,6 +2569,7 @@ public:
     std::deque<const Array<int>* > & GetSpOffsetsFunct() {return offsets_sp_funct;}
     std::deque<Array<int>* >& GetOffsets_El2dofs_row() {return el2dofs_row_offsets;}
     std::deque<Array<int>* >& GetOffsets_El2dofs_col() {return el2dofs_col_offsets;}
+    Array<MonolithicGSBlockSmoother*> & GetMonolitGSSmoothers() {return MonolithicGSSmoothers_lvls;}
 
     /// Getters for component description options
     bool With_Hcurl() {return descr.with_Hcurl;}
@@ -2598,6 +2606,8 @@ bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &
 ParGridFunction * FindParticularSolution(ParFiniteElementSpace *Hdiv_space, const HypreParMatrix & B, const Vector& rhs, bool verbose);
 
 void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i);
+
+BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem);
 
 } // for namespace mfem
 

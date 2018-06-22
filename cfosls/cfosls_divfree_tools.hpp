@@ -1509,7 +1509,8 @@ protected:
     BlockVector * tmp;
 
 public:
-    MonolithicGSBlockSmoother(BlockOperator &Op, const Array<int>& Offsets, bool IsDiagonal, HypreSmoother::Type diag_type, int nsweeps);
+    MonolithicGSBlockSmoother(BlockOperator &Op, const Array<int>& Offsets,
+                              bool IsDiagonal, HypreSmoother::Type diag_type, int nsweeps);
 
     MonolithicGSBlockSmoother(BlockOperator &Op, const Array<int>& Offsets, bool IsDiagonal)
         : MonolithicGSBlockSmoother(Op, Offsets, IsDiagonal, HypreSmoother::Type::l1GS, 1) {}

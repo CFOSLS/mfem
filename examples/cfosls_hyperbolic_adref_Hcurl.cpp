@@ -27,11 +27,11 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-//#define AMR
+#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
-//#define DIVFREE_SETUP
+#define DIVFREE_SETUP
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 //#define CLEVER_STARTING_GUESS
@@ -59,8 +59,6 @@ using namespace mfem;
 using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
-
-BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem);
 
 int main(int argc, char *argv[])
 {
@@ -1055,15 +1053,18 @@ int main(int argc, char *argv[])
 #endif
 
 #else // not a multilevel particular solution finder
-       HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(2,0));
-       Vector& div_rhs = problem->GetRhs().GetBlock(2);
+       HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(numblocks - 1,0));
+
+       Vector * div_rhs = new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size());
+       *div_rhs = problem->GetRhs().GetBlock(numblocks - 1);
+       //Vector& div_rhs = problem->GetRhs().GetBlock(2);
        ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, *div_rhs, verbose);
        partsigma->ParallelProject(true_partsol.GetBlock(0));
 #endif
        // a check that the particular solution does satisfy the divergence constraint after all
-       HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks_funct, 0));
+       HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks - 1, 0));
        Vector tempc(Constr.Height());
-       Constr.Mult(partsol_vec.GetBlock(0), tempc);
+       Constr.Mult(true_partsol.GetBlock(0), tempc);
        tempc -= *div_rhs;//problem->GetRhs().GetBlock(numblocks_funct);
        double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
        MFEM_ASSERT (res_constr_norm < 1.0e-12, "");
@@ -1572,6 +1573,8 @@ int main(int argc, char *argv[])
 #ifndef     MULTILEVEL_PARTSOL
        delete partsigma;
 #endif
+#else
+       delete div_rhs;
 #endif
 
        // checking #dofs after the refinement
@@ -1589,35 +1592,6 @@ int main(int argc, char *argv[])
    MPI_Finalize();
    return 0;
 //#endif
-}
-
-// works for HdivH1 and HdivL2 formulations
-BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem)
-{
-    const HypreParMatrix * divfree_hpmat = &problem_divfree.GetDivfreeHpMat();
-    BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree.GetTrueOffsets());
-    HypreParMatrix * orig00 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(0,0));
-    HypreParMatrix * blk00 = RAP(divfree_hpmat, orig00, divfree_hpmat);
-    problem_divfree_op->SetBlock(0,0,blk00);
-
-    HypreParMatrix * blk10, *blk01, *blk11;
-    // Hdiv-H1 case
-    if (problem.GetFEformulation().Nunknowns() == 2)
-    {
-        blk11 = CopyHypreParMatrix(*(dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,1))));
-
-        HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,0));
-        blk10 = ParMult(orig10, divfree_hpmat);
-
-        blk01 = blk10->Transpose();
-
-        problem_divfree_op->SetBlock(0,1,blk01);
-        problem_divfree_op->SetBlock(1,0,blk10);
-        problem_divfree_op->SetBlock(1,1,blk11);
-    }
-    problem_divfree_op->owns_blocks = true;
-
-    return problem_divfree_op;
 }
 
 

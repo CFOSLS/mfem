@@ -2015,7 +2015,7 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
       with_hcurl_smoothers(with_hcurl_smoothers_),
       update_counter(hierarchy->GetUpdateCounter()),
       own_data(false),
-      mgtools_hierarchy(&mgtools_hierarchy_),
+      mgtools_hierarchy(&mgtools_hierarchy_),// why this doesn't work? or does it?
       built_on_mgtools(true),
       num_levels(hierarchy->Nlevels()),
       comm(problem->GetComm()),
@@ -2026,9 +2026,17 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
                 mgtools_hierarchy->With_Schwarz() && mgtools_hierarchy->With_Hcurl(),
                 "MultigridToolsHierarchy instance must have these components in order to be"
                 " used for constructing DivConstraintSolver");
+    /*
+    MFEM_ASSERT(mgtools_hierarchy_.With_Coarsest_partfinder() &&
+                mgtools_hierarchy_.With_Schwarz() && mgtools_hierarchy_.With_Hcurl(),
+                "MultigridToolsHierarchy instance must have these components in order to be"
+                " used for constructing DivConstraintSolver");
+    */
 
     P_L2.SetSize(num_levels - 1);
     AE_e.SetSize(num_levels - 1);
+
+    //mgtools_hierarchy = &mgtools_hierarchy_;
 
     const Array<SpaceName>* space_names_funct =
             problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();

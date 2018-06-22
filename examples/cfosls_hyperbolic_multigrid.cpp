@@ -52,6 +52,8 @@ int main(int argc, char *argv[])
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
+    using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
 
     /*
     // Hdiv-L2 case
@@ -59,6 +61,8 @@ int main(int argc, char *argv[])
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
     */
 
     bool aniso_refine = false;
@@ -306,8 +310,25 @@ int main(int argc, char *argv[])
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
 
-    FOSLSProblem* problem = hierarchy->BuildDynamicProblem<ProblemType>(*bdr_conds, *fe_formulat, prec_option, verbose);
+    FOSLSProblem* problem = hierarchy->BuildDynamicProblem<ProblemType>
+            (*bdr_conds, *fe_formulat, prec_option, verbose);
     hierarchy->AttachProblem(problem);
+
+    ComponentsDescriptor * descriptor;
+    {
+        bool with_Schwarz = true;
+        bool optimized_Schwarz = true;
+        bool with_Hcurl = true;
+        bool with_coarsest_partfinder = true;
+        bool with_coarsest_hcurl = true;
+        bool with_monolithic_GS = false;
+        descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
+                                                      with_Hcurl, with_coarsest_partfinder,
+                                                      with_coarsest_hcurl, with_monolithic_GS);
+    }
+    MultigridToolsHierarchy * mgtools_hierarchy =
+            new MultigridToolsHierarchy(*hierarchy, 0, *descriptor);
+
 
     // defining the original problem on the finest mesh
     //FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
@@ -316,9 +337,11 @@ int main(int argc, char *argv[])
     BlockVector * Xinit_truedofs = problem->GetTrueInitialConditionFunc();
 
     // defining space names for the original problem, for the functional and the related divfree problem
-    const Array<SpaceName>* space_names_problem = problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
+    const Array<SpaceName>* space_names_problem = problem->GetFEformulation().
+            GetFormulation()->GetSpacesDescriptor();
 
-    //const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+    //const Array<SpaceName>* space_names_funct = problem->GetFEformulation().
+                //GetFormulation()->GetFunctSpacesDescriptor();
     Array<SpaceName> space_names_funct(numblocks_funct);
     space_names_funct[0] = SpaceName::HDIV;
     if (strcmp(space_for_S,"H1") == 0)
@@ -356,7 +379,8 @@ int main(int argc, char *argv[])
     std::vector<const Array<int> *> divfree_offsets(nlevels);
     divfree_offsets[0] = hierarchy->ConstructTrueOffsetsforFormul(0, space_names_divfree);
 
-    HypreParMatrix * Constraint_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0));
+    HypreParMatrix * Constraint_global = (HypreParMatrix*)
+            (&problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0));
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
 
@@ -511,9 +535,11 @@ int main(int argc, char *argv[])
         cout << "Particular solution found in " << chrono.RealTime() << " seconds.\n";
 
     if (verbose)
-        std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
+        std::cout << "Checking that particular solution in parallel version "
+                     "satisfies the divergence constraint \n";
 
-    if (!CheckConstrRes(Sigmahat_truedofs, *Constraint_global, &problem->GetRhs().GetBlock(numblocks_funct),
+    if (!CheckConstrRes(Sigmahat_truedofs, *Constraint_global,
+                        &problem->GetRhs().GetBlock(numblocks_funct),
                         "in the old code for the particular solution"))
         std::cout << "Failure! \n";
     else
@@ -615,7 +641,8 @@ int main(int argc, char *argv[])
                         *coarsebnd_indces_divfree_lvls[l],
                         *divfree_offsets[l], *divfree_offsets[l + 1]);
             BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_divfree,
-                                                                    *divfree_offsets[l], *divfree_offsets[l + 1]);
+                                                                    *divfree_offsets[l],
+                                                                    *divfree_offsets[l + 1]);
         }
 
         if (l == 0)
@@ -633,8 +660,8 @@ int main(int argc, char *argv[])
         Ops_mg[l] = BlockOps_mg[l];
 
         if (l < num_levels - 1)
-            Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l],
-                                                        *divfree_offsets[l], false, HypreSmoother::Type::l1GS, 1);
+            Smoo_mg[l] = new MonolithicGSBlockSmoother( *BlockOps_mg[l], *divfree_offsets[l],
+                                                        false, HypreSmoother::Type::l1GS, 1);
     }
 
     // setting the coarsest level problem solver for the multigrid in divergence-free formulation
@@ -665,8 +692,58 @@ int main(int argc, char *argv[])
 
     ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
 
+    // newer interface, using MultigridToolsHierarchy
+    DivfreeFormulType * formulat_divfree = new DivfreeFormulType (dim, numsol, verbose);
+    DivfreeFEFormulType * fe_formulat_divfree = new DivfreeFEFormulType(*formulat_divfree, feorder);
+
+    FOSLSDivfreeProblem* divfree_problem = hierarchy->BuildDynamicProblem<FOSLSDivfreeProblem>
+            (*bdr_conds, *fe_formulat_divfree, prec_option, verbose);
+    divfree_problem->ConstructDivfreeHpMats();
+    divfree_problem->CreateOffsetsRhsSol();
+    BlockOperator * divfree_problem_op = ConstructDivfreeProblemOp(*divfree_problem, *problem);
+    divfree_problem->ResetOp(*divfree_problem_op);
+
+    divfree_problem->InitSolver(verbose);
+    // creating a preconditioner for the divfree problem
+    divfree_problem->CreatePrec(*divfree_problem->GetOp(), prec_option, verbose);
+    divfree_problem->ChangeSolver();
+    divfree_problem->UpdateSolverPrec();
+
+    hierarchy->AttachProblem(divfree_problem);
+    ComponentsDescriptor * divfree_descriptor;
+    {
+        bool with_Schwarz = false;
+        bool optimized_Schwarz = false;
+        bool with_Hcurl = false;
+        bool with_coarsest_partfinder = false;
+        bool with_coarsest_hcurl = false;
+        bool with_monolithic_GS = true;
+        divfree_descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
+                                                      with_Hcurl, with_coarsest_partfinder,
+                                                      with_coarsest_hcurl, with_monolithic_GS);
+    }
+
+    MultigridToolsHierarchy * mgtools_divfree_hierarchy =
+            new MultigridToolsHierarchy(*hierarchy, 1, *divfree_descriptor);
+
+    Array<Operator*> casted_monolitGSSmoothers(nlevels - 1);
+    for (int l = 0; l < nlevels - 1; ++l)
+        casted_monolitGSSmoothers[l] = mgtools_divfree_hierarchy->GetMonolitGSSmoothers()[l];
+
     GeneralMultigrid * GeneralMGprec =
-            new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
+            new GeneralMultigrid(nlevels,
+                                 //P_mg,
+                                 mgtools_divfree_hierarchy->GetPs_bnd(),
+                                 //Ops_mg,
+                                 //mgtools_divfree_hierarchy->GetOps(),
+                                 *CoarseSolver_mg,
+                                 *mgtools_divfree_hierarchy->GetCoarsestSolver_Hcurl(),
+                                 //Smoo_mg);
+                                 casted_monolitGSSmoothers);
+
+    // old interface
+    //GeneralMultigrid * GeneralMGprec =
+            //new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
 
     chrono.Stop();
     if (verbose)
@@ -983,11 +1060,10 @@ int main(int argc, char *argv[])
             //new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
 
     // newer interface using MultigridTools
-    ComponentsDescriptor descriptor(true, true, true, true, true);
-    MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
     GeneralMultigrid * GeneralMGprec_plus =
             new GeneralMultigrid(nlevels, mgtools_hierarchy->GetPs_bnd(), mgtools_hierarchy->GetOps(),
-                                 *mgtools_hierarchy->GetCoarsestSolver_Hcurl(), mgtools_hierarchy->GetCombinedSmoothers());
+                                 *mgtools_hierarchy->GetCoarsestSolver_Hcurl(),
+                                 mgtools_hierarchy->GetCombinedSmoothers());
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
     if (verbose)
@@ -1039,6 +1115,12 @@ int main(int argc, char *argv[])
     // old, works
     //DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers,
                                       //with_hcurl_smoothers, verbose);
+
+    mgtools_hierarchy->GetOffsetsFunct()[0]->Print();
+    mgtools_hierarchy->GetOffsetsFunct()[1]->Print();
+    mgtools_hierarchy->GetSpOffsetsFunct()[0]->Print();
+    mgtools_hierarchy->GetSpOffsetsFunct()[1]->Print();
+    std::cout << "maass mat 0 size = " << mgtools_hierarchy->GetMassSpmats()[0]->Height() << "\n";
 
     // newer
     DivConstraintSolver PartsolFinder(*mgtools_hierarchy, opt_localsolvers,

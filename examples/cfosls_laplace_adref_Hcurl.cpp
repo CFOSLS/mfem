@@ -305,6 +305,9 @@ int main(int argc, char *argv[])
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
+   ComponentsDescriptor descriptor(true, true, true, true, true, false);
+   MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
+
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
    Laplace_test* Mytest = dynamic_cast<Laplace_test*>

@@ -535,8 +535,9 @@ void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructSpacesDescriptor() const
 
 void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructFunctSpacesDescriptor() const
 {
-    space_names_funct = new Array<SpaceName>(1);
+    space_names_funct = new Array<SpaceName>(2);
     (*space_names_funct)[0] = SpaceName::HCURL;
+    (*space_names_funct)[1] = SpaceName::H1;
 }
 
 
@@ -995,6 +996,17 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
             if (descr.with_Schwarz && descr.with_Hcurl)
                 CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+        }
+    }
+
+    if (descr.with_monolithic_GS)
+    {
+        MonolithicGSSmoothers_lvls.SetSize(nlevels - 1);
+        for (int l = 0; l < nlevels - 1; ++l)
+        {
+            MonolithicGSSmoothers_lvls[l] =
+                    new MonolithicGSBlockSmoother( *FunctOps_lvls[l], *offsets_funct[l],
+                                                    false, HypreSmoother::Type::l1GS, 1);
         }
     }
 
@@ -2221,6 +2233,8 @@ BlockOperator* FOSLSProblem::GetFunctOp(const Array<int> &offsets)
     BlockOperator * funct_op = new BlockOperator(offsets);
 
     int numblocks = offsets.Size() - 1;
+
+    MFEM_ASSERT(CFOSLSop, "CFOSLSop is NULL \n");
 
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
@@ -7161,6 +7175,34 @@ void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i)
     block_op.SetBlock(i, i, id);
 }
 
+// works for HdivH1 and HdivL2 formulations
+BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem)
+{
+    const HypreParMatrix * divfree_hpmat = &problem_divfree.GetDivfreeHpMat();
+    BlockOperator * problem_divfree_op = new BlockOperator(problem_divfree.GetTrueOffsets());
+    HypreParMatrix * orig00 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(0,0));
+    HypreParMatrix * blk00 = RAP(divfree_hpmat, orig00, divfree_hpmat);
+    problem_divfree_op->SetBlock(0,0,blk00);
+
+    HypreParMatrix * blk10, *blk01, *blk11;
+    // Hdiv-H1 case
+    if (problem.GetFEformulation().Nunknowns() == 2)
+    {
+        blk11 = CopyHypreParMatrix(*(dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,1))));
+
+        HypreParMatrix * orig10 = dynamic_cast<HypreParMatrix*>(&problem.GetOp()->GetBlock(1,0));
+        blk10 = ParMult(orig10, divfree_hpmat);
+
+        blk01 = blk10->Transpose();
+
+        problem_divfree_op->SetBlock(0,1,blk01);
+        problem_divfree_op->SetBlock(1,0,blk10);
+        problem_divfree_op->SetBlock(1,1,blk11);
+    }
+    problem_divfree_op->owns_blocks = true;
+
+    return problem_divfree_op;
+}
 
 
 
