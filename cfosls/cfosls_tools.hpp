@@ -1266,12 +1266,6 @@ protected:
     void InitSpaces(ParMesh& pmesh);
     void InitForms();
     void AssembleSystem(bool verbose);
-    void SetPrec(Solver & Prec)
-    {
-        MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
-        prec = &Prec;
-        solver->SetPreconditioner(*prec);
-    }
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) {}
     void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
     void SetPrecOption(int option) { prec_option = option; }
@@ -1283,6 +1277,13 @@ public:
     void InitSolver(bool verbose);
 
     void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
+
+    void SetPrec(Solver & Prec)
+    {
+        MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
+        prec = &Prec;
+        solver->SetPreconditioner(*prec);
+    }
 
     void DistributeToGrfuns(const Vector& vec) const;
 

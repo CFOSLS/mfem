@@ -1122,6 +1122,9 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
     CFOSLSop = NULL;
     CFOSLSop_nobnd = NULL;
 
+    solver = NULL;
+    prec = NULL;
+
     if (assemble_system)
     {
         AssembleSystem(verbose);
@@ -1154,6 +1157,9 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     CFOSLSop = NULL;
     CFOSLSop_nobnd = NULL;
 
+    solver = NULL;
+    prec = NULL;
+
     if (assemble_system)
     {
         AssembleSystem(verbose);
@@ -1183,6 +1189,9 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
 
     CFOSLSop = NULL;
     CFOSLSop_nobnd = NULL;
+
+    solver = NULL;
+    prec = NULL;
 
     if (assemble_system)
     {
@@ -3804,7 +3813,9 @@ void FOSLSDivfreeProblem::ChangeSolver()
          new_solver->SetPreconditioner(*prec);
     new_solver->SetPrintLevel(0);
 
-    delete solver;
+    if (solver)
+        delete solver;
+
     solver = new_solver;
 }
 

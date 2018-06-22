@@ -735,9 +735,9 @@ int main(int argc, char *argv[])
                                  //P_mg,
                                  mgtools_divfree_hierarchy->GetPs_bnd(),
                                  //Ops_mg,
-                                 //mgtools_divfree_hierarchy->GetOps(),
+                                 mgtools_divfree_hierarchy->GetOps(),
                                  *CoarseSolver_mg,
-                                 *mgtools_divfree_hierarchy->GetCoarsestSolver_Hcurl(),
+                                 //*mgtools_divfree_hierarchy->GetCoarsestSolver_Hcurl(),
                                  //Smoo_mg);
                                  casted_monolitGSSmoothers);
 

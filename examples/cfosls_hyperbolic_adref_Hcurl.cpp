@@ -33,6 +33,9 @@
 // and a divergence-free correction
 #define DIVFREE_SETUP
 
+#define NEWINTERFACE
+//#define MG_DIVFREEPREC
+
 // activates using the solution at the previous mesh as a starting guess for the next problem
 //#define CLEVER_STARTING_GUESS
 
@@ -703,11 +706,87 @@ int main(int argc, char *argv[])
 
 
 #ifdef DIVFREE_SETUP
+
+
+#ifdef NEWINTERFACE
+   FOSLSDivfreeProblem* problem_divfree = hierarchy->BuildDynamicProblem<FOSLSDivfreeProblem>
+           (*bdr_conds, *fe_formulat_divfree, prec_option, verbose);
+
+   problem_divfree->ConstructDivfreeHpMats();
+   problem_divfree->CreateOffsetsRhsSol();
+   BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
+   problem_divfree->ResetOp(*problem_divfree_op);
+
+   hierarchy->AttachProblem(problem_divfree);
+   ComponentsDescriptor * divfree_descriptor;
+   {
+       bool with_Schwarz = false;
+       bool optimized_Schwarz = false;
+       bool with_Hcurl = false;
+       bool with_coarsest_partfinder = false;
+       bool with_coarsest_hcurl = false;
+       bool with_monolithic_GS = true;
+       divfree_descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
+                                                     with_Hcurl, with_coarsest_partfinder,
+                                                     with_coarsest_hcurl, with_monolithic_GS);
+   }
+
+   MultigridToolsHierarchy * mgtools_divfree_hierarchy =
+           new MultigridToolsHierarchy(*hierarchy, problem_divfree->GetAttachedIndex(), *divfree_descriptor);
+   GeneralMultigrid * GeneralMGprec;
+
+   problem_divfree->InitSolver(verbose);
+#ifdef MG_DIVFREEPREC
+   int num_levels = hierarchy->Nlevels();
+
+   int coarsest_level = num_levels - 1;
+   Operator* CoarseSolver_mg = new CGSolver(comm);
+   ((CGSolver*)CoarseSolver_mg)->SetAbsTol(sqrt(1e-32));
+   ((CGSolver*)CoarseSolver_mg)->SetRelTol(sqrt(1e-12));
+   ((CGSolver*)CoarseSolver_mg)->SetMaxIter(100);
+   ((CGSolver*)CoarseSolver_mg)->SetPrintLevel(0);
+   ((CGSolver*)CoarseSolver_mg)->SetOperator(*mgtools_divfree_hierarchy->GetOps()[coarsest_level]);
+   ((CGSolver*)CoarseSolver_mg)->iterative_mode = false;
+
+   BlockDiagonalPreconditioner * CoarsePrec_mg =
+           new BlockDiagonalPreconditioner(mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->ColOffsets());
+
+   HypreParMatrix &blk00 = (HypreParMatrix&)(mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->GetBlock(0,0));
+   HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+   ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(0, precU);
+
+   Array<Operator*> casted_monolitGSSmoothers(num_levels - 1);
+   for (int l = 0; l < casted_monolitGSSmoothers.Size(); ++l)
+       casted_monolitGSSmoothers[l] = mgtools_divfree_hierarchy->GetMonolitGSSmoothers()[l];
+
+   GeneralMGprec =
+           new GeneralMultigrid(num_levels,
+                                //P_mg,
+                                mgtools_divfree_hierarchy->GetPs_bnd(),
+                                //Ops_mg,
+                                mgtools_divfree_hierarchy->GetOps(),
+                                *CoarseSolver_mg,
+                                //*mgtools_divfree_hierarchy->GetCoarsestSolver_Hcurl(),
+                                //Smoo_mg);
+                                casted_monolitGSSmoothers);
+   problem_divfree->ChangeSolver();
+   problem_divfree->SetPrec(*GeneralMGprec);
+   problem_divfree->UpdateSolverPrec();
+#else
+   // creating a preconditioner for the divfree problem
+   problem_divfree->CreatePrec(*problem_divfree->GetOp(), prec_option, verbose);
+   problem_divfree->ChangeSolver();
+   problem_divfree->UpdateSolverPrec();
+#endif
+
+#else
+
    FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy> * divfreeprob_hierarchy =
            new FOSLSProblHierarchy<FOSLSDivfreeProblem, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat_divfree, prec_option, verbose);
 
    FOSLSDivfreeProblem * problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+#endif
 
 #ifdef MULTILEVEL_PARTSOL
    bool optimized_localsolvers = true;
@@ -1070,11 +1149,65 @@ int main(int argc, char *argv[])
        MFEM_ASSERT (res_constr_norm < 1.0e-12, "");
 
        // creating the operator for the div-free problem
+#ifdef NEWINTERFACE
+       if (it > 0)
+       {
+           problem_divfree->ConstructDivfreeHpMats();
+           problem_divfree->CreateOffsetsRhsSol();
+           BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
+           problem_divfree->ResetOp(*problem_divfree_op);
+
+           problem_divfree->InitSolver(verbose);
+
+#ifdef MG_DIVFREEPREC
+
+           int num_levels = hierarchy->Nlevels();
+
+           int coarsest_level = num_levels - 1;
+           Operator* CoarseSolver_mg = new CGSolver(comm);
+           ((CGSolver*)CoarseSolver_mg)->SetAbsTol(sqrt(1e-32));
+           ((CGSolver*)CoarseSolver_mg)->SetRelTol(sqrt(1e-12));
+           ((CGSolver*)CoarseSolver_mg)->SetMaxIter(100);
+           ((CGSolver*)CoarseSolver_mg)->SetPrintLevel(0);
+           ((CGSolver*)CoarseSolver_mg)->SetOperator(*mgtools_divfree_hierarchy->GetOps()[coarsest_level]);
+           ((CGSolver*)CoarseSolver_mg)->iterative_mode = false;
+
+           BlockDiagonalPreconditioner * CoarsePrec_mg =
+                   new BlockDiagonalPreconditioner(mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->ColOffsets());
+
+           HypreParMatrix &blk00 = (HypreParMatrix&)(mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->GetBlock(0,0));
+           HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+           ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(0, precU);
+
+           Array<Operator*> casted_monolitGSSmoothers(num_levels - 1);
+           for (int l = 0; l < casted_monolitGSSmoothers.Size(); ++l)
+               casted_monolitGSSmoothers[l] = mgtools_divfree_hierarchy->GetMonolitGSSmoothers()[l];
+
+           GeneralMGprec =
+                   new GeneralMultigrid(num_levels,
+                                        //P_mg,
+                                        mgtools_divfree_hierarchy->GetPs_bnd(),
+                                        //Ops_mg,
+                                        mgtools_divfree_hierarchy->GetOps(),
+                                        *CoarseSolver_mg,
+                                        //*mgtools_divfree_hierarchy->GetCoarsestSolver_Hcurl(),
+                                        //Smoo_mg);
+                                        casted_monolitGSSmoothers);
+           problem_divfree->ChangeSolver();
+           problem_divfree->SetPrec(*GeneralMGprec);
+           problem_divfree->UpdateSolverPrec();
+#else
+           // creating a preconditioner for the divfree problem
+           problem_divfree->CreatePrec(*problem_divfree->GetOp(), prec_option, verbose);
+           problem_divfree->ChangeSolver();
+           problem_divfree->UpdateSolverPrec();
+#endif
+       }
+#else
        problem_divfree->ConstructDivfreeHpMats();
        problem_divfree->CreateOffsetsRhsSol();
        BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
        problem_divfree->ResetOp(*problem_divfree_op);
-
        divfreeprob_hierarchy->ConstructCoarsenedOps();
 
        problem_divfree->InitSolver(verbose);
@@ -1082,6 +1215,8 @@ int main(int argc, char *argv[])
        problem_divfree->CreatePrec(*problem_divfree->GetOp(), prec_option, verbose);
        problem_divfree->ChangeSolver();
        problem_divfree->UpdateSolverPrec();
+#endif
+
 
        //  creating the solution and right hand side for the divfree problem
        BlockVector rhs(problem_divfree->GetTrueOffsets());
@@ -1494,8 +1629,18 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef DIVFREE_SETUP
+
+#ifdef      NEWINTERFACE
+#ifdef      MG_DIVFREEPREC
+       mgtools_divfree_hierarchy->Update(recoarsen);
+#endif
+       hierarchy->Update();
+#else
+
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
+#endif // for ifdef NEWINTERFACE
+
 #ifdef      MULTILEVEL_PARTSOL
 #ifdef          PUREDIVCONSTRAINT
        partsol_finder->UpdateProblem(*special_problem);
