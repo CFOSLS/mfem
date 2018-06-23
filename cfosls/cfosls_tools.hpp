@@ -480,6 +480,9 @@ public:
     BlockMatrix* GetElementToDofs(const Array<SpaceName>& space_names, int level,
                                   Array<int>& row_offsets, Array<int>& col_offsets) const;
 
+    BlockMatrix* GetElementToDofs(const Array<SpaceName>& space_names, int level,
+                                  Array<int>* row_offsets, Array<int>* col_offsets) const;
+
     HypreParMatrix *GetDofTrueDof(SpaceName space_name, int level) const;
     std::vector<HypreParMatrix*> & GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
     BlockOperator* GetDofTrueDof(const Array<SpaceName> &space_names, int level,
@@ -1360,11 +1363,13 @@ public:
         return estimators[i];
     }
 
+    /*
     virtual void CreateEstimator(int option)
     {
         // TODO: Implement a default error estimator here, FOSLS block + constraints
         MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
     }
+    */
 
     Array<ParGridFunction*> & GetGrFuns() {return grfuns;}
 
@@ -1398,13 +1403,15 @@ public:
     void ResetOp(BlockOperator& op)
     {
         MFEM_ASSERT(op.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
-                    && op.Width() == op.Height(), "Replacing operator sizes mismatch the existing's");
+                    && op.Width() == op.Height(), "Replacing operator sizes mismatch"
+                                                  " the existing's");
         CFOSLSop = &op;
     }
     void ResetOp_nobnd(BlockOperator& op_nobnd)
     {
         MFEM_ASSERT(op_nobnd.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
-                    && op_nobnd.Width() == op_nobnd.Height(), "Replacing operator sizes mismatch the existing's");
+                    && op_nobnd.Width() == op_nobnd.Height(), "Replacing operator sizes"
+                                                              " mismatch the existing's");
         CFOSLSop_nobnd = &op_nobnd;
     }
 

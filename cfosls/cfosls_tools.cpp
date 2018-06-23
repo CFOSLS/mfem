@@ -423,7 +423,8 @@ void BdrConditions::Set(const std::vector<Array<int>* >& bdr_attribs_)
 }
 
 
-FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint)
+FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks,
+                                   int num_unknowns, bool do_have_constraint)
     : dim(dimension),
       numblocks(num_blocks), unknowns_number(num_unknowns),
       have_constraint(do_have_constraint),
@@ -440,7 +441,8 @@ FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks, int num_unknow
     blk_structure.resize(numblocks);
 }
 
-CFOSLSFormulation_HdivL2Hyper::CFOSLSFormulation_HdivL2Hyper (int dimension, int num_solution, bool verbose)
+CFOSLSFormulation_HdivL2Hyper::CFOSLSFormulation_HdivL2Hyper (int dimension,
+                                                              int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 2, 1, true), numsol(num_solution), test(dim, numsol)
 {
     blfis(0,0) = new VectorFEMassIntegrator(*test.GetKtilda());
@@ -832,8 +834,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         Funct_mat_lvls[0] = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
 
         Constraint_mat_lvls.SetSize(nlevels);
-        ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy.GetSpace(SpaceName::HDIV, 0),
-                                                                hierarchy.GetSpace(SpaceName::L2, 0));
+        ParMixedBilinearForm *Divblock = new ParMixedBilinearForm
+                (hierarchy.GetSpace(SpaceName::HDIV, 0), hierarchy.GetSpace(SpaceName::L2, 0));
         Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
         Divblock->Assemble();
         Divblock->Finalize();
@@ -884,8 +886,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         offsets_funct[l] = hierarchy.ConstructTrueOffsetsforFormul(l, *space_names_funct);
         offsets_sp_funct[l] = hierarchy.ConstructOffsetsforFormul(l, *space_names_funct);
 
-        BlockP_nobnd_lvls[l - 1] = hierarchy.ConstructTruePforFormul(l - 1, *space_names_funct,
-                                                                     *offsets_funct[l - 1], *offsets_funct[l]);
+        BlockP_nobnd_lvls[l - 1] = hierarchy.ConstructTruePforFormul
+                (l - 1, *space_names_funct, *offsets_funct[l - 1], *offsets_funct[l]);
         P_bnd_lvls[l - 1] = new BlkInterpolationWithBNDforTranspose(*BlockP_nobnd_lvls[l - 1],
                                                           *coarsebnd_indces_funct_lvls[l - 1],
                                                           *offsets_funct[l - 1], *offsets_funct[l]);
@@ -904,8 +906,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
                                             *Constraint_mat_lvls[l - 1], *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
 
-            BlockMatrix * P_Funct = hierarchy.ConstructPforFormul(l - 1, *space_names_funct,
-                                                                       *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
+            BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
+                    (l - 1, *space_names_funct, *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
             Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
 
             delete P_Funct;
@@ -931,72 +933,59 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     if (descr.with_Schwarz && descr.with_Hcurl)
         CombinedSmoothers_lvls.SetSize(nlevels - 1);
 
-    for (int l = 0; l < nlevels; ++l)
+    for (int l = 0; l < nlevels - 1; ++l)
     {
-        if (l < nlevels - 1)
+        if (descr.with_Hcurl)
         {
-            if (descr.with_Hcurl)
-            {
-                Array<int> SweepsNum(numblocks_funct);
-                SweepsNum = ipow(1, l);
+            Array<int> SweepsNum(numblocks_funct);
+            SweepsNum = ipow(1, l);
 
-                HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*FunctOps_lvls[l],
-                                                         *hierarchy.GetDivfreeDop(l),
-                                                         hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                                   essbdr_attribs_Hcurl, l),
-                                                         hierarchy.GetEssBdrTdofsOrDofs("tdof",
-                                                                                   *space_names_funct,
-                                                                                   essbdr_attribs, l),
-                                                         &SweepsNum, *offsets_funct[l]);
-            }
-
-            if (descr.with_Schwarz)
-            {
-                int size = FunctOps_lvls[l]->Height();
-
-                bool optimized_localsolve = descr.optimized_Schwarz;
-
-                el2dofs_row_offsets[l] = new Array<int>();
-                el2dofs_col_offsets[l] = new Array<int>();
-
-                AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
-                if (numblocks_funct > 1) // S is present
-                {
-                    SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls[l],
-                                                             *Constraint_mat_lvls[l],
-                                                             hierarchy.GetDofTrueDof(*space_names_funct, l),
-                                                             *AE_e_lvls[l],
-                                                             *hierarchy.GetElementToDofs(*space_names_funct, l,
-                                                                                         *el2dofs_row_offsets[l],
-                                                                                         *el2dofs_col_offsets[l]),
-                                                             *hierarchy.GetElementToDofs(SpaceName::L2, l),
-                                                             hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                      fullbdr_attribs, l),
-                                                             hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                      essbdr_attribs, l),
-                                                             optimized_localsolve);
-                }
-                else // no S
-                {
-                    SchwarzSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls[l],
-                                                                      *Constraint_mat_lvls[l],
-                                                                      hierarchy.GetDofTrueDof(*space_names_funct, l),
-                                                                      *AE_e_lvls[l],
-                                                                      *hierarchy.GetElementToDofs(*space_names_funct, l,
-                                                                                                  *el2dofs_row_offsets[l],
-                                                                                                  *el2dofs_col_offsets[l]),
-                                                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
-                                                                      hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                               fullbdr_attribs, l),
-                                                                      hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                               essbdr_attribs, l),
-                                                                      optimized_localsolve);
-                }
-            }
-
-            if (descr.with_Schwarz && descr.with_Hcurl)
-                CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+            HcurlSmoothers_lvls[l] = new HcurlGSSSmoother
+                    (*FunctOps_lvls[l], *hierarchy.GetDivfreeDop(l),
+                     hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l),
+                     hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l),
+                     &SweepsNum, *offsets_funct[l]);
         }
+
+        if (descr.with_Schwarz)
+        {
+            int size = FunctOps_lvls[l]->Height();
+
+            bool optimized_localsolve = descr.optimized_Schwarz;
+
+            el2dofs_row_offsets[l] = new Array<int>();
+            el2dofs_col_offsets[l] = new Array<int>();
+
+            AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
+            if (numblocks_funct > 1) // S is present
+            {
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
+                        (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                         hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                         *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                     el2dofs_col_offsets[l]),
+                         *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                         optimized_localsolve);
+            }
+            else // no S
+            {
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolver
+                        (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                         hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                         *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                     el2dofs_col_offsets[l]),
+                         *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                         optimized_localsolve);
+            }
+        }
+
+        if (descr.with_Schwarz && descr.with_Hcurl)
+            CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l],
+                                                        *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
     }
 
     if (descr.with_monolithic_GS)
@@ -1045,18 +1034,14 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     if (descr.with_coarsest_hcurl)
     {
-        CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver(FunctOps_lvls[nlevels - 1]->Height(),
-                                                     *FunctOps_lvls[nlevels - 1],
-                                                     *hierarchy.GetDivfreeDop(nlevels - 1),
-                                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                     fullbdr_attribs, nlevels - 1),
-                                                     hierarchy.GetEssBdrTdofsOrDofs("tdof",
-                                                                                     *space_names_funct,
-                                                                                     essbdr_attribs, nlevels - 1),
-                                                     hierarchy.GetEssBdrTdofsOrDofs("dof", SpaceName::HCURL,
-                                                                                     essbdr_attribs_Hcurl, nlevels - 1),
-                                                     hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                                     essbdr_attribs_Hcurl, nlevels - 1));
+        CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver
+                (FunctOps_lvls[nlevels - 1]->Height(), *FunctOps_lvls[nlevels - 1],
+                *hierarchy.GetDivfreeDop(nlevels - 1),
+                hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, nlevels - 1),
+                hierarchy.GetEssBdrTdofsOrDofs("tdof",*space_names_funct, essbdr_attribs, nlevels - 1),
+                hierarchy.GetEssBdrTdofsOrDofs("dof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1),
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1));
+
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetRelTol(sqrt(1.0e-12));
@@ -1068,34 +1053,339 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
 void MultigridToolsHierarchy::Update(bool recoarsen)
 {
-    MFEM_ABORT("Not implemented \n");
-
     int hierarchy_upd_cnt = hierarchy.GetUpdateCounter();
     if (update_counter != hierarchy_upd_cnt)
     {
-        // ...
+        MFEM_ASSERT(problem->GetOp(),"Problem operator must not be NULL in the call "
+                                     "to Update() for MultigridToolsHierarchy \n");
+
+        const Array<SpaceName>* space_names_problem = problem->GetFEformulation().
+                GetFormulation()->GetSpacesDescriptor();
+        const Array<SpaceName>* space_names_funct = problem->GetFEformulation().
+                GetFormulation()->GetFunctSpacesDescriptor();
+
+        int numblocks_funct = space_names_funct->Size();
+
+        const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+        std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+        std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
+        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+        {
+            fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
+            (*fullbdr_attribs[i]) = 1;
+        }
+
+        const Array<int>* offsets_funct_new = hierarchy.ConstructTrueOffsetsforFormul(0, *space_names_funct);
+        offsets_funct.push_front(offsets_funct_new);
+
+        const Array<int>* offsets_sp_funct_new = hierarchy.ConstructOffsetsforFormul(0, *space_names_funct);
+        offsets_sp_funct.push_front(offsets_sp_funct_new);
+
+        std::vector<Array<int>* > &essbdr_tdofs_funct =
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 1);
+
+        int ncoarse_bndtdofs = 0;
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            ncoarse_bndtdofs += essbdr_tdofs_funct[blk]->Size();
+        }
+
+        Array<int> * coarsebnd_indces_funct_new = new Array<int>(ncoarse_bndtdofs);
+
+        int shift_bnd_indices = 0;
+        int shift_tdofs_indices = 0;
+
+        for (int blk = 0; blk < numblocks_funct; ++blk)
+        {
+            for (int j = 0; j < essbdr_tdofs_funct[blk]->Size(); ++j)
+                (*coarsebnd_indces_funct_new)[j + shift_bnd_indices] =
+                    (*essbdr_tdofs_funct[blk])[j] + shift_tdofs_indices;
+
+            shift_bnd_indices += essbdr_tdofs_funct[blk]->Size();
+            shift_tdofs_indices += hierarchy.GetSpace((*space_names_funct)[blk], 1)->TrueVSize();
+        }
+
+        coarsebnd_indces_funct_lvls.push_front(coarsebnd_indces_funct_new);
+
         if (recoarsen)
         {
             for (int l = 0; l < nlevels; ++l)
             {
                 delete FunctOps_lvls[l];
+                if (descr.with_Schwarz)
+                    delete Funct_mat_lvls[l];
                 if (l < nlevels - 1)
                 {
-                    delete SchwarzSmoothers_lvls[l];
-                    delete HcurlSmoothers_lvls[l];
-                    delete CombinedSmoothers_lvls[l];
+                    if (descr.with_Schwarz)
+                        delete SchwarzSmoothers_lvls[l];
+                    if (descr.with_Hcurl)
+                        delete HcurlSmoothers_lvls[l];
+                    if (descr.with_Schwarz && descr.with_Hcurl)
+                        delete CombinedSmoothers_lvls[l];
+                    if (descr.with_monolithic_GS)
+                        delete MonolithicGSSmoothers_lvls[l];
                 }
-                delete Mass_mat_lvls[l];
-                delete Funct_mat_lvls[l];
-                delete Constraint_mat_lvls[l];
+                //delete Mass_mat_lvls[l];
+                if (descr.with_Schwarz)
+                    delete Constraint_mat_lvls[l];
+            }
+        }
+
+        BlockOperator * FunctOp_new = problem->GetFunctOp(*offsets_funct[0]);
+
+        FunctOps_lvls.Prepend(FunctOp_new);
+        Ops_lvls.Prepend(FunctOp_new);
+
+        if (descr.with_Schwarz)
+        {
+            BlockMatrix * Funct_mat_new = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
+            Funct_mat_lvls.Prepend(Funct_mat_new);
+
+            ParMixedBilinearForm *Divblock = new ParMixedBilinearForm(hierarchy.GetSpace(SpaceName::HDIV, 0),
+                                                                    hierarchy.GetSpace(SpaceName::L2, 0));
+            Divblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Divblock->Assemble();
+            Divblock->Finalize();
+            SparseMatrix * Constraint_mat_new = Divblock->LoseMat();
+            delete Divblock;
+
+            Constraint_mat_lvls.Prepend(Constraint_mat_new);
+
+            ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, 0));
+            mass_form.AddDomainIntegrator(new MassIntegrator);
+            mass_form.Assemble();
+            mass_form.Finalize();
+            SparseMatrix * Mass_mat_new  = mass_form.LoseMat();
+
+            Mass_mat_lvls.Prepend(Mass_mat_new);
+        }
+
+        BlockOperator * BlockP_nobnd_new = hierarchy.ConstructTruePforFormul(0, *space_names_funct,
+                                                                     *offsets_funct[0], *offsets_funct[1]);
+        BlockP_nobnd_lvls.Prepend(BlockP_nobnd_new);
+
+        BlkInterpolationWithBNDforTranspose * P_bnd_new = new BlkInterpolationWithBNDforTranspose
+                (*BlockP_nobnd_lvls[0], *coarsebnd_indces_funct_lvls[0], *offsets_funct[0], *offsets_funct[1]);
+
+        P_bnd_lvls.Prepend(P_bnd_new);
+
+
+        if (descr.with_monolithic_GS)
+        {
+            MonolithicGSBlockSmoother* MonolitGSS_new = new
+                    MonolithicGSBlockSmoother( *FunctOps_lvls[0], *offsets_funct[0],
+                                                        false, HypreSmoother::Type::l1GS, 1);
+
+            MonolithicGSSmoothers_lvls.Prepend(MonolitGSS_new);
+        }
+
+        if (descr.with_Hcurl)
+        {
+            Array<int> SweepsNum(numblocks_funct);
+            SweepsNum = 1;
+
+            HcurlGSSSmoother* HcurlSmoother_new = new HcurlGSSSmoother
+                    (*FunctOps_lvls[0], *hierarchy.GetDivfreeDop(0),
+                     hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
+                     hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
+                     &SweepsNum, *offsets_funct[0]);
+
+            HcurlSmoothers_lvls.Prepend(HcurlSmoother_new);
+        }
+
+        if (descr.with_Schwarz)
+        {
+            int size = FunctOps_lvls[0]->Height();
+
+            bool optimized_localsolve = descr.optimized_Schwarz;
+
+            Array<int> * el2dofs_row_offsets_new = new Array<int>();
+            Array<int> * el2dofs_col_offsets_new = new Array<int>();
+
+            SparseMatrix * AE_e_new = Transpose(*hierarchy.GetPspace(SpaceName::L2, 0));
+            AE_e_lvls.Prepend(AE_e_new);
+
+            LocalProblemSolver* SchwarzSmoother_new;
+            if (numblocks_funct > 1) // S is present
+            {
+                SchwarzSmoother_new = new LocalProblemSolverWithS
+                        (size, *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
+                         hierarchy.GetDofTrueDof(*space_names_funct, 0), *AE_e_lvls[0],
+                         *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
+                                                     el2dofs_col_offsets_new),
+                         *hierarchy.GetElementToDofs(SpaceName::L2, 0),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                         optimized_localsolve);
+            }
+            else // no S
+            {
+                SchwarzSmoothers_lvls = new LocalProblemSolver
+                        (size, *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
+                         hierarchy.GetDofTrueDof(*space_names_funct, 0), *AE_e_lvls[0],
+                         *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
+                                                     el2dofs_col_offsets_new),
+                         *hierarchy.GetElementToDofs(SpaceName::L2, 0),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
+                         hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                         optimized_localsolve);
             }
 
-            FunctOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
-            // ...
+            SchwarzSmoothers_lvls.Prepend(SchwarzSmoother_new);
+
+            el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
+            el2dofs_col_offsets.push_front(el2dofs_col_offsets_new);
+        } // end of if descr.with_Schwarz
+
+        if (descr.with_Schwarz && descr.with_Hcurl)
+        {
+            SmootherSum * CombinedSmoother_new = new SmootherSum(*SchwarzSmoothers_lvls[0],
+                                                                 *HcurlSmoothers_lvls[0], *FunctOps_lvls[0]);
+            CombinedSmoothers_lvls.Prepend(CombinedSmoother_new);
         }
 
         nlevels = hierarchy.Nlevels();
-    }
+
+        if (recoarsen)
+        {
+            for (int l = 1; l < nlevels - 1; ++l)
+            {
+                FunctOps_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+                        *FunctOps_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
+
+                std::vector<Array<int>* > &essbdr_tdofs_funct =
+                        hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
+                EliminateBoundaryBlocks(*FunctOps_lvls[l], essbdr_tdofs_funct);
+
+                Ops_lvls[l] = FunctOps_lvls[l];
+
+                if (descr.with_Schwarz)
+                {
+                    Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
+                                                 *Constraint_mat_lvls[l - 1], *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
+
+                    BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
+                            (l - 1, *space_names_funct, *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
+                    Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
+
+                    delete P_Funct;
+                }
+
+                if (descr.with_Hcurl)
+                {
+                    Array<int> SweepsNum(numblocks_funct);
+                    SweepsNum = ipow(1, l);
+
+                    HcurlSmoothers_lvls[l] = new HcurlGSSSmoother
+                            (*FunctOps_lvls[l], *hierarchy.GetDivfreeDop(l),
+                             hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l),
+                             hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l),
+                             &SweepsNum, *offsets_funct[l]);
+                }
+
+                if (descr.with_Schwarz)
+                {
+                    int size = FunctOps_lvls[l]->Height();
+
+                    bool optimized_localsolve = descr.optimized_Schwarz;
+
+                    el2dofs_row_offsets[l] = new Array<int>();
+                    el2dofs_col_offsets[l] = new Array<int>();
+
+                    AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
+                    if (numblocks_funct > 1) // S is present
+                    {
+                        SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
+                                (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                                 hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                 *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                             *el2dofs_col_offsets[l]),
+                                 *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                                 optimized_localsolve);
+                    }
+                    else // no S
+                    {
+                        SchwarzSmoothers_lvls[l] = new LocalProblemSolver
+                                (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                                 hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                 *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                             *el2dofs_col_offsets[l]),
+                                 *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                                 optimized_localsolve);
+                    }
+                }
+
+                if (descr.with_Schwarz && descr.with_Hcurl)
+                    CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l],
+                                                                *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+            } // end of loop over levels
+
+            if (descr.with_monolithic_GS)
+            {
+                for (int l = 1; l < nlevels - 1; ++l)
+                {
+                    MonolithicGSSmoothers_lvls[l] =
+                            new MonolithicGSBlockSmoother( *FunctOps_lvls[l], *offsets_funct[l],
+                                                            false, HypreSmoother::Type::l1GS, 1);
+                }
+            }
+
+            if (descr.with_coarsest_hcurl)
+            {
+                if (CoarsestSolver_hcurl)
+                    delete CoarsestSolver_hcurl;
+
+                CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver
+                        (FunctOps_lvls[nlevels - 1]->Height(), *FunctOps_lvls[nlevels - 1],
+                        *hierarchy.GetDivfreeDop(nlevels - 1),
+                        hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, nlevels - 1),
+                        hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, nlevels - 1),
+                        hierarchy.GetEssBdrTdofsOrDofs("dof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1),
+                        hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1));
+                ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
+                ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
+                ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetRelTol(sqrt(1.0e-12));
+                ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->ResetSolverParams();
+            }
+
+            int coarse_size = 0;
+            for (int i = 0; i < space_names_problem->Size(); ++i)
+                coarse_size += hierarchy.GetSpace((*space_names_problem)[i], nlevels - 1)->TrueVSize();
+
+            Array<int> row_offsets_coarse, col_offsets_coarse;
+
+            std::vector<Array<int>* > &essbdr_tdofs_funct_coarse =
+                    hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, nlevels - 1);
+
+            std::vector<Array<int>* > &essbdr_dofs_funct_coarse =
+                    hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, nlevels - 1);
+
+
+            if (descr.with_coarsest_partfinder)
+            {
+                if (CoarsestSolver_partfinder)
+                    delete CoarsestSolver_partfinder;
+
+                CoarsestSolver_partfinder = new CoarsestProblemSolver
+                        (coarse_size, *Funct_mat_lvls[nlevels - 1], *Constraint_mat_lvls[nlevels - 1],
+                        hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse,
+                                                col_offsets_coarse),
+                        *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
+                        essbdr_dofs_funct_coarse,
+                        essbdr_tdofs_funct_coarse);
+
+                CoarsestSolver_partfinder->SetMaxIter(70000);
+                CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
+                CoarsestSolver_partfinder->SetRelTol(1.0e-18);
+                CoarsestSolver_partfinder->ResetSolverParams();
+            }
+
+        } // end of if (recoarsen)
+    } // end of if "update is needed"
 
 }
 
@@ -1240,10 +1530,13 @@ void FOSLSProblem::Update()
         delete x;
     x = NULL;
 
-    delete solver;
+    if (solver)
+        delete solver;
+    solver = NULL;
 
     if (prec)
         delete prec;
+    prec = NULL;
 
     if (hpmats_initialized)
         for (int i = 0; i < hpmats.NumRows(); ++i)
@@ -1290,7 +1583,8 @@ void FOSLSProblem::InitForms()
     forms_initialized = true;
 }
 
-void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level, const Array<SpaceName> &spaces_descriptor)
+void FOSLSProblem::InitSpacesFromHierarchy(GeneralHierarchy& hierarchy, int level,
+                                           const Array<SpaceName> &spaces_descriptor)
 {
     pfes.SetSize(fe_formul.Nblocks());
 
@@ -2243,6 +2537,8 @@ BlockOperator* FOSLSProblem::GetFunctOp(const Array<int> &offsets)
 
     int numblocks = offsets.Size() - 1;
 
+    if (!CFOSLSop)
+        std::cout << "Bug \n";
     MFEM_ASSERT(CFOSLSop, "CFOSLSop is NULL \n");
 
     for (int i = 0; i < numblocks; ++i)
@@ -2685,65 +2981,6 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
     double globalFunctional2;
     MPI_Reduce(&localFunctional2, &globalFunctional2, 1,
                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-
-
-
-    // algebraic approach
-    /*
-    // problem here is that first term is computed from a vector on H^1 and the others on L2 space
-    // which makes the terms very different
-
-    ParBilinearForm * cform_diff = new ParBilinearForm(H1_space);
-    cform_diff->AddDomainIntegrator(new DiffusionIntegrator(*test->GetBBt()));
-    cform_diff->Assemble();
-    cform_diff->Finalize();
-    HypreParMatrix * C_diff = cform_diff->ParallelAssemble();
-    delete cform_diff;
-
-    Vector Vec1(H1_space->TrueVSize());
-    C_diff->Mult(vec_viewer.GetBlock(1), Vec1);
-    double local_part1_diff = Vec1 * vec_viewer.GetBlock(1);
-    double global_part1_diff;
-    MPI_Reduce(&local_part1_diff, &global_part1_diff, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-    delete C_diff;
-
-    ParMixedBilinearForm * special_form = new ParMixedBilinearForm(H1_space, L2_space);
-    special_form->AddDomainIntegrator(new MixedDirectionalDerivativeIntegrator(*test->GetMinB()));
-    special_form->Assemble();
-    special_form->Finalize();
-    HypreParMatrix * Special = special_form->ParallelAssemble();
-    delete special_form;
-
-    Vector Vec2(L2_space->TrueVSize());
-    Special->Mult(vec_viewer.GetBlock(1), Vec2);
-    double local_part2 = Rhs * Vec2;
-    local_part2 *= 2.0;
-    double global_part2;
-    MPI_Reduce(&local_part2, &global_part2, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-
-    delete Special;
-
-    double local_part3 = Rhs * Rhs;
-    double global_part3;
-    MPI_Reduce(&local_part3, &global_part3, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-
-    std::cout << "global_part1 = " << global_part1_diff << ", part2 = " << global_part2 << ", part3 = " << global_part3 << "\n";
-    double globalFunctional2 = global_part1_diff + global_part2 + global_part3;
-    */
-
-    /*
-     * non-algebraic approach, not completed, don't know how to do b * grad u
-     * for a f.e. grid function representation of grad u
-    DiscreteLinearOperator Grad(H1_space, L2_space);
-    Grad.AddDomainInterpolator(new GradientInterpolator());
-    ParGridFunction DivSigma(L2_space);
-    Grad.Assemble();
-    Grad.Mult(u, GradU);
-    */
-
 
     if (verbose)
     {
@@ -3703,8 +3940,9 @@ void FOSLSProblem_Laplace::ChangeSolver(double new_rtol, double new_atol)
 }
 
 
-FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-             FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)
+FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level,
+                                         BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
+                                         int precond_option, bool verbose)
     : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose, false)
 {
     int dim = pmesh.Dimension();
@@ -3712,6 +3950,9 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level,
 
     hdiv_pfespace = Hierarchy.GetSpace(SpaceName::HDIV, level);
     hdiv_fecoll = NULL;
+
+    divfree_hpmat = NULL;
+    divfree_hpmat_nobnd = NULL;
 }
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
@@ -3723,6 +3964,9 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditi
 
     hdiv_pfespace = Hierarchy.GetFinestSpace(SpaceName::HDIV);
     hdiv_fecoll = NULL;
+
+    divfree_hpmat = NULL;
+    divfree_hpmat_nobnd = NULL;
 }
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -3739,6 +3983,9 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_cond
         hdiv_fecoll = new RT_FECollection(feorder, dim);
 
     hdiv_pfespace = new ParFiniteElementSpace(&pmesh, hdiv_fecoll);
+
+    divfree_hpmat = NULL;
+    divfree_hpmat_nobnd = NULL;
 }
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -3792,9 +4039,11 @@ void FOSLSDivfreeProblem::Update()
 
     if (divfree_hpmat)
         delete divfree_hpmat;
+    divfree_hpmat = NULL;
 
     if (divfree_hpmat_nobnd)
         delete divfree_hpmat_nobnd;
+    divfree_hpmat_nobnd = NULL;
 }
 
 void FOSLSDivfreeProblem::ChangeSolver()
@@ -4108,7 +4357,8 @@ void InterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y)
     }
 }
 
-GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose, bool with_hcurl_)
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
+                                   bool verbose, bool with_hcurl_)
     : num_lvls(num_levels), pmesh(pmesh_), with_hcurl(with_hcurl_),
       divfreedops_constructed (false), doftruedofs_constructed (true),
       pmesh_ne(0), update_counter(0)
@@ -4410,7 +4660,8 @@ void GeneralHierarchy::Update()
             P_Hcurl_lvls.Prepend(P_Hcurl_new);
 
             auto d_td_coarse_Hcurl = Hcurl_space_lvls[1]->Dof_TrueDof_Matrix();
-            SparseMatrix * RP_Hcurl_local = Mult(*Hcurl_space_lvls[0]->GetRestrictionMatrix(), *P_Hcurl_lvls[0]);
+            SparseMatrix * RP_Hcurl_local =
+                    Mult(*Hcurl_space_lvls[0]->GetRestrictionMatrix(), *P_Hcurl_lvls[0]);
 
             HypreParMatrix * TrueP_Hcurl_new = d_td_coarse_Hcurl->LeftDiagMult(
                         *RP_Hcurl_local, Hcurl_space_lvls[0]->GetTrueDofOffsets());
@@ -4726,57 +4977,6 @@ std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * t
     return *res;
 }
 
-/*
-std::vector<Array<int>* >& GeneralHierarchy::GetEssBdrTdofsOrDofs(const char * tdof_or_dof,
-                                                            const Array<SpaceName> &space_names,
-                                                            std::vector<const Array<int>*>& essbdr_attribs,
-                                                            int level) const
-{
-    MFEM_ASSERT(strcmp(tdof_or_dof,"dof") == 0 || strcmp(tdof_or_dof,"tdof") == 0,
-                "First argument must be 'dof' or 'tdof' \n");
-
-    ParFiniteElementSpace* pfes;
-    std::vector<Array<int>* > * res = new std::vector<Array<int>* >();
-    res->resize(space_names.Size());
-
-    for (int i = 0; i < space_names.Size(); ++i)
-    {
-        switch(space_names[i])
-        {
-        case HDIV:
-            pfes = Hdiv_space_lvls[level];
-            break;
-        case H1:
-            pfes = H1_space_lvls[level];
-            break;
-        case L2:
-            pfes = L2_space_lvls[level];
-            break;
-        case HCURL:
-            pfes = Hcurl_space_lvls[level];
-            break;
-        case HDIVSKEW:
-            pfes = Hdivskew_space_lvls[level];
-            break;
-        default:
-            {
-                MFEM_ABORT("Unknown or unsupported space name \n");
-                break;
-            }
-        }
-
-        (*res)[i] = new Array<int>();
-
-        if (strcmp(tdof_or_dof, "tdof") == 0)
-            pfes->GetEssentialTrueDofs(*essbdr_attribs[i], *(*res)[i]);
-        else
-            pfes->GetEssentialVDofs(*essbdr_attribs[i], *(*res)[i]);
-    }
-
-    return *res;
-}
-*/
-
 ParFiniteElementSpace * GeneralHierarchy::GetSpace(SpaceName space, int level)
 {
     switch(space)
@@ -4973,10 +5173,60 @@ BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_na
 {
     Array<ParFiniteElementSpace*> pfess(space_names.Size());
 
-    row_offsets.SetSize(space_names.Size() + 1);
-    row_offsets[0] = 0;
-    col_offsets.SetSize(space_names.Size() + 1);
-    col_offsets[0] = 0;
+    for (int i = 0; i < pfess.Size(); ++i)
+    {
+        switch(space_names[i])
+        {
+        case HDIV:
+            pfess[i] = Hdiv_space_lvls[level];
+            break;
+        case H1:
+            pfess[i] = H1_space_lvls[level];
+            break;
+        case L2:
+            pfess[i] = L2_space_lvls[level];
+            break;
+        case HCURL:
+            if (!with_hcurl)
+            {
+                MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+                           " was not build in the hierarchy \n");
+            }
+            pfess[i] = Hcurl_space_lvls[level];
+            break;
+        case HDIVSKEW:
+            pfess[i] = Hdivskew_space_lvls[level];
+            break;
+        default:
+            {
+                MFEM_ABORT("Unknown or unsupported space name \n");
+                break;
+            }
+        }
+    }
+
+    BlockMatrix * res = new BlockMatrix(row_offsets, col_offsets);
+
+    for (int i = 0; i < res->NumRowBlocks(); ++i)
+    {
+        SparseMatrix * el2dofs_blk = ElementToDofs(*pfess[i]);
+        res->SetBlock(i,i, el2dofs_blk);
+    }
+
+    res->owns_blocks = true;
+
+    return res;
+}
+
+BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_names, int level,
+                                                Array<int>* row_offsets, Array<int>* col_offsets) const
+{
+    Array<ParFiniteElementSpace*> pfess(space_names.Size());
+
+    row_offsets->SetSize(space_names.Size() + 1);
+    (*row_offsets)[0] = 0;
+    col_offsets->SetSize(space_names.Size() + 1);
+    (*col_offsets)[0] = 0;
 
     for (int i = 0; i < pfess.Size(); ++i)
     {
@@ -5009,14 +5259,14 @@ BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_na
             }
         }
 
-        row_offsets[i + 1] = pfess[i]->GetNE();
-        col_offsets[i + 1] = pfess[i]->GetVSize();
+        (*row_offsets)[i + 1] = pfess[i]->GetNE();
+        (*col_offsets)[i + 1] = pfess[i]->GetVSize();
     }
 
-    row_offsets.PartialSum();
-    col_offsets.PartialSum();
+    row_offsets->PartialSum();
+    col_offsets->PartialSum();
 
-    BlockMatrix * res = new BlockMatrix(row_offsets, col_offsets);
+    BlockMatrix * res = new BlockMatrix(*row_offsets, *col_offsets);
 
     for (int i = 0; i < res->NumRowBlocks(); ++i)
     {
@@ -5123,19 +5373,23 @@ void GeneralCylHierarchy::ConstructInterpolations()
 
     for (int l = num_lvls - 2; l >= 0; --l)
     {
-        TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l], TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
+        TrueP_bndbot_H1_lvls[l] = RAP(Restrict_bot_H1_lvls[l],
+                                      TrueP_H1_lvls[l], Restrict_bot_H1_lvls[l + 1]);
         TrueP_bndbot_H1_lvls[l]->CopyColStarts();
         TrueP_bndbot_H1_lvls[l]->CopyRowStarts();
 
-        TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l], TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
+        TrueP_bndtop_H1_lvls[l] = RAP(Restrict_top_H1_lvls[l],
+                                      TrueP_H1_lvls[l], Restrict_top_H1_lvls[l + 1]);
         TrueP_bndtop_H1_lvls[l]->CopyColStarts();
         TrueP_bndtop_H1_lvls[l]->CopyRowStarts();
 
-        TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
+        TrueP_bndbot_Hdiv_lvls[l] = RAP(Restrict_bot_Hdiv_lvls[l],
+                                        TrueP_Hdiv_lvls[l], Restrict_bot_Hdiv_lvls[l + 1]);
         TrueP_bndbot_Hdiv_lvls[l]->CopyColStarts();
         TrueP_bndbot_Hdiv_lvls[l]->CopyRowStarts();
 
-        TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l], TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
+        TrueP_bndtop_Hdiv_lvls[l] = RAP(Restrict_top_Hdiv_lvls[l],
+                                        TrueP_Hdiv_lvls[l], Restrict_top_Hdiv_lvls[l + 1]);
         TrueP_bndtop_Hdiv_lvls[l]->CopyColStarts();
         TrueP_bndtop_Hdiv_lvls[l]->CopyRowStarts();
     }
@@ -6401,8 +6655,10 @@ void computeSliceCell (const Mesh& mesh, int elind, vector<vector<double> > & pv
 }
 
 // outputs the slice mesh information in VTK format
-void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
-                                std::list<int> &celltypes, int cellstructsize, std::list<std::vector<int> > &elvrtindices)
+void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname,
+                         std::vector<std::vector<double> > & ipoints,
+                         std::list<int> &celltypes, int cellstructsize,
+                         std::list<std::vector<int> > &elvrtindices)
 {
     int dim = mesh.Dimension();
     // output in the vtk format for paraview
@@ -6526,7 +6782,8 @@ void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > 
         double det = 0.0;
 
         for ( int i = 0; i < dim - 1; ++i)
-            Mtemp(i,0) = (1.0/3.0)*(cellpnts[permutation[3]][i] + cellpnts[permutation[4]][i] + cellpnts[permutation[5]][i])
+            Mtemp(i,0) = (1.0/3.0)*(cellpnts[permutation[3]][i] +
+                    cellpnts[permutation[4]][i] + cellpnts[permutation[5]][i])
                     - cellpnts[permutation[0]][i];
 
         for ( int i = 0; i < dim - 1; ++i)

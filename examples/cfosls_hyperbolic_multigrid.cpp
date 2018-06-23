@@ -992,35 +992,27 @@ int main(int argc, char *argv[])
             AE_e_lvls[l] = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0) // S is present
             {
-                SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
-                                                         *Constraint_mat_lvls_mg[l],
-                                                         hierarchy->GetDofTrueDof(space_names_funct, l),
-                                                         *AE_e_lvls[l],
-                                                         *hierarchy->GetElementToDofs(space_names_funct, l,
-                                                                                     *el2dofs_row_offsets[l],
-                                                                                     *el2dofs_col_offsets[l]),
-                                                         *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
-                                                                                  fullbdr_attribs, l),
-                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
-                                                                                  essbdr_attribs, l),
-                                                         optimized_localsolve);
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
+                        (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
+                         hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
+                         *hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
+                                                      el2dofs_col_offsets[l]),
+                         *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, fullbdr_attribs, l),
+                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, l),
+                         optimized_localsolve);
             }
             else // no S
             {
-                SchwarzSmoothers_lvls[l] = new LocalProblemSolver(size, *Funct_mat_lvls_mg[l],
-                                                                  *Constraint_mat_lvls_mg[l],
-                                                                  hierarchy->GetDofTrueDof(space_names_funct, l),
-                                                                  *AE_e_lvls[l],
-                                                                  *hierarchy->GetElementToDofs(space_names_funct, l,
-                                                                                              *el2dofs_row_offsets[l],
-                                                                                              *el2dofs_col_offsets[l]),
-                                                                  *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                                  hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
-                                                                                           fullbdr_attribs, l),
-                                                                  hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
-                                                                                           essbdr_attribs, l),
-                                                                  optimized_localsolve);
+                SchwarzSmoothers_lvls[l] = new LocalProblemSolver
+                        (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
+                         hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
+                         *hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
+                                                      el2dofs_col_offsets[l]),
+                         *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, fullbdr_attribs, l),
+                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, l),
+                         optimized_localsolve);
             }
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
@@ -1115,12 +1107,6 @@ int main(int argc, char *argv[])
     // old, works
     //DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers,
                                       //with_hcurl_smoothers, verbose);
-
-    mgtools_hierarchy->GetOffsetsFunct()[0]->Print();
-    mgtools_hierarchy->GetOffsetsFunct()[1]->Print();
-    mgtools_hierarchy->GetSpOffsetsFunct()[0]->Print();
-    mgtools_hierarchy->GetSpOffsetsFunct()[1]->Print();
-    std::cout << "maass mat 0 size = " << mgtools_hierarchy->GetMassSpmats()[0]->Height() << "\n";
 
     // newer
     DivConstraintSolver PartsolFinder(*mgtools_hierarchy, opt_localsolvers,

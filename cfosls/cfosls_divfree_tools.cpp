@@ -2254,35 +2254,27 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
 
         if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
         {
-            LocalSolvers_lvls[l] = new LocalProblemSolverWithS(BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l],
-                                                               *Constraint_mat_lvls[l],
-                                                               hierarchy->GetDofTrueDof(*space_names_funct, l),
-                                                               *AE_e[l],
-                                                               *hierarchy->GetElementToDofs(*space_names_funct, l,
-                                                                                            *el2dofs_row_offsets[l],
-                                                                                            *el2dofs_col_offsets[l]),
-                                                               *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                               hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                               fullbdr_attribs, l),
-                                                               hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                              essbdr_attribs, l),
-                                                               optimized_localsolvers);
+            LocalSolvers_lvls[l] = new LocalProblemSolverWithS
+                    (BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                     hierarchy->GetDofTrueDof(*space_names_funct, l), *AE_e[l],
+                     *hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                  el2dofs_col_offsets[l]),
+                     *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     optimized_localsolvers);
         }
         else // no S -> Hdiv-L2 formulation
         {
-            LocalSolvers_lvls[l] = new LocalProblemSolver(BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l],
-                                                              *Constraint_mat_lvls[l],
-                                                              hierarchy->GetDofTrueDof(*space_names_funct, l),
-                                                              *AE_e[l],
-                                                              *hierarchy->GetElementToDofs(*space_names_funct, l,
-                                                                                          *el2dofs_row_offsets[l],
-                                                                                          *el2dofs_col_offsets[l]),
-                                                              *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                              hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                       fullbdr_attribs, l),
-                                                              hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                       essbdr_attribs, l),
-                                                              optimized_localsolvers);
+            LocalSolvers_lvls[l] = new LocalProblemSolver
+                    (BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                     hierarchy->GetDofTrueDof(*space_names_funct, l), *AE_e[l],
+                     *hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                  el2dofs_col_offsets[l]),
+                     *hierarchy->GetElementToDofs(SpaceName::L2, l),
+                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     optimized_localsolvers);
         }
 
         truesolupdate_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
@@ -2533,7 +2525,7 @@ void DivConstraintSolver::Update(bool recoarsen)
                     *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
                     hierarchy->GetDofTrueDof(*space_names_funct, 0), *AE_e[0],
                     *hierarchy->GetElementToDofs(*space_names_funct, 0,
-                                                 *el2dofs_row_offsets_new,  *el2dofs_col_offsets_new),
+                                                 el2dofs_row_offsets_new,  el2dofs_col_offsets_new),
                     *hierarchy->GetElementToDofs(SpaceName::L2, 0),
                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
@@ -2545,7 +2537,7 @@ void DivConstraintSolver::Update(bool recoarsen)
                     *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
                     hierarchy->GetDofTrueDof(*space_names_funct, 0), *AE_e[0],
                     *hierarchy->GetElementToDofs(*space_names_funct, 0,
-                                                 *el2dofs_row_offsets_new, *el2dofs_col_offsets_new),
+                                                 el2dofs_row_offsets_new, el2dofs_col_offsets_new),
                     *hierarchy->GetElementToDofs(SpaceName::L2, 0),
                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),

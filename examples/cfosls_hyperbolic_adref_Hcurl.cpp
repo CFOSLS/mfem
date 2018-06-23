@@ -34,7 +34,7 @@
 #define DIVFREE_SETUP
 
 #define NEWINTERFACE
-//#define MG_DIVFREEPREC
+#define MG_DIVFREEPREC
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 //#define CLEVER_STARTING_GUESS
@@ -432,52 +432,6 @@ int main(int argc, char *argv[])
    MFEM_ASSERT(pmesh->bdr_attributes.Max() == 6, "For CYLINDER_CUBE_TEST there must be"
                                                  " a bdr aittrbute for each face");
 
-   /*
-   for (int beind = 0; beind < pmesh->GetNBE(); ++beind)
-   {
-       Element * bel = pmesh->GetBdrElement(beind);
-       int nverts = bel->GetNVertices();
-       Array<int> belverts;
-       bel->GetVertices(belverts);
-
-       double vert_av[dim];
-
-       for (int coo = 0; coo < dim; ++coo)
-           vert_av[coo] = 0.0;
-
-       for (int i = 0; i < nverts; ++i)
-       {
-           double * vertcoos = pmesh->GetVertex(belverts[i]);
-           for (int coo = 0; coo < dim; ++coo)
-               vert_av[coo] += vertcoos[coo];
-       }
-
-       for (int coo = 0; coo < dim; ++coo)
-           vert_av[coo] /= nverts;
-
-       for (int coo = 0; coo < dim; ++coo)
-       {
-           bool found = true;
-           for (int i = 0; i < nverts; ++i)
-           {
-               double * vertcoos = pmesh->GetVertex(belverts[i]);
-               if (fabs(vert_av[coo] - vertcoos[coo]) > 1.0e-14)
-                   found = false;
-           }
-
-           if (found)
-           {
-               std::cout << "bdr attr: " << pmesh->GetBdrAttribute(beind) <<
-                            " coo No. " << coo << " is constant = " << vert_av[coo] << "\n";
-           }
-
-       }
-   }
-
-   MPI_Finalize();
-   return 0;
-   */
-
    std::vector<Array<int>* > bdr_attribs_data(formulat->Nblocks());
    for (int i = 0; i < formulat->Nblocks(); ++i)
        bdr_attribs_data[i] = new Array<int>(pmesh->bdr_attributes.Max());
@@ -486,25 +440,12 @@ int main(int argc, char *argv[])
    {
        *bdr_attribs_data[0] = 1;
        (*bdr_attribs_data[0])[5] = 0;
-       /*
-       *bdr_attribs_data[0] = 0;
-       (*bdr_attribs_data[0])[0] = 1;
-       (*bdr_attribs_data[0])[2] = 1;
-       (*bdr_attribs_data[0])[3] = 1;
-       */
    }
    else // S from H^1
    {
        *bdr_attribs_data[0] = 0;
        *bdr_attribs_data[1] = 1;
        (*bdr_attribs_data[1])[5] = 0;
-       /*
-       *bdr_attribs_data[0] = 0;
-       *bdr_attribs_data[1] = 0;
-       (*bdr_attribs_data[1])[0] = 1;
-       (*bdr_attribs_data[1])[2] = 1;
-       (*bdr_attribs_data[1])[3] = 1;
-       */
    }
    *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
 
@@ -1152,11 +1093,6 @@ int main(int argc, char *argv[])
 #ifdef NEWINTERFACE
        if (it > 0)
        {
-           problem_divfree->ConstructDivfreeHpMats();
-           problem_divfree->CreateOffsetsRhsSol();
-           BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
-           problem_divfree->ResetOp(*problem_divfree_op);
-
            problem_divfree->InitSolver(verbose);
 
 #ifdef MG_DIVFREEPREC
@@ -1631,12 +1567,17 @@ int main(int argc, char *argv[])
 #ifdef DIVFREE_SETUP
 
 #ifdef      NEWINTERFACE
+       hierarchy->Update();
 #ifdef      MG_DIVFREEPREC
+       mgtools_divfree_hierarchy->GetProblem()->Update();
+       problem_divfree->ConstructDivfreeHpMats();
+       problem_divfree->CreateOffsetsRhsSol();
+       BlockOperator * problem_divfree_op = ConstructDivfreeProblemOp(*problem_divfree, *problem);
+       problem_divfree->ResetOp(*problem_divfree_op);
+
        mgtools_divfree_hierarchy->Update(recoarsen);
 #endif
-       hierarchy->Update();
 #else
-
        divfreeprob_hierarchy->Update(false);
        problem_divfree = divfreeprob_hierarchy->GetProblem(0);
 #endif // for ifdef NEWINTERFACE
