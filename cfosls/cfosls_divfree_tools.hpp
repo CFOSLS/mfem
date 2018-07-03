@@ -526,7 +526,11 @@ public:
     // this routine updates the solver when the hierarchy is updated (new levels appear)
     void Update(bool recoarsen = true);
 
-    void FindParticularSolution(const Vector &start_guess, Vector &partsol, const Vector& ConstrRhs, bool verbose) const;
+    void FindParticularSolution(const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose) const;
+    void FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
+                                const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose) const;
 
     int Size() const {return size;}
 

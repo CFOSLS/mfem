@@ -1112,8 +1112,11 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             for (int l = 0; l < nlevels; ++l)
             {
                 delete FunctOps_lvls[l];
-                if (descr.with_Schwarz)
+                if (descr.with_Schwarz || descr.with_coarsest_partfinder)
+                {
+                    delete Constraint_mat_lvls[l];
                     delete Funct_mat_lvls[l];
+                }
                 if (l < nlevels - 1)
                 {
                     if (descr.with_Schwarz)
@@ -1126,17 +1129,17 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                         delete MonolithicGSSmoothers_lvls[l];
                 }
                 //delete Mass_mat_lvls[l];
-                if (descr.with_Schwarz)
-                    delete Constraint_mat_lvls[l];
             }
         }
 
         BlockOperator * FunctOp_new = problem->GetFunctOp(*offsets_funct[0]);
 
         FunctOps_lvls.Prepend(FunctOp_new);
-        Ops_lvls.Prepend(FunctOp_new);
+        Ops_lvls.SetSize(FunctOps_lvls.Size());
+        for (int i = 0; i < Ops_lvls.Size(); ++i)
+            Ops_lvls[i] = FunctOps_lvls[i];
 
-        if (descr.with_Schwarz)
+        if (descr.with_Schwarz || descr.with_coarsest_partfinder)
         {
             BlockMatrix * Funct_mat_new = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
             Funct_mat_lvls.Prepend(Funct_mat_new);
@@ -1150,7 +1153,10 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             delete Divblock;
 
             Constraint_mat_lvls.Prepend(Constraint_mat_new);
+        }
 
+        if (descr.with_Schwarz)
+        {
             ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, 0));
             mass_form.AddDomainIntegrator(new MassIntegrator);
             mass_form.Assemble();
@@ -1248,7 +1254,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         if (recoarsen)
         {
-            for (int l = 1; l < nlevels - 1; ++l)
+            for (int l = 1; l < nlevels; ++l)
             {
                 FunctOps_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
                         *FunctOps_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
@@ -1259,69 +1265,74 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
                 Ops_lvls[l] = FunctOps_lvls[l];
 
-                if (descr.with_Schwarz)
+                if (l < nlevels - 1)
                 {
-                    Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
-                                                 *Constraint_mat_lvls[l - 1], *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
-
-                    BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
-                            (l - 1, *space_names_funct, *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
-                    Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
-
-                    delete P_Funct;
-                }
-
-                if (descr.with_Hcurl)
-                {
-                    Array<int> SweepsNum(numblocks_funct);
-                    SweepsNum = ipow(1, l);
-
-                    HcurlSmoothers_lvls[l] = new HcurlGSSSmoother
-                            (*FunctOps_lvls[l], *hierarchy.GetDivfreeDop(l),
-                             hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l),
-                             hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l),
-                             &SweepsNum, *offsets_funct[l]);
-                }
-
-                if (descr.with_Schwarz)
-                {
-                    int size = FunctOps_lvls[l]->Height();
-
-                    bool optimized_localsolve = descr.optimized_Schwarz;
-
-                    el2dofs_row_offsets[l] = new Array<int>();
-                    el2dofs_col_offsets[l] = new Array<int>();
-
-                    AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
-                    if (numblocks_funct > 1) // S is present
+                    if (descr.with_Schwarz || descr.with_coarsest_partfinder)
                     {
-                        SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
-                                (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                                 hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
-                                 *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
-                                                             *el2dofs_col_offsets[l]),
-                                 *hierarchy.GetElementToDofs(SpaceName::L2, l),
-                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
-                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
-                                 optimized_localsolve);
-                    }
-                    else // no S
-                    {
-                        SchwarzSmoothers_lvls[l] = new LocalProblemSolver
-                                (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                                 hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
-                                 *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
-                                                             *el2dofs_col_offsets[l]),
-                                 *hierarchy.GetElementToDofs(SpaceName::L2, l),
-                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
-                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
-                                 optimized_localsolve);
-                    }
-                }
+                        Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
+                                                     *Constraint_mat_lvls[l - 1],
+                                                     *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
 
-                if (descr.with_Schwarz && descr.with_Hcurl)
-                    CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l],
-                                                                *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+                        BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
+                                (l - 1, *space_names_funct, *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
+                        Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
+
+                        delete P_Funct;
+                    }
+
+                    if (descr.with_Hcurl)
+                    {
+                        Array<int> SweepsNum(numblocks_funct);
+                        SweepsNum = ipow(1, l);
+
+                        HcurlSmoothers_lvls[l] = new HcurlGSSSmoother
+                                (*FunctOps_lvls[l], *hierarchy.GetDivfreeDop(l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l),
+                                 hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l),
+                                 &SweepsNum, *offsets_funct[l]);
+                    }
+
+                    if (descr.with_Schwarz)
+                    {
+                        int size = FunctOps_lvls[l]->Height();
+
+                        bool optimized_localsolve = descr.optimized_Schwarz;
+
+                        el2dofs_row_offsets[l] = new Array<int>();
+                        el2dofs_col_offsets[l] = new Array<int>();
+
+                        AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
+                        if (numblocks_funct > 1) // S is present
+                        {
+                            SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
+                                    (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                                     hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                     *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                                 *el2dofs_col_offsets[l]),
+                                     *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                                     optimized_localsolve);
+                        }
+                        else // no S
+                        {
+                            SchwarzSmoothers_lvls[l] = new LocalProblemSolver
+                                    (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
+                                     hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                     *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                                 *el2dofs_col_offsets[l]),
+                                     *hierarchy.GetElementToDofs(SpaceName::L2, l),
+                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                                     hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                                     optimized_localsolve);
+                        }
+                    }
+
+                    if (descr.with_Schwarz && descr.with_Hcurl)
+                        CombinedSmoothers_lvls[l] = new SmootherSum(*SchwarzSmoothers_lvls[l],
+                                                                    *HcurlSmoothers_lvls[l], *FunctOps_lvls[l]);
+                } // end if if l < nlevels - 1
+
             } // end of loop over levels
 
             if (descr.with_monolithic_GS)

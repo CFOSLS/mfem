@@ -1935,8 +1935,10 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
     // update number of levels
     nlevels = hierarchy.Nlevels();
 
-    // delete the o old coarsened ops
-    for (int l = 0; l < CoarsenedOps_lvls.Size(); ++l )
+    // delete the old coarsened ops
+    // if l == 0, these are the operators of the previous finest problem
+    // so we don't delete them
+    for (int l = 1; l < CoarsenedOps_lvls.Size(); ++l )
     {
         delete CoarsenedOps_lvls[l];
         delete CoarsenedOps_nobnd_lvls[l];

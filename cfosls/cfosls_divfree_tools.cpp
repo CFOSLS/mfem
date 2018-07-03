@@ -487,7 +487,8 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     /*
     if (coarsetrueRhs->Norml2() / sqrt(coarsetrueRhs->Size()) < atol * atol)
     {
-        std::cout << "norm = " << coarsetrueRhs->Norml2() / sqrt(coarsetrueRhs->Size()) << ", atol^2 = " << atol * atol << "\n";
+        std::cout << "norm = " << coarsetrueRhs->Norml2() / sqrt(coarsetrueRhs->Size())
+                  << ", atol^2 = " << atol * atol << "\n";
         std::cout << "Resetting max iter num to 1 \n";
         coarseSolver->SetMaxIter(1);
         coarseSolver->SetAbsTol(1.0e-15);
@@ -2026,17 +2027,9 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
                 mgtools_hierarchy->With_Schwarz() && mgtools_hierarchy->With_Hcurl(),
                 "MultigridToolsHierarchy instance must have these components in order to be"
                 " used for constructing DivConstraintSolver");
-    /*
-    MFEM_ASSERT(mgtools_hierarchy_.With_Coarsest_partfinder() &&
-                mgtools_hierarchy_.With_Schwarz() && mgtools_hierarchy_.With_Hcurl(),
-                "MultigridToolsHierarchy instance must have these components in order to be"
-                " used for constructing DivConstraintSolver");
-    */
 
     P_L2.SetSize(num_levels - 1);
     AE_e.SetSize(num_levels - 1);
-
-    //mgtools_hierarchy = &mgtools_hierarchy_;
 
     const Array<SpaceName>* space_names_funct =
             problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
@@ -2050,14 +2043,12 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
     offsets_funct.resize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         offsets_funct[l] = mgtools_hierarchy->GetOffsetsFunct()[l];
-    // hierarchy->ConstructTrueOffsetsforFormul(l, *space_names_funct);
 
     size = (*offsets_funct[0])[numblocks_funct];
 
     offsets_sp_funct.resize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         offsets_sp_funct[l] = mgtools_hierarchy->GetSpOffsetsFunct()[l];
-    //hierarchy->ConstructOffsetsforFormul(l, *space_names_funct);
 
     Funct_mat_lvls.SetSize(num_levels);
     for (int l = 0; l < num_levels; ++l)
@@ -2136,7 +2127,6 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     MFEM_ASSERT(problem->GetParMesh()->GetNE() == hierarchy->GetPmesh(0)->GetNE(),
                 "Given FOSLS problem must be defined on the finest level of the "
                 "hierarchy in the current implementation");
-    //int num = ( num_levels > 1 ? num_levels - 1 : 1);
 
     P_L2.SetSize(num_levels - 1);
     AE_e.SetSize(num_levels - 1);
@@ -2650,11 +2640,144 @@ void DivConstraintSolver::Update(bool recoarsen)
 
 }
 
+void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
+                            const Vector &start_guess, Vector &partsol,
+                            const Vector& constrRhs, bool verbose) const
+{
+    int start_level_size = truesolupdate_lvls[start_level]->Size();
+    if (!(start_guess.Size() == start_level_size && partsol.Size() == start_level_size))
+        std::cout << "Breakpoint \n";
+    MFEM_ASSERT(start_guess.Size() == start_level_size && partsol.Size() == start_level_size,
+                "Sizes of all arguments must be equal to the size of internal vector"
+                " at the start level");
 
-// the start_guess is on dofs
+    const Array<int>* offsets;
+    if (own_data)
+        offsets = offsets_funct[start_level];
+    else
+    {
+        MFEM_ASSERT(num_levels > 1, "Old interface works only if number of levels"
+                                    " was more than 1 in the constructor");
+        offsets = &TrueP_Func[start_level]->RowOffsets();
+    }
+    const BlockVector start_guess_viewer(start_guess.GetData(), *offsets);
+    BlockVector partsol_viewer(partsol.GetData(), *offsets);
+
+    // checking if the given initial vector satisfies the divergence constraint
+    Vector rhs_constr(Constr_start_lvl.Height());
+    Constr_start_lvl.Mult(start_guess_viewer.GetBlock(0), rhs_constr);
+    rhs_constr -= constrRhs;
+    rhs_constr *= -1.0;
+
+    // 3.1 if not, computing the particular solution
+    if ( ComputeMPIVecNorm(comm, rhs_constr, "", false) > 1.0e-14 )
+    {
+        if (verbose)
+            std::cout << "Initial vector does not satisfy the divergence constraint. "
+                         "A V-cycle will be performed to find the particular solution. \n";
+    }
+    else
+    {
+        if (verbose)
+            std::cout << "Initial vector already satisfies divergence constraint. "
+                         "No need to perform a V-cycle \n";
+        partsol = start_guess;
+        return;
+    }
+
+    // variable-size vectors (initialized with the finest level sizes) on dofs
+    Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
+    Vector PtQlminus1_f(rhs_constr.Size());
+    Vector finer_buff(rhs_constr.Size());
+
+    // 0. Compute rhs in the functional for the finest level
+    UpdateTrueResidual(start_level, NULL, start_guess_viewer, *trueresfunc_lvls[start_level] );
+
+    Qlminus1_f = rhs_constr;
+
+    // 1. loop over levels finer than the coarsest
+    for (int l = start_level; l < num_levels - 1; ++l)
+    {
+        // solution updates will always satisfy homogeneous essential boundary conditions
+        *truesolupdate_lvls[l] = 0.0;
+
+        ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, PtQlminus1_f, finer_buff);
+
+        // solve local problems at level l
+        if (LocalSolvers_lvls[l])
+        {
+            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
+            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        }
+
+        UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+        // smooth
+        if (Smoothers_lvls[l])
+        {
+            //std::cout << "l = " << l << "\n";
+            //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+            Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+
+            //truetempvec2_lvls[l]->Print();
+
+            *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
+
+            UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+        }
+
+        *trueresfunc_lvls[l] = *truetempvec_lvls[l];
+
+        // setting up rhs from the functional for the next (coarser) level
+        TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
+
+        if (verbose)
+            std::cout << "update at level " << l << " norm = " <<
+                         truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls[l]->Size()) << "\n";
+
+    } // end of loop over finer levels
+
+    // 2. setup and solve the coarse problem
+    rhs_constr = Qlminus1_f;
+
+    if (verbose)
+        std::cout << "coarse rhs_constr norm = " << rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
+
+    // 2.5 solve coarse problem
+    CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
+
+    if (verbose)
+        std::cout << "coarse update norm = " << truesolupdate_lvls[num_levels - 1]->Norml2()
+                     / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
+
+    // 3. assemble the final solution update
+    // final sol update (at level 0)  =
+    //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
+    for (int level = num_levels - 1; level > start_level; --level)
+    {
+        // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
+        TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
+
+        *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
+    }
+
+    // 4. update the global iterate by the computed update (interpolated to the finest level)
+    // setting temporarily tempvec[0] is actually the particular solution on dofs
+
+    partsol = start_guess;
+
+    partsol += *truesolupdate_lvls[start_level];
+
+#ifdef CHECK_CONSTR
+    CheckConstrRes(partsol_viewer.GetBlock(0), Constr_start_lvl,
+                    &constrRhs, "for the particular solution inside in the end");
+#endif
+}
+
+
 // (*) returns particular solution as a vector on true dofs!
-void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
-                                                         Vector& partsol, const Vector &constr_rhs, bool verbose) const
+void DivConstraintSolver::FindParticularSolution(const Vector& start_guess, Vector& partsol,
+                                                 const Vector &constrRhs, bool verbose) const
 {
     if (!(start_guess.Size() == size && partsol.Size() == size))
         std::cout << "Breakpoint \n";
@@ -2676,7 +2799,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
     // checking if the given initial vector satisfies the divergence constraint
     Vector rhs_constr(Constr_global->Height());
     Constr_global->Mult(start_guess_viewer.GetBlock(0), rhs_constr);
-    rhs_constr -= constr_rhs;
+    rhs_constr -= constrRhs;
     rhs_constr *= -1.0;
 
     // 3.1 if not, computing the particular solution
@@ -2780,7 +2903,7 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess,
 
 #ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), *Constr_global,
-                    &constr_rhs, "for the particular solution inside in the end");
+                    &constrRhs, "for the particular solution inside in the end");
 #endif
 
 }
@@ -3904,11 +4027,13 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_CONSTR
      if (!preconditioner_mode)
      {
-        MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "for the initial guess"),"");
+        MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global,
+                                   "for the initial guess"),"");
      }
      else
      {
-         MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL, "for the initial guess"),"");
+         MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL,
+                                    "for the initial guess"),"");
      }
 #endif
 
@@ -3920,18 +4045,20 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_BNDCND
         for (int blk = 0; blk < numblocks; ++blk)
         {
-            MFEM_ASSERT(CheckBdrError(tempblock_truedofs->GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
-                                  "before the iteration");
+            MFEM_ASSERT(CheckBdrError(tempblock_truedofs->GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)),
+                                      *essbdrtruedofs_Func[0][blk], true), "before the iteration");
         }
 #endif
 
 #ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global, "before the iteration"),"");
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global,
+                                       "before the iteration"),"");
         }
         else
-            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL, "before the iteration"),"");
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL,
+                                       "before the iteration"),"");
 #endif
 
 #ifdef TIMING
@@ -3954,11 +4081,13 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
-           MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, Constr_rhs_global, "after the iteration"),"");
+           MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, Constr_rhs_global,
+                                      "after the iteration"),"");
         }
         else
         {
-            MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, NULL, "after the iteration"),"");
+            MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, NULL,
+                                       "after the iteration"),"");
         }
 #endif
         // monitoring convergence
@@ -4102,19 +4231,21 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef CHECK_BNDCND
     for (int blk = 0; blk < numblocks; ++blk)
     {
-        MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
-                              "at the start of Solve()");
+        MFEM_ASSERT(CheckBdrError(previous_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)),
+                                  *essbdrtruedofs_Func[0][blk], true), "at the start of Solve()");
     }
 #endif
 
 #ifdef CHECK_CONSTR
     if (!preconditioner_mode)
     {
-        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, Constr_rhs_global, "for previous_sol"),"");
+        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, Constr_rhs_global,
+                                   "for previous_sol"),"");
     }
     else
     {
-        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, NULL, "for previous_sol"),"");
+        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, NULL,
+                                   "for previous_sol"),"");
     }
 #endif
 
@@ -4161,7 +4292,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         {
             LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l]);
 
-            //std::cout << "LocalSmoother * r, x, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
+            //std::cout << "LocalSmoother * r, x, norm = " <<
+                            // truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
             *truesolupdate_lvls[l] += *truetempvec_lvls[l];
         }
@@ -4178,7 +4310,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
-        //std::cout << "residual after LocalSmoother, r - A Smoo1 * r, norm = " << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
+        //std::cout << "residual after LocalSmoother, r - A Smoo1 * r, norm = "
+                        // << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -4203,7 +4336,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
             Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
 
-            //std::cout << "HcurlSmoother * updated residual, Smoo2 * (r - A Smoo1 * r), norm = " << truetempvec2_lvls[l]->Norml2() / sqrt(truetempvec2_lvls[l]->Size()) << "\n";
+            //std::cout << "HcurlSmoother * updated residual, Smoo2 * (r - A Smoo1 * r), norm = "
+                            //<< truetempvec2_lvls[l]->Norml2() / sqrt(truetempvec2_lvls[l]->Size()) << "\n";
 
             //std::cout << "correction after Hcurl smoothing, old GenMinConstr, "
                          //"norm = " << truetempvec2_lvls[l]->Norml2() / sqrt (truetempvec2_lvls[l]->Size())
@@ -4229,7 +4363,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
             //std::cout << "residual again before smoothing, old GenMinConstr, "
-                         //"norm = " << trueresfunc_lvls[l]->Norml2() / sqrt (trueresfunc_lvls[l]->Size()) << "\n";
+                         //"norm = " << trueresfunc_lvls[l]->Norml2() /
+                         // sqrt (trueresfunc_lvls[l]->Size()) << "\n";
 
             UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
@@ -4298,7 +4433,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
     //std::cout << "residual at the coarsest level, old GenMinConstr, "
-                 //"norm = " << trueresfunc_lvls[num_levels - 1]->Norml2() / sqrt (trueresfunc_lvls[num_levels - 1]->Size()) << "\n";
+                 //"norm = " << trueresfunc_lvls[num_levels - 1]->Norml2() /
+                 //sqrt (trueresfunc_lvls[num_levels - 1]->Size()) << "\n";
 
 
 #ifdef NO_COARSESOLVE
@@ -4309,7 +4445,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
     //std::cout << "coarsest grid correction, old GenMinConstr, "
-                 //"norm = " << truesolupdate_lvls[num_levels - 1]->Norml2() / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
+                 //"norm = " << truesolupdate_lvls[num_levels - 1]->Norml2() /
+                    //sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -4327,11 +4464,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
 #ifdef CHECK_CONSTR
     TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
-    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL, "for interpolated coarsest level update"),"");
+    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
+                "for interpolated coarsest level update"),"");
 
     *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
-    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL, "after fw and bottom updates"),"");
+    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
+                "after fw and bottom updates"),"");
     next_sol -= *truesolupdate_lvls[0];
     *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
 #endif
@@ -4446,7 +4585,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
 #ifdef CHECK_CONSTR
-    MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global, NULL, "for update after full V-cycle"),"");
+    MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global, NULL,
+                "for update after full V-cycle"),"");
 #endif
 
     // 4. update the global iterate by the resulting update at the finest level
@@ -4471,8 +4611,8 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     {
         for (int blk = 0; blk < numblocks; ++blk)
         {
-            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)), *essbdrtruedofs_Func[0][blk], true),
-                                  "after all levels update");
+            MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)),
+                                      *essbdrtruedofs_Func[0][blk], true), "after all levels update");
         }
     }
 #endif
@@ -4724,9 +4864,11 @@ MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOpe
 
             HypreParMatrix * A00_c = RAP(&P0, &A00, &P0);
             {
-                Eliminate_ib_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                Eliminate_ib_block(*A00_c, *essbdrtdofs_lvls[Operators_.Size() - l][0],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][0] );
                 HypreParMatrix * temphpmat = A00_c->Transpose();
-                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][0] );
                 A00_c = temphpmat->Transpose();
                 A00_c->CopyColStarts();
                 A00_c->CopyRowStarts();
@@ -4759,7 +4901,8 @@ MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOpe
             */
 
             {
-                Eliminate_ib_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                Eliminate_ib_block(*A11_c, *essbdrtdofs_lvls[Operators_.Size() - l][1],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][1] );
 
                 /*
                 if (l == 2)
@@ -4777,7 +4920,8 @@ MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOpe
                 */
 
                 HypreParMatrix * temphpmat = A11_c->Transpose();
-                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][1],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][1] );
 
                 /*
                 if (l == 2)
@@ -4819,9 +4963,11 @@ MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOpe
 
             HypreParMatrix * A01_c = RAP(&P0, &A01, &P1);
             {
-                Eliminate_ib_block(*A01_c, *essbdrtdofs_lvls[Operators_.Size() - l][1], *essbdrtdofs_lvls[Operators_.Size() - l][0] );
+                Eliminate_ib_block(*A01_c, *essbdrtdofs_lvls[Operators_.Size() - l][1],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][0] );
                 HypreParMatrix * temphpmat = A01_c->Transpose();
-                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0], *essbdrtdofs_lvls[Operators_.Size() - l][1] );
+                Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l][0],
+                        *essbdrtdofs_lvls[Operators_.Size() - l][1] );
                 A01_c = temphpmat->Transpose();
                 A01_c->CopyColStarts();
                 A01_c->CopyRowStarts();
