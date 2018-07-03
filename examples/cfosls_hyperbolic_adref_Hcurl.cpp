@@ -51,7 +51,7 @@
 
 // activates using the particular solution at the previous mesh as a starting guess
 // when finding the next particular solution (i.e., particular solution on the next mesh)
-//#define CLEVER_STARTING_PARTSOL
+#define CLEVER_STARTING_PARTSOL
 
 //#define DEBUGGING_CASE
 
@@ -1023,11 +1023,17 @@ int main(int argc, char *argv[])
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
 
+       if (verbose)
+           for (int l = 0; l < div_rhs_lvls.Size(); ++l)
+               std::cout << "rhs norm = " << div_rhs_lvls[l]->Norml2() / sqrt(div_rhs_lvls[l]->Size()) << "\n";;
+
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
        int coarsest_lvl = prob_hierarchy->Nlevels() - 1;
        for (int l = coarsest_lvl; l > 0; --l) // l = 0 could be included actually after testing
        {
+           if (verbose)
+               std::cout << "level " << l << "\n";
            ProblemType * problem_l = prob_hierarchy->GetProblem(l);
            FOSLSDivfreeProblem * problem_l_divfree = divfreeprob_hierarchy->GetProblem(l);
 
@@ -1055,7 +1061,7 @@ int main(int argc, char *argv[])
            {
                BlockVector partsol_guess_viewer(partsol_guess.GetData(), problem_l->GetTrueOffsetsFunc());
                for (int blk = 0; blk < numblocks_funct; ++blk)
-                   hierarchy->GetTruePspace((*space_names_funct)[blk], l - 1)->Mult
+                   hierarchy->GetTruePspace((*space_names_funct)[blk], l)->Mult
                            (partsol_funct_lvls[l + 1]->GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
            }
 #endif
@@ -1077,6 +1083,12 @@ int main(int argc, char *argv[])
            tempc -= *div_rhs_lvls[l];
            double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
            MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
+
+           if (it == 2 && l < coarsest_lvl)
+           {
+               MPI_Finalize();
+               return 0;
+           }
 
 #ifdef NEW_INTERFACE
            MFEM_ABORT("Not ready yet \n");
