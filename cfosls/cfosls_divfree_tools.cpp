@@ -2543,6 +2543,7 @@ void DivConstraintSolver::Update(bool recoarsen)
         // recoarsening local and global matrices
         if (recoarsen)
         {
+            // reocrasening operators, constraint matrices, Schwarz and (optionally) Hcurl smoothers
             for (int l = 0; l < num_levels - 1; ++l)
             {
                 BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
@@ -2565,46 +2566,48 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                 // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
                 // TODO: The concern is that the Functional matrix is recoarsened and thus changes
-                /*
                 delete LocalSolvers_lvls[l + 1];
                 if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
                 {
-                    LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS(BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1],
-                                                                       *Constraint_mat_lvls[l + 1],
-                                                                       hierarchy->GetDofTrueDof(*space_names_funct, l  +1),
-                                                                       *AE_e[l  +1],
-                                                                       *hierarchy->GetElementToDofs(*space_names_funct, l + 1,
-                                                                                                    *el2dofs_row_offsets[l + 1],
-                                                                                                    *el2dofs_col_offsets[l + 1]),
-                                                                       *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
-                                                                       hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                                       fullbdr_attribs, l + 1),
-                                                                       hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                      essbdr_attribs, l + 1),
-                                                                       optimized_localsolvers);
+                    LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS
+                            (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
+                            hierarchy->GetDofTrueDof(*space_names_funct, l  +1), *AE_e[l + 1],
+                            *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                            *el2dofs_col_offsets[l + 1]),
+                            *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
+                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                            optimized_localsolvers);
                 }
                 else // no S -> Hdiv-L2 formulation
                 {
-                    LocalSolvers_lvls[l + 1] = new LocalProblemSolver(BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1],
-                                                                      *Constraint_mat_lvls[l + 1],
-                                                                      hierarchy->GetDofTrueDof(*space_names_funct, l + 1),
-                                                                      *AE_e[l  +1],
-                                                                      *hierarchy->GetElementToDofs(*space_names_funct, l + 1,
-                                                                                                  *el2dofs_row_offsets[l + 1],
-                                                                                                  *el2dofs_col_offsets[l + 1]),
-                                                                      *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
-                                                                      hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                               fullbdr_attribs, l + 1),
-                                                                      hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct,
-                                                                                               essbdr_attribs, l + 1),
-                                                                      optimized_localsolvers);
+                    LocalSolvers_lvls[l + 1] = new LocalProblemSolver
+                            (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
+                            hierarchy->GetDofTrueDof(*space_names_funct, l + 1), *AE_e[l + 1],
+                            *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                            *el2dofs_col_offsets[l + 1]),
+                            *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
+                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                            optimized_localsolvers);
                 }
-                */
 
-            }
+                if (with_hcurl_smoothers)
+                {
+                    delete Smoothers_lvls[l + 1];
+                    SweepsNum = ipow(1, l); // = 1
+                    Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
+                                                             *hierarchy->GetDivfreeDop(l + 1),
+                                                             hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                                       essbdr_attribs_Hcurl, l + 1),
+                                                             hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
+                                                                                       essbdr_attribs, l + 1),
+                                                             &SweepsNum, *offsets_funct[l + 1]);
+                }
 
-            //MFEM_ABORT("Not implemented \n");
-        }
+            } // end of loop over levels from finest+1 to the coarsest-1
+
+        } // end of if recoarsen case
 
         num_levels = hierarchy->Nlevels();
 
@@ -2641,8 +2644,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 }
 
 void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
-                            const Vector &start_guess, Vector &partsol,
-                            const Vector& constrRhs, bool verbose) const
+                                                 const Vector &start_guess, Vector &partsol, const Vector& constrRhs,
+                                                 bool verbose, bool report_funct) const
 {
     int start_level_size = truesolupdate_lvls[start_level]->Size();
     if (!(start_guess.Size() == start_level_size && partsol.Size() == start_level_size))
@@ -2737,6 +2740,21 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 
     } // end of loop over finer levels
 
+    if (start_level == 0 && num_levels == 2)
+    {
+        std::cout << "Checking M_h sigma_0 = - M_h starting_guess \n";
+
+        Vector temp1(truesolupdate_lvls[0]->Size());
+        Func_global_lvls[0]->Mult(*truesolupdate_lvls[0], temp1);
+
+        Vector temp2(truesolupdate_lvls[0]->Size());
+        Func_global_lvls[0]->Mult(start_guess, temp2);
+
+        temp2 -= temp1;
+
+        std::cout << "|| M_h sigma_0 = - M_h starting_guess || = " << temp2.Norml2() / sqrt (temp2.Size()) << "\n";
+    }
+
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
 
@@ -2774,7 +2792,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 #endif
 }
 
-
+/*
 // (*) returns particular solution as a vector on true dofs!
 void DivConstraintSolver::FindParticularSolution(const Vector& start_guess, Vector& partsol,
                                                  const Vector &constrRhs, bool verbose) const
@@ -2907,6 +2925,8 @@ void DivConstraintSolver::FindParticularSolution(const Vector& start_guess, Vect
 #endif
 
 }
+*/
+
 
 void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {

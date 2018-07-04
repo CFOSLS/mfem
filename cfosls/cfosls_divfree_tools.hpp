@@ -527,10 +527,17 @@ public:
     void Update(bool recoarsen = true);
 
     void FindParticularSolution(const Vector &start_guess, Vector &partsol,
-                                const Vector& constrRhs, bool verbose) const;
+                                const Vector& constrRhs, bool verbose) const
+    { FindParticularSolution(0, *Constr_global, start_guess, partsol, constrRhs, verbose);}
+
     void FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
                                 const Vector &start_guess, Vector &partsol,
-                                const Vector& constrRhs, bool verbose) const;
+                                const Vector& constrRhs, bool verbose) const
+    { FindParticularSolution(start_level, Constr_start_lvl, start_guess, partsol, constrRhs, verbose, false);}
+
+    void FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
+                                const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose, bool report_funct) const;
 
     int Size() const {return size;}
 

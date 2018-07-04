@@ -27,7 +27,7 @@
 #include <list>
 
 // if passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 // activates the setup when the solution is sought for as a sum of a particular solution
 // and a divergence-free correction
@@ -1001,6 +1001,12 @@ int main(int argc, char *argv[])
           cout << "Number of unknowns: " << global_dofs << "\n\n";
        }
 
+       if (it == 2)
+       {
+           MPI_Finalize();
+           return 0;
+       }
+
 #ifdef DIVFREE_SETUP
        // finding a particular solution
        partsol_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
@@ -1024,8 +1030,13 @@ int main(int argc, char *argv[])
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
 
        if (verbose)
+       {
+           std::cout << "norms of partsol_lvls before: \n";
+           for (int l = 0; l < partsol_lvls.Size(); ++l)
+               std::cout << "partsol norm = " << partsol_lvls[l]->Norml2() / sqrt(partsol_lvls[l]->Size()) << "\n";;
            for (int l = 0; l < div_rhs_lvls.Size(); ++l)
                std::cout << "rhs norm = " << div_rhs_lvls[l]->Norml2() / sqrt(div_rhs_lvls[l]->Size()) << "\n";;
+       }
 
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
@@ -1074,6 +1085,7 @@ int main(int argc, char *argv[])
            HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem_l->GetOp()->GetBlock(numblocks - 1,0));
            ParGridFunction * partsigma = FindParticularSolution(problem_l->GetPfes(0), *B_hpmat, *div_rhs_lvls[l], verbose);
            partsigma->ParallelProject(partsol_lvls[l]->GetBlock(0));
+           delete partsigma;
 #endif // for #else for #ifdef MULTILEVEL_PARTSOL
 
            // a check that the particular solution does satisfy the divergence constraint after all
@@ -1084,11 +1096,13 @@ int main(int argc, char *argv[])
            double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
            MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
 
+           /*
            if (it == 2 && l < coarsest_lvl)
            {
                MPI_Finalize();
                return 0;
            }
+           */
 
 #ifdef NEW_INTERFACE
            MFEM_ABORT("Not ready yet \n");
@@ -1150,6 +1164,14 @@ int main(int argc, char *argv[])
 
        if (verbose)
            std::cout << "Re-coarsening and re-solving part has been finished\n";
+
+       if (verbose)
+       {
+           std::cout << "norms of partsol_lvls after: \n";
+           for (int l = 0; l < partsol_lvls.Size(); ++l)
+               std::cout << "partsol norm = " << partsol_lvls[l]->Norml2() / sqrt(partsol_lvls[l]->Size()) << "\n";;
+       }
+
 
 #endif // end of #ifdef RECOARSENING_AMR
 
@@ -1232,6 +1254,7 @@ int main(int argc, char *argv[])
        HypreParMatrix * B_hpmat = dynamic_cast<HypreParMatrix*>(&problem->GetOp()->GetBlock(numblocks - 1,0));
        ParGridFunction * partsigma = FindParticularSolution(problem->GetPfes(0), *B_hpmat, *div_rhs_lvls[0], verbose);
        partsigma->ParallelProject(partsol_lvls[0]->GetBlock(0));
+       delete partsigma;
 #endif
        // a check that the particular solution does satisfy the divergence constraint after all
        HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks - 1, 0));
@@ -1716,6 +1739,8 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef DIVFREE_SETUP
+       // updating divfree problem hierarchy and (optional) MG tools
+       // and multilevel particular solution finder
 
 #ifdef      NEWINTERFACE
        hierarchy->Update();
@@ -1735,21 +1760,21 @@ int main(int argc, char *argv[])
 
 #ifdef      MULTILEVEL_PARTSOL
 
+       // updating partsol_finder
 #ifdef          PUREDIVCONSTRAINT
        partsol_finder->UpdateProblem(*special_problem);
 #else
        partsol_finder->UpdateProblem(*problem);
 #endif
-       partsol_finder->Update();
-#else
-       delete partsigma;
+
+       partsol_finder->Update(recoarsen);
 #endif // endif for MULTILEVEL_PARTSOL
 
 #endif // endif for DIVFREE_SETUP
 
        if (fosls_func_version == 2)
        {
-           // first option is just to delete and recreate the extra grid function
+           // first option is just to delete and re-construct the extra grid function
            // this is slightly different from the old approach when the pgfun was
            // updated (~ interpolated)
            /*
@@ -1781,7 +1806,7 @@ int main(int argc, char *argv[])
           break;
        }
 
-   }
+   } // end of the main AMR loop
 
    MPI_Finalize();
    return 0;
