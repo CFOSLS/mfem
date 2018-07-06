@@ -828,7 +828,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     Ops_lvls.SetSize(nlevels);
     Ops_lvls[0] = FunctOps_lvls[0];
 
-    if (descr.with_Schwarz)
+    if (descr.with_Schwarz || descr.with_coarsest_partfinder)
     {
         Funct_mat_lvls.SetSize(nlevels);
         Funct_mat_lvls[0] = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
@@ -841,7 +841,10 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         Divblock->Finalize();
         Constraint_mat_lvls[0] = Divblock->LoseMat();
         delete Divblock;
+    }
 
+    if (descr.with_Schwarz)
+    {
         Mass_mat_lvls.SetSize(nlevels);
         ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, 0));
         mass_form.AddDomainIntegrator(new MassIntegrator);
@@ -906,17 +909,21 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             Constraint_mat_lvls[l] = RAP(*hierarchy.GetPspace(SpaceName::L2, l - 1),
                                             *Constraint_mat_lvls[l - 1], *hierarchy.GetPspace(SpaceName::HDIV, l - 1));
 
+            ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, l));
+            mass_form.AddDomainIntegrator(new MassIntegrator);
+            mass_form.Assemble();
+            mass_form.Finalize();
+            Mass_mat_lvls[l] = mass_form.LoseMat();
+        }
+
+        if (descr.with_Schwarz && descr.with_coarsest_partfinder)
+        {
             BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
                     (l - 1, *space_names_funct, *offsets_sp_funct[l - 1], *offsets_sp_funct[l]);
             Funct_mat_lvls[l] = RAP(*P_Funct, *Funct_mat_lvls[l - 1], *P_Funct);
 
             delete P_Funct;
 
-            ParBilinearForm mass_form(hierarchy.GetSpace(SpaceName::L2, l));
-            mass_form.AddDomainIntegrator(new MassIntegrator);
-            mass_form.Assemble();
-            mass_form.Finalize();
-            Mass_mat_lvls[l] = mass_form.LoseMat();
         }
     }
 
@@ -1048,7 +1055,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->ResetSolverParams();
     }
     else
-        CoarsestSolver_partfinder = NULL;
+        CoarsestSolver_hcurl = NULL;
 }
 
 void MultigridToolsHierarchy::Update(bool recoarsen)
@@ -1056,8 +1063,8 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
     int hierarchy_upd_cnt = hierarchy.GetUpdateCounter();
     if (update_counter != hierarchy_upd_cnt)
     {
-        MFEM_ASSERT(problem->GetOp(),"Problem operator must not be NULL in the call "
-                                     "to Update() for MultigridToolsHierarchy \n");
+        //MFEM_ASSERT(problem->GetOp(),"Problem operator must not be NULL in the call "
+                                     //"to Update() for MultigridToolsHierarchy \n");
 
         const Array<SpaceName>* space_names_problem = problem->GetFEformulation().
                 GetFormulation()->GetSpacesDescriptor();
@@ -1298,8 +1305,8 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
                         bool optimized_localsolve = descr.optimized_Schwarz;
 
-                        el2dofs_row_offsets[l] = new Array<int>();
-                        el2dofs_col_offsets[l] = new Array<int>();
+                        //el2dofs_row_offsets[l] = new Array<int>();
+                        //el2dofs_col_offsets[l] = new Array<int>();
 
                         AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
                         if (numblocks_funct > 1) // S is present
@@ -1380,6 +1387,21 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             {
                 if (CoarsestSolver_partfinder)
                     delete CoarsestSolver_partfinder;
+
+                Constraint_mat_lvls[nlevels - 1] = RAP(*hierarchy.GetPspace(SpaceName::L2, nlevels - 1 - 1),
+                                             *Constraint_mat_lvls[nlevels - 1 - 1],
+                                             *hierarchy.GetPspace(SpaceName::HDIV, nlevels - 1 - 1));
+
+                BlockMatrix * P_Funct = hierarchy.ConstructPforFormul
+                        (nlevels - 1 - 1, *space_names_funct, *offsets_sp_funct[nlevels - 1 - 1],
+                        *offsets_sp_funct[nlevels - 1]);
+                Funct_mat_lvls[nlevels - 1] = RAP(*P_Funct, *Funct_mat_lvls[nlevels - 1 - 1], *P_Funct);
+
+                delete P_Funct;
+
+                //for (int i = 0;i < essbdr_dofs_funct_coarse[0]->Size(); ++i )
+                    //if ( (*essbdr_dofs_funct_coarse[0])[i] != 0)
+                        //std::cout << " essbdr_dof: " << i << "\n";
 
                 CoarsestSolver_partfinder = new CoarsestProblemSolver
                         (coarse_size, *Funct_mat_lvls[nlevels - 1], *Constraint_mat_lvls[nlevels - 1],
@@ -1656,7 +1678,7 @@ void FOSLSProblem::InitSolver(bool verbose)
     solver->SetRelTol(rtol);
     solver->SetMaxIter(max_iter);
     solver->SetOperator(*CFOSLSop);
-    if (prec_option)
+    if (prec)
          solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
 
@@ -2484,7 +2506,7 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
                     //pbforms.diag(i)->Assemble();
                     //pbforms.diag(i)->Finalize();
 
-                    funct_blocks(i,j) = &pbforms.diag(i)->SpMat();
+                    funct_blocks(i,j) = new SparseMatrix(pbforms.diag(i)->SpMat());
                 }
             }
             else // off-diagonal
@@ -2511,7 +2533,7 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
                     //pbforms.offd(exist_row,exist_col)->Finalize();
 
                     //funct_blocks(exist_row, exist_col) = pbforms.offd(exist_row,exist_col)->LoseMat();
-                    funct_blocks(exist_row, exist_col) = &pbforms.offd(exist_row,exist_col)->SpMat();
+                    funct_blocks(exist_row, exist_col) = new SparseMatrix(pbforms.offd(exist_row,exist_col)->SpMat());
                     funct_blocks(exist_col, exist_row) = Transpose(*funct_blocks(exist_row, exist_col));
                 }
             }

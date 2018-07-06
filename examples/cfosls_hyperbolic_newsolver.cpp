@@ -12,6 +12,7 @@
 
 //#define NEW_INTERFACE
 //#define NEW_INTERFACE2
+#define BRANDNEW_INTERFACE
 
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
@@ -607,6 +608,8 @@ int main(int argc, char *argv[])
     const SparseMatrix* P_R_local;
     const SparseMatrix* P_H_local;
 
+    Array<SparseMatrix*> Mass_mat_lvls(num_levels);
+
     DivPart divp;
 
     int numblocks_funct = 1;
@@ -799,6 +802,12 @@ int main(int argc, char *argv[])
 #endif
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
         }
+
+        ParBilinearForm mass_form(W_space_lvls[l]);
+        mass_form.AddDomainIntegrator(new MassIntegrator);
+        mass_form.Assemble();
+        mass_form.Finalize();
+        Mass_mat_lvls[l] = mass_form.LoseMat();
 
         // getting operators at level l
         // curl or divskew operator from C_space into R_space
@@ -1728,6 +1737,26 @@ int main(int argc, char *argv[])
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
+
+    FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
+            (*bdr_conds, *fe_formulat, prec_option, verbose);
+    hierarchy->AttachProblem(problem_mgtools);
+
+    ComponentsDescriptor * descriptor;
+    {
+        bool with_Schwarz = true;
+        bool optimized_Schwarz = true;
+        bool with_Hcurl = true;
+        bool with_coarsest_partfinder = true;
+        bool with_coarsest_hcurl = true;
+        bool with_monolithic_GS = false;
+        descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
+                                                      with_Hcurl, with_coarsest_partfinder,
+                                                      with_coarsest_hcurl, with_monolithic_GS);
+    }
+    MultigridToolsHierarchy * mgtools_hierarchy =
+            new MultigridToolsHierarchy(*hierarchy, 0, *descriptor);
+
 
     const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
 
@@ -3375,8 +3404,8 @@ int main(int argc, char *argv[])
                                                          hierarchy->GetDofTrueDof(space_names_funct, l),
                                                          *P_L2_T,
                                                          *hierarchy->GetElementToDofs(space_names_funct, l,
-                                                                                     *el2dofs_row_offsets[l],
-                                                                                     *el2dofs_col_offsets[l]),
+                                                                                     el2dofs_row_offsets[l],
+                                                                                     el2dofs_col_offsets[l]),
                                                          *hierarchy->GetElementToDofs(SpaceName::L2, l),
                                                          hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                   fullbdr_attribs, l),
@@ -3391,8 +3420,8 @@ int main(int argc, char *argv[])
                                                                   hierarchy->GetDofTrueDof(space_names_funct, l),
                                                                   *P_L2_T,
                                                                   *hierarchy->GetElementToDofs(space_names_funct, l,
-                                                                                              *el2dofs_row_offsets[l],
-                                                                                              *el2dofs_col_offsets[l]),
+                                                                                              el2dofs_row_offsets[l],
+                                                                                              el2dofs_col_offsets[l]),
                                                                   *hierarchy->GetElementToDofs(SpaceName::L2, l),
                                                                   hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                            fullbdr_attribs, l),
@@ -3401,7 +3430,7 @@ int main(int argc, char *argv[])
                                                                   optimized_localsolve);
             }
 
-            delete P_L2_T;
+            //delete P_L2_T;
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
             Smoo_mg_plus[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
@@ -3618,6 +3647,7 @@ int main(int argc, char *argv[])
                                       AE_e_lvls,
                                       BlockP_mg_nobnd_plus,
                                       P_L2_lvls,
+                                      Mass_mat_lvls,
                                       essbdr_tdofs_funct_lvls,
                                       Ops_mg_special,
                                       (HypreParMatrix&)(problem->GetOp_nobnd()->GetBlock(numblocks_funct,0)),
@@ -3629,6 +3659,7 @@ int main(int argc, char *argv[])
 #else
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
+                                      Mass_mat_lvls,
                                       EssBdrTrueDofs_Funct_lvls,
                                       Ops_mg_special,
                                       //Funct_global_lvls,
@@ -3647,6 +3678,16 @@ int main(int argc, char *argv[])
     CoarsestSolver_partfinder->ResetSolverParams();
 #endif
 
+#ifdef BRANDNEW_INTERFACE
+    bool with_local_smoothers = true;
+    bool optimized_localsolvers = true;
+    bool with_hcurl_smoothers = true;
+
+    int size_funct = problem_mgtools->GetTrueOffsetsFunc()[numblocks_funct];
+    GeneralMinConstrSolver NewSolver(size_funct, *mgtools_hierarchy, with_local_smoothers,
+                                     optimized_localsolvers, with_hcurl_smoothers, stopcriteria_type, verbose);
+#else
+
     GeneralMinConstrSolver NewSolver( comm, num_levels,
                                       BlockP_mg_nobnd_plus,
                                       //TrueP_Func,
@@ -3654,9 +3695,9 @@ int main(int argc, char *argv[])
                                       *Functrhs_global,
                                       HcurlSmoothers_lvls, //Smoothers_lvls,
                                       //Xinit_truedofs, Funct_global_lvls,
-                                      Xinit_truedofs, Ops_mg_special,
+                                      Ops_mg_special,
 #ifdef CHECK_CONSTR
-                                     *Constraint_global, Floc,
+                                      *Constraint_global, Floc,
 #endif
 #ifdef TIMING
                                      Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,
@@ -3668,6 +3709,7 @@ int main(int argc, char *argv[])
 #endif
                                       CoarseSolver_mg_plus, //CoarsestSolver,
                                       stopcriteria_type);
+#endif
 
     double newsolver_reltol = 1.0e-6;
 

@@ -618,7 +618,8 @@ int main(int argc, char *argv[])
                     (*essbdr_tdofs_hcurlfunct[blk])[j] + shift_tdofs_indices;
 
             shift_bnd_indices += essbdr_tdofs_hcurlfunct[blk]->Size();
-            shift_tdofs_indices += hierarchy->GetSpace(space_names_divfree[blk], l + 1)->TrueVSize();
+            shift_tdofs_indices += hierarchy->GetSpace
+                    (space_names_divfree[blk], l + 1)->TrueVSize();
         }
 
     }

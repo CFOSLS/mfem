@@ -510,6 +510,7 @@ public:
                            Array< SparseMatrix*> &AE_to_e,
                            Array< BlockOperator*>& TrueProj_Func,
                            Array< SparseMatrix*> &Proj_L2,
+                           Array< SparseMatrix*> &Mass_mat_lvls_,
                            std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                            std::vector<Operator*> & Func_Global_lvls,
                            HypreParMatrix& Constr_Global,
@@ -522,7 +523,7 @@ public:
     // usually must be called before Update() by the user.
     void UpdateProblem(FOSLSProblem& problem_) {problem = &problem_;}
 
-    // in case when the solver is based on hierarchy and problem and hence owns the data,
+    // in case when the solver is based on hierarchy (or mgtools),
     // this routine updates the solver when the hierarchy is updated (new levels appear)
     void Update(bool recoarsen = true);
 
@@ -530,12 +531,28 @@ public:
                                 const Vector& constrRhs, bool verbose) const
     { FindParticularSolution(0, *Constr_global, start_guess, partsol, constrRhs, verbose);}
 
+    void FindParticularSolution(const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose, bool report_funct) const
+    { FindParticularSolution(0, *Constr_global, start_guess, partsol, constrRhs, verbose, report_funct);}
+
     void FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
                                 const Vector &start_guess, Vector &partsol,
                                 const Vector& constrRhs, bool verbose) const
     { FindParticularSolution(start_level, Constr_start_lvl, start_guess, partsol, constrRhs, verbose, false);}
 
     void FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
+                                const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose, bool report_funct) const;
+
+    void UpdateParticularSolution(const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose) const
+    { UpdateParticularSolution(start_guess, partsol, constrRhs, verbose, false); }
+
+    void UpdateParticularSolution(const Vector &start_guess, Vector &partsol,
+                                const Vector& constrRhs, bool verbose, bool report_funct) const
+    { UpdateParticularSolution(0, *Constr_global, start_guess, partsol, constrRhs, verbose, report_funct); }
+
+    void UpdateParticularSolution(int level, HypreParMatrix& Constr_lvl,
                                 const Vector &start_guess, Vector &partsol,
                                 const Vector& constrRhs, bool verbose, bool report_funct) const;
 
@@ -706,6 +723,8 @@ void HcurlGSSSmoother::ResetInternalTimings() const
 
 class GeneralMinConstrSolver : public Solver
 {
+protected:
+    mutable int size;
 private:
     // if 0, relative change for consecutive iterations is checked
     // if 1, relative value is checked
@@ -731,6 +750,20 @@ private:
 protected:
     int num_levels;
 
+    // FIXME: Clean this (now just copied from DivConstraintSolver
+    FOSLSProblem* problem;
+    GeneralHierarchy* hierarchy;
+    mutable std::deque<const Array<int> *> offsets_funct;
+    mutable bool with_local_smoothers;
+    mutable bool optimized_localsolvers;
+    mutable bool with_hcurl_smoothers;
+    mutable int update_counter;
+
+    const bool own_data;
+
+    MultigridToolsHierarchy* mgtools_hierarchy;
+    const bool built_on_mgtools;
+
     // iteration counter (solver behavior is different for the first iteration)
     mutable int current_iteration;
 
@@ -754,24 +787,19 @@ protected:
     const MPI_Comm comm;
 
     // Projectors for the variables related to the functional and constraint
-    const Array< BlockOperator*>& TrueP_Func;
+    Array< BlockOperator*> TrueP_Func;
 
     // for each level and for each variable in the functional stores a vector
     // which defines if a dof is at the boundary / essential part of the boundary
     // or not
-    const std::vector<std::vector<Array<int>* > > & essbdrtruedofs_Func; // can be removed since it is used only for debugging
+    std::deque<std::vector<Array<int>* > >  essbdrtruedofs_Func;
 
     // parts of block structure which define the Functional at the finest level
     const int numblocks;
 
-    const Array<Operator*>& Smoothers_lvls;
+    Array<Operator*> Smoothers_lvls;
 
-    // a given blockvector which satisfies essential bdr conditions
-    // imposed for the initial problem
-    // on true dofs
-    const BlockVector& bdrdata_truedofs;
-
-    const std::vector<Operator*> & Func_global_lvls;
+    std::deque<Operator*> Func_global_lvls;
 
 
 #ifdef CHECK_CONSTR
@@ -808,7 +836,7 @@ private:
 #endif
 
 protected:
-    const BlockVector& Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
+    BlockVector* Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
     // A temporary vector defined on true dofs of the finest level
     mutable BlockVector* tempblock_truedofs;
@@ -827,6 +855,8 @@ protected:
 
     mutable Array<Operator*> LocalSolvers_lvls;
     mutable Operator* CoarseSolver;
+
+    bool verbose;
 
 protected:
     virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const;
@@ -853,16 +883,20 @@ protected:
 
 public:
     ~GeneralMinConstrSolver();
+
+    GeneralMinConstrSolver(int size, MultigridToolsHierarchy& mgtools_hierarchy_, bool with_local_smoothers_,
+                           bool optimized_localsolvers_, bool with_hcurl_smoothers_,
+                           int stopcriteria_type_, bool verbose_);
+
     // constructor
     GeneralMinConstrSolver(
                            MPI_Comm Comm,
                            int NumLevels,
-                           const Array< BlockOperator*>& TrueProj_Func,
-                           const std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
-                           const BlockVector& Functrhs_Global,
-                           const Array<Operator*>& Smoothers_Lvls,
-                           const BlockVector& Bdrdata_TrueDofs,
-                           const std::vector<Operator*> & Func_Global_lvls,
+                           Array< BlockOperator*>& TrueProj_Func,
+                           std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
+                           BlockVector& Functrhs_Global,
+                           Array<Operator*>& Smoothers_Lvls,
+                           std::vector<Operator*> & Func_Global_lvls,
 #ifdef CHECK_CONSTR
                            HypreParMatrix & Constr_Global,
                            Vector & Constr_Rhs_global,
@@ -883,6 +917,18 @@ public:
                            Array<Operator*>* LocalSolvers = NULL,
                            Operator* CoarseSolver = NULL,
                            int StopCriteria_Type = 1);
+
+    // a necessary routine to update the internal problem pointer
+    // usually must be called before Update() by the user.
+    void UpdateProblem(FOSLSProblem& problem_) {problem = &problem_;}
+
+    // in case when the solver is based on hierarchy (or mgtools),
+    // this routine updates the solver when the hierarchy is updated (new levels appear)
+    void Update(bool recoarsen = true);
+
+    void SetFunctRhs(BlockVector& FunctRhs) {Functrhs_global = &FunctRhs;}
+
+    int Size() const {return size;}
 
     GeneralMinConstrSolver() = delete;
 
@@ -906,6 +952,7 @@ public:
     void SetUnSymmetric() const {symmetric = false;}
 
     void SetInitialGuess(Vector& InitGuess) const;
+    void SetConstrRhs(Vector& ConstrRhs) const;
 
     // have to define these to mimic useful routines from IterativeSolver class
     void SetRelTol(double RelTol) const {rel_tol = RelTol;}

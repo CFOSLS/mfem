@@ -45,7 +45,8 @@ double ComputeMPIVecNorm(MPI_Comm comm, const Vector& bvec, char const * string,
 
 // Computes and prints the norm of ( Funct * y, y )_2,h, assembled over all processes, input vectors on true dofs, matrix on dofs
 // w/o proper assembly over shared dofs
-double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const std::vector<HypreParMatrix*> Dof_TrueDof, const BlockVector& truevec, char const * string, bool print)
+double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const std::vector<HypreParMatrix*> Dof_TrueDof,
+                       const BlockVector& truevec, char const * string, bool print)
 {
     MFEM_ASSERT(Dof_TrueDof.size() - Funct.NumColBlocks() == 0,"CheckFunctValue: number of blocks mismatch \n");
 
@@ -66,7 +67,8 @@ double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct, const std::vecto
 }
 
 // Computes and prints the norm of ( Funct * y, y )_2,h, assembled over all processes, everything on truedofs
-double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truefunctrhs, const Vector& truevec, char const * string, bool print)
+double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truefunctrhs, const Vector& truevec,
+                       char const * string, bool print)
 {
     Vector trueres(truevec.Size());
     Funct.Mult(truevec, trueres);
@@ -74,7 +76,8 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
     if (truefunctrhs)
     {
         trueres.Add(-2.0, *truefunctrhs);
-        local_func_norm = truevec * trueres / sqrt (trueres.Size()); // incorrect, different f should be used + (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
+        // incorrect, different f should be used + (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
+        local_func_norm = truevec * trueres / sqrt (trueres.Size());
     }
     else // NULL case assumed to denote zero righthand side
         local_func_norm = truevec * trueres / sqrt (trueres.Size());
@@ -2315,6 +2318,7 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
                        Array< SparseMatrix*> &AE_to_e,
                        Array< BlockOperator*>& TrueProj_Func,
                        Array< SparseMatrix*> &Proj_L2,
+                       Array<SparseMatrix *> &Mass_mat_lvls_,
                        std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
                        std::vector<Operator*> & Func_Global_lvls,
                        HypreParMatrix &Constr_Global,
@@ -2346,7 +2350,7 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
 
     Mass_mat_lvls.SetSize(num_levels);
     for (int i = 0; i < Mass_mat_lvls.Size(); ++i)
-        Mass_mat_lvls[i] = NULL;
+        Mass_mat_lvls[i] = Mass_mat_lvls_[i];
 
     Func_global_lvls.resize(Func_Global_lvls.size());
     for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
@@ -2643,6 +2647,127 @@ void DivConstraintSolver::Update(bool recoarsen)
 
 }
 
+// updates the given starting guess at the specific level
+void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Constr_lvl,
+                                                 const Vector &start_guess, Vector &partsol, const Vector& constrRhs,
+                                                 bool verbose, bool report_funct) const
+{
+    int level_size = truesolupdate_lvls[level]->Size();
+    if (!(start_guess.Size() == level_size && partsol.Size() == level_size))
+        std::cout << "Breakpoint \n";
+    MFEM_ASSERT(start_guess.Size() == level_size && partsol.Size() == level_size,
+                "Sizes of all arguments must be equal to the size of internal vector"
+                " at the prescribed level");
+
+    const Array<int>* offsets;
+    if (own_data)
+        offsets = offsets_funct[level];
+    else
+    {
+        MFEM_ASSERT(num_levels > 1, "Old interface works only if number of levels"
+                                    " was more than 1 in the constructor");
+        offsets = &TrueP_Func[level]->RowOffsets();
+    }
+    const BlockVector start_guess_viewer(start_guess.GetData(), *offsets);
+    BlockVector partsol_viewer(partsol.GetData(), *offsets);
+
+    // checking if the given initial vector satisfies the divergence constraint
+    Vector rhs_constr(Constr_lvl.Height());
+    Constr_lvl.Mult(start_guess_viewer.GetBlock(0), rhs_constr);
+    rhs_constr -= constrRhs;
+    rhs_constr *= -1.0;
+
+    // 3.1 if not, computing the particular solution
+    if ( ComputeMPIVecNorm(comm, rhs_constr, "", false) > 1.0e-14 )
+    {
+        if (verbose)
+            std::cout << "Initial vector does not satisfy the divergence constraint. "
+                         "A single level update will be performed to find the particular solution. \n";
+    }
+    else
+    {
+        if (verbose)
+            std::cout << "Initial vector already satisfies divergence constraint. "
+                         "No need to perform a single level update \n";
+        partsol = start_guess;
+        return;
+    }
+
+    // variable-size vectors (initialized with the finest level sizes) on dofs
+    Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
+    Vector PtQlminus1_f(rhs_constr.Size());
+    Vector finer_buff(rhs_constr.Size());
+
+    // 0. Compute rhs in the functional for the finest level
+    UpdateTrueResidual(level, NULL, start_guess_viewer, *trueresfunc_lvls[level] );
+
+    if (report_funct && verbose)
+        CheckFunctValue(comm, *Func_global_lvls[level], NULL, start_guess, "for starting guess: ", true);
+
+    Qlminus1_f = rhs_constr;
+
+    if (level < num_levels - 1)
+    {
+        int l = level;
+        // solution updates will always satisfy homogeneous essential boundary conditions
+        *truesolupdate_lvls[l] = 0.0;
+
+        ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, PtQlminus1_f, finer_buff);
+
+        // solve local problems at level l
+        if (LocalSolvers_lvls[l])
+        {
+            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
+            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
+        }
+
+        UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+
+        // smooth
+        if (Smoothers_lvls[l])
+        {
+            //std::cout << "l = " << l << "\n";
+            //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
+            Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
+
+            //truetempvec2_lvls[l]->Print();
+
+            *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
+
+            UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
+        }
+
+        *trueresfunc_lvls[l] = *truetempvec_lvls[l];
+    }
+    else // we are at the coarsest level, l == num_levels - 1
+    {
+        if (verbose)
+            std::cout << "coarse rhs_constr norm = " << rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
+
+        // 2.5 solve coarse problem
+        CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
+
+        if (verbose)
+        {
+            std::cout << "coarse update norm = " << truesolupdate_lvls[num_levels - 1]->Norml2()
+                         / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
+            std::cout << "coarse update blk 0 norm = " << truesolupdate_lvls[num_levels - 1]->GetBlock(0).Norml2()
+                         / sqrt (truesolupdate_lvls[num_levels - 1]->GetBlock(0).Size()) << "\n";
+        }
+    }
+
+    partsol = start_guess;
+    partsol += *truesolupdate_lvls[level];
+
+    if (report_funct && verbose)
+        CheckFunctValue(comm, *Func_global_lvls[level], NULL, partsol, "for final partsol: ", true);
+
+#ifdef CHECK_CONSTR
+    CheckConstrRes(partsol_viewer.GetBlock(0), Constr_lvl,
+                    &constrRhs, "for the particular solution inside in the end");
+#endif
+}
+
 void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
                                                  const Vector &start_guess, Vector &partsol, const Vector& constrRhs,
                                                  bool verbose, bool report_funct) const
@@ -2696,6 +2821,9 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     // 0. Compute rhs in the functional for the finest level
     UpdateTrueResidual(start_level, NULL, start_guess_viewer, *trueresfunc_lvls[start_level] );
 
+    if (report_funct && verbose)
+        CheckFunctValue(comm, *Func_global_lvls[start_level], NULL, start_guess, "for starting guess: ", true);
+
     Qlminus1_f = rhs_constr;
 
     // 1. loop over levels finer than the coarsest
@@ -2740,6 +2868,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 
     } // end of loop over finer levels
 
+#if 0
     if (start_level == 0 && num_levels == 2)
     {
         std::cout << "Checking M_h sigma_0 = - M_h starting_guess \n";
@@ -2754,6 +2883,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 
         std::cout << "|| M_h sigma_0 = - M_h starting_guess || = " << temp2.Norml2() / sqrt (temp2.Size()) << "\n";
     }
+#endif
 
     // 2. setup and solve the coarse problem
     rhs_constr = Qlminus1_f;
@@ -2765,8 +2895,12 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
 
     if (verbose)
+    {
         std::cout << "coarse update norm = " << truesolupdate_lvls[num_levels - 1]->Norml2()
                      / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
+        std::cout << "coarse update blk 0 norm = " << truesolupdate_lvls[num_levels - 1]->GetBlock(0).Norml2()
+                     / sqrt (truesolupdate_lvls[num_levels - 1]->GetBlock(0).Size()) << "\n";
+    }
 
     // 3. assemble the final solution update
     // final sol update (at level 0)  =
@@ -2786,148 +2920,16 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 
     partsol += *truesolupdate_lvls[start_level];
 
+    if (report_funct && verbose)
+        CheckFunctValue(comm, *Func_global_lvls[start_level], NULL, partsol, "for final partsol: ", true);
+
 #ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), Constr_start_lvl,
                     &constrRhs, "for the particular solution inside in the end");
 #endif
 }
 
-/*
-// (*) returns particular solution as a vector on true dofs!
-void DivConstraintSolver::FindParticularSolution(const Vector& start_guess, Vector& partsol,
-                                                 const Vector &constrRhs, bool verbose) const
-{
-    if (!(start_guess.Size() == size && partsol.Size() == size))
-        std::cout << "Breakpoint \n";
-    MFEM_ASSERT(start_guess.Size() == size && partsol.Size() == size,
-                "Sizes of all arguments must be equal to the size of the solver");
-
-    const Array<int>* offsets;
-    if (own_data)
-        offsets = offsets_funct[0];
-    else
-    {
-        MFEM_ASSERT(num_levels > 1, "Old interface works only if number of levels"
-                                    " was more than 1 in the constructor");
-        offsets = &TrueP_Func[0]->RowOffsets();
-    }
-    const BlockVector start_guess_viewer(start_guess.GetData(), *offsets);
-    BlockVector partsol_viewer(partsol.GetData(), *offsets);
-
-    // checking if the given initial vector satisfies the divergence constraint
-    Vector rhs_constr(Constr_global->Height());
-    Constr_global->Mult(start_guess_viewer.GetBlock(0), rhs_constr);
-    rhs_constr -= constrRhs;
-    rhs_constr *= -1.0;
-
-    // 3.1 if not, computing the particular solution
-    if ( ComputeMPIVecNorm(comm, rhs_constr, "", false) > 1.0e-14 )
-    {
-        if (verbose)
-            std::cout << "Initial vector does not satisfy the divergence constraint. "
-                         "A V-cycle will be performed to find the particular solution. \n";
-    }
-    else
-    {
-        if (verbose)
-            std::cout << "Initial vector already satisfies divergence constraint. "
-                         "No need to perform a V-cycle \n";
-        partsol = start_guess;
-        return;
-    }
-
-    // variable-size vectors (initialized with the finest level sizes) on dofs
-    Vector Qlminus1_f(rhs_constr.Size());     // stores P_l^T rhs_constr_l
-    Vector PtQlminus1_f(rhs_constr.Size());
-    Vector finer_buff(rhs_constr.Size());
-
-    // 0. Compute rhs in the functional for the finest level
-    UpdateTrueResidual(0, NULL, start_guess_viewer, *trueresfunc_lvls[0] );
-
-    Qlminus1_f = rhs_constr;
-
-    // 1. loop over levels finer than the coarsest
-    for (int l = 0; l < num_levels - 1; ++l)
-    {
-        // solution updates will always satisfy homogeneous essential boundary conditions
-        *truesolupdate_lvls[l] = 0.0;
-
-        ComputeLocalRhsConstr(l, Qlminus1_f, rhs_constr, PtQlminus1_f, finer_buff);
-
-        // solve local problems at level l
-        if (LocalSolvers_lvls[l])
-        {
-            LocalSolvers_lvls[l]->Mult(*trueresfunc_lvls[l], *truetempvec_lvls[l], &rhs_constr);
-            *truesolupdate_lvls[l] += *truetempvec_lvls[l];
-        }
-
-        UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
-
-        // smooth
-        if (Smoothers_lvls[l])
-        {
-            //std::cout << "l = " << l << "\n";
-            //std::cout << "tempvec_l = " << truetempvec_lvls[l] << ", tempvec2_l = " << truetempvec2_lvls[l] << "\n";
-            Smoothers_lvls[l]->Mult(*truetempvec_lvls[l], *truetempvec2_lvls[l] );
-
-            //truetempvec2_lvls[l]->Print();
-
-            *truesolupdate_lvls[l] += *truetempvec2_lvls[l];
-
-            UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
-        }
-
-        *trueresfunc_lvls[l] = *truetempvec_lvls[l];
-
-        // setting up rhs from the functional for the next (coarser) level
-        TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
-
-        if (verbose)
-            std::cout << "update at level " << l << " norm = " <<
-                         truesolupdate_lvls[l]->Norml2() / sqrt (truesolupdate_lvls[l]->Size()) << "\n";
-
-    } // end of loop over finer levels
-
-    // 2. setup and solve the coarse problem
-    rhs_constr = Qlminus1_f;
-
-    if (verbose)
-        std::cout << "coarse rhs_constr norm = " << rhs_constr.Norml2() / sqrt (rhs_constr.Size()) << "\n";
-
-    // 2.5 solve coarse problem
-    CoarseSolver->Mult(*trueresfunc_lvls[num_levels - 1], *truesolupdate_lvls[num_levels - 1], &rhs_constr);
-
-    if (verbose)
-        std::cout << "coarse update norm = " << truesolupdate_lvls[num_levels - 1]->Norml2()
-                     / sqrt (truesolupdate_lvls[num_levels - 1]->Size()) << "\n";
-
-    // 3. assemble the final solution update
-    // final sol update (at level 0)  =
-    //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
-    for (int level = num_levels - 1; level > 0; --level)
-    {
-        // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
-        TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
-
-        *truesolupdate_lvls[level - 1] += *truetempvec_lvls[level - 1];
-    }
-
-    // 4. update the global iterate by the computed update (interpolated to the finest level)
-    // setting temporarily tempvec[0] is actually the particular solution on dofs
-
-    partsol = start_guess;
-
-    partsol += *truesolupdate_lvls[0];
-
-#ifdef CHECK_CONSTR
-    CheckConstrRes(partsol_viewer.GetBlock(0), *Constr_global,
-                    &constrRhs, "for the particular solution inside in the end");
-#endif
-
-}
-*/
-
-
+// rhs_l = coeff * Funct_l * x_l
 void DivConstraintSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
 {
     Func_global_lvls[l]->Mult(x_l, rhs_l);
@@ -2960,6 +2962,8 @@ void DivConstraintSolver::UpdateTrueResidual(int level, const BlockVector* rhs_l
 void DivConstraintSolver::NewProjectFinerL2ToCoarser(int l, const Vector& in,
                                                      Vector &out, Vector& finer_buff) const
 {
+    if (!Mass_mat_lvls[l])
+        std::cout << "Mass matrix is absent \n";
     MFEM_ASSERT(Mass_mat_lvls[l], "The modified projector requires mass matrix to be defined at this level");
 
     SparseMatrix * temp = mfem::RAP(*P_L2[l], *Mass_mat_lvls[l], *P_L2[l]);
@@ -3763,6 +3767,13 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
     delete time_localsolve_lvls;
     delete time_smoother_lvls;
 #endif
+
+    if (own_data)
+    {
+        //...
+        MFEM_ABORT("Destructor not implemented for case own_data = true \n");
+    }
+
 }
 
 void GeneralMinConstrSolver::PrintAllOptions() const
@@ -3783,7 +3794,15 @@ void GeneralMinConstrSolver::PrintAllOptions() const
 // The input must be defined on true dofs
 void GeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
 {
-    init_guess->Update(InitGuess.GetData(), TrueP_Func[0]->RowOffsets());
+    if (built_on_mgtools)
+        init_guess->Update(InitGuess.GetData(), *offsets_funct[0]);
+    else
+        init_guess->Update(InitGuess.GetData(), TrueP_Func[0]->RowOffsets());
+}
+
+void GeneralMinConstrSolver::SetConstrRhs(Vector& ConstrRhs) const
+{
+    Constr_rhs_global = &ConstrRhs;
 }
 
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
@@ -3847,16 +3866,251 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
     }
 }
 
+GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
+                                               MultigridToolsHierarchy& mgtools_hierarchy_,
+                                               bool with_local_smoothers_,
+                                               bool optimized_localsolvers_,
+                                               bool with_hcurl_smoothers_,
+                                               int stopcriteria_type_,
+                                               bool verbose_)
+    : Solver(size_),
+      size(size_),
+      stopcriteria_type(stopcriteria_type_),
+      setup_finished(false),
+      num_levels(mgtools_hierarchy_.GetHierarchy()->Nlevels()),
+
+      problem(mgtools_hierarchy_.GetProblem()),
+      hierarchy(mgtools_hierarchy_.GetHierarchy()),
+      with_local_smoothers(with_local_smoothers_),
+      optimized_localsolvers(optimized_localsolvers_),
+      with_hcurl_smoothers(with_hcurl_smoothers_),
+      update_counter(hierarchy->GetUpdateCounter()),
+      own_data(false),
+      mgtools_hierarchy(&mgtools_hierarchy_),
+      built_on_mgtools(true),
+      comm(problem->GetComm()),
+      numblocks(problem->GetFEformulation().Nblocks()),
+      verbose(verbose_)
+{
+    const Array<SpaceName>* space_names_funct =
+            problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+
+    int numblocks_funct = space_names_funct->Size();
+
+    TrueP_Func.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        TrueP_Func[l] = mgtools_hierarchy->GetBlockPs_nobnd()[l];
+
+    offsets_funct.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        offsets_funct[l] = mgtools_hierarchy->GetOffsetsFunct()[l];
+
+    MFEM_ASSERT(size == (*offsets_funct[0])[numblocks_funct],"Error");
+
+    Smoothers_lvls.SetSize(num_levels - 1);
+    for (int l = 0; l < num_levels - 1; ++l)
+        if (with_hcurl_smoothers)
+            Smoothers_lvls[l] = mgtools_hierarchy->GetHcurlSmoothers()[l];
+        else
+            Smoothers_lvls[l] = NULL;
+
+    Func_global_lvls.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
+
+    LocalSolvers_lvls.SetSize(num_levels - 1);
+
+    truesolupdate_lvls.SetSize(num_levels);
+    truetempvec_lvls  .SetSize(num_levels);
+    truetempvec2_lvls .SetSize(num_levels);
+    trueresfunc_lvls  .SetSize(num_levels);
+
+    truesolupdate_lvls[0] = new BlockVector(*offsets_funct[0]);
+    truetempvec_lvls[0]   = new BlockVector(*offsets_funct[0]);
+    truetempvec2_lvls[0]  = new BlockVector(*offsets_funct[0]);
+    trueresfunc_lvls[0]   = new BlockVector(*offsets_funct[0]);
+
+    for (int l = 0; l < num_levels - 1; ++l)
+    {
+        LocalSolvers_lvls[l] = mgtools_hierarchy->GetSchwarzSmoothers()[l];
+
+        truesolupdate_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
+        truetempvec_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+        truetempvec2_lvls[l + 1]  = new BlockVector(*offsets_funct[l + 1]);
+        trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+    }
+
+    CoarseSolver = mgtools_hierarchy->GetCoarsestSolver_Partfinder();
+#ifdef CHECK_CONSTR
+    Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
+#endif
+
+    init_guess = new BlockVector(*offsets_funct[0]);
+    *init_guess = 0.0;
+
+    Functrhs_global = NULL;
+
+    SetRelTol(1.0e-12);
+    SetMaxIter(1000);
+    SetPrintLevel(0);
+    SetSymmetric();
+    SetAsPreconditioner(false);
+    converged = 0;
+
+    funct_prevnorm = 0.0;
+    funct_currnorm = 0.0;
+    funct_firstnorm = 0.0;
+
+    solupdate_prevnorm = 0.0;
+    solupdate_currnorm = 0.0;
+    sol_firstitnorm = 0.0;
+
+    solupdate_prevmgnorm = 0.0;
+    solupdate_currmgnorm = 0.0;
+    solupdate_firstmgnorm = 0.0;
+
+    tempblock_truedofs = new BlockVector(*offsets_funct[0]);
+
+    std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+
+    essbdrtruedofs_Func.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+    {
+        essbdrtruedofs_Func[l] = hierarchy->GetEssBdrTdofsOrDofs
+                ("tdof", *space_names_funct, essbdr_attribs, l);
+    }
+
+
+    Setup();
+
+}
+
+// in case when the solver is based on hierarchy (or mgtools),
+// this routine updates the solver when the hierarchy is updated (new levels appear)
+void GeneralMinConstrSolver::Update(bool recoarsen)
+{
+    if (!hierarchy)
+    {
+        if (verbose)
+            std::cout << "Update() is meaningless if the solver is not based on the hierarchy \n";
+        return;
+    }
+
+    MFEM_ASSERT(problem->GetParMesh()->GetNE() == hierarchy->GetPmesh(0)->GetNE(),
+                "Given FOSLS problem must be defined on the finest level of the "
+                "hierarchy in the current implementation. Probably it was not updated "
+                "by a call to GeneralMinConstrSolver::UpdateProblem() after the hierarchy was updated \n");
+
+    int hierarchy_upd_cnt = hierarchy->GetUpdateCounter();
+    if (update_counter != hierarchy_upd_cnt)
+    {
+        MFEM_ASSERT(update_counter == hierarchy_upd_cnt - 1,
+                    "Current implementation allows the update counters to differ no more than by one");
+
+        if (!built_on_mgtools)
+        {
+            MFEM_ABORT("Not implemented");
+        }
+        else // built on mgtools
+        {
+            // prepending one more level
+            const Array<SpaceName>* space_names_funct =
+                    problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+
+            int numblocks_funct = space_names_funct->Size();
+
+            const Array<int> * offsets_funct_new =
+                    hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
+            offsets_funct.push_front(offsets_funct_new);
+
+            size = (*offsets_funct[0])[numblocks_funct];
+
+            BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
+                                                               *offsets_funct[0], *offsets_funct[1]);
+
+            TrueP_Func.Prepend(TrueP_Func_new);
+
+
+            delete tempblock_truedofs;
+            tempblock_truedofs = new BlockVector(*offsets_funct[0]);
+
+            std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
+
+            std::vector<Array<int>* > & essbdrtruedofs_Func_new = hierarchy->GetEssBdrTdofsOrDofs
+                    ("tdof", *space_names_funct, essbdr_attribs, 0);
+            essbdrtruedofs_Func.push_front(essbdrtruedofs_Func_new);
+
+
+            BlockVector * truesolupdate_new = new BlockVector(TrueP_Func[0]->RowOffsets());
+            truesolupdate_lvls.Prepend(truesolupdate_new);
+            BlockVector * truetempvec_new = new BlockVector(TrueP_Func[0]->RowOffsets());
+            truetempvec_lvls.Prepend(truetempvec_new);
+            BlockVector * truetempvec2_new = new BlockVector(TrueP_Func[0]->RowOffsets());
+            truetempvec2_lvls.Prepend(truetempvec2_new);
+            BlockVector * trueresfunc_new = new BlockVector(TrueP_Func[0]->RowOffsets());
+            trueresfunc_lvls.Prepend(trueresfunc_new);
+
+            if (with_hcurl_smoothers)
+                Smoothers_lvls.Prepend(mgtools_hierarchy->GetHcurlSmoothers()[0]);
+            else
+                Smoothers_lvls.Prepend(NULL);
+
+
+            if (with_local_smoothers)
+                LocalSolvers_lvls.Prepend(mgtools_hierarchy->GetSchwarzSmoothers()[0]);
+            else
+                LocalSolvers_lvls.Prepend(NULL);
+
+            Func_global_lvls.push_front(mgtools_hierarchy->GetOps()[0]);
+
+            Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
+
+            num_levels = hierarchy->Nlevels();
+
+            // recoarsening local and global matrices
+            if (recoarsen)
+            {
+                for (int l = 1; l < num_levels; ++l)
+                {
+                    Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
+
+                    if (l < num_levels - 1)
+                    {
+                        if (with_local_smoothers)
+                            LocalSolvers_lvls[l] = mgtools_hierarchy->GetSchwarzSmoothers()[l];
+                        if (with_hcurl_smoothers)
+                            Smoothers_lvls[l] = mgtools_hierarchy->GetHcurlSmoothers()[l];
+                    }
+                }
+            } // end of if recoarsen case
+
+            if (recoarsen)
+            {
+                CoarseSolver = mgtools_hierarchy->GetCoarsestSolver_Partfinder();
+
+                ((CoarsestProblemSolver*)CoarseSolver)->SetMaxIter(70000);
+                ((CoarsestProblemSolver*)CoarseSolver)->SetAbsTol(1.0e-18);
+                ((CoarsestProblemSolver*)CoarseSolver)->SetRelTol(1.0e-18);
+                ((CoarsestProblemSolver*)CoarseSolver)->ResetSolverParams();
+            }
+        }
+
+        update_counter = hierarchy_upd_cnt;
+    }
+
+    //MFEM_ABORT("Not implemented in GeneralMinConstrSolve");
+}
+
+
 
 GeneralMinConstrSolver::GeneralMinConstrSolver(
                         MPI_Comm Comm,
                         int NumLevels,
-                       const Array< BlockOperator*>& TrueProj_Func,
-                       const std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
-                       const BlockVector& Functrhs_Global,
-                       const Array<Operator*>& Smoothers_Lvls,
-                       const BlockVector& Bdrdata_TrueDofs,
-                       const std::vector<Operator*> & Func_Global_lvls,
+                       Array< BlockOperator*>& TrueProj_Func,
+                       std::vector<std::vector<Array<int> *> > &EssBdrTrueDofs_Func,
+                       BlockVector& Functrhs_Global,
+                       Array<Operator*>& Smoothers_Lvls,
+                       std::vector<Operator*> & Func_Global_lvls,
 #ifdef CHECK_CONSTR
                        HypreParMatrix & Constr_Global,
                        Vector & Constr_Rhs_global,
@@ -3880,21 +4134,21 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        stopcriteria_type(StopCriteria_Type),
        setup_finished(false),
        num_levels(NumLevels),
+       own_data(false),
+       built_on_mgtools(false),
        current_iteration(0),
        comm(Comm),
-       TrueP_Func(TrueProj_Func),
-       essbdrtruedofs_Func(EssBdrTrueDofs_Func),
-       numblocks(TrueProj_Func[0]->NumRowBlocks()),
-       Smoothers_lvls(Smoothers_Lvls),
-       bdrdata_truedofs(Bdrdata_TrueDofs),
-       Func_global_lvls(Func_Global_lvls),
-
+       //TrueP_Func(TrueProj_Func),
+       //essbdrtruedofs_Func(EssBdrTrueDofs_Func),
+       numblocks(TrueProj_Func[0]->NumRowBlocks())
+       //Smoothers_lvls(Smoothers_Lvls),
+       //Func_global_lvls(Func_Global_lvls),
 #ifdef CHECK_CONSTR
-       Constr_global(&Constr_Global),
-       Constr_rhs_global(&Constr_Rhs_global),
+       , Constr_global(&Constr_Global),
+       Constr_rhs_global(&Constr_Rhs_global)
 #endif
 #ifdef TIMING
-       times_mult(Times_mult),
+       , times_mult(Times_mult),
        times_solve(Times_solve),
        times_localsolve(Times_localsolve),
        times_localsolve_lvls(Times_localsolve_lvls),
@@ -3905,10 +4159,26 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        times_fw(Times_fw),
        times_up(Times_up),
 #endif
-       Functrhs_global(Functrhs_Global)
+       //Functrhs_global(Functrhs_Global)
 {
 
-    TrueProj_Func[0]->RowOffsets();
+    TrueP_Func.SetSize(TrueProj_Func.Size());
+    for (int i = 0; i < TrueP_Func.Size(); ++i)
+        TrueP_Func[i] = TrueProj_Func[i];
+
+    Func_global_lvls.resize(Func_Global_lvls.size());
+    for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
+        Func_global_lvls[i] = Func_Global_lvls[i];
+
+    Smoothers_lvls.SetSize(Smoothers_Lvls.Size());
+    for (int i = 0; i < Smoothers_lvls.Size(); ++i)
+        Smoothers_lvls[i] = Smoothers_Lvls[i];
+
+    essbdrtruedofs_Func.resize(EssBdrTrueDofs_Func.size());
+    for (unsigned int i = 0; i < essbdrtruedofs_Func.size(); ++i)
+        essbdrtruedofs_Func[i] = EssBdrTrueDofs_Func[i];
+
+    Functrhs_global = &Functrhs_Global;
 
     tempblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
@@ -3981,7 +4251,7 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
     if (verbose)
         std::cout << "Starting solver setup \n";
 
-    CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, *init_guess,
+    CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
             "for the initial guess during solver setup (no rhs provided): ", print_level);
     // 2. setting up the required internal data at all levels
 
@@ -4031,15 +4301,26 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     current_iteration = 0;
     converged = 0;
 
+    const Array<int>* offsets;
+    if (built_on_mgtools)
+        offsets = offsets_funct[0];
+    else
+    {
+        MFEM_ASSERT(num_levels > 1, "Old interface works only if number of levels"
+                                    " was more than 1 in the constructor");
+        offsets = &TrueP_Func[0]->RowOffsets();
+    }
+
+
     // x and y will be accessed through these viewers as BlockVectors
-    const BlockVector x_viewer(x.GetData(), TrueP_Func[0]->RowOffsets());
-    BlockVector y_viewer(y.GetData(), TrueP_Func[0]->RowOffsets());
+    const BlockVector x_viewer(x.GetData(), *offsets);
+    BlockVector y_viewer(y.GetData(), *offsets);
 
     if (preconditioner_mode)
         *init_guess = 0.0;
     else
     {
-        funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, *init_guess,
+        funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
                                  "for the initial guess: ", print_level);
     }
     // tempblock is the initial guess (on true dofs)
@@ -4272,7 +4553,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     next_sol = previous_sol;
 
     if (!preconditioner_mode && print_level)
-        CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
+        CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, next_sol,
                              "at the beginning of Solve: ", print_level);
 
 #ifdef TIMING
@@ -4414,9 +4695,9 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
         TrueP_Func[l]->MultTranspose(*trueresfunc_lvls[l], *trueresfunc_lvls[l + 1]);
 
-        // manually setting the boundary conditions (requried for S from H1 at least) at the coarser level
+        // manually setting the boundary conditions (required for S from H1 at least) at the coarser level
         //int shift = 0;
-        for (int blk = 0; blk < numblocks; ++blk)
+        for (int blk = 0; blk < numblocks - 1; ++blk)
         {
             const Array<int> * temp;
             temp = essbdrtruedofs_Func[l + 1][blk];
@@ -4483,11 +4764,16 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
 #ifdef CHECK_CONSTR
-    TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
+    if (num_levels > 1)
+    {
+        TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
+        *truesolupdate_lvls[0] += *truetempvec_lvls[0];
+    }
+    else
+        truetempvec_lvls[0] = truesolupdate_lvls[0];
     MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
                 "for interpolated coarsest level update"),"");
 
-    *truesolupdate_lvls[0] += *truetempvec_lvls[0];
     next_sol += *truesolupdate_lvls[0];
     MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
                 "after fw and bottom updates"),"");
@@ -4647,7 +4933,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
         {
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], &Functrhs_global, next_sol,
+            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, next_sol,
                                      "at the end of iteration: ", print_level);
         }
 
