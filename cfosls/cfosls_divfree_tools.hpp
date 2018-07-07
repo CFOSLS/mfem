@@ -930,6 +930,8 @@ public:
 
     int Size() const {return size;}
 
+    const Operator * GetFunctOp(int level) const {return Func_global_lvls[level];}
+
     GeneralMinConstrSolver() = delete;
 
     // external calling routine (as in any IterativeSolver) which takes care of convergence
@@ -940,7 +942,7 @@ public:
 
     bool StoppingCriteria(int type, double value_curr, double value_prev, double value_scalefactor,
                           double stop_tol, bool monotone_check = true, char const * name = NULL,
-                          bool print = false) const;
+                          int print = 0) const;
 
     int GetStopCriteriaType () const {return stopcriteria_type;}
     void SetStopCriteriaType (int StopCriteria_Type) const {stopcriteria_type = StopCriteria_Type;}

@@ -66,12 +66,9 @@ int main(int argc, char *argv[])
     using BdrCondsType = BdrConditions_Laplace;
     using ProblemType = FOSLSProblem_Laplace;
 #else
-    /*
-    // Hdiv-H1 case
-    */
+
 #endif
 
-    // Hdiv-L2 case
     /*
     using FormulType = CFOSLSFormulation_MixedLaplace;
     using FEFormulType = CFOSLSFEFormulation_MixedLaplace;
@@ -305,8 +302,8 @@ int main(int argc, char *argv[])
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   ComponentsDescriptor descriptor(true, true, true, true, true, false);
-   MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
+   //ComponentsDescriptor descriptor(true, true, true, true, true, false);
+   //MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
 
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 

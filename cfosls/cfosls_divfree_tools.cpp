@@ -3808,8 +3808,9 @@ void GeneralMinConstrSolver::SetConstrRhs(Vector& ConstrRhs) const
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
                                                   double value_scalefactor, double stop_tol,
                                                   bool monotone_check, char const * name,
-                                                  bool print) const
+                                                  int printvar) const
 {
+    bool print = (printvar >= 1);
     bool already_printed = false;
     if (monotone_check)
         if (value_curr > value_prev && fabs(value_prev - value_curr) / fabs(value_scalefactor) > 1.0e-10 )
@@ -4397,16 +4398,16 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         {
             if (i == 0)
                 StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                                 monotone_check, "functional", print_level);
+                                 monotone_check, "functional", print_level-1);
             else
                 StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                                 monotone_check, "functional", print_level);
+                                 monotone_check, "functional", print_level-1);
 
             StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
-                             sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level);
+                             sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level-1);
         }
         StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
-                         solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level);
+                         solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level-1);
 
         bool stopped;
         switch(stopcriteria_type)
@@ -4923,7 +4924,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     }
 #endif
 
-    if (print_level > 10)
+    if (print_level > 1)
     {
         std::cout << "sol_update norm: " << truesolupdate_lvls[0]->GetBlock(0).Norml2() /
                   sqrt(truesolupdate_lvls[0]->GetBlock(0).Size()) << "\n";

@@ -766,8 +766,9 @@ int main(int argc, char *argv[])
 #else // if using the original FOSLS problem when finding the particular solution
    partsol_finder = new DivConstraintSolver
            (*problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
-   bool report_funct = true;
 #endif
+
+   bool report_funct = true;
 
 #endif// endif for MULTILEVEL_PARTSOL
 #endif // for #ifdef PARTSOL_SETUP
@@ -1035,17 +1036,21 @@ int main(int argc, char *argv[])
    ThresholdRefiner refiner(*estimator);
    refiner.SetTotalErrorFraction(0.9); // 0.5
 
-#ifdef CLEVER_STARTING_GUESS
-   BlockVector * coarse_guess;
-#endif
-
 #ifdef DEBUGGING_CASE
    Vector * checkdiff;
 #endif
 
+#ifdef PARTSOL_SETUP
    Array<Vector*> div_rhs_lvls(0);
    Array<BlockVector*> partsol_lvls(0);
    Array<BlockVector*> partsol_funct_lvls(0);
+   Array<BlockVector*> initguesses_funct_lvls(0);
+#endif
+
+   Array<BlockVector*> problem_sols_lvls(0);
+#ifdef DIVFREE_HCURLSETUP
+   Array<BlockVector*> divfreeproblem_sols_lvls(0);
+#endif
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
@@ -1076,7 +1081,17 @@ int main(int argc, char *argv[])
            return 0;
        }
 
+       initguesses_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
+       *initguesses_funct_lvls[0] = 0.0;
 
+       problem_sols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
+       *problem_sols_lvls[0] = 0.0;
+
+#ifdef DIVFREE_HCURLSETUP
+       divfreeproblem_sols_lvls.Prepend(new BlockVector(divfreeprob_hierarchy->
+                                                        GetProblem(0)->GetTrueOffsets()));
+       *divfreeproblem_sols_lvls[0] = 0.0;
+#endif
 
 #ifdef PARTSOL_SETUP
        // finding a particular solution
@@ -1220,7 +1235,7 @@ int main(int argc, char *argv[])
            // if it's not the coarsest level, we reuse the previous solution as a starting guess
            if (l < coarsest_lvl)
                divfreeprob_hierarchy->GetTrueP(l)->Mult
-                       (divfreeprob_hierarchy->GetProblem(l + 1)->GetSol(), problem_l_divfree->GetSol());
+                       (*divfreeproblem_sols_lvls[l + 1], problem_l_divfree->GetSol());
 
            // checking the residual
            BlockVector res(problem_l_divfree->GetTrueOffsets());
@@ -1250,6 +1265,7 @@ int main(int argc, char *argv[])
 #endif
 
            problem_l_divfree->SolveProblem(rhs, problem_l_divfree->GetSol(), verbose, false);
+           *divfreeproblem_sols_lvls[l] = problem_l_divfree->GetSol();
 #else
            problem_l_divfree->SolveProblem(rhs, verbose, false);
 #endif // for #else for #ifdef CLEVER_STARTING_GUESS
@@ -1443,7 +1459,7 @@ int main(int argc, char *argv[])
 #ifdef CLEVER_STARTING_GUESS
        // if it's not the first iteration we reuse the previous solution as a starting guess
        if (it > 0)
-           divfreeprob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem_divfree->GetSol());
+           divfreeprob_hierarchy->GetTrueP(0)->Mult(*divfreeproblem_sols_lvls[1], problem_divfree->GetSol());
 
        // checking the residual
        BlockVector res(problem_divfree->GetTrueOffsets());
@@ -1479,6 +1495,8 @@ int main(int argc, char *argv[])
 #else
        problem_divfree->SolveProblem(rhs, verbose, false);
 #endif // for #ifdef CLEVER_STARTING_GUESS
+
+       *divfreeproblem_sols_lvls[0] = problem_divfree->GetSol();
 
        // checking the residual afterwards
        {
@@ -1545,17 +1563,10 @@ int main(int argc, char *argv[])
        BlockVector& problem_sol = problem->GetSol();
        problem_sol = 0.0;
 
-       BlockVector& problem_divfree_sol = problem_divfree->GetSol();
-#ifdef CLEVER_STARTING_GUESS
-       if (it > 0)
-           delete coarse_guess;
-       coarse_guess = new BlockVector(problem_divfree->GetTrueOffsets());
-       *coarse_guess = problem_divfree_sol;
-#endif
-
-       problem_divfree->GetDivfreeHpMat().Mult(1.0, problem_divfree_sol.GetBlock(0), 1.0, problem_sol.GetBlock(0));
+       problem_divfree->GetDivfreeHpMat().Mult(1.0, divfreeproblem_sols_lvls[0]->GetBlock(0),
+               1.0, problem_sol.GetBlock(0));
        if (strcmp(space_for_S,"H1") == 0)
-           problem_sol.GetBlock(1) = problem_divfree_sol.GetBlock(1);
+           problem_sol.GetBlock(1) = divfreeproblem_sols_lvls[0]->GetBlock(1);
 
 #endif // for #ifdef DIVFREE_HCURLSETUP
 
@@ -1570,8 +1581,16 @@ int main(int argc, char *argv[])
 
        NewSolver->SetRelTol(newsolver_reltol);
        NewSolver->SetMaxIter(200);
-       NewSolver->SetPrintLevel(0);
+       NewSolver->SetPrintLevel(1);
        NewSolver->SetStopCriteriaType(0);
+
+#ifdef CLEVER_STARTING_GUESS
+       if (it > 0)
+           for (int blk = 0; blk < numblocks_funct; ++blk)
+               hierarchy->GetTruePspace( (*space_names_funct)[blk], 0)->Mult
+                   (problem_sols_lvls[1]->GetBlock(blk), initguesses_funct_lvls[0]->GetBlock(blk));
+#endif
+       *initguesses_funct_lvls[0] += *partsol_funct_lvls[0];
 
        NewSolver->SetInitialGuess(*partsol_funct_lvls[0]);
        NewSolver->SetConstrRhs(*div_rhs_lvls[0]);
@@ -1594,6 +1613,8 @@ int main(int argc, char *argv[])
 
        problem_sol += *partsol_lvls[0];
 
+       *problem_sols_lvls[0] = problem_sol;
+
        if (compute_error)
            problem->ComputeError(problem_sol, verbose, false);
 
@@ -1605,7 +1626,7 @@ int main(int argc, char *argv[])
 #ifdef CLEVER_STARTING_GUESS
        // if it's not the first iteration we reuse the previous solution as a starting guess
        if (it > 0)
-           prob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem->GetSol());
+           prob_hierarchy->GetTrueP(0)->Mult(*problem_sols_lvls[1], problem->GetSol());
 
        // checking the residual
        BlockVector res(problem->GetTrueOffsets());
@@ -1655,11 +1676,11 @@ int main(int argc, char *argv[])
        problem->Solve(verbose, false);
 #endif
 
-      BlockVector& problem_sol = problem->GetSol();
+       *problem_sols_lvls[0] = problem->GetSol();
       if (compute_error)
       {
-          problem->ComputeError(problem_sol, verbose, true);
-          problem->ComputeBndError(problem_sol);
+          problem->ComputeError(*problem_sols_lvls[0], verbose, true);
+          problem->ComputeBndError(*problem_sols_lvls[0]);
       }
 
       // special testing cheaper preconditioners!
@@ -1747,13 +1768,6 @@ int main(int argc, char *argv[])
       MPI_Finalize();
       return 0;
       */
-
-#ifdef CLEVER_STARTING_GUESS
-       if (it > 0)
-           delete coarse_guess;
-       coarse_guess = new BlockVector(problem->GetTrueOffsets());
-       *coarse_guess = problem_sol;
-#endif
 
 #endif
 
