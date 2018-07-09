@@ -10,12 +10,12 @@
 #include <list>
 #include <unistd.h>
 
-//#define VISUALIZATION
+#define VISUALIZATION
 
 // (de)activates solving of the discrete global problem
 #define OLD_CODE
 
-//#define WITH_DIVCONSTRAINT_SOLVER
+#define WITH_DIVCONSTRAINT_SOLVER
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -68,19 +68,10 @@ using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
-void ExternalUpdateResImitation(Operator& oper, double coeff, const Vector* rhs_l, const Vector& x_l, Vector &out_l)
-{
-    oper.Mult(x_l, out_l);
-    out_l *= coeff;
-
-    if (rhs_l)
-        out_l += *rhs_l;
-}
-
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
-    bool visualization = 1;
+    bool visualization = 0;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -91,7 +82,7 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 4;
+    int numsol          = 11;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
@@ -261,15 +252,19 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Running tests for the paper: \n";
 
-    if (nDimensions == 3)
+    if (numsol == -3 || numsol == 3)
     {
-        numsol = -3;
         mesh_file = "../data/cube_3d_moderate.mesh";
     }
-    else // 4D case
+
+    if (numsol == -4 || numsol == 4)
     {
-        numsol = -4;
         mesh_file = "../data/cube4d_96.MFEM";
+    }
+
+    if (numsol == 11)
+    {
+        mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
     }
 
     if (verbose)
@@ -409,6 +404,14 @@ int main(int argc, char *argv[])
         delete mesh;
     }
 
+    /*
+    std::stringstream fname;
+    fname << "netgen_lshape3D.mesh";
+    std::ofstream ofid(fname.str().c_str());
+    ofid.precision(8);
+    pmesh->Print(ofid);
+    */
+
     MFEM_ASSERT(!(aniso_refine && (with_multilevel || nDimensions == 4)),"Anisotropic refinement works only in 3D and without multilevel algorithm \n");
 
     int dim = nDimensions;
@@ -504,6 +507,8 @@ int main(int argc, char *argv[])
     Array< SparseMatrix*> Element_dofs_R(ref_levels);
     Array< SparseMatrix*> Element_dofs_H(ref_levels);
     Array< SparseMatrix*> Element_dofs_W(ref_levels);
+
+    Array<SparseMatrix*> Mass_mat_lvls(num_levels);
 
     const SparseMatrix* P_W_local;
     const SparseMatrix* P_R_local;
@@ -715,6 +720,12 @@ int main(int argc, char *argv[])
             H_space_lvls[l]->GetEssentialTrueDofs(ess_bdrS, *EssBdrTrueDofs_HcurlFunct_lvls[l][1]);
             H_space_lvls[l]->GetEssentialVDofs(ess_bdrS, *EssBdrDofs_H1[l]);
         }
+
+        ParBilinearForm mass_form(W_space_lvls[l]);
+        mass_form.AddDomainIntegrator(new MassIntegrator);
+        mass_form.Assemble();
+        mass_form.Finalize();
+        Mass_mat_lvls[l] = mass_form.LoseMat();
 
         // getting operators at level l
         // curl or divskew operator from C_space into R_space
@@ -1406,269 +1417,6 @@ int main(int argc, char *argv[])
                 + Dof_TrueDof_Func_lvls[num_levels - 1][1]->N() + Dof_TrueDof_L2_lvls[num_levels - 1]->N() << "\n";
 #endif
     }
-
-#ifdef CHECK_SPDCOARSESTSOLVER
-
-#ifdef HCURL_COARSESOLVER
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(200);
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetAbsTol(sqrt(1.0e-14));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetRelTol(sqrt(1.0e-14));
-    ((CoarsestProblemHcurlSolver*)CoarsestSolver)->ResetSolverParams();
-#else
-    CoarsestSolver = CoarsestSolver_partfinder;
-    CoarsestSolver_partfinder->SetMaxIter(1000);
-    CoarsestSolver_partfinder->SetAbsTol(1.0e-12);
-    CoarsestSolver_partfinder->SetRelTol(1.0e-12);
-    CoarsestSolver_partfinder->ResetSolverParams();
-#endif
-
-
-    HypreParMatrix * temp = Divfree_hpmat_mod_lvls[num_levels - 1];
-    HypreParMatrix * tempT = temp->Transpose();
-    HypreParMatrix * CurlCurlT = ParMult(temp, tempT);
-
-    SparseMatrix diag;
-    CurlCurlT->GetDiag(diag);
-
-    if (verbose)
-        std::cout << "diag of CurlCurlT unsymmetry measure = " << diag.IsSymmetric() << "\n";
-
-    {
-        Vector Tempy(CoarsestSolver->Height());
-
-        Vector Vec1(CoarsestSolver->Height());
-        Vec1.Randomize(2000);
-        Vector Vec2(CoarsestSolver->Height());
-        Vec2.Randomize(-39);
-
-        for ( int i = 0; i < EssBdrTrueDofs_Funct_lvls[num_levels - 1][0]->Size(); ++i )
-        {
-            int tdof = (*EssBdrTrueDofs_Funct_lvls[num_levels - 1][0])[i];
-            //std::cout << "index = " << tdof << "\n";
-            Vec1[tdof] = 0.0;
-            Vec2[tdof] = 0.0;
-        }
-
-        Vector VecDiff(Vec1.Size());
-        VecDiff = Vec1;
-
-        std::cout << "Norm of Vec1 = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
-
-        VecDiff -= Vec2;
-
-        MFEM_ASSERT(VecDiff.Norml2() / sqrt(VecDiff.Size()) > 1.0e-10, "Vec1 equals Vec2 but they must be different");
-        //VecDiff.Print();
-        std::cout << "Norm of (Vec1 - Vec2) = " << VecDiff.Norml2() / sqrt(VecDiff.Size())  << "\n";
-
-        CoarsestSolver->Mult(Vec1, Tempy);
-        //CurlCurlT->Mult(Vec1, Tempy);
-        double scal1 = Tempy * Vec2;
-        double scal3 = Tempy * Vec1;
-        //std::cout << "A Vec1 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
-
-        CoarsestSolver->Mult(Vec2, Tempy);
-        //CurlCurlT->Mult(Vec2, Tempy);
-        double scal2 = Tempy * Vec1;
-        double scal4 = Tempy * Vec2;
-        //std::cout << "A Vec2 norm = " << Tempy.Norml2() / sqrt (Tempy.Size()) << "\n";
-
-        std::cout << "scal1 = " << scal1 << "\n";
-        std::cout << "scal2 = " << scal2 << "\n";
-
-        if ( fabs(scal1 - scal2) / fabs(scal1) > 1.0e-12)
-        {
-            std::cout << "CoarsestSolver is not symmetric on two random vectors: \n";
-            std::cout << "vec2 * (S * vec1) = " << scal1 << " != " << scal2 << " = vec1 * (S * vec2)" << "\n";
-            std::cout << "difference = " << scal1 - scal2 << "\n";
-            std::cout << "relative difference = " << fabs(scal1 - scal2) / fabs(scal1) << "\n";
-        }
-        else
-        {
-            std::cout << "CoarsestSolver was symmetric on the given vectors: dot product = " << scal1 << "\n";
-        }
-
-        std::cout << "scal3 = " << scal3 << "\n";
-        std::cout << "scal4 = " << scal4 << "\n";
-
-        if (scal3 < 0 || scal4 < 0)
-        {
-            std::cout << "The operator (CoarsestSolver) is not s.p.d. \n";
-        }
-        else
-        {
-            std::cout << "The CoarsestSolver is s.p.d. on the two random vectors: (Sv,v) > 0 \n";
-        }
-
-        //MPI_Finalize();
-        //return 0;
-    }
-#endif
-
-
-    /*
-    StopWatch chrono_debug;
-
-    Vector testRhs(CoarsestSolver->Height());
-    testRhs = 1.0;
-    Vector testX(CoarsestSolver->Width());
-    testX = 0.0;
-
-    MPI_Barrier(comm);
-    chrono_debug.Clear();
-    chrono_debug.Start();
-    for (int it = 0; it < 20; ++it)
-    {
-        CoarsestSolver->Mult(testRhs, testX);
-        testRhs = testX;
-    }
-
-    MPI_Barrier(comm);
-    chrono_debug.Stop();
-
-    if (verbose)
-       std::cout << "CoarsestSolver test run is finished in " << chrono_debug.RealTime() << " \n" << std::flush;
-
-    //delete CoarsestSolver;
-    //MPI_Finalize();
-    //return 0;
-    */
-
-    /*
-    // comparing Divfreehpmat with smth from the Divfree_spmat at level 0
-    SparseMatrix d_td_Hdiv_diag;
-    Dof_TrueDof_Func_lvls[0][0]->GetDiag(d_td_Hdiv_diag);
-
-    SparseMatrix * d_td_Hdiv_diag_T = Transpose(d_td_Hdiv_diag);
-
-
-    SparseMatrix * tempRA = mfem::Mult(*d_td_Hdiv_diag_T, *Divfree_mat_lvls[0]);
-    HypreParMatrix * tempRAP = Dof_TrueDof_Hcurl_lvls[0]->LeftDiagMult(*tempRA, R_space_lvls[0]->GetTrueDofOffsets() );
-
-    ParGridFunction * temppgrfunc = new ParGridFunction(C_space_lvls[0]);
-    temppgrfunc->ProjectCoefficient(*Mytest.divfreepart);
-
-    Vector testvec1(tempRAP->Width());
-    temppgrfunc->ParallelAssemble(testvec1);
-    Vector testvec2(tempRAP->Height());
-    tempRAP->Mult(testvec1, testvec2);
-
-    temppgrfunc->ParallelAssemble(testvec1);
-    Vector testvec3(tempRAP->Height());
-    Divfree_hpmat_mod_lvls[0]->Mult(testvec1, testvec3);
-
-    Vector diffvec(tempRAP->Height());
-    double diffnorm = diffvec.Norml2() / sqrt (diffvec.Size());
-    MPI_Barrier(comm);
-    std::cout << "diffnorm = " << diffnorm << "\n" << std::flush;
-    MPI_Barrier(comm);
-    */
-
-#ifdef TIMING
-    /*
-    // testing Functional action as operator timing with an external imitating routine
-    for (int l = 0; l < num_levels - 1; ++l)
-    {
-        Vector testRhs(Funct_global_lvls[l]->Height());
-        testRhs = 1.0;
-        Vector testX(Funct_global_lvls[l]->Width());
-        testX = 0.0;
-
-        Vector testsuppl(Funct_global_lvls[l]->Height());
-
-        StopWatch chrono_debug;
-
-        MPI_Barrier(comm);
-        chrono_debug.Clear();
-        chrono_debug.Start();
-        for (int it = 0; it < 20; ++it)
-        {
-            ExternalUpdateResImitation(*Funct_global_lvls[l], -1.0, &testsuppl, testRhs, testX);
-            testRhs += testX;
-        }
-
-        MPI_Barrier(comm);
-        chrono_debug.Stop();
-
-        if (verbose)
-           std::cout << "UpdateRes imitating routine at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
-
-        MPI_Barrier(comm);
-
-    }
-
-    // testing Functional action as operator timing
-
-    for (int l = 0; l < num_levels - 1; ++l)
-    {
-        StopWatch chrono_debug;
-
-        Vector testRhs(Funct_global_lvls[l]->Height());
-        testRhs = 1.0;
-        Vector testX(Funct_global_lvls[l]->Width());
-        testX = 0.0;
-
-        MPI_Barrier(comm);
-        chrono_debug.Clear();
-        chrono_debug.Start();
-        for (int it = 0; it < 20; ++it)
-        {
-            Funct_global_lvls[l]->Mult(testRhs, testX);
-            testRhs += testX;
-        }
-
-        MPI_Barrier(comm);
-        chrono_debug.Stop();
-
-        if (verbose)
-           std::cout << "Funct action at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
-
-        MPI_Barrier(comm);
-
-    }
-    */
-
-    //testing the smoother performance
-
-#ifdef WITH_SMOOTHERS
-    for (int l = 0; l < num_levels - 1; ++l)
-    {
-        StopWatch chrono_debug;
-
-        Vector testRhs(Smoothers_lvls[l]->Height());
-        testRhs = 1.0;
-        Vector testX(Smoothers_lvls[l]->Width());
-        testX = 0.0;
-
-        MPI_Barrier(comm);
-        chrono_debug.Clear();
-        chrono_debug.Start();
-        for (int it = 0; it < 1; ++it)
-        {
-            Smoothers_lvls[l]->Mult(testRhs, testX);
-            testRhs += testX;
-        }
-
-        MPI_Barrier(comm);
-        chrono_debug.Stop();
-
-        if (verbose)
-           std::cout << "Smoother at level " << l << "  has finished in " << chrono_debug.RealTime() << " \n" << std::flush;
-
-        if (verbose)
-        {
-           std::cout << "Internal timing of the smoother at level " << l << ": \n";
-           std::cout << "global mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetGlobalMultTime() << " \n" << std::flush;
-           std::cout << "internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetInternalMultTime() << " \n" << std::flush;
-           std::cout << "before internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetBeforeIntMultTime() << " \n" << std::flush;
-           std::cout << "after internal mult time: " << ((HcurlGSSSmoother*)Smoothers_lvls[l])->GetAfterIntMultTime() << " \n" << std::flush;
-        }
-        MPI_Barrier(comm);
-
-    }
-    for (int l = 0; l < num_levels - 1; ++l)
-        ((HcurlGSSSmoother*)Smoothers_lvls[l])->ResetInternalTimings();
-#endif
-#endif
 
     if (verbose)
         std::cout << "End of the creating a hierarchy of meshes AND pfespaces \n";
@@ -2988,17 +2736,14 @@ int main(int argc, char *argv[])
 #ifdef WITH_DIVCONSTRAINT_SOLVER
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
                                       TrueP_Func, P_W,
+                                      Mass_mat_lvls,
                                       EssBdrTrueDofs_Funct_lvls,
                                       Funct_global_lvls,
                                       *Constraint_global,
                                       Floc,
                                       Smoothers_lvls,
-                                      Xinit_truedofs,
-#ifdef CHECK_CONSTR
-                                      Floc,
-#endif
                                       LocalSolver_partfinder_lvls,
-                                      CoarsestSolver_partfinder);
+                                      CoarsestSolver_partfinder, verbose);
     CoarsestSolver_partfinder->SetMaxIter(70000);
     CoarsestSolver_partfinder->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder->SetRelTol(1.0e-18);
@@ -3049,7 +2794,7 @@ int main(int argc, char *argv[])
         CoarsestSolver_partfinder->PrintSolverParams();
     }
 
-    PartsolFinder.Mult(Xinit_truedofs, ParticSol);
+    PartsolFinder.FindParticularSolution(Xinit_truedofs, ParticSol, Floc, verbose);
 #else
     Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif
@@ -3088,27 +2833,6 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    // checking that the computed particular solution satisfies essential boundary conditions
-    for ( int blk = 0; blk < numblocks_funct; ++blk)
-    {
-        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
-                                  "for the particular solution");
-    }
-
-    // checking that the boundary conditions are not violated for the initial guess
-    for ( int blk = 0; blk < numblocks_funct; ++blk)
-    {
-        for (int i = 0; i < EssBdrTrueDofs_Funct_lvls[0][blk]->Size(); ++i)
-        {
-            int tdofind = (*EssBdrTrueDofs_Funct_lvls[0][blk])[i];
-            if ( fabs(ParticSol.GetBlock(blk)[tdofind]) > 1.0e-14 )
-            {
-                std::cout << "blk = " << blk << ": bnd cnd is violated for the ParticSol! \n";
-                std::cout << "tdofind = " << tdofind << ", value = " << ParticSol.GetBlock(blk)[tdofind] << "\n";
-            }
-        }
-    }
-
     // checking that the particular solution satisfies the divergence constraint
     BlockVector temp_dofs(Funct_mat_lvls[0]->RowOffsets());
     for ( int blk = 0; blk < numblocks_funct; ++blk)
@@ -3133,10 +2857,10 @@ int main(int argc, char *argv[])
 
     for (int blk = 0; blk < numblocks_funct; ++blk)
     {
-        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)), *EssBdrTrueDofs_Funct_lvls[0][blk], true),
+        MFEM_ASSERT(CheckBdrError(ParticSol.GetBlock(blk), &(Xinit_truedofs.GetBlock(blk)),
+                                  *EssBdrTrueDofs_Funct_lvls[0][blk], true),
                                   "for the particular solution");
     }
-
 
     Vector error3(ParticSol.Size());
     error3 = ParticSol;
@@ -3514,131 +3238,6 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0)
         NewS->Distribute(trueXtest.GetBlock(1));
 
-    /*
-#ifdef OLD_CODE
-
-    if (verbose)
-        std::cout << "Using the new solver as a preconditioner for CG applied"
-                     " to a saddle point problem for sigma and lambda \n";
-
-    Array<int> block_Offsetstest(numblocks + 2); // number of variables + 1
-    block_Offsetstest[0] = 0;
-    block_Offsetstest[1] = R_space_lvls[0]->GetVSize();
-    block_Offsetstest[2] = W_space_lvls[0]->GetVSize();
-    block_Offsetstest.PartialSum();
-
-    Array<int> block_trueOffsetstest(numblocks + 2); // number of variables + 1
-    block_trueOffsetstest[0] = 0;
-    block_trueOffsetstest[1] = R_space_lvls[0]->TrueVSize();
-    block_trueOffsetstest[2] = W_space_lvls[0]->TrueVSize();
-    block_trueOffsetstest.PartialSum();
-
-    BlockVector trueXtest(block_trueOffsetstest), trueRhstest(block_trueOffsetstest);
-
-    ConstantCoefficient zerostest(.0);
-
-    ParLinearForm *fform = new ParLinearForm(R_space_lvls[0]);
-    fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zerostest));
-    fform->Assemble();
-
-    ParLinearForm *gformtest;
-    gformtest = new ParLinearForm(W_space_lvls[0]);
-    gformtest->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
-    gformtest->Assemble();
-
-    ParBilinearForm *Ablock(new ParBilinearForm(R_space));
-    HypreParMatrix *Atest;
-    Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
-    Ablock->Assemble();
-    Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform);
-    Ablock->Finalize();
-    Atest = Ablock->ParallelAssemble();
-
-    HypreParMatrix *D;
-    HypreParMatrix *DT;
-
-    ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space_lvls[0], W_space_lvls[0]));
-    Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
-    Dblock->Assemble();
-    Dblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *gformtest);
-    Dblock->Finalize();
-    D = Dblock->ParallelAssemble();
-    DT = D->Transpose();
-
-    fform->ParallelAssemble(trueRhstest.GetBlock(0));
-    gformtest->ParallelAssemble(trueRhstest.GetBlock(1));
-
-    Solver *prectest;
-    prectest = new BlockDiagonalPreconditioner(block_trueOffsetstest);
-    NewSolver.SetAsPreconditioner(true);
-    NewSolver.SetPrintLevel(1);
-    ((BlockDiagonalPreconditioner*)prectest)->SetDiagonalBlock(0, &NewSolver);
-
-    HypreParMatrix *Schur;
-    {
-        HypreParMatrix *AinvDt = D->Transpose();
-        HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, Atest->GetGlobalNumRows(),
-                                             Atest->GetRowStarts());
-
-        Atest->GetDiag(*Ad);
-        AinvDt->InvScaleRows(*Ad);
-        Schur = ParMult(D, AinvDt);
-    }
-
-    Solver * precS;
-    precS = new HypreBoomerAMG(*Schur);
-    ((HypreBoomerAMG *)precS)->SetPrintLevel(0);
-    ((HypreBoomerAMG *)precS)->iterative_mode = false;
-    ((BlockDiagonalPreconditioner*)prectest)->SetDiagonalBlock(1, precS);
-
-
-    BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsetstest);
-    CFOSLSop->SetBlock(0,0, Atest);
-    CFOSLSop->SetBlock(0,1, DT);
-    CFOSLSop->SetBlock(1,0, D);
-
-    IterativeSolver * solvertest;
-    solvertest = new CGSolver(comm);
-
-    solvertest->SetAbsTol(atol);
-    solvertest->SetRelTol(rtol);
-    solvertest->SetMaxIter(max_num_iter);
-    solvertest->SetOperator(*MainOp);
-
-    solvertest->SetPrintLevel(0);
-    solvertest->SetOperator(*CFOSLSop);
-    solvertest->SetPreconditioner(*prectest);
-    solvertest->SetPrintLevel(1);
-
-    trueXtest = 0.0;
-    trueXtest.GetBlock(0) = trueParticSol;
-
-    chrono.Clear();
-    chrono.Start();
-
-    solvertest->Mult(trueRhstest, trueXtest);
-
-    chrono.Stop();
-
-    NewSigmahat->Distribute(&(trueXtest.GetBlock(0)));
-
-
-    if (verbose)
-    {
-        if (solvertest->GetConverged())
-            std::cout << "Linear solver converged in " << solvertest->GetNumIterations()
-                      << " iterations with a residual norm of " << solvertest->GetFinalNorm() << ".\n";
-        else
-            std::cout << "Linear solver did not converge in " << solvertest->GetNumIterations()
-                      << " iterations. Residual norm is " << solvertest->GetFinalNorm() << ".\n";
-        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
-    }
-#else
-    *NewSigmahat = 0.0;
-    std::cout << "OLD_CODE must be defined for using the new solver as a preconditioner \n";
-#endif
-    */
-
     {
         int order_quad = max(2, 2*feorder+1);
         const IntegrationRule *irs[Geometry::NumGeom];
@@ -3684,6 +3283,10 @@ int main(int argc, char *argv[])
                     double bdr_error_dof = fabs(Xinit.GetBlock(1)[dof] - (*NewS)[dof]);
                     if ( bdr_error_dof > max_bdr_error )
                         max_bdr_error = bdr_error_dof;
+
+                    if (bdr_error_dof > 1.0e-11)
+                        std::cout << "dof " << dof << ": ex_val = " << Xinit.GetBlock(1)[dof]
+                                     <<  ", val = " << (*NewS)[dof] << ", s_exact_val = " << (*S_exact)[dof] << "\n";
                 }
             }
 
@@ -4025,15 +3628,15 @@ int main(int argc, char *argv[])
             S_h_sock << "parallel " << num_procs << " " << myid << "\n";
             S_h_sock.precision(8);
             MPI_Barrier(pmesh->GetComm());
-            S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
+            S_h_sock << "solution\n" << *pmesh << *NewS << "window_title 'S_h'"
                    << endl;
 
-            *S -= *S_exact;
+            *NewS -= *S_exact;
             socketstream S_diff_sock(vishost, visport);
             S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
             S_diff_sock.precision(8);
             MPI_Barrier(pmesh->GetComm());
-            S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
+            S_diff_sock << "solution\n" << *pmesh << *NewS << "window_title 'S_h - S_exact'"
                    << endl;
         }
 
@@ -4065,8 +3668,8 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    //MPI_Finalize();
-    //return 0;
+    MPI_Finalize();
+    return 0;
 
 #ifdef MINSOLVER_TESTING
     if (verbose)
@@ -4120,7 +3723,7 @@ int main(int argc, char *argv[])
                                          optimized_localsolvers, with_hcurl_smoothers, stopcriteria_type, verbose);
     }
 
-    MinSolver->SetRelTol(1.0e-12);
+    MinSolver->SetRelTol(1.0e-6);
     MinSolver->SetMaxIter(200);
     MinSolver->SetPrintLevel(2);
     MinSolver->SetStopCriteriaType(0);

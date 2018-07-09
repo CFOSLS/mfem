@@ -82,6 +82,10 @@ void uFun5_ex_wave_dtgradx(const Vector& xt, Vector& gradx );
 double uFunTestLap_ex(const Vector& xt);
 double uFunTestLap_lap(const Vector& xt);
 void uFunTestLap_grad(const Vector& xt, Vector& grad );
+
+double uFunTestLapLshape_ex(const Vector& xt);
+double uFunTestLapLshape_lap(const Vector& xt);
+void uFunTestLapLshape_grad(const Vector& xt, Vector& grad );
 /////////////////////////////////////
 
 double delta_center_ex(const Vector& xt);

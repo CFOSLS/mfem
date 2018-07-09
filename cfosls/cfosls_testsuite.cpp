@@ -417,6 +417,55 @@ void uFunTestLap_grad(const Vector& xt, Vector& grad )
     return;
 }
 
+// http://hpfem.org/hermes-doc/hermes-examples/html/src/hermes2d/benchmarks-general/lshape.html
+// r^(2/3) sin (2 phi/3 + pi/3), phi = atan(x/y), r(x,y) = sqrt(x^2 + y^2)
+double uFunTestLapLshape_ex(const Vector& xt)
+{
+    MFEM_ASSERT(xt.Size() == 3,"TThis example works only in 3D");
+    double x = xt(0);
+    double y = xt(1);
+    //double t = xt(2);
+
+    double r = sqrt(x * x + y * y);
+    double phi = atan2(x,y);
+
+    return pow(r, 2.0/3.0) * sin ( 2.0/3.0 * phi + M_PI / 3.0 );
+}
+
+double uFunTestLapLshape_lap(const Vector& xt)
+{
+    MFEM_ASSERT(xt.Size() == 3,"TThis example works only in 3D");
+    return 0.0;
+}
+
+void uFunTestLapLshape_grad(const Vector& xt, Vector& grad )
+{
+    MFEM_ASSERT(xt.Size() == 3,"TThis example works only in 3D");
+    double x = xt(0);
+    double y = xt(1);
+    //double t = xt(2);
+
+    double r = sqrt(x * x + y * y);
+    double r_x = x / r;
+    double r_y = y / r;
+
+    double phi = atan2(x,y);
+    double phi_x = y / (r * r);
+    double phi_y = - x / (r * r);
+
+    double u_r = 2.0/3.0 * uFunTestLapLshape_ex(xt) / r;
+    double u_phi = 2.0/3.0 * pow(r, 2.0/3.0) * cos ( 2.0/3.0 * phi + M_PI / 3.0 );
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = u_r * r_x + u_phi * phi_x;
+    grad(1) = u_r * r_y + u_phi * phi_y;
+    grad(2) =  0.0;
+
+    return;
+}
+
+
 FOSLS_test::FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients)
     : dim(dimension), nfunc_coeffs(nfunc_coefficients), nvec_coeffs(nvec_coefficients), nmat_coeffs(nmat_coefficients)
 {
@@ -442,7 +491,9 @@ Hyper_test::Hyper_test(int dimension, int num_solution)
 void Hyper_test::Init()
 {
     if ( CheckTestConfig() == false )
-        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    {
+        MFEM_ABORT("Inconsistent dim and numsol \n");
+    }
     else
     {
         if (numsol == -3) // 3D test for the paper
@@ -514,7 +565,9 @@ Parab_test::Parab_test(int dimension, int num_solution)
 void Parab_test::Init()
 {
     if ( CheckTestConfig() == false )
-        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    {
+        MFEM_ABORT("Inconsistent dim and numsol \n");
+    }
     else
     {
         if (numsol == -3) // 3D test for the paper
@@ -605,7 +658,9 @@ Wave_test::Wave_test(int dimension, int num_solution)
 void Wave_test::Init()
 {
     if ( CheckTestConfig() == false )
-        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    {
+        MFEM_ABORT("Inconsistent dim and numsol \n");
+    }
     else
     {
         if (numsol == -3) // 3D test for the paper
@@ -718,11 +773,15 @@ Laplace_test::Laplace_test(int dimension, int num_solution)
 void Laplace_test::Init()
 {
     if ( CheckTestConfig() == false )
-        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    {
+        MFEM_ABORT("Inconsistent dim and numsol \n");
+    }
     else
     {
         if (numsol == -3 || numsol == -4 || numsol == -34)
             SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
+        if (numsol == 11 && dim == 3)
+            SetTestCoeffs<&uFunTestLapLshape_ex, &uFunTestLapLshape_grad, &uFunTestLapLshape_lap>();
         if (numsol == -9)
             SetTestCoeffs<&zero_ex, &zerovec_ex, &delta_center_ex>();
     } // end of setting test coefficients in correct case
@@ -750,6 +809,8 @@ bool Laplace_test::CheckTestConfig()
         if (numsol == -34 && (dim == 3 || dim == 4))
             return true;
         if (numsol == -9 && dim == 3)
+            return true;
+        if (numsol == 11 && dim == 3)
             return true;
         return false;
     }
@@ -801,7 +862,9 @@ Transport_test::Transport_test (int Dim, int NumSol)
     numsol = NumSol;
 
     if ( CheckTestConfig() == false )
-        std::cout << "Inconsistent dim and numsol \n" << std::flush;
+    {
+        MFEM_ABORT("Inconsistent dim and numsol \n");
+    }
     else
     {
         if (numsol == -3) // 3D test for the paper
