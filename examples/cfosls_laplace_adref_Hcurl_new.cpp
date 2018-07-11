@@ -337,6 +337,16 @@ int main(int argc, char *argv[])
        int size_funct = problem_mgtools->GetTrueOffsetsFunc()[numblocks_funct];
        NewSolver = new GeneralMinConstrSolver(size_funct, *mgtools_hierarchy, with_local_smoothers,
                                         optimized_localsolvers, with_hcurl_smoothers, stopcriteria_type, verbose);
+
+       double newsolver_reltol = 1.0e-6;
+
+       if (verbose)
+           std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
+
+       NewSolver->SetRelTol(newsolver_reltol);
+       NewSolver->SetMaxIter(200);
+       NewSolver->SetPrintLevel(0);
+       NewSolver->SetStopCriteriaType(0);
    }
 
    ///////////////////////////////////////////////////////////////
@@ -460,6 +470,12 @@ int main(int argc, char *argv[])
           cout << "Number of unknowns: " << global_dofs << "\n\n";
        }
 
+       if (it == 3)
+       {
+           MPI_Finalize();
+           return 0;
+       }
+
        bool compute_error = true;
 
        initguesses_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
@@ -487,100 +503,131 @@ int main(int argc, char *argv[])
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
 
+       /*
        if (verbose)
        {
-           //std::cout << "norms of partsol_lvls before: \n";
-           //for (int l = 0; l < partsol_lvls.Size(); ++l)
-               //std::cout << "partsol norm = " << partsol_lvls[l]->Norml2() / sqrt(partsol_lvls[l]->Size()) << "\n";;
            std::cout << "norms of rhs_lvls before: \n";
            for (int l = 0; l < div_rhs_lvls.Size(); ++l)
                std::cout << "rhs norm = " << div_rhs_lvls[l]->Norml2() / sqrt(div_rhs_lvls[l]->Size()) << "\n";;
        }
+       */
 
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
        int coarsest_lvl = prob_hierarchy->Nlevels() - 1;
-       for (int l = coarsest_lvl; l >= 1; --l) // l = 0 could be included actually after testing
+       for (int l = coarsest_lvl; l >= 0; --l) // l = 0 could be included actually after testing
        {
            if (verbose)
                std::cout << "level " << l << "\n";
            ProblemType * problem_l = prob_hierarchy->GetProblem(l);
 
-           /*
-           // finding a new particular solution for the new rhs
-           Vector partsol_guess(partsol_funct_lvls[l]->Size());//partsol_finder->Size());
-           partsol_guess = 0.0;
+           // solving the problem at level l
 
+           *initguesses_funct_lvls[l] = 0.0;
+
+#ifdef CLEVER_STARTING_GUESS
+           // create a better initial guess
            if (l < coarsest_lvl)
            {
-               BlockVector partsol_guess_viewer(partsol_guess.GetData(), problem_l->GetTrueOffsetsFunc());
                for (int blk = 0; blk < numblocks_funct; ++blk)
-                   hierarchy->GetTruePspace((*space_names_funct)[blk], l)->Mult
-                           (problem_sols_lvls[l + 1]->GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
+                   hierarchy->GetTruePspace( (*space_names_funct)[blk], l)->Mult
+                       (problem_sols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
+
+               std::cout << "check init norm before bnd = " << initguesses_funct_lvls[l]->Norml2()
+                            / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
+           }
+#endif
+           // setting correct bdr values
+           problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
+
+           std::cout << "check init norm after bnd = " << initguesses_funct_lvls[l]->Norml2()
+                        / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
+
+           // checking the initial guess
+           {
+               problem_l->ComputeBndError(*initguesses_funct_lvls[l]);
+
+               HypreParMatrix & Constr = (HypreParMatrix&)(problem_l->GetOp()->GetBlock(numblocks - 1, 0));
+               Vector tempc(Constr.Height());
+               Constr.Mult(initguesses_funct_lvls[l]->GetBlock(0), tempc);
+               tempc -= *div_rhs_lvls[l];
+               double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
+               MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
            }
 
-           HypreParMatrix& Constr_l = (HypreParMatrix&)problem_l->GetOp_nobnd()->GetBlock(numblocks_funct,0);
-           // full V-cycle
-           //partsol_finder->FindParticularSolution(l, Constr_l, partsol_guess,
-                                                  //*partsol_funct_lvls[l], *div_rhs_lvls[l], verbose, report_funct);
+           CheckFunctValue(comm,*NewSolver->GetFunctOp(0), NULL, *initguesses_funct_lvls[0],
+                           "for the initial guess ", verbose);
 
-           // finest-available level update
-           partsol_finder->UpdateParticularSolution(l, Constr_l, partsol_guess,
-                                                  *partsol_funct_lvls[l], *div_rhs_lvls[l], verbose, report_funct);
+           BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
+           zero_vec = 0.0;
+           NewSolver->SetInitialGuess(l, zero_vec);
+           NewSolver->SetConstrRhs(*div_rhs_lvls[l]);
+
+           //if (verbose)
+               //NewSolver->PrintAllOptions();
+
+           BlockVector NewRhs(problem_l->GetTrueOffsetsFunc());
+           NewRhs = 0.0;
+
+           // computing rhs = ...
+           BlockVector padded_initguess(problem_l->GetTrueOffsets());
+           padded_initguess = 0.0;
+           for (int blk = 0; blk < numblocks_funct; ++blk)
+               padded_initguess.GetBlock(blk) = initguesses_funct_lvls[l]->GetBlock(blk);
+
+           BlockVector padded_rhs(problem_l->GetTrueOffsets());
+           problem_l->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
+
+           padded_rhs *= -1;
+           for (int blk = 0; blk < numblocks_funct; ++blk)
+               NewRhs.GetBlock(blk) = padded_rhs.GetBlock(blk);
+           problem_l->ZeroBndValues(NewRhs);
+
+           NewSolver->SetFunctRhs(NewRhs);
+
+           HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp()->GetBlock(numblocks - 1, 0));
+
+           // solving for correction
+           BlockVector correction(problem_l->GetTrueOffsetsFunc());
+           correction = 0.0;
+           //std::cout << "NewSolver size = " << NewSolver->Size() << "\n";
+           //std::cout << "NewRhs norm = " << NewRhs.Norml2() / sqrt (NewRhs.Size()) << "\n";
+           //if (l == 0)
+               //NewSolver->SetPrintLevel(1);
+           //else
+               NewSolver->SetPrintLevel(0);
+
+           NewSolver->Mult(l, &Constr_l, NewRhs, correction);
 
            for (int blk = 0; blk < numblocks_funct; ++blk)
-               partsol_lvls[l]->GetBlock(blk) = partsol_funct_lvls[l]->GetBlock(blk);
+           {
+               problem_sols_lvls[l]->GetBlock(blk) = initguesses_funct_lvls[l]->GetBlock(blk);
+               problem_sols_lvls[l]->GetBlock(blk) += correction.GetBlock(blk);
+           }
 
-           // a check that the particular solution does satisfy the divergence constraint after all
-           HypreParMatrix & Constr = (HypreParMatrix&)(problem_l->GetOp()->GetBlock(numblocks - 1, 0));
-           Vector tempc(Constr.Height());
-           Constr.Mult(partsol_lvls[l]->GetBlock(0), tempc);
-           tempc -= *div_rhs_lvls[l];
-           double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
-           MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
-           */
+           if (l == 0)
+           {
+               BlockVector tmp1(problem_l->GetTrueOffsetsFunc());
+               for (int blk = 0; blk < numblocks_funct; ++blk)
+                   tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
-           // solving the problem at level l
-           // ...
-           MFEM_ABORT("Code is to be written here \n");
+               CheckFunctValue(comm,*NewSolver->GetFunctOp(0), NULL, tmp1,
+                               "for the finest level solution ", verbose);
+
+               BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
+               for (int blk = 0; blk < numblocks_funct; ++blk)
+                   tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
+
+               CheckFunctValue(comm,*NewSolver->GetFunctOp(0), NULL, tmp2,
+                               "for the projection of the exact solution ", verbose);
+           }
+
        }
 
        if (verbose)
            std::cout << "Re-coarsening (and re-solving if divfree problem in H(curl) is considered)"
                         " has been finished\n";
-
        /*
-       // finding the particular solution for the finest level
-       {
-           ProblemType * problem_l = prob_hierarchy->GetProblem(0);
-
-           // finding a new particular solution for the new rhs
-           Vector partsol_guess(partsol_funct_lvls[0]->Size());//partsol_finder->Size());
-           partsol_guess = 0.0;
-
-           HypreParMatrix& Constr_l = (HypreParMatrix&)problem_l->GetOp_nobnd()->GetBlock(numblocks_funct,0);
-
-           if (it > 0)
-           {
-               BlockVector partsol_guess_viewer(partsol_guess.GetData(), problem_l->GetTrueOffsetsFunc());
-               for (int blk = 0; blk < numblocks_funct; ++blk)
-                   hierarchy->GetTruePspace((*space_names_funct)[blk], 0)->Mult
-                           (problem_sols_lvls[1]->GetBlock(blk), partsol_guess_viewer.GetBlock(blk));
-           }
-
-           // full V-cycle
-           //partsol_finder->FindParticularSolution(l, Constr_l, partsol_guess,
-                                                  //*partsol_funct_lvls[l], *div_rhs_lvls[l], verbose, report_funct);
-
-           // finest-available level update
-           partsol_finder->UpdateParticularSolution(0, Constr_l, partsol_guess,
-                                                  *partsol_funct_lvls[0], *div_rhs_lvls[0], verbose, report_funct);
-
-           for (int blk = 0; blk < numblocks_funct; ++blk)
-               partsol_lvls[0]->GetBlock(blk) = partsol_funct_lvls[0]->GetBlock(blk);
-       }
-       */
-
        // solving at the finest level
        BlockVector& problem_sol = problem->GetSol();
        problem_sol = 0.0;
@@ -601,40 +648,90 @@ int main(int argc, char *argv[])
                hierarchy->GetTruePspace( (*space_names_funct)[blk], 0)->Mult
                    (problem_sols_lvls[1]->GetBlock(blk), initguesses_funct_lvls[0]->GetBlock(blk));
 #endif
+
        // setting correct bdr values
-       BlockVector * bdr_cond = *problem->GetInitialCondition();
-       MFEM_ABORT("Code fails at the next line");
-       // it should be setting only tdofs at the boundary, so the semantics is wrong here
-       *initguesses_funct_lvls[0] = *bdr_cond;
+       problem->SetExactBndValues(*initguesses_funct_lvls[0]);
+       //MFEM_ABORT("Code fails at the next line");
 
        //*initguesses_funct_lvls[0] += *partsol_funct_lvls[0];
 
-       NewSolver->SetInitialGuess(*initguesses_funct_lvls[0]);
+       if (verbose)
+           std::cout << "init guess norm = " << initguesses_funct_lvls[0]->Norml2() /
+                        sqrt (initguesses_funct_lvls[0]->Size()) << "\n";
+
+       //std::cout << "ParticSol blk 0 norm = " << initguesses_funct_lvls[0]->GetBlock(0).Norml2()
+                    // / sqrt (initguesses_funct_lvls[0]->GetBlock(0).Size()) << "\n";
+       //std::cout << "ParticSol blk 1 norm = " << initguesses_funct_lvls[0]->GetBlock(1).Norml2()
+                    // / sqrt (initguesses_funct_lvls[0]->GetBlock(1).Size()) << "\n";
+
+
+       // checking the initial guess
+       {
+           problem->ComputeBndError(*initguesses_funct_lvls[0]);
+
+           HypreParMatrix & Constr = (HypreParMatrix&)(problem->GetOp()->GetBlock(numblocks - 1, 0));
+           Vector tempc(Constr.Height());
+           Constr.Mult(initguesses_funct_lvls[0]->GetBlock(0), tempc);
+           tempc -= *div_rhs_lvls[0];
+           double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
+           MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
+       }
+
+       //NewSolver->SetInitialGuess(*initguesses_funct_lvls[0]);
+       BlockVector zero_vec(problem->GetTrueOffsetsFunc());
+       zero_vec = 0.0;
+       NewSolver->SetInitialGuess(zero_vec);
        NewSolver->SetConstrRhs(*div_rhs_lvls[0]);
        //NewSolver.SetUnSymmetric();
 
        if (verbose)
            NewSolver->PrintAllOptions();
 
-       Vector NewRhs(NewSolver->Size());
+       BlockVector NewRhs(problem->GetTrueOffsetsFunc());
        NewRhs = 0.0;
 
-       BlockVector divfree_part(problem->GetTrueOffsetsFunc());
-       NewSolver->Mult(NewRhs, divfree_part);
+       // computing rhs = ...
+       BlockVector padded_initguess(problem->GetTrueOffsets());
+       padded_initguess = 0.0;
+       for (int blk = 0; blk < numblocks_funct; ++blk)
+           padded_initguess.GetBlock(blk) = initguesses_funct_lvls[0]->GetBlock(blk);
+
+       BlockVector padded_rhs(problem->GetTrueOffsets());
+       problem->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
+
+       padded_rhs *= -1;
+       for (int blk = 0; blk < numblocks_funct; ++blk)
+           NewRhs.GetBlock(blk) = padded_rhs.GetBlock(blk);
+       problem->ZeroBndValues(NewRhs);
+
+       NewSolver->SetFunctRhs(NewRhs);
+
+       // solving for correction
+       BlockVector correction(problem->GetTrueOffsetsFunc());
+       correction = 0.0;
+       //std::cout << "NewSolver size = " << NewSolver->Size() << "\n";
+       //std::cout << "NewRhs norm = " << NewRhs.Norml2() / sqrt (NewRhs.Size()) << "\n";
+       NewSolver->SetPrintLevel(1);
+       NewSolver->Mult(NewRhs, correction);
 
        for (int blk = 0; blk < numblocks_funct; ++blk)
-           problem_sol.GetBlock(blk) = divfree_part.GetBlock(blk);
+       {
+           problem_sol.GetBlock(blk) = initguesses_funct_lvls[0]->GetBlock(blk);
+           problem_sol.GetBlock(blk) += correction.GetBlock(blk);
+       }
 
        //problem_sol += *partsol_lvls[0];
 
        *problem_sols_lvls[0] = problem_sol;
+       //...
+       */
 
        if (compute_error)
-           problem->ComputeError(problem_sol, verbose, false);
+           problem->ComputeError(*problem_sols_lvls[0], verbose, true);
 
        // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
        // though for now its coordination already happens in ComputeError()
-       problem->DistributeToGrfuns(problem_sol);
+       problem->DistributeToGrfuns(*problem_sols_lvls[0]);
 
 
        // Send the solution by socket to a GLVis server.

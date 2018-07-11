@@ -1732,6 +1732,56 @@ BlockVector * FOSLSProblem::GetExactSolProj()
     return res;
 }
 
+void FOSLSProblem::SetExactBndValues(Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    // alias
+    FOSLS_test * test = fe_formul.GetFormulation()->GetTest();
+
+    for (int blk = 0; blk < fe_formul.Nblocks(); ++blk)
+    {
+        if (fe_formul.GetFormulation()->GetPair(blk).first != -1)
+        {
+            ParGridFunction * exsol_pgfun = new ParGridFunction(pfes[blk]);
+
+            int coeff_index = fe_formul.GetFormulation()->GetPair(blk).second;
+            MFEM_ASSERT(coeff_index >= 0, "Value of coeff_index must be nonnegative at least \n");
+            switch (fe_formul.GetFormulation()->GetPair(blk).first)
+            {
+            case 0: // function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetFuncCoeff(coeff_index));
+                break;
+            case 1: // vector function coefficient
+                exsol_pgfun->ProjectCoefficient(*test->GetVecCoeff(coeff_index));
+                break;
+            default:
+                {
+                    MFEM_ABORT("Unsupported type of coefficient for the call to ProjectCoefficient");
+                }
+                break;
+
+            }
+
+            Vector exsol_tdofs(pfes[blk]->TrueVSize());
+            exsol_pgfun->ParallelProject(exsol_tdofs);
+
+            const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+
+            Array<int> ess_tdofs;
+            pfes[blk]->GetEssentialTrueDofs(essbdr_attrs, ess_tdofs);
+
+            for (int j = 0; j < ess_tdofs.Size(); ++j)
+            {
+                int tdof = ess_tdofs[j];
+                vec_viewer.GetBlock(blk)[tdof] = exsol_tdofs[tdof];
+            }
+
+            delete exsol_pgfun;
+        }
+    }
+
+}
 
 BlockVector * FOSLSProblem::GetTrueInitialCondition()
 {
@@ -2452,8 +2502,7 @@ void FOSLSProblem::ZeroBndValues(Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
-    int numblocks = fe_formul.Nblocks();
-    for (int i = 0; i < numblocks; ++i)
+    for (int i = 0; i < fe_formul.Nunknowns(); ++i)
     {
         const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(i);
 

@@ -3668,8 +3668,8 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    MPI_Finalize();
-    return 0;
+    //MPI_Finalize();
+    //return 0;
 
 #ifdef MINSOLVER_TESTING
     if (verbose)
@@ -3728,26 +3728,57 @@ int main(int argc, char *argv[])
     MinSolver->SetPrintLevel(2);
     MinSolver->SetStopCriteriaType(0);
 
-    MinSolver->SetInitialGuess(ParticSol);
+    if (!CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &Floc, "in the main code for the particular solution"))
+        std::cout << "Failure! \n";
+    else
+        if (verbose)
+            std::cout << "Success \n";
+
+    //std::cout << "ParticSol blk 0 norm = " << ParticSol.GetBlock(0).Norml2() / sqrt (ParticSol.GetBlock(0).Size()) << "\n";
+    //std::cout << "ParticSol blk 1 norm = " << ParticSol.GetBlock(1).Norml2() / sqrt (ParticSol.GetBlock(1).Size()) << "\n";
+
+    //MinSolver->SetInitialGuess(ParticSol);
+    BlockVector zero_vec(problem_mgtools->GetTrueOffsetsFunc());
+    zero_vec = 0.0;
+    MinSolver->SetInitialGuess(zero_vec);
     MinSolver->SetConstrRhs(problem_mgtools->GetRhs().GetBlock(numblocks_funct));
     //MinSolver->SetUnSymmetric();
 
     if (verbose)
         MinSolver->PrintAllOptions();
 
-    Vector NewRhs(MinSolver->Size());
+    BlockVector NewRhs(problem_mgtools->GetTrueOffsetsFunc());
     NewRhs = 0.0;
 
+    // computing rhs = ...
+    BlockVector padded_particsol(problem_mgtools->GetTrueOffsets());
+    padded_particsol = 0.0;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        padded_particsol.GetBlock(blk) = ParticSol.GetBlock(blk);
+
+    BlockVector padded_rhs(problem_mgtools->GetTrueOffsets());
+    problem_mgtools->GetOp_nobnd()->Mult(padded_particsol, padded_rhs);
+
+    padded_rhs *= -1;
+    for (int blk = 0; blk < numblocks_funct; ++blk)
+        NewRhs.GetBlock(blk) = padded_rhs.GetBlock(blk);
+    problem_mgtools->ZeroBndValues(NewRhs);
+
+    MinSolver->SetFunctRhs(NewRhs);
+
     BlockVector divfree_part(problem_mgtools->GetTrueOffsetsFunc());
+    divfree_part = 0.0;
+    //std::cout << "MinSolver size = " << MinSolver->Size() << "\n";
+    //std::cout << "NewRhs norm = " << NewRhs.Norml2() / sqrt (NewRhs.Size()) << "\n";
     MinSolver->Mult(NewRhs, divfree_part);
 
     BlockVector& problem_sol = problem_mgtools->GetSol();
     for (int blk = 0; blk < numblocks_funct; ++blk)
     {
-        //problem_sol.GetBlock(blk) = ParticSol.GetBlock(blk);
-        //problem_sol.GetBlock(blk) += divfree_part.GetBlock(blk);
+        problem_sol.GetBlock(blk) = ParticSol.GetBlock(blk);
+        problem_sol.GetBlock(blk) += divfree_part.GetBlock(blk);
 
-        problem_sol.GetBlock(blk) = divfree_part.GetBlock(blk);
+        //problem_sol.GetBlock(blk) = divfree_part.GetBlock(blk);
     }
 
     bool checkbnd = true;
@@ -3760,6 +3791,7 @@ int main(int argc, char *argv[])
     CheckFunctValue(comm,*MinSolver->GetFunctOp(0), NULL, tmp1,
                     "for the projection of the exact solution ", verbose);
 
+    delete MinSolver;
 #endif
 
     chrono.Stop();

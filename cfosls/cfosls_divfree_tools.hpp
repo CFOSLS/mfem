@@ -839,7 +839,7 @@ protected:
     BlockVector* Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
     // A temporary vector defined on true dofs of the finest level
-    mutable BlockVector* tempblock_truedofs;
+    //mutable BlockVector* tempblock_truedofs;
 
     // stores the initial guess for the solver
     // which satisfies the divergence contraint
@@ -852,6 +852,7 @@ protected:
     mutable Array<BlockVector*> truetempvec2_lvls;
     mutable Array<BlockVector*> trueresfunc_lvls;
     mutable Array<BlockVector*> truesolupdate_lvls;
+    mutable Array<BlockVector*> truetempblock_lvls;
 
     mutable Array<Operator*> LocalSolvers_lvls;
     mutable Operator* CoarseSolver;
@@ -879,7 +880,18 @@ protected:
     void Setup(bool verbose = false) const;
 
     // main solver iteration routine
-    void Solve(const BlockVector &righthand_side, const BlockVector &previous_sol, BlockVector &next_sol) const;
+    void Solve(const BlockVector &righthand_side,
+               const BlockVector &previous_sol, BlockVector &next_sol) const
+    {
+#ifdef CHECK_CONSTR
+        Solve(0, Constr_global, righthand_side, previous_sol, next_sol);
+#else
+        Solve(0, NULL, righthand_side, previous_sol, next_sol);
+#endif
+    }
+
+    void Solve(int start_level, const HypreParMatrix* Constr_start_lvl, const BlockVector &righthand_side,
+               const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
     ~GeneralMinConstrSolver();
@@ -935,10 +947,19 @@ public:
     GeneralMinConstrSolver() = delete;
 
     // external calling routine (as in any IterativeSolver) which takes care of convergence
-    virtual void Mult(const Vector & x, Vector & y) const override;
+    virtual void Mult(const Vector & x, Vector & y) const override
+    {
+#ifdef CHECK_CONSTR
+        Mult(0, Constr_global, x, y);
+#else
+        Mult(0, NULL, x, y);
+#endif
+    }
 
     // existence of this method is required by the (abstract) base class Solver
     virtual void SetOperator(const Operator &op) override{}
+
+    void Mult(int start_level, const HypreParMatrix* Constr_start_lvl, const Vector & x, Vector & y) const;
 
     bool StoppingCriteria(int type, double value_curr, double value_prev, double value_scalefactor,
                           double stop_tol, bool monotone_check = true, char const * name = NULL,
@@ -953,7 +974,11 @@ public:
     void SetSymmetric() const {symmetric = true;}
     void SetUnSymmetric() const {symmetric = false;}
 
-    void SetInitialGuess(Vector& InitGuess) const;
+    void SetInitialGuess(Vector& InitGuess) const
+    { SetInitialGuess(0, InitGuess); }
+
+    void SetInitialGuess(int level, Vector& InitGuess) const;
+
     void SetConstrRhs(Vector& ConstrRhs) const;
 
     // have to define these to mimic useful routines from IterativeSolver class

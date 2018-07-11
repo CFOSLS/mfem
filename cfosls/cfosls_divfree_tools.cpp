@@ -76,8 +76,8 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
     if (truefunctrhs)
     {
         trueres.Add(-2.0, *truefunctrhs);
-        // incorrect, different f should be used + (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
         local_func_norm = truevec * trueres / sqrt (trueres.Size());
+        local_func_norm += (*truefunctrhs) * (*truefunctrhs) / sqrt(truefunctrhs->Size());
     }
     else // NULL case assumed to denote zero righthand side
         local_func_norm = truevec * trueres / sqrt (trueres.Size());
@@ -3751,17 +3751,19 @@ void HcurlGSSSmoother::Setup() const
 
 GeneralMinConstrSolver::~GeneralMinConstrSolver()
 {
-    delete tempblock_truedofs;
+    //delete tempblock_truedofs;
     delete init_guess;
 
+    for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
+        delete truesolupdate_lvls[i];
     for (int i = 0; i < truetempvec_lvls.Size(); ++i)
         delete truetempvec_lvls[i];
     for (int i = 0; i < truetempvec2_lvls.Size(); ++i)
         delete truetempvec2_lvls[i];
     for (int i = 0; i < trueresfunc_lvls.Size(); ++i)
         delete trueresfunc_lvls[i];
-    for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
-        delete truesolupdate_lvls[i];
+    for (int i = 0; i < truetempblock_lvls.Size(); ++i)
+        delete truetempblock_lvls[i];
 
 #ifdef TIMING
     delete time_localsolve_lvls;
@@ -3792,12 +3794,12 @@ void GeneralMinConstrSolver::PrintAllOptions() const
 }
 
 // The input must be defined on true dofs
-void GeneralMinConstrSolver::SetInitialGuess(Vector& InitGuess) const
+void GeneralMinConstrSolver::SetInitialGuess(int level, Vector& InitGuess) const
 {
     if (built_on_mgtools)
-        init_guess->Update(InitGuess.GetData(), *offsets_funct[0]);
+        init_guess->Update(InitGuess.GetData(), *offsets_funct[level]);
     else
-        init_guess->Update(InitGuess.GetData(), TrueP_Func[0]->RowOffsets());
+        init_guess->Update(InitGuess.GetData(), TrueP_Func[level]->RowOffsets());
 }
 
 void GeneralMinConstrSolver::SetConstrRhs(Vector& ConstrRhs) const
@@ -3925,11 +3927,13 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     truetempvec_lvls  .SetSize(num_levels);
     truetempvec2_lvls .SetSize(num_levels);
     trueresfunc_lvls  .SetSize(num_levels);
+    truetempblock_lvls.SetSize(num_levels);
 
     truesolupdate_lvls[0] = new BlockVector(*offsets_funct[0]);
     truetempvec_lvls[0]   = new BlockVector(*offsets_funct[0]);
     truetempvec2_lvls[0]  = new BlockVector(*offsets_funct[0]);
     trueresfunc_lvls[0]   = new BlockVector(*offsets_funct[0]);
+    truetempblock_lvls[0] = new BlockVector(*offsets_funct[0]);
 
     for (int l = 0; l < num_levels - 1; ++l)
     {
@@ -3939,6 +3943,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
         truetempvec_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
         truetempvec2_lvls[l + 1]  = new BlockVector(*offsets_funct[l + 1]);
         trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+        truetempblock_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
     }
 
     CoarseSolver = mgtools_hierarchy->GetCoarsestSolver_Partfinder();
@@ -3970,7 +3975,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
 
-    tempblock_truedofs = new BlockVector(*offsets_funct[0]);
+    //tempblock_truedofs = new BlockVector(*offsets_funct[0]);
 
     std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
@@ -4031,9 +4036,8 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
 
             TrueP_Func.Prepend(TrueP_Func_new);
 
-
-            delete tempblock_truedofs;
-            tempblock_truedofs = new BlockVector(*offsets_funct[0]);
+            //delete tempblock_truedofs;
+            //tempblock_truedofs = new BlockVector(*offsets_funct[0]);
 
             std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
@@ -4050,6 +4054,8 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
             truetempvec2_lvls.Prepend(truetempvec2_new);
             BlockVector * trueresfunc_new = new BlockVector(TrueP_Func[0]->RowOffsets());
             trueresfunc_lvls.Prepend(trueresfunc_new);
+            BlockVector * truetempblock_new = new BlockVector(TrueP_Func[0]->RowOffsets());
+            truetempblock_lvls.Prepend(truetempblock_new);
 
             if (with_hcurl_smoothers)
                 Smoothers_lvls.Prepend(mgtools_hierarchy->GetHcurlSmoothers()[0]);
@@ -4181,7 +4187,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
 
     Functrhs_global = &Functrhs_Global;
 
-    tempblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
+    //tempblock_truedofs = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     truesolupdate_lvls.SetSize(num_levels);
     truesolupdate_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
@@ -4192,6 +4198,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
     truetempvec2_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
     trueresfunc_lvls.SetSize(num_levels);
     trueresfunc_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
+    truetempblock_lvls.SetSize(num_levels);
+    truetempblock_lvls[0] = new BlockVector(TrueProj_Func[0]->RowOffsets());
 
     if (CoarsestSolver)
         CoarseSolver = CoarsestSolver;
@@ -4273,7 +4281,8 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
 // Works on true dof vectors
 // x is the righthand side
 // y is the output
-void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
+void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_start_lvl,
+                                  const Vector & x, Vector & y) const
 {
     MFEM_ASSERT(setup_finished, "Solver setup must have been called before Mult() \n");
 
@@ -4290,9 +4299,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     time_resupdate = 0.0;
     time_fw = 0.0;
     time_up = 0.0;
-#endif
 
-#ifdef TIMING
     MPI_Barrier(comm);
     chrono4.Clear();
     chrono4.Start();
@@ -4304,12 +4311,12 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 
     const Array<int>* offsets;
     if (built_on_mgtools)
-        offsets = offsets_funct[0];
+        offsets = offsets_funct[start_level];
     else
     {
         MFEM_ASSERT(num_levels > 1, "Old interface works only if number of levels"
                                     " was more than 1 in the constructor");
-        offsets = &TrueP_Func[0]->RowOffsets();
+        offsets = &TrueP_Func[start_level]->RowOffsets();
     }
 
 
@@ -4320,21 +4327,23 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     if (preconditioner_mode)
         *init_guess = 0.0;
     else
-    {
-        funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
+        funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, *init_guess,
                                  "for the initial guess: ", print_level);
-    }
+
     // tempblock is the initial guess (on true dofs)
+    BlockVector * tempblock_truedofs = truetempblock_lvls[start_level];
     *tempblock_truedofs = *init_guess;
 #ifdef CHECK_CONSTR
      if (!preconditioner_mode)
      {
-        MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global,
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                    "for the initial guess"),"");
      }
      else
      {
-         MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL,
+         if (Constr_start_lvl)
+             MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, NULL,
                                     "for the initial guess"),"");
      }
 #endif
@@ -4355,11 +4364,13 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
-            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, Constr_rhs_global,
+            if (Constr_start_lvl)
+                MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                        "before the iteration"),"");
         }
         else
-            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_global, NULL,
+            if (Constr_start_lvl)
+                MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, NULL,
                                        "before the iteration"),"");
 #endif
 
@@ -4372,7 +4383,7 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
         //std::cout << "righthand side on the entrance to Solve() \n";
         //xblock_truedofs->Print();
 
-        Solve(x_viewer, *tempblock_truedofs, y_viewer);
+        Solve(start_level, Constr_start_lvl, x_viewer, *tempblock_truedofs, y_viewer);
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -4383,12 +4394,14 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
-           MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, Constr_rhs_global,
+            if (Constr_start_lvl)
+                MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                       "after the iteration"),"");
         }
         else
         {
-            MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_global, NULL,
+            if (Constr_start_lvl)
+                MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_start_lvl, NULL,
                                        "after the iteration"),"");
         }
 #endif
@@ -4458,17 +4471,12 @@ void GeneralMinConstrSolver::Mult(const Vector & x, Vector & y) const
     } // end of main iterative loop
 
     // describing the reason for the stop:
-    if (!preconditioner_mode)
+    if (!preconditioner_mode && verbose)
     {
-        int myrank;
-        MPI_Comm_rank(comm, &myrank);
-        if (myrank == 0)
-        {
-            if (converged == 1)
-                std::cout << "Solver converged in " << itnum << " iterations. \n" << std::flush;
-            else // -1
-                std::cout << "Solver didn't converge in " << itnum << " iterations. \n" << std::flush;
-        }
+        if (converged == 1)
+            std::cout << "Solver converged in " << itnum << " iterations. \n" << std::flush;
+        else // -1
+            std::cout << "Solver didn't converge in " << itnum << " iterations. \n" << std::flush;
     }
 
 #ifdef TIMING
@@ -4518,8 +4526,9 @@ void GeneralMinConstrSolver::UpdateTrueResidual(int level, const BlockVector* rh
 // Input: previous_sol (and all the setup)
 // Output: next_sol
 // All parameters are defined as vectors on true dofs
-void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
-                                       const BlockVector& previous_sol, BlockVector& next_sol) const
+void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr_start_lvl,
+                                   const BlockVector& righthand_side,
+                                   const BlockVector& previous_sol, BlockVector& next_sol) const
 {
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -4541,12 +4550,14 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef CHECK_CONSTR
     if (!preconditioner_mode)
     {
-        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, Constr_rhs_global,
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                    "for previous_sol"),"");
     }
     else
     {
-        MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_global, NULL,
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_start_lvl, NULL,
                                    "for previous_sol"),"");
     }
 #endif
@@ -4554,7 +4565,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     next_sol = previous_sol;
 
     if (!preconditioner_mode && print_level)
-        CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, next_sol,
+        CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
                              "at the beginning of Solve: ", print_level);
 
 #ifdef TIMING
@@ -4562,7 +4573,16 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono.Clear();
     chrono.Start();
 #endif
-    UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
+    UpdateTrueResidual(start_level, &righthand_side, previous_sol, *trueresfunc_lvls[start_level] );
+
+    /*
+    if (verbose)
+    {
+        std::cout << "rhside norm = " << righthand_side.Norml2() / sqrt (righthand_side.Size()) << "\n";
+        std::cout << "previous sol norm = " << previous_sol.Norml2() / sqrt (previous_sol.Size()) << "\n";
+        std::cout << "then startng res norm = " << trueresfunc_lvls[start_level]->Norml2() / sqrt (trueresfunc_lvls[start_level]->Size()) << "\n";
+    }
+    */
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -4575,7 +4595,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 
     // DOWNWARD loop: from finest to coarsest
     // 1. loop over levels finer than the coarsest
-    for (int l = 0; l < num_levels - 1; ++l)
+    for (int l = start_level; l < num_levels - 1; ++l)
     {
 
 #ifdef TIMING
@@ -4613,7 +4633,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         UpdateTrueResidual(l, trueresfunc_lvls[l], *truesolupdate_lvls[l], *truetempvec_lvls[l] );
 
         //std::cout << "residual after LocalSmoother, r - A Smoo1 * r, norm = "
-                        // << truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
+                         //<< truetempvec_lvls[l]->Norml2() / sqrt(truetempvec_lvls[l]->Size()) << "\n";
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -4715,8 +4735,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         }
 
         //std::cout << "residual after coarsening, old GenMinConstr, "
-                     //"norm = " << trueresfunc_lvls[l + 1]->Norml2() / sqrt (trueresfunc_lvls[l + 1]->Size())
-                //<< "\n";
+                     //"norm = " << trueresfunc_lvls[l + 1]->Norml2() / sqrt (trueresfunc_lvls[l + 1]->Size()) << "\n";
 
 
 
@@ -4737,7 +4756,6 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     //std::cout << "residual at the coarsest level, old GenMinConstr, "
                  //"norm = " << trueresfunc_lvls[num_levels - 1]->Norml2() /
                  //sqrt (trueresfunc_lvls[num_levels - 1]->Size()) << "\n";
-
 
 #ifdef NO_COARSESOLVE
     *truesolupdate_lvls[num_levels - 1] = 0.0;
@@ -4764,6 +4782,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     chrono2.Start();
 #endif
 
+    /*
 #ifdef CHECK_CONSTR
     if (num_levels > 1)
     {
@@ -4779,13 +4798,15 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
     MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
                 "after fw and bottom updates"),"");
     next_sol -= *truesolupdate_lvls[0];
-    *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
+    if (num_levels > 1)
+        *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
 #endif
+    */
 
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
     {
-        for (int l = num_levels - 1; l > 0; --l)
+        for (int l = num_levels - 1; l > start_level; --l)
         {
             // interpolate back to the finer level
             TrueP_Func[l - 1]->Mult(*truesolupdate_lvls[l], *truetempvec_lvls[l - 1]);
@@ -4876,7 +4897,7 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         // assemble the final solution update from all levels
         // final sol update (at level 0)  =
         //                   = solupdate[0] + P_0 * (solupdate[1] + P_1 * ( ...) )
-        for (int level = num_levels - 1; level > 0; --level)
+        for (int level = num_levels - 1; level > start_level; --level)
         {
             // solupdate[level-1] = solupdate[level-1] + P[level-1] * solupdate[level]
             TrueP_Func[level - 1]->Mult(*truesolupdate_lvls[level], *truetempvec_lvls[level - 1] );
@@ -4892,12 +4913,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #endif
 
 #ifdef CHECK_CONSTR
-    MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[0]->GetBlock(0), *Constr_global, NULL,
+    if (Constr_start_lvl)
+        MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[start_level]->GetBlock(0), *Constr_start_lvl, NULL,
                 "for update after full V-cycle"),"");
 #endif
 
     // 4. update the global iterate by the resulting update at the finest level
-    next_sol += *truesolupdate_lvls[0];
+    next_sol += *truesolupdate_lvls[start_level];
 
     //truesolupdate_lvls[0]->Print();
     //next_sol.Print();
@@ -4905,11 +4927,13 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
 #ifdef CHECK_CONSTR
     if (!preconditioner_mode)
     {
-        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_global, Constr_rhs_global, "for next_sol"),"");
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_start_lvl, Constr_rhs_global, "for next_sol"),"");
     }
     else
     {
-        MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_global, NULL, "for next_sol"),"");
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_start_lvl, NULL, "for next_sol"),"");
     }
 #endif
 
@@ -4919,41 +4943,42 @@ void GeneralMinConstrSolver::Solve(const BlockVector& righthand_side,
         for (int blk = 0; blk < numblocks; ++blk)
         {
             MFEM_ASSERT(CheckBdrError(next_sol.GetBlock(blk), &(bdrdata_truedofs.GetBlock(blk)),
-                                      *essbdrtruedofs_Func[0][blk], true), "after all levels update");
+                                      *essbdrtruedofs_Func[start_level][blk], true), "after all levels update");
         }
     }
 #endif
 
     if (print_level > 1)
     {
-        std::cout << "sol_update norm: " << truesolupdate_lvls[0]->GetBlock(0).Norml2() /
-                  sqrt(truesolupdate_lvls[0]->GetBlock(0).Size()) << "\n";
+        std::cout << "sol_update norm: " << truesolupdate_lvls[start_level]->GetBlock(0).Norml2() /
+                  sqrt(truesolupdate_lvls[start_level]->GetBlock(0).Size()) << "\n";
     }
 
     // some monitoring service calls
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
         {
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, next_sol,
+            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
                                      "at the end of iteration: ", print_level);
         }
 
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 1)
-            solupdate_currnorm = ComputeMPIVecNorm(comm, *truesolupdate_lvls[0],
+            solupdate_currnorm = ComputeMPIVecNorm(comm, *truesolupdate_lvls[start_level],
                                                     "of the update: ", print_level);
 
     if (print_level || stopcriteria_type == 2)
     {
         if (!preconditioner_mode)
         {
-            UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[0] );
-            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *truesolupdate_lvls[0], *trueresfunc_lvls[0]));
+            UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[start_level] );
+            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *truesolupdate_lvls[start_level],
+                                                             *trueresfunc_lvls[start_level]));
         }
         else
         {
             // FIXME: is this correct?
-            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *truesolupdate_lvls[0], righthand_side));
+            solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *truesolupdate_lvls[start_level], righthand_side));
         }
     }
 
@@ -5091,6 +5116,7 @@ void GeneralMinConstrSolver::SetUpFinerLvl(int lvl) const
     truetempvec2_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
     truesolupdate_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
     trueresfunc_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
+    truetempblock_lvls[lvl + 1] = new BlockVector(TrueP_Func[lvl]->ColOffsets());
 }
 
 MonolithicMultigrid::MonolithicMultigrid(BlockOperator &Op, const Array<BlockOperator*> &P,

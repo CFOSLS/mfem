@@ -1417,6 +1417,8 @@ public:
 
     void ZeroBndValues(Vector& vec) const;
 
+    void SetExactBndValues(Vector& vec) const;
+
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd) const;
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd, int blk) const;
 
