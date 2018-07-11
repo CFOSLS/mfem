@@ -721,6 +721,8 @@ void HcurlGSSSmoother::ResetInternalTimings() const
 // TODO: Clean up the variables names
 // TODO: Maybe, local matrices can also be stored as an improvement (see SolveLocalProblems())?
 
+/// FIXME: Clean-up the mess with checking the functional value w.r.t to the boundary conditions
+/// FIXME: imposed on the functional operator matrix
 class GeneralMinConstrSolver : public Solver
 {
 protected:
@@ -800,6 +802,7 @@ protected:
     Array<Operator*> Smoothers_lvls;
 
     std::deque<Operator*> Func_global_lvls;
+    std::deque<Operator*> Func_global_nobnd_lvls;
 
 
 #ifdef CHECK_CONSTR
@@ -943,6 +946,12 @@ public:
     int Size() const {return size;}
 
     const Operator * GetFunctOp(int level) const {return Func_global_lvls[level];}
+    const Operator * GetFunctOp_nobnd(int level) const
+    {
+        MFEM_ASSERT(built_on_mgtools, "Functional operator without boundary conditions is constructed "
+                                      "only when the solver is built on mg tools");
+        return Func_global_nobnd_lvls[level];
+    }
 
     GeneralMinConstrSolver() = delete;
 

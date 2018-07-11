@@ -3921,6 +3921,10 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     for (int l = 0; l < num_levels; ++l)
         Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
 
+    Func_global_nobnd_lvls.resize(num_levels);
+    for (int l = 0; l < num_levels; ++l)
+        Func_global_nobnd_lvls[l] = mgtools_hierarchy->GetBlockOps_nobnd()[l];
+
     LocalSolvers_lvls.SetSize(num_levels - 1);
 
     truesolupdate_lvls.SetSize(num_levels);
@@ -4069,6 +4073,7 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
                 LocalSolvers_lvls.Prepend(NULL);
 
             Func_global_lvls.push_front(mgtools_hierarchy->GetOps()[0]);
+            Func_global_nobnd_lvls.push_front(mgtools_hierarchy->GetBlockOps_nobnd()[0]);
 
             Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 
@@ -4080,6 +4085,7 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
                 for (int l = 1; l < num_levels; ++l)
                 {
                     Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
+                    Func_global_nobnd_lvls[l] = mgtools_hierarchy->GetBlockOps_nobnd()[l];
 
                     if (l < num_levels - 1)
                     {
@@ -4177,6 +4183,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
     for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
         Func_global_lvls[i] = Func_Global_lvls[i];
 
+    Func_global_nobnd_lvls.resize(0);
+
     Smoothers_lvls.SetSize(Smoothers_Lvls.Size());
     for (int i = 0; i < Smoothers_lvls.Size(); ++i)
         Smoothers_lvls[i] = Smoothers_Lvls[i];
@@ -4260,7 +4268,11 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
     if (verbose)
         std::cout << "Starting solver setup \n";
 
-    CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
+    if (built_on_mgtools)
+        CheckFunctValue(comm, *Func_global_nobnd_lvls[0], Functrhs_global, *init_guess,
+            "for the initial guess during solver setup (no rhs provided): ", print_level);
+    else
+        CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
             "for the initial guess during solver setup (no rhs provided): ", print_level);
     // 2. setting up the required internal data at all levels
 
@@ -4327,7 +4339,11 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
     if (preconditioner_mode)
         *init_guess = 0.0;
     else
-        funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, *init_guess,
+        if (built_on_mgtools)
+            funct_firstnorm = CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, *init_guess,
+                                     "for the initial guess: ", print_level);
+        else
+            funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, *init_guess,
                                  "for the initial guess: ", print_level);
 
     // tempblock is the initial guess (on true dofs)
@@ -4565,7 +4581,11 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     next_sol = previous_sol;
 
     if (!preconditioner_mode && print_level)
-        CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
+        if (built_on_mgtools)
+            CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, next_sol,
+                                 "at the beginning of Solve: ", print_level);
+        else
+            CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
                              "at the beginning of Solve: ", print_level);
 
 #ifdef TIMING
@@ -4958,7 +4978,11 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     if (!preconditioner_mode)
         if (print_level || stopcriteria_type == 0)
         {
-            funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
+            if (built_on_mgtools)
+                funct_currnorm = CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, next_sol,
+                                         "at the end of iteration: ", print_level);
+            else
+                funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
                                      "at the end of iteration: ", print_level);
         }
 
@@ -4971,7 +4995,7 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     {
         if (!preconditioner_mode)
         {
-            UpdateTrueResidual(0, &righthand_side, previous_sol, *trueresfunc_lvls[start_level] );
+            UpdateTrueResidual(start_level, &righthand_side, previous_sol, *trueresfunc_lvls[start_level] );
             solupdate_currmgnorm = sqrt(ComputeMPIDotProduct(comm, *truesolupdate_lvls[start_level],
                                                              *trueresfunc_lvls[start_level]));
         }

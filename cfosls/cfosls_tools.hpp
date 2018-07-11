@@ -1385,6 +1385,7 @@ public:
 
     // doesn't own its blocks (taken from CFOSLSop)
     BlockOperator* GetFunctOp(const Array<int>& offsets);
+    BlockOperator* GetFunctOp_nobnd(const Array<int>& offsets);
 
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
@@ -2523,6 +2524,7 @@ protected:
     Array<Operator*> P_bnd_lvls;
     Array<BlockOperator*> FunctOps_lvls;
     Array<Operator*> Ops_lvls;
+    Array<BlockOperator*> FunctOps_nobnd_lvls;
     Array<LocalProblemSolver*> SchwarzSmoothers_lvls;
     Array<HcurlGSSSmoother*> HcurlSmoothers_lvls;
     Array<Operator*> CombinedSmoothers_lvls;
@@ -2566,6 +2568,7 @@ public:
     Array<Operator*>& GetCombinedSmoothers() {return CombinedSmoothers_lvls;}
     Array<BlockOperator*>& GetBlockOps() {return FunctOps_lvls;}
     Array<Operator*>& GetOps() {return Ops_lvls;}
+    Array<BlockOperator*>& GetBlockOps_nobnd() {return FunctOps_nobnd_lvls;}
     Array<Operator*>& GetPs_bnd() {return P_bnd_lvls;}
     Array<BlockOperator*>& GetBlockPs_nobnd() {return BlockP_nobnd_lvls;}
     CoarsestProblemSolver* GetCoarsestSolver_Partfinder() {return CoarsestSolver_partfinder;}

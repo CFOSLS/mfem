@@ -822,6 +822,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     FunctOps_lvls.SetSize(nlevels);
     FunctOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
 
+    FunctOps_nobnd_lvls.SetSize(nlevels);
+    FunctOps_nobnd_lvls[0] = problem->GetFunctOp_nobnd(*offsets_funct[0]);
+
     BlockP_nobnd_lvls.SetSize(nlevels - 1);
     P_bnd_lvls.SetSize(nlevels - 1);
 
@@ -903,6 +906,10 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         EliminateBoundaryBlocks(*FunctOps_lvls[l], essbdr_tdofs_funct);
 
         Ops_lvls[l] = FunctOps_lvls[l];
+
+        FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+                *FunctOps_nobnd_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
+
 
         if (descr.with_Schwarz)
         {
@@ -1119,6 +1126,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             for (int l = 0; l < nlevels; ++l)
             {
                 delete FunctOps_lvls[l];
+                delete FunctOps_nobnd_lvls[l];
                 if (descr.with_Schwarz || descr.with_coarsest_partfinder)
                 {
                     delete Constraint_mat_lvls[l];
@@ -1140,11 +1148,14 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         }
 
         BlockOperator * FunctOp_new = problem->GetFunctOp(*offsets_funct[0]);
-
         FunctOps_lvls.Prepend(FunctOp_new);
+
         Ops_lvls.SetSize(FunctOps_lvls.Size());
         for (int i = 0; i < Ops_lvls.Size(); ++i)
             Ops_lvls[i] = FunctOps_lvls[i];
+
+        BlockOperator * FunctOp_nobnd_new = problem->GetFunctOp_nobnd(*offsets_funct[0]);
+        FunctOps_nobnd_lvls.Prepend(FunctOp_nobnd_new);
 
         if (descr.with_Schwarz || descr.with_coarsest_partfinder)
         {
@@ -1271,6 +1282,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                 EliminateBoundaryBlocks(*FunctOps_lvls[l], essbdr_tdofs_funct);
 
                 Ops_lvls[l] = FunctOps_lvls[l];
+
+                FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+                        *FunctOps_nobnd_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
 
                 if (l < nlevels - 1)
                 {
@@ -2630,6 +2644,25 @@ BlockOperator* FOSLSProblem::GetFunctOp(const Array<int> &offsets)
 
     funct_op->owns_blocks = false;
     return funct_op;
+}
+
+BlockOperator* FOSLSProblem::GetFunctOp_nobnd(const Array<int> &offsets)
+{
+    BlockOperator * funct_op_nobnd = new BlockOperator(offsets);
+
+    int numblocks = offsets.Size() - 1;
+
+    if (!CFOSLSop_nobnd)
+        std::cout << "Bug \n";
+    MFEM_ASSERT(CFOSLSop_nobnd, "CFOSLSop_nobnd is NULL \n");
+
+    for (int i = 0; i < numblocks; ++i)
+        for (int j = 0; j < numblocks; ++j)
+            if (!CFOSLSop_nobnd->IsZeroBlock(i,j))
+                funct_op_nobnd->SetBlock(i,j, (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(i,j)));
+
+    funct_op_nobnd->owns_blocks = false;
+    return funct_op_nobnd;
 }
 
 void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const
