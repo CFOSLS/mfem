@@ -12,11 +12,11 @@
 // if passive, the mesh is simply uniformly refined at each iteration
 #define AMR
 
-// activates using the solution at the previous mesh as a starting guess for the next problem
-#define CLEVER_STARTING_GUESS
+//#define RECOARSENING_AMR
 
-// activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
-#define USE_GS_PREC
+// activates using the solution at the previous mesh as a starting guess for the next problem
+// combined with RECOARSENING_AMR this leads to a vriant of cascadic MG
+//#define CLEVER_STARTING_GUESS
 
 //#define FOSLS
 
@@ -162,7 +162,8 @@ int main(int argc, char *argv[])
 
     if (numsol == 11)
     {
-        mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
+        //mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
+        mesh_file = "../data/netgen_lshape3D_onemoretry_coarsest.netgen";
     }
 
     if (verbose)
@@ -177,20 +178,21 @@ int main(int argc, char *argv[])
         std::cout << "AMR passive \n";
 #endif
 
+#ifdef RECOARSENING_AMR
+    if (verbose)
+        std::cout << "RECOARSENING_AMR active \n";
+#else
+    if (verbose)
+        std::cout << "RECOARSENING_AMR passive \n";
+#endif
+
+
 #ifdef CLEVER_STARTING_GUESS
     if (verbose)
         std::cout << "CLEVER_STARTING_GUESS active \n";
 #else
     if (verbose)
         std::cout << "CLEVER_STARTING_GUESS passive \n";
-#endif
-
-#ifdef USE_GS_PREC
-    if (verbose)
-        std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
-#else
-    if (verbose)
-        std::cout << "USE_GS_PREC passive \n";
 #endif
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
@@ -496,9 +498,10 @@ int main(int argc, char *argv[])
        //if (verbose && it == 0)
            //std::cout << "div_rhs norm = " << div_rhs_lvls[0]->Norml2() / sqrt (div_rhs_lvls[0]->Size()) << "\n";
 
+#ifdef RECOARSENING_AMR
        if (verbose)
            std::cout << "Starting re-coarsening and re-solving part \n";
-
+#endif
        // recoarsening constraint rhsides from finest to coarsest level
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
@@ -515,7 +518,11 @@ int main(int argc, char *argv[])
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
        int coarsest_lvl = prob_hierarchy->Nlevels() - 1;
+#ifdef RECOARSENING_AMR
        for (int l = coarsest_lvl; l >= 0; --l) // l = 0 could be included actually after testing
+#else
+       for (int l = 0; l >= 0; --l) // only l = 0
+#endif
        {
            if (verbose)
                std::cout << "level " << l << "\n";
@@ -547,7 +554,7 @@ int main(int argc, char *argv[])
            {
                problem_l->ComputeBndError(*initguesses_funct_lvls[l]);
 
-               HypreParMatrix & Constr = (HypreParMatrix&)(problem_l->GetOp()->GetBlock(numblocks - 1, 0));
+               HypreParMatrix & Constr = (HypreParMatrix&)(problem_l->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
                Vector tempc(Constr.Height());
                Constr.Mult(initguesses_funct_lvls[l]->GetBlock(0), tempc);
                tempc -= *div_rhs_lvls[l];
@@ -595,7 +602,7 @@ int main(int argc, char *argv[])
            //if (l == 0)
                //NewSolver->SetPrintLevel(1);
            //else
-               NewSolver->SetPrintLevel(0);
+               NewSolver->SetPrintLevel(1);
 
            NewSolver->Mult(l, &Constr_l, NewRhs, correction);
 
@@ -622,11 +629,13 @@ int main(int argc, char *argv[])
                                "for the projection of the exact solution ", verbose);
            }
 
-       }
+       } // end of loop over levels
 
+#ifdef RECOARSENING_AMR
        if (verbose)
            std::cout << "Re-coarsening (and re-solving if divfree problem in H(curl) is considered)"
-                        " has been finished\n";
+                        " has been finished\n\n";
+#endif
 
        if (compute_error)
            problem->ComputeError(*problem_sols_lvls[0], verbose, true);
@@ -639,6 +648,9 @@ int main(int argc, char *argv[])
        // Send the solution by socket to a GLVis server.
        if (visualization)
        {
+           int ne = pmesh->GetNE();
+           for (int elind = 0; elind < ne; ++elind)
+               pmesh->SetAttribute(elind, elind);
            ParGridFunction * sigma = problem->GetGrFun(0);
            ParGridFunction * S;
            S = problem->GetGrFun(1);
