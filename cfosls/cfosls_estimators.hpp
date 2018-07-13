@@ -22,6 +22,8 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi,
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates);
 
+enum FOSLSMarkingStrategy {DEFAULT = 0, DOERFLER = 1};
+
 class FOSLSEstimator : public ErrorEstimator
 {
 protected:
@@ -32,19 +34,22 @@ protected:
     Array2D<BilinearFormIntegrator*> integs; // those as well
     Vector error_estimates;
     double global_total_error;
-    bool verbose;
 
+    bool verbose;
+protected:
     /// Checks if the mesh of the solution was modified.
     bool MeshIsModified();
 
     /// Main function. Computes the element error estimates.
     void ComputeEstimates();
+
 public:
     /// Constructor which explicitly takes all the grid functions as an input.
     /// The local error estimator is using the locally assembled forms provided
     /// as integrators in the input
-    FOSLSEstimator(MPI_Comm Comm, Array<ParGridFunction*>& solutions,
-                   Array2D<BilinearFormIntegrator*>& integrators, bool verbose_ = false);
+    FOSLSEstimator(MPI_Comm Comm,
+                   Array<ParGridFunction*>& solutions, Array2D<BilinearFormIntegrator*>& integrators,
+                   bool verbose_ = false);
 
     /// Constructor which takes some of the grid functions from the given FOSLS problem
     /// via grfuns descriptor and can additionally take extra grid functions (which might be
@@ -61,70 +66,28 @@ public:
     /// This routine is called by the FOSLSProblem::Update() if the
     /// estimator was added via AddEstimator() to the problem
     void Update();
+
+    const Vector & GetLastLocalErrors() const { return error_estimates; }
 };
 
-#if 0
-/// TODO: Finish and test the implementation
-class FOSLSEstimatorOnHier2 : public FOSLSEstimator
+class ThresholdSmooRefiner : public ThresholdRefiner
 {
 protected:
-    GeneralHierarchy& hierarchy;
-    int attached_index;
-    std::vector<std::pair<int,int> > & grfuns_descriptor;
-    // unlike FOSLSEstimator, we have to store this because
-    // the user has to delete and recreate extra grfuns
-    // outside of this (and hierarchy) class(es)
-    Array<ParGridFunction *> *extra_grfuns;
-    int update_counter;
+    double beta;
+protected:
+    // overrides the ThresholdRefiner main function
+    virtual int ApplyImpl(Mesh &mesh) override;
 public:
-    FOSLSEstimatorOnHier2(GeneralHierarchy & hierarchy_, int problem_index,
-                         std::vector<std::pair<int,int> > & grfuns_descriptor_,
-                         Array<ParGridFunction *> *extra_grfuns_,
-                         Array2D<BilinearFormIntegrator*>& integrators,
-                         bool verbose_ = false)
-        :FOSLSEstimator(hierarchy_.GetProblem(problem_index), grfuns_descriptor_,
-                        extra_grfuns_, integrators, verbose_),
-          hierarchy(hierarchy_), attached_index(problem_index),
-          grfuns_descriptor(grfuns_descriptor_),
-          extra_grfuns(extra_grfuns_),
-          update_counter(prob_hierarchy.GetUpdateCounter() - 1)
-    {}
+    ThresholdSmooRefiner(ErrorEstimator &est)
+        : ThresholdRefiner(est), beta(0.2) {}
+    ThresholdSmooRefiner(ErrorEstimator &est, double beta_)
+        : ThresholdRefiner(est), beta(beta_) {}
 
-    virtual const Vector & GetLocalErrors () override;
+    int Beta() const {return beta;}
 
-    void RedefineGrFuns();
+    void SetBeta(double beta_) {beta = beta_;}
+
 };
-
-const Vector & FOSLSEstimatorOnHier2::GetLocalErrors()
-{
-    int hierarchy_upd_cnt = hierarchy.GetUpdateCounter();
-    if (update_counter != hierarchy_upd_cnt) // if hierarchy was updated but the estimator not yet
-    {
-        MFEM_ASSERT(update_counter == hierarchy_upd_cnt - 1,
-                    "Current implementation allows the update counters to differ no more than by one");
-        RedefineGrFuns();
-        ComputeEstimates();
-        update_counter = hierarchy_upd_cnt;
-    }
-    return error_estimates;
-}
-
-void FOSLSEstimatorOnHier2::RedefineGrFuns()
-{
-    for (int i = 0; i < numblocks; ++i)
-    {
-        MFEM_ASSERT(grfuns_descriptor[i].first == 1 || grfuns_descriptor[i].first == -1,
-                    "Values of grfuns_descriptor must be either 1 or -1");
-        if (grfuns_descriptor[i].first == 1)
-            grfuns[i] = hierarchy.GetProblem(attached_index)->GetGrFuns()[grfuns_descriptor[i].second];
-        else
-        {
-            MFEM_ASSERT(extra_grfuns, "Trying to use extra_grfuns which is NULL \n");
-            grfuns[i] = (*extra_grfuns)[grfuns_descriptor[i].second];
-        }
-    }
-}
-#endif
 
 /// A templated class for a FOSLSEstimator which lives on the hierarchy of problems(meshes)
 /// The difference with the base class is that when more levels are added to the hierarchy,
@@ -132,6 +95,9 @@ void FOSLSEstimatorOnHier2::RedefineGrFuns()
 /// grid functions involved in the estimator. This is done automatically via RedefineGrFuns()
 /// With that, the user must update the extra grid functions (if used) manually
 /// TODO: Refactor this class, its relations to hierarchy and problem classes look too weird
+/// UPD: After recent changes, one can simply use a 'dynamic' problem constructed via
+/// UPD: BuildDynamicProblem of the GeneralHierarchy, and never use the setup below with
+/// UPD: FOSLSProblHierarchy
 template <class Problem, class Hierarchy>
 class FOSLSEstimatorOnHier : public FOSLSEstimator
 {

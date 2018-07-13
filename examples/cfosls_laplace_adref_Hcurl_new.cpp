@@ -15,7 +15,7 @@
 //#define RECOARSENING_AMR
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
-// combined with RECOARSENING_AMR this leads to a vriant of cascadic MG
+// combined with RECOARSENING_AMR this leads to a variant of cascadic MG
 //#define CLEVER_STARTING_GUESS
 
 //#define FOSLS
@@ -428,13 +428,19 @@ int main(int argc, char *argv[])
 
    FOSLSEstimator * estimator;
 
-   estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
-           (*prob_hierarchy, 0, grfuns_descriptor, NULL, integs, verbose);
+   estimator = new FOSLSEstimator(*problem_mgtools, grfuns_descriptor, NULL, integs, verbose);
+   problem_mgtools->AddEstimator(*estimator);
 
-   problem->AddEstimator(*estimator);
+   //estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
+           //(*prob_hierarchy, 0, grfuns_descriptor, NULL, integs, verbose);
+   //problem->AddEstimator(*estimator);
 
-   ThresholdRefiner refiner(*estimator);
+   //ThresholdRefiner refiner(*estimator);
+   ThresholdSmooRefiner refiner(*estimator, 0.01);
    refiner.SetTotalErrorFraction(0.95); // 0.5
+
+   if (verbose)
+       std::cout << "beta for the face marking strategy: " << refiner.Beta() << "\n";
 
    Array<Vector*> div_rhs_lvls(0);
    //Array<BlockVector*> partsol_lvls(0);
@@ -451,20 +457,21 @@ int main(int argc, char *argv[])
    const int max_dofs = 400000;
 #endif
 
-   const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
-   const double fixed_atol = 1.0e-5;
+   //const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
+   //const double fixed_atol = 1.0e-5;
 
-   const double initial_rtol = fixed_rtol;
-   const double initial_atol = fixed_atol;
-   double initial_res_norm = -1.0;
+   //const double initial_rtol = fixed_rtol;
+   //const double initial_atol = fixed_atol;
+   //double initial_res_norm = -1.0;
 
-   double adjusted_atol = -1.0;
+   //double adjusted_atol = -1.0;
 
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
-   std::cout << "starting n_el = " << prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE() << "\n";
+   std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   for (int it = 0; ; it++)
+   int max_iter_amr = 6;
+   for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
        {
@@ -472,31 +479,16 @@ int main(int argc, char *argv[])
           cout << "Number of unknowns: " << global_dofs << "\n\n";
        }
 
-       if (it == 6)
-       {
-           MPI_Finalize();
-           return 0;
-       }
-
        bool compute_error = true;
 
-       initguesses_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
+       initguesses_funct_lvls.Prepend(new BlockVector(problem_mgtools->GetTrueOffsetsFunc()));
        *initguesses_funct_lvls[0] = 0.0;
 
-       problem_sols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
+       problem_sols_lvls.Prepend(new BlockVector(problem_mgtools->GetTrueOffsets()));
        *problem_sols_lvls[0] = 0.0;
 
-       //partsol_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
-       //*partsol_lvls[0] = 0.0;
-
-       //partsol_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
-       //*partsol_funct_lvls[0] = 0.0;
-
-       div_rhs_lvls.Prepend(new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size()));
-       *div_rhs_lvls[0] = problem->GetRhs().GetBlock(numblocks - 1);
-
-       //if (verbose && it == 0)
-           //std::cout << "div_rhs norm = " << div_rhs_lvls[0]->Norml2() / sqrt (div_rhs_lvls[0]->Size()) << "\n";
+       div_rhs_lvls.Prepend(new Vector(problem_mgtools->GetRhs().GetBlock(numblocks - 1).Size()));
+       *div_rhs_lvls[0] = problem_mgtools->GetRhs().GetBlock(numblocks - 1);
 
 #ifdef RECOARSENING_AMR
        if (verbose)
@@ -506,19 +498,10 @@ int main(int argc, char *argv[])
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
 
-       /*
-       if (verbose)
-       {
-           std::cout << "norms of rhs_lvls before: \n";
-           for (int l = 0; l < div_rhs_lvls.Size(); ++l)
-               std::cout << "rhs norm = " << div_rhs_lvls[l]->Norml2() / sqrt(div_rhs_lvls[l]->Size()) << "\n";;
-       }
-       */
-
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
-       int coarsest_lvl = prob_hierarchy->Nlevels() - 1;
 #ifdef RECOARSENING_AMR
+       int coarsest_lvl = hierarchy->Nlevels() - 1;
        for (int l = coarsest_lvl; l >= 0; --l) // l = 0 could be included actually after testing
 #else
        for (int l = 0; l >= 0; --l) // only l = 0
@@ -547,8 +530,8 @@ int main(int argc, char *argv[])
            // setting correct bdr values
            problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
 
-           std::cout << "check init norm after bnd = " << initguesses_funct_lvls[l]->Norml2()
-                        / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
+           //std::cout << "check init norm after bnd = " << initguesses_funct_lvls[l]->Norml2()
+                        /// sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
 
            // checking the initial guess
            {
@@ -562,6 +545,7 @@ int main(int argc, char *argv[])
                MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
            }
 
+           // functional value for the initial guess
            CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
                            "for the initial guess ", verbose);
 
@@ -638,22 +622,22 @@ int main(int argc, char *argv[])
 #endif
 
        if (compute_error)
-           problem->ComputeError(*problem_sols_lvls[0], verbose, true);
+           problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
 
        // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
        // though for now its coordination already happens in ComputeError()
-       problem->DistributeToGrfuns(*problem_sols_lvls[0]);
+       problem_mgtools->DistributeToGrfuns(*problem_sols_lvls[0]);
 
 
        // Send the solution by socket to a GLVis server.
-       if (visualization)
+       if (visualization && it == max_iter_amr - 1)
        {
            int ne = pmesh->GetNE();
            for (int elind = 0; elind < ne; ++elind)
                pmesh->SetAttribute(elind, elind);
-           ParGridFunction * sigma = problem->GetGrFun(0);
+           ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
            ParGridFunction * S;
-           S = problem->GetGrFun(1);
+           S = problem_mgtools->GetGrFun(1);
 
            char vishost[] = "localhost";
            int  visport   = 19916;
@@ -691,11 +675,11 @@ int main(int argc, char *argv[])
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
 
-       if (visualization)
+       if (visualization && it == max_iter_amr - 1)
        {
-           const Vector& local_errors = estimator->GetLocalErrors();
+           const Vector& local_errors = estimator->GetLastLocalErrors();
            if (feorder == 0)
-               MFEM_ASSERT(local_errors.Size() == problem->GetPfes(numblocks_funct)->TrueVSize(), "");
+               MFEM_ASSERT(local_errors.Size() == problem_mgtools->GetPfes(numblocks_funct)->TrueVSize(), "");
 
            FiniteElementCollection * l2_coll;
            if (feorder > 0)
@@ -703,9 +687,9 @@ int main(int argc, char *argv[])
 
            ParFiniteElementSpace * L2_space;
            if (feorder == 0)
-               L2_space = problem->GetPfes(numblocks_funct);
+               L2_space = problem_mgtools->GetPfes(numblocks_funct);
            else
-               L2_space = new ParFiniteElementSpace(problem->GetParMesh(), l2_coll);
+               L2_space = new ParFiniteElementSpace(problem_mgtools->GetParMesh(), l2_coll);
            ParGridFunction * local_errors_pgfun = new ParGridFunction(L2_space);
            local_errors_pgfun->SetFromTrueDofs(local_errors);
            char vishost[] = "localhost";
@@ -747,7 +731,7 @@ int main(int argc, char *argv[])
        //partsol_finder->Update(recoarsen);
 
        // checking #dofs after the refinement
-       global_dofs = problem->GlobalTrueProblemSize();
+       global_dofs = problem_mgtools->GlobalTrueProblemSize();
 
        if (global_dofs > max_dofs)
        {

@@ -160,7 +160,8 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
     return std::sqrt(total_error);
 }
 
-FOSLSEstimator::FOSLSEstimator(MPI_Comm Comm, Array<ParGridFunction *> &solutions,
+FOSLSEstimator::FOSLSEstimator(MPI_Comm Comm,
+                               Array<ParGridFunction *> &solutions,
                                Array2D<BilinearFormIntegrator *> &integrators, bool verbose_)
     : comm(Comm), numblocks(solutions.Size()), current_sequence(-1),
       global_total_error(0.0), verbose(verbose_)
@@ -183,7 +184,8 @@ FOSLSEstimator::FOSLSEstimator(MPI_Comm Comm, Array<ParGridFunction *> &solution
 FOSLSEstimator::FOSLSEstimator(FOSLSProblem& problem,
                                std::vector<std::pair<int,int> > & grfuns_descriptor,
                                Array<ParGridFunction*>* extra_grfuns,
-                               Array2D<BilinearFormIntegrator*>& integrators, bool verbose_)
+                               Array2D<BilinearFormIntegrator*>& integrators,
+                               bool verbose_)
     : comm (problem.GetComm()), numblocks(integrators.NumRows()), current_sequence(-1),
       global_total_error(0.0), verbose(verbose_)
 {
@@ -229,9 +231,9 @@ const Vector & FOSLSEstimator::GetLocalErrors()
 {
     if (MeshIsModified())
         ComputeEstimates();
-    return error_estimates;
 
     current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
+    return error_estimates;
 }
 
 void FOSLSEstimator::ComputeEstimates()
@@ -251,6 +253,78 @@ void FOSLSEstimator::ComputeEstimates()
     // FIXME: Probably should be moved out of the ComputeEstimates
     // FIXME: in view of the inheriting classes which might not use current_sequence at all
     //current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
+}
+
+int ThresholdSmooRefiner::ApplyImpl(Mesh &mesh)
+{
+   threshold = 0.0;
+   num_marked_elements = 0;
+   marked_elements.SetSize(0);
+   current_sequence = mesh.GetSequence();
+
+   const long num_elements = mesh.GetGlobalNE();
+   if (num_elements >= max_elements) { return STOP; }
+
+   const int NE = mesh.GetNE();
+   const Vector &local_err = estimator.GetLocalErrors();
+   MFEM_ASSERT(local_err.Size() == NE, "invalid size of local_err");
+
+   int nfaces = mesh.GetNFaces();
+   Vector face_err(nfaces);
+   for (int faceind = 0; faceind < nfaces; ++faceind)
+   {
+       int elind1, elind2;
+       mesh.GetFaceElements(faceind, &elind1, &elind2);
+       //std::cout << "elind1 = " << elind1 << ", elind2 = " << elind2 << ", ne = " << mesh.GetNE() << "\n";
+       if (elind2 > 0) // not a boundary edge
+           face_err[faceind] = (1.0/beta) * (local_err[elind1] - local_err[elind2]) *
+                                                (local_err[elind1] - local_err[elind2])
+                   + 0.5 * (local_err[elind1]*local_err[elind1] + local_err[elind2]*local_err[elind2]);
+       else
+           face_err[faceind] = local_err[elind1];
+
+       face_err[faceind] = std::sqrt(face_err[faceind]);
+   }
+
+   //face_err.Print();
+
+   double total_err_face = GetNorm(face_err, mesh);
+   if (total_err_face <= total_err_goal) { return STOP; }
+
+   threshold = std::max(total_err_face * total_fraction *
+                        std::pow(num_elements, -1.0/total_norm_p),
+                        local_err_goal);
+
+   for (int faceind = 0; faceind < nfaces; ++faceind)
+   {
+       if (face_err[faceind] > threshold)
+       {
+           int elind1, elind2;
+           mesh.GetFaceElements(faceind, &elind1, &elind2);
+
+           if (elind2 > 0)
+           {
+               marked_elements.Append(Refinement(elind1));
+               marked_elements.Append(Refinement(elind2));
+           }
+           else
+               marked_elements.Append(Refinement(elind1));
+       }
+   }
+
+   std::cout << "mesh ne: " << mesh.GetNE() << "\n";
+   std::cout << "marked elements: \n";
+   for (int i = 0; i < marked_elements.Size(); ++i)
+       std::cout << "(" << marked_elements[i].index << ", " << (int)marked_elements[i].ref_type << ") ";
+   std::cout << "\n";
+
+   MFEM_ASSERT(!aniso_estimator,"Anisotropic estimator option is not supported in the current implementation");
+
+   num_marked_elements = mesh.ReduceInt(marked_elements.Size());
+   if (num_marked_elements == 0) { return STOP; }
+
+   mesh.GeneralRefinement(marked_elements, non_conforming, nc_limit);
+   return CONTINUE + REFINED;
 }
 
 } // for namespace mfem

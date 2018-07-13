@@ -1376,8 +1376,8 @@ int main(int argc, char *argv[])
 
        problem->Solve(verbose, true);
 
-       MPI_Finalize();
-       return 0;
+       //MPI_Finalize();
+       //return 0;
 
        // 17. Send the solution by socket to a GLVis server.
        if (visualization)
