@@ -255,6 +255,15 @@ void FOSLSEstimator::ComputeEstimates()
     //current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
 }
 
+struct compare_Refinements
+{
+    bool operator() (const Refinement& ref1, const Refinement& ref2)
+    {
+        return (ref1.index < ref2.index);
+    }
+};
+
+
 int ThresholdSmooRefiner::ApplyImpl(Mesh &mesh)
 {
    threshold = 0.0;
@@ -286,14 +295,14 @@ int ThresholdSmooRefiner::ApplyImpl(Mesh &mesh)
        face_err[faceind] = std::sqrt(face_err[faceind]);
    }
 
-   //face_err.Print();
-
    double total_err_face = GetNorm(face_err, mesh);
    if (total_err_face <= total_err_goal) { return STOP; }
 
    threshold = std::max(total_err_face * total_fraction *
                         std::pow(num_elements, -1.0/total_norm_p),
                         local_err_goal);
+
+   std::set<Refinement, compare_Refinements> marked_elements_set;
 
    for (int faceind = 0; faceind < nfaces; ++faceind)
    {
@@ -304,13 +313,17 @@ int ThresholdSmooRefiner::ApplyImpl(Mesh &mesh)
 
            if (elind2 > 0)
            {
-               marked_elements.Append(Refinement(elind1));
-               marked_elements.Append(Refinement(elind2));
+               marked_elements_set.insert(Refinement(elind1));
+               marked_elements_set.insert(Refinement(elind2));
            }
            else
-               marked_elements.Append(Refinement(elind1));
+               marked_elements_set.insert(Refinement(elind1));
        }
    }
+
+   std::set<Refinement>::iterator it;
+   for (it = marked_elements_set.begin(); it != marked_elements_set.end(); ++it)
+       marked_elements.Append(*it);
 
    std::cout << "mesh ne: " << mesh.GetNE() << "\n";
    std::cout << "marked elements: \n";

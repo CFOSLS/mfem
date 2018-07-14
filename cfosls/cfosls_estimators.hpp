@@ -70,22 +70,34 @@ public:
     const Vector & GetLastLocalErrors() const { return error_estimates; }
 };
 
+/// Threshold refiner which uses face error indicators for computing element errors
+/// First, it computes for each element T the local error \delta_T
+/// Second, it computes for each face F
+///     (\eta_F)^2 = (1.0/beta)*(\delta_T1 - \delta_T2)^2 + gamma * (\delta_T1^2 + \delta_T2^2)
+/// where F separates elements T1 and T2.
+/// Then chooses all the faces where \eta_F > threshold * max_F { \eta_F }
+/// And then marks the elements separated by F for the refinement
 class ThresholdSmooRefiner : public ThresholdRefiner
 {
 protected:
     double beta;
+    double gamma;
 protected:
     // overrides the ThresholdRefiner main function
     virtual int ApplyImpl(Mesh &mesh) override;
 public:
     ThresholdSmooRefiner(ErrorEstimator &est)
-        : ThresholdRefiner(est), beta(0.2) {}
+        : ThresholdRefiner(est), beta(1.0e+18), gamma(1.0) {}
     ThresholdSmooRefiner(ErrorEstimator &est, double beta_)
-        : ThresholdRefiner(est), beta(beta_) {}
+        : ThresholdRefiner(est), beta(beta_), gamma(1.0) {}
+    ThresholdSmooRefiner(ErrorEstimator &est, double beta_, double gamma_)
+        : ThresholdRefiner(est), beta(beta_), gamma(gamma_) {}
 
     int Beta() const {return beta;}
-
     void SetBeta(double beta_) {beta = beta_;}
+
+    int Gamma() const {return gamma;}
+    void SetGamma(double gamma_) {gamma = gamma_;}
 
 };
 

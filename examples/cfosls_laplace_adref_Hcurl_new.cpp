@@ -304,8 +304,8 @@ int main(int argc, char *argv[])
            //(*problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
    //bool report_funct = true;
 
-   const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
-           GetFunctSpacesDescriptor();
+   //const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
+           //GetFunctSpacesDescriptor();
 
    FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
            (*bdr_conds, *fe_formulat, prec_option, verbose);
@@ -427,7 +427,6 @@ int main(int argc, char *argv[])
    }
 
    FOSLSEstimator * estimator;
-
    estimator = new FOSLSEstimator(*problem_mgtools, grfuns_descriptor, NULL, integs, verbose);
    problem_mgtools->AddEstimator(*estimator);
 
@@ -436,7 +435,7 @@ int main(int argc, char *argv[])
    //problem->AddEstimator(*estimator);
 
    //ThresholdRefiner refiner(*estimator);
-   ThresholdSmooRefiner refiner(*estimator, 0.01);
+   ThresholdSmooRefiner refiner(*estimator, 0.1); // 0.1, 0.001
    refiner.SetTotalErrorFraction(0.95); // 0.5
 
    if (verbose)
@@ -470,7 +469,7 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 6;
+   int max_iter_amr = 15;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
