@@ -20,7 +20,7 @@
 
 //#define FOSLS
 
-//#define REFERENCE_SOLUTION
+#define REFERENCE_SOLUTION
 
 using namespace std;
 using namespace mfem;
@@ -489,7 +489,8 @@ int main(int argc, char *argv[])
        *problem_sols_lvls[0] = 0.0;
 
        div_rhs_lvls.Prepend(new Vector(problem_mgtools->GetRhs().GetBlock(numblocks - 1).Size()));
-       *div_rhs_lvls[0] = problem_mgtools->GetRhs().GetBlock(numblocks - 1);
+       //*div_rhs_lvls[0] = problem_mgtools->GetRhs().GetBlock(numblocks - 1); // incorrect but works for laplace with no bdr for sigma
+       problem_mgtools->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
 
 #ifdef REFERENCE_SOLUTION
        problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), *problem_sols_lvls[0], verbose, false);
@@ -501,7 +502,8 @@ int main(int argc, char *argv[])
        CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
 
-#else
+#endif
+//#else
 
 #ifdef RECOARSENING_AMR
        if (verbose)
@@ -542,6 +544,10 @@ int main(int argc, char *argv[])
 #endif
            // setting correct bdr values
            problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
+
+           // for debugging
+           //for (int blk = 0; blk < numblocks_funct; ++blk)
+               //initguesses_funct_lvls[l]->GetBlock(blk) = reduced_problem_sol.GetBlock(blk);
 
            //std::cout << "check init norm after bnd = " << initguesses_funct_lvls[l]->Norml2()
                         /// sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
@@ -636,7 +642,7 @@ int main(int argc, char *argv[])
            std::cout << "Re-coarsening (and re-solving if divfree problem in H(curl) is considered)"
                         " has been finished\n\n";
 #endif
-#endif // for #ifdef REFERENCE_SOLUTION
+//#endif // for #ifdef REFERENCE_SOLUTION
 
        if (compute_error)
            problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);

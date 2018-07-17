@@ -55,7 +55,7 @@
 #define CYLINDER_CUBE_TEST
 
 // used as a reference solution
-#define APPROACH_0
+//#define APPROACH_0
 
 // only the finest level consideration, 0 starting guess, solved by minimization solver
 // (i.e., partsol finder is also used)
@@ -648,7 +648,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2;
+   int max_iter_amr = 1;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -672,6 +672,10 @@ int main(int argc, char *argv[])
 
        BlockVector saved_sol(problem_mgtools->GetTrueOffsets());
        saved_sol = *problem_sols_lvls[0];
+
+       if (compute_error)
+           problem_mgtools->ComputeError(saved_sol, verbose, true);
+
 #endif
 
 #ifdef PARTSOL_SETUP
@@ -679,7 +683,11 @@ int main(int argc, char *argv[])
        *initguesses_funct_lvls[0] = 0.0;
 
        div_rhs_lvls.Prepend(new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size()));
-       *div_rhs_lvls[0] = problem->GetRhs().GetBlock(numblocks - 1);
+       //*div_rhs_lvls[0] = problem->GetRhs().GetBlock(numblocks - 1); // incorrect
+       problem_mgtools->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
+
+       //if (verbose)
+           //std::cout << "div rhs norm = " << div_rhs_lvls[0]->Norml2() << "\n";
 
        partsol_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
 #endif
@@ -727,14 +735,25 @@ int main(int argc, char *argv[])
                   //"righthand side related to the functional part \n");
        BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
        zero_vec = 0.0;
+
+       if (verbose)
+           std::cout << "Finding a particular solution... \n";
+
+       // only for debugging
+       //BlockVector reduced_saved_sol(problem_l->GetTrueOffsetsFunc());
+       //for (int blk = 0; blk < numblocks_funct; ++blk)
+           //reduced_saved_sol.GetBlock(blk) = saved_sol.GetBlock(blk);
+       //*div_rhs_lvls[0] += div_initguess;
+       //partsol_finder->FindParticularSolution(reduced_saved_sol, *partsol_funct_lvls[0], *div_rhs_lvls[0], verbose, report_funct);
+
        partsol_finder->FindParticularSolution(zero_vec, *partsol_funct_lvls[0], *div_rhs_lvls[0], verbose, report_funct);
 
        *partsol_funct_lvls[0] += *initguesses_funct_lvls[0];
        *div_rhs_lvls[0] += div_initguess;
 
-       // only for debugging
-       for (int blk = 0; blk < numblocks_funct; ++blk)
-           partsol_funct_lvls[0]->GetBlock(blk) = saved_sol.GetBlock(blk);
+       // only for debugging, making partsol_funct[0] = solution of the saddle point system
+       //for (int blk = 0; blk < numblocks_funct; ++blk)
+           //partsol_funct_lvls[0]->GetBlock(blk) = saved_sol.GetBlock(blk);
 
        // functional value for the initial guess
        CheckFunctValue(comm, *NewSolver->GetFunctOp_nobnd(0), NULL, *partsol_funct_lvls[0],
@@ -749,17 +768,21 @@ int main(int argc, char *argv[])
            tempc -= *div_rhs_lvls[0];
            double res_constr_norm = ComputeMPIVecNorm(comm, tempc, "", false);
            if (!(res_constr_norm < 1.0e-10))
-               std::cout << "red_constr_norm = " << res_constr_norm << "\n";
+               std::cout << "res_constr_norm = " << res_constr_norm << "\n";
            MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
        }
 
-       MFEM_ABORT("Investigate the connection between bdr conditions and constraint, something is wrong here \n");
-       MFEM_ABORT("And why it works correctly for laplace equation \n");
+       //MFEM_ABORT("Investigate the connection between bdr conditions and constraint, something is wrong here \n");
+       //MFEM_ABORT("And why it works correctly for laplace equation \n");
 
        //MPI_Finalize();
        //return 0;
 
-       NewSolver->SetInitialGuess(l, *partsol_funct_lvls[0]);
+       //BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
+       zero_vec = 0.0;
+       NewSolver->SetInitialGuess(l, zero_vec);
+
+       //NewSolver->SetInitialGuess(l, *partsol_funct_lvls[0]);
 
        NewSolver->SetConstrRhs(*div_rhs_lvls[0]);
 
@@ -789,11 +812,18 @@ int main(int argc, char *argv[])
        correction = 0.0;
 
        NewSolver->SetPrintLevel(1);
+
+       if (verbose)
+           std::cout << "Solving the finest level problem... \n";
+
        NewSolver->Mult(l, &Constr_l, NewRhs, correction);
 
        for (int blk = 0; blk < numblocks_funct; ++blk)
        {
-           problem_sols_lvls[l]->GetBlock(blk) = correction.GetBlock(blk);
+           problem_sols_lvls[l]->GetBlock(blk) = partsol_funct_lvls[l]->GetBlock(blk);
+           problem_sols_lvls[l]->GetBlock(blk) += correction.GetBlock(blk);
+
+           //problem_sols_lvls[l]->GetBlock(blk) = correction.GetBlock(blk);
 
            //problem_sols_lvls[l]->GetBlock(blk) = initguesses_funct_lvls[l]->GetBlock(blk);
            //problem_sols_lvls[l]->GetBlock(blk) += correction.GetBlock(blk);

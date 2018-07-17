@@ -1390,8 +1390,9 @@ public:
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
     void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
-
     void ComputeAnalyticalRhs(Vector& rhs) const;
+
+    void ComputeRhsBlock(Vector& rhs, int blk) const;
 
     BlockVector& GetSol() {return *trueX;}
 
