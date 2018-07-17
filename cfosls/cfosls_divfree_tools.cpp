@@ -2076,6 +2076,8 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
     for (int l = 0; l < num_levels; ++l)
         BlockOps_lvls[l] = mgtools_hierarchy->GetBlockOps()[l];
 
+    Functrhs_global = NULL;
+
     Func_global_lvls.resize(num_levels);
     for (int l = 0; l < num_levels; ++l)
         Func_global_lvls[l] = mgtools_hierarchy->GetOps()[l];
@@ -2174,6 +2176,9 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
 
     BlockOps_lvls.SetSize(num_levels);
     BlockOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
+
+    Functrhs_global = NULL;
+
     Func_global_lvls.resize(num_levels);
     Func_global_lvls[0] = BlockOps_lvls[0];
 
@@ -2351,6 +2356,8 @@ DivConstraintSolver::DivConstraintSolver(MPI_Comm Comm, int NumLevels,
     Mass_mat_lvls.SetSize(num_levels);
     for (int i = 0; i < Mass_mat_lvls.Size(); ++i)
         Mass_mat_lvls[i] = Mass_mat_lvls_[i];
+
+    Functrhs_global = NULL;
 
     Func_global_lvls.resize(Func_Global_lvls.size());
     for (unsigned int i = 0; i < Func_global_lvls.size(); ++i)
@@ -2702,7 +2709,7 @@ void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Co
     UpdateTrueResidual(level, NULL, start_guess_viewer, *trueresfunc_lvls[level] );
 
     if (report_funct && verbose)
-        CheckFunctValue(comm, *Func_global_lvls[level], NULL, start_guess, "for starting guess: ", true);
+        CheckFunctValue(comm, *Func_global_lvls[level], Functrhs_global, start_guess, "for starting guess: ", true);
 
     Qlminus1_f = rhs_constr;
 
@@ -2760,7 +2767,7 @@ void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Co
     partsol += *truesolupdate_lvls[level];
 
     if (report_funct && verbose)
-        CheckFunctValue(comm, *Func_global_lvls[level], NULL, partsol, "for final partsol: ", true);
+        CheckFunctValue(comm, *Func_global_lvls[level], Functrhs_global, partsol, "for final partsol: ", true);
 
 #ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), Constr_lvl,
@@ -2819,10 +2826,10 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     Vector finer_buff(rhs_constr.Size());
 
     // 0. Compute rhs in the functional for the finest level
-    UpdateTrueResidual(start_level, NULL, start_guess_viewer, *trueresfunc_lvls[start_level] );
+    UpdateTrueResidual(start_level, Functrhs_global, start_guess_viewer, *trueresfunc_lvls[start_level] );
 
     if (report_funct && verbose)
-        CheckFunctValue(comm, *Func_global_lvls[start_level], NULL, start_guess, "for starting guess: ", true);
+        CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, start_guess, "for starting guess: ", true);
 
     Qlminus1_f = rhs_constr;
 
@@ -2921,7 +2928,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     partsol += *truesolupdate_lvls[start_level];
 
     if (report_funct && verbose)
-        CheckFunctValue(comm, *Func_global_lvls[start_level], NULL, partsol, "for final partsol: ", true);
+        CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, partsol, "for final partsol: ", true);
 
 #ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), Constr_start_lvl,
@@ -4518,20 +4525,21 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
 
 }
 
-void GeneralMinConstrSolver::MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector &rhs_l) const
+void GeneralMinConstrSolver::MultTrueFunc(int l, const Operator *Funct_l, double coeff,
+                                          const BlockVector& x_l, BlockVector &rhs_l) const
 {
-    Func_global_lvls[l]->Mult(x_l, rhs_l);
+    Funct_l->Mult(x_l, rhs_l);
     rhs_l *= coeff;
 }
 
 // Computes out_l as an updated rhs in the functional part for the given level
 //      out_l :=  rhs_l - M_l sol_l
 // the same as ComputeUpdatedLvlRhsFunc but on true dofs
-void GeneralMinConstrSolver::UpdateTrueResidual(int level, const BlockVector* rhs_l,
+void GeneralMinConstrSolver::UpdateTrueResidual(int level, const Operator& Funct_l, const BlockVector* rhs_l,
                                                           const BlockVector& solupd_l, BlockVector& out_l) const
 {
     // out_l = - M_l * solupd_l
-    MultTrueFunc(level, -1.0, solupd_l, out_l);
+    MultTrueFunc(level, &Funct_l, -1.0, solupd_l, out_l);
 
     // out_l = rhs_l - M_l * solupd_l
     if (rhs_l)

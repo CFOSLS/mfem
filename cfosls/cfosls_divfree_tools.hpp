@@ -469,6 +469,7 @@ protected:
 
     Array<Operator*> Smoothers_lvls;
 
+    BlockVector* Functrhs_global;
     std::deque<Operator*> Func_global_lvls;
     mutable HypreParMatrix * Constr_global;
 
@@ -555,6 +556,8 @@ public:
     void UpdateParticularSolution(int level, HypreParMatrix& Constr_lvl,
                                 const Vector &start_guess, Vector &partsol,
                                 const Vector& constrRhs, bool verbose, bool report_funct) const;
+
+    void SetFunctRhs(BlockVector& FunctRhs) {Functrhs_global = &FunctRhs;}
 
     int Size() const {return size;}
 
@@ -752,7 +755,7 @@ private:
 protected:
     int num_levels;
 
-    // FIXME: Clean this (now just copied from DivConstraintSolver
+    // FIXME: Clean this (now just copied from DivConstraintSolver)
     FOSLSProblem* problem;
     GeneralHierarchy* hierarchy;
     mutable std::deque<const Array<int> *> offsets_funct;
@@ -863,7 +866,9 @@ protected:
     bool verbose;
 
 protected:
-    virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const;
+    //virtual void MultTrueFunc(int l, double coeff, const BlockVector& x_l, BlockVector& rhs_l) const
+    virtual void MultTrueFunc(int l, const Operator* Funct_l, double coeff,
+                              const BlockVector& x_l, BlockVector& rhs_l) const;
 
     // Allocates current level-related data and computes coarser matrices for the functional
     // and the constraint.
@@ -873,7 +878,11 @@ protected:
     // Computes out_l as updated rhs in the functional for the current level
     //      out_l := rhs_l - M_l * solupd_l
     // Routine is used to update righthand side before and after the smoother call
-    void UpdateTrueResidual(int level, const BlockVector* rhs_l,  const BlockVector& solupd_l, BlockVector& out_l) const;
+    void UpdateTrueResidual(int level, const BlockVector* rhs_l,  const BlockVector& solupd_l, BlockVector& out_l) const
+    { UpdateTrueResidual(level, *Func_global_lvls[level], rhs_l, solupd_l, out_l); }
+
+    void UpdateTrueResidual(int level, const Operator& Funct_l, const BlockVector* rhs_l,
+                            const BlockVector& solupd_l, BlockVector& out_l) const;
 
     // constructs hierarchy of all objects requires
     // if necessary, builds the particular solution which satisfies

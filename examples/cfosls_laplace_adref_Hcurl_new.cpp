@@ -20,6 +20,8 @@
 
 //#define FOSLS
 
+//#define REFERENCE_SOLUTION
+
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
@@ -469,7 +471,7 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 15;
+   int max_iter_amr = 2;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -488,6 +490,18 @@ int main(int argc, char *argv[])
 
        div_rhs_lvls.Prepend(new Vector(problem_mgtools->GetRhs().GetBlock(numblocks - 1).Size()));
        *div_rhs_lvls[0] = problem_mgtools->GetRhs().GetBlock(numblocks - 1);
+
+#ifdef REFERENCE_SOLUTION
+       problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), *problem_sols_lvls[0], verbose, false);
+
+       // functional value for the initial guess
+       BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
+       for (int blk = 0; blk < numblocks_funct; ++blk)
+           reduced_problem_sol.GetBlock(blk) = problem_sols_lvls[0]->GetBlock(blk);
+       CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+                       "for the problem solution via saddle-point system ", verbose);
+
+#else
 
 #ifdef RECOARSENING_AMR
        if (verbose)
@@ -551,6 +565,9 @@ int main(int argc, char *argv[])
            BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
            zero_vec = 0.0;
            NewSolver->SetInitialGuess(l, zero_vec);
+
+           //NewSolver->SetInitialGuess(l, *initguesses_funct_lvls[l]);
+
            NewSolver->SetConstrRhs(*div_rhs_lvls[l]);
 
            //if (verbose)
@@ -559,7 +576,7 @@ int main(int argc, char *argv[])
            BlockVector NewRhs(problem_l->GetTrueOffsetsFunc());
            NewRhs = 0.0;
 
-           // computing rhs = ...
+           // computing rhs = - Funct_nobnd * init_guess at level l, with zero boundary conditions imposed
            BlockVector padded_initguess(problem_l->GetTrueOffsets());
            padded_initguess = 0.0;
            for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -619,6 +636,7 @@ int main(int argc, char *argv[])
            std::cout << "Re-coarsening (and re-solving if divfree problem in H(curl) is considered)"
                         " has been finished\n\n";
 #endif
+#endif // for #ifdef REFERENCE_SOLUTION
 
        if (compute_error)
            problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
