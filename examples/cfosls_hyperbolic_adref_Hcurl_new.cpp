@@ -667,7 +667,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 1;
+   int max_iter_amr = 2;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -951,7 +951,7 @@ int main(int argc, char *argv[])
                BlockVector padded_initguess(problem_l->GetTrueOffsets());
                padded_initguess = 0.0;
                for (int blk = 0; blk < numblocks_funct; ++blk)
-                   padded_initguess.GetBlock(blk) = initguesses_funct_lvls[l]->GetBlock(blk);
+                   padded_initguess.GetBlock(blk) = partsol_funct_lvls[l]->GetBlock(blk);
 
                BlockVector padded_rhs(problem_l->GetTrueOffsets());
                problem_l->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
@@ -973,6 +973,9 @@ int main(int argc, char *argv[])
                //NewSolver->SetPrintLevel(1);
            //else
                NewSolver->SetPrintLevel(1);
+
+           if (verbose && l == 0)
+               std::cout << "Solving the finest level problem... \n";
 
            NewSolver->Mult(l, &Constr_l, NewRhs, correction);
 
