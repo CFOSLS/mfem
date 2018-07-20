@@ -188,6 +188,14 @@ int main(int argc, char *argv[])
         std::cout << "RECOARSENING_AMR passive \n";
 #endif
 
+#ifdef REFERENCE_SOLUTION
+    if (verbose)
+        std::cout << "REFERENCE_SOLUTION active \n";
+#else
+    if (verbose)
+        std::cout << "REFERENCE_SOLUTION passive \n";
+#endif
+
 
 #ifdef CLEVER_STARTING_GUESS
     if (verbose)
@@ -306,8 +314,8 @@ int main(int argc, char *argv[])
            //(*problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
    //bool report_funct = true;
 
-   //const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
-           //GetFunctSpacesDescriptor();
+   const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
+           GetFunctSpacesDescriptor();
 
    FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
            (*bdr_conds, *fe_formulat, prec_option, verbose);
@@ -432,12 +440,8 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem_mgtools, grfuns_descriptor, NULL, integs, verbose);
    problem_mgtools->AddEstimator(*estimator);
 
-   //estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
-           //(*prob_hierarchy, 0, grfuns_descriptor, NULL, integs, verbose);
-   //problem->AddEstimator(*estimator);
-
    //ThresholdRefiner refiner(*estimator);
-   ThresholdSmooRefiner refiner(*estimator, 0.1); // 0.1, 0.001
+   ThresholdSmooRefiner refiner(*estimator); // 0.1, 0.001
    refiner.SetTotalErrorFraction(0.95); // 0.5
 
    if (verbose)
@@ -471,7 +475,7 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 2;
+   int max_iter_amr = 10;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -482,17 +486,22 @@ int main(int argc, char *argv[])
 
        bool compute_error = true;
 
-       initguesses_funct_lvls.Prepend(new BlockVector(problem_mgtools->GetTrueOffsetsFunc()));
+       initguesses_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
        *initguesses_funct_lvls[0] = 0.0;
 
-       problem_sols_lvls.Prepend(new BlockVector(problem_mgtools->GetTrueOffsets()));
+       problem_sols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
        *problem_sols_lvls[0] = 0.0;
+
+       //for (int i = 0; i < problem_sols_lvls.Size(); ++i)
+           //std::cout << "problem_sols_lvls[" << i << "]'s' size = " << problem_sols_lvls[i]->Size() << "\n";
 
        div_rhs_lvls.Prepend(new Vector(problem_mgtools->GetRhs().GetBlock(numblocks - 1).Size()));
        //*div_rhs_lvls[0] = problem_mgtools->GetRhs().GetBlock(numblocks - 1); // incorrect but works for laplace with no bdr for sigma
        problem_mgtools->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
 
 #ifdef REFERENCE_SOLUTION
+       if (verbose)
+           std::cout << "Solving the saddle point system \n";
        problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), *problem_sols_lvls[0], verbose, false);
 
        // functional value for the initial guess
@@ -501,7 +510,8 @@ int main(int argc, char *argv[])
            reduced_problem_sol.GetBlock(blk) = problem_sols_lvls[0]->GetBlock(blk);
        CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
-
+       if (compute_error)
+           problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
 #endif
 //#else
 
@@ -515,12 +525,13 @@ int main(int argc, char *argv[])
 
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
+       int coarsest_lvl; // coarsest lvl considered below
 #ifdef RECOARSENING_AMR
-       int coarsest_lvl = hierarchy->Nlevels() - 1;
-       for (int l = coarsest_lvl; l >= 0; --l) // l = 0 could be included actually after testing
+       coarsest_lvl = hierarchy->Nlevels() - 1;
 #else
-       for (int l = 0; l >= 0; --l) // only l = 0
+       coarsest_lvl = 0;
 #endif
+       for (int l = coarsest_lvl; l >= 0; --l) // all levels from coarsest to finest
        {
            if (verbose)
                std::cout << "level " << l << "\n";
@@ -532,11 +543,17 @@ int main(int argc, char *argv[])
 
 #ifdef CLEVER_STARTING_GUESS
            // create a better initial guess
-           if (l < coarsest_lvl)
+           if (l < problem_sols_lvls.Size() - 1)
            {
+               //std::cout << "size of problem_sols_lvls[l + 1] = " << problem_sols_lvls[l + 1]->Size() << "\n";
+               //std::cout << "size of initguesses_funct_lvls[l] = " << initguesses_funct_lvls[l]->Size() << "\n";
                for (int blk = 0; blk < numblocks_funct; ++blk)
+               {
+                   //std::cout << "size of problem_sols_lvls[l + 1]->GetBlock(blk) = " << problem_sols_lvls[l + 1]->GetBlock(blk).Size() << "\n";
+                   //std::cout << "size of initguesses_funct_lvls[l]->GetBlock(blk) = " << initguesses_funct_lvls[l]->GetBlock(blk).Size() << "\n";
                    hierarchy->GetTruePspace( (*space_names_funct)[blk], l)->Mult
                        (problem_sols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
+               }
 
                std::cout << "check init norm before bnd = " << initguesses_funct_lvls[l]->Norml2()
                             / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
@@ -609,6 +626,9 @@ int main(int argc, char *argv[])
                //NewSolver->SetPrintLevel(1);
            //else
                NewSolver->SetPrintLevel(1);
+
+           if (verbose)
+               std::cout << "Solving the minimization problem at level " << l << "\n";
 
            NewSolver->Mult(l, &Constr_l, NewRhs, correction);
 

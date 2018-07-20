@@ -61,14 +61,16 @@
 // (i.e., partsol finder is also used)
 //#define APPROACH_1
 
+//#define APPROACH_2
+
 // the approach when we go back only for one level, i.e. we use the solution from the previous level
 // to create a starting guess for the finest level
-#define APPROACH_2
+//#define APPROACH_3_2
 
 // the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-//#define APPROACH_3
+#define APPROACH_3
 
 
 // for debugging
@@ -85,8 +87,16 @@
 #define     PARTSOL_SETUP
 #define     DIVFREE_MINSOLVER
 #define     CLEVER_STARTING_PARTSOL
+#define     RECOARSENING_AMR
+//#undef     CLEVER_STARTING_GUESS
+#endif
 
-#undef     RECOARSENING_AMR
+
+#ifdef APPROACH_3_2
+#define     PARTSOL_SETUP
+#define     DIVFREE_MINSOLVER
+#define     CLEVER_STARTING_PARTSOL
+#define     RECOARSENING_AMR
 //#undef     CLEVER_STARTING_GUESS
 #endif
 
@@ -667,7 +677,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 3;
+   int max_iter_amr = 6;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -841,7 +851,7 @@ int main(int argc, char *argv[])
        //return 0;
 #endif
 
-#if defined(APPROACH_2) || defined(APPROACH_3)
+#if defined(APPROACH_2) || defined(APPROACH_3) || defined (APPROACH_3_2)
        // recoarsening constraint rhsides from finest to coarsest level
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
@@ -849,8 +859,20 @@ int main(int argc, char *argv[])
        // re-solving all the problems with coarsened rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
 #ifdef RECOARSENING_AMR
-       int coarsest_lvl = hierarchy->Nlevels() - 1;
-       for (int l = coarsest_lvl; l >= 0; --l) // l = 0 could be included actually after testing
+       int coarsest_lvl; // coarsest level to be considered
+#ifdef APPROACH_2
+       coarsest_lvl = 0;
+#endif
+
+#ifdef APPROACH_3_2
+       coarsest_lvl = ( hierarchy->Nlevels() > 1 ? 1 : 0);
+#endif
+
+#ifdef APPROACH_3
+       coarsest_lvl = hierarchy->Nlevels() - 1; // all levels from coarsest to finest (0)
+#endif
+
+       for (int l = coarsest_lvl; l >= 0; --l)
 #else
        for (int l = 0; l >= 0; --l) // only l = 0
 #endif
@@ -865,15 +887,19 @@ int main(int argc, char *argv[])
 
 #ifdef CLEVER_STARTING_PARTSOL
            // create a better initial guess
-#ifdef APPROACH_2
-           if (it > 0)
-#else // APPROACH_3
            if (l < coarsest_lvl)
-#endif
            {
+               //std::cout << "size of problem_sols_lvls[l + 1] = " << problem_sols_lvls[l + 1]->Size() << "\n";
+               //std::cout << "size of initguesses_funct_lvls[l] = " << initguesses_funct_lvls[l]->Size() << "\n";
+
                for (int blk = 0; blk < numblocks_funct; ++blk)
+               {
+                   //std::cout << "size of problem_sols_lvls[l + 1]->GetBlock(blk) = " << problem_sols_lvls[l + 1]->GetBlock(blk).Size() << "\n";
+                   //std::cout << "size of initguesses_funct_lvls[l]->GetBlock(blk) = " << initguesses_funct_lvls[l]->GetBlock(blk).Size() << "\n";
+
                    hierarchy->GetTruePspace( (*space_names_funct)[blk], l)->Mult
                        (problem_sols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
+               }
 
                std::cout << "check init norm before bnd = " << initguesses_funct_lvls[l]->Norml2()
                              / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
@@ -914,6 +940,11 @@ int main(int argc, char *argv[])
            if (verbose)
                std::cout << "Finding a particular solution... \n";
 
+           // functional value for the initial guess for particular solution
+           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
+                           "for the particular solution ", verbose);
+
+
            partsol_finder->FindParticularSolution(l, Constr_l, zero_vec, *partsol_funct_lvls[l],
                                                   *div_rhs_lvls[l], verbose, report_funct);
 
@@ -934,7 +965,7 @@ int main(int argc, char *argv[])
 
            // functional value for the initial guess
            CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
-                           "for the initial guess = particular solution ", verbose);
+                           "for the particular solution ", verbose);
 
            //BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
            zero_vec = 0.0;
