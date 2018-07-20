@@ -2551,6 +2551,13 @@ void FOSLSProblem::ComputeAnalyticalRhs(Vector& rhs) const
     }
 }
 
+// no boundary conditions
+void FOSLSProblem::ComputeRhsBlock(Vector& rhs, int blk) const
+{
+    plforms[blk]->Assemble();
+    plforms[blk]->ParallelAssemble(rhs);
+}
+
 BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
 {
     int num_unknowns = fe_formul.GetFormulation()->Nunknowns();

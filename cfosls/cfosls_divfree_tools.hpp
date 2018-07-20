@@ -789,6 +789,8 @@ protected:
     mutable double solupdate_currmgnorm;
     mutable double solupdate_firstmgnorm;
 
+    mutable double base_value;
+
     const MPI_Comm comm;
 
     // Projectors for the variables related to the functional and constraint
@@ -843,6 +845,7 @@ private:
 
 protected:
     BlockVector* Functrhs_global; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
+    BlockVector* Funct_addvec; // used only for FunctCheck (hence, it is not used in the preconditioner mode at all)
 
     // A temporary vector defined on true dofs of the finest level
     //mutable BlockVector* tempblock_truedofs;
@@ -951,6 +954,11 @@ public:
     void Update(bool recoarsen = true);
 
     void SetFunctRhs(BlockVector& FunctRhs) {Functrhs_global = &FunctRhs;}
+
+    void SetFunctAdditionalVector(BlockVector& FunctAddVec) {Funct_addvec = &FunctAddVec;}
+
+    void SetBaseValue(double value) const { base_value = value;}
+    double GetBaseValue() const {return base_value;}
 
     int Size() const {return size;}
 

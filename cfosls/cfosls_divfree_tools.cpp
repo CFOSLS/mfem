@@ -88,6 +88,28 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
     return global_func_norm;
 }
 
+// Computes and prints the norm of ( Funct * y, y )_2,h, assembled over all processes, everything on truedofs
+double CheckFunctValueNew(MPI_Comm comm, const Operator& Funct, const Vector* truefunct_addvec,
+                       const Vector& truevec, char const * string, bool print)
+{
+    Vector truetemp(truevec.Size());
+    truetemp = truevec;
+
+    if (truefunct_addvec)
+        truetemp += *truefunct_addvec;
+
+    Vector trueres(truevec.Size());
+    Funct.Mult(truetemp, trueres);
+
+    double local_func_norm;
+    local_func_norm = truetemp * trueres / sqrt (trueres.Size());
+    double global_func_norm = 0;
+    MPI_Allreduce(&local_func_norm, &global_func_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+    if (print)
+        std::cout << "Functional norm " << string << global_func_norm << " ... \n";
+    return global_func_norm;
+}
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
 bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
                                                 char const* string)
@@ -828,7 +850,9 @@ void CoarsestProblemSolver::Setup() const
     Schur = ParMult(Constr_global, MinvBt);
     Schur->CopyRowStarts();
     Schur->CopyColStarts();
-
+    SparseMatrix schur_diag;
+    Schur->GetDiag(schur_diag);
+    schur_diag.MoveDiagonalFirst();
 
     delete MinvBt;
     delete Md;
@@ -2552,9 +2576,12 @@ void DivConstraintSolver::Update(bool recoarsen)
         Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 
         // recoarsening local and global matrices
+
+        num_levels = hierarchy->Nlevels();
+
         if (recoarsen)
         {
-            // reocrasening operators, constraint matrices, Schwarz and (optionally) Hcurl smoothers
+            // recoarsening operators, constraint matrices, Schwarz and (optionally) Hcurl smoothers
             for (int l = 0; l < num_levels - 1; ++l)
             {
                 BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
@@ -2575,52 +2602,52 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                 delete P_Funct;
 
-                // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
-                // TODO: The concern is that the Functional matrix is recoarsened and thus changes
-                delete LocalSolvers_lvls[l + 1];
-                if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
+                if (l + 1 < num_levels - 1)
                 {
-                    LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS
-                            (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
-                            hierarchy->GetDofTrueDof(*space_names_funct, l  +1), *AE_e[l + 1],
-                            *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
-                            *el2dofs_col_offsets[l + 1]),
-                            *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
-                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
-                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
-                            optimized_localsolvers);
-                }
-                else // no S -> Hdiv-L2 formulation
-                {
-                    LocalSolvers_lvls[l + 1] = new LocalProblemSolver
-                            (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
-                            hierarchy->GetDofTrueDof(*space_names_funct, l + 1), *AE_e[l + 1],
-                            *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
-                            *el2dofs_col_offsets[l + 1]),
-                            *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
-                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
-                            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
-                            optimized_localsolvers);
-                }
+                    // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
+                    // TODO: The concern is that the Functional matrix is recoarsened and thus changes
+                    delete LocalSolvers_lvls[l + 1];
+                    if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
+                    {
+                        LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS
+                                (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
+                                hierarchy->GetDofTrueDof(*space_names_funct, l  +1), *AE_e[l + 1],
+                                *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                                *el2dofs_col_offsets[l + 1]),
+                                *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
+                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                optimized_localsolvers);
+                    }
+                    else // no S -> Hdiv-L2 formulation
+                    {
+                        LocalSolvers_lvls[l + 1] = new LocalProblemSolver
+                                (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
+                                hierarchy->GetDofTrueDof(*space_names_funct, l + 1), *AE_e[l + 1],
+                                *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                                *el2dofs_col_offsets[l + 1]),
+                                *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
+                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                optimized_localsolvers);
+                    }
 
-                if (with_hcurl_smoothers)
-                {
-                    delete Smoothers_lvls[l + 1];
-                    SweepsNum = ipow(1, l); // = 1
-                    Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
-                                                             *hierarchy->GetDivfreeDop(l + 1),
-                                                             hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                                       essbdr_attribs_Hcurl, l + 1),
-                                                             hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
-                                                                                       essbdr_attribs, l + 1),
-                                                             &SweepsNum, *offsets_funct[l + 1]);
-                }
-
+                    if (with_hcurl_smoothers)
+                    {
+                        delete Smoothers_lvls[l + 1];
+                        SweepsNum = ipow(1, l); // = 1
+                        Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
+                                                                 *hierarchy->GetDivfreeDop(l + 1),
+                                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                                           essbdr_attribs_Hcurl, l + 1),
+                                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
+                                                                                           essbdr_attribs, l + 1),
+                                                                 &SweepsNum, *offsets_funct[l + 1]);
+                    }
+                } // end of if (l+1) is not the coarsest level
             } // end of loop over levels from finest+1 to the coarsest-1
 
         } // end of if recoarsen case
-
-        num_levels = hierarchy->Nlevels();
 
         if (recoarsen)
         {
@@ -3835,12 +3862,14 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
     switch(type)
     {
     case 0:
+    case 3:
     {
         if (print && !already_printed)
         {
 
             std::cout << "current " << name << ": " << value_curr << "\n";
             std::cout << "previous " << name << ": " << value_prev << "\n";
+            std::cout << "value_scalefactor = " << value_scalefactor << "\n";
             std::cout << "rel change = " << (value_prev - value_curr) / value_scalefactor
                       << " (rel.tol = " << stop_tol << ")\n";
         }
@@ -3858,6 +3887,7 @@ bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, doubl
         {
 
             std::cout << "current " << name << ": " << value_curr << "\n";
+            std::cout << "value_scalefactor = " << value_scalefactor << "\n";
             std::cout << "rel = " << value_curr / value_scalefactor
                       << " (rel.tol = " << stop_tol << ")\n";
         }
@@ -3966,6 +3996,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     *init_guess = 0.0;
 
     Functrhs_global = NULL;
+    Funct_addvec = NULL;
 
     SetRelTol(1.0e-12);
     SetMaxIter(1000);
@@ -3985,6 +4016,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     solupdate_prevmgnorm = 0.0;
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
+
+    base_value = 1.0;
 
     //tempblock_truedofs = new BlockVector(*offsets_funct[0]);
 
@@ -4240,6 +4273,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
     solupdate_currmgnorm = 0.0;
     solupdate_firstmgnorm = 0.0;
 
+    base_value = 1.0;
+
     init_guess = new BlockVector(TrueProj_Func[0]->RowOffsets());
     *init_guess = 0.0;
 
@@ -4276,11 +4311,18 @@ void GeneralMinConstrSolver::Setup(bool verbose) const
         std::cout << "Starting solver setup \n";
 
     if (built_on_mgtools)
-        CheckFunctValue(comm, *Func_global_nobnd_lvls[0], Functrhs_global, *init_guess,
+        CheckFunctValueNew(comm, *Func_global_nobnd_lvls[0], Funct_addvec, *init_guess,
+            "for the initial guess during solver setup (no rhs provided): ", print_level);
+
+    /*
+    if (built_on_mgtools)
+        CheckFunctValue(comm, *Func_global_nobnd_lvls[0], Functrhs_global, Funct_addvec, *init_guess,
             "for the initial guess during solver setup (no rhs provided): ", print_level);
     else
-        CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, *init_guess,
+        CheckFunctValue(comm, *Func_global_lvls[0], Functrhs_global, Funct_addvec, *init_guess,
             "for the initial guess during solver setup (no rhs provided): ", print_level);
+    */
+
     // 2. setting up the required internal data at all levels
 
     // 2.1 loop over all levels except the coarsest
@@ -4347,11 +4389,19 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
         *init_guess = 0.0;
     else
         if (built_on_mgtools)
+            funct_firstnorm = CheckFunctValueNew(comm, *Func_global_nobnd_lvls[start_level], Funct_addvec, *init_guess,
+                                     "for the initial guess: ", print_level);
+        else
+            funct_firstnorm = CheckFunctValueNew(comm, *Func_global_lvls[start_level], Funct_addvec, *init_guess,
+                                 "for the initial guess: ", print_level);
+        /*
+        if (built_on_mgtools)
             funct_firstnorm = CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, *init_guess,
                                      "for the initial guess: ", print_level);
         else
             funct_firstnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, *init_guess,
                                  "for the initial guess: ", print_level);
+        */
 
     // tempblock is the initial guess (on true dofs)
     BlockVector * tempblock_truedofs = truetempblock_lvls[start_level];
@@ -4432,18 +4482,26 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
         bool monotone_check = (i != 0);
         if (!preconditioner_mode)
         {
-            if (i == 0)
-                StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                                 monotone_check, "functional", print_level-1);
+            if (stopcriteria_type == 3)
+            {
+                StoppingCriteria(0, funct_currnorm, funct_prevnorm, base_value, rel_tol,
+                                 monotone_check, "functional ", print_level-1);
+            }
             else
-                StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
-                                 monotone_check, "functional", print_level-1);
+            {
+                if (i == 0)
+                    StoppingCriteria(1, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                                     monotone_check, "functional", print_level-1);
+                else
+                    StoppingCriteria(0, funct_currnorm, funct_prevnorm, funct_firstnorm, rel_tol,
+                                     monotone_check, "functional", print_level-1);
+            }
 
             StoppingCriteria(stopcriteria_type, solupdate_currnorm, solupdate_prevnorm,
                              sol_firstitnorm,  rel_tol, monotone_check, "sol_update", print_level-1);
         }
-        StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
-                         solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level-1);
+        //StoppingCriteria(stopcriteria_type, solupdate_currmgnorm, solupdate_prevmgnorm,
+                         //solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", print_level-1);
 
         bool stopped;
         switch(stopcriteria_type)
@@ -4463,6 +4521,10 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
         case 2:
             stopped = StoppingCriteria(2, solupdate_currmgnorm, solupdate_prevmgnorm,
                                        solupdate_firstmgnorm, rel_tol, monotone_check, "sol_update in mg ", 0);
+            break;
+        case 3:
+            stopped = StoppingCriteria(0, funct_currnorm, funct_prevnorm,
+                                       base_value, rel_tol, monotone_check, "functional (w.r.t to the base value ", 0);
             break;
         default:
             MFEM_ABORT("Unknown stopping criteria type \n");
@@ -4590,11 +4652,19 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
 
     if (!preconditioner_mode && print_level)
         if (built_on_mgtools)
-            CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, next_sol,
+            CheckFunctValueNew(comm, *Func_global_nobnd_lvls[start_level], Funct_addvec, next_sol,
                                  "at the beginning of Solve: ", print_level);
         else
-            CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
+            CheckFunctValueNew(comm, *Func_global_lvls[start_level], Funct_addvec, next_sol,
                              "at the beginning of Solve: ", print_level);
+        /*
+        if (built_on_mgtools)
+            CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, Funct_addvec, next_sol,
+                                 "at the beginning of Solve: ", print_level);
+        else
+            CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, Funct_addvec, next_sol,
+                             "at the beginning of Solve: ", print_level);
+        */
 
 #ifdef TIMING
     MPI_Barrier(comm);
@@ -4987,11 +5057,19 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
         if (print_level || stopcriteria_type == 0)
         {
             if (built_on_mgtools)
-                funct_currnorm = CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, next_sol,
+                funct_currnorm = CheckFunctValueNew(comm, *Func_global_nobnd_lvls[start_level], Funct_addvec, next_sol,
                                          "at the end of iteration: ", print_level);
             else
-                funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, next_sol,
+                funct_currnorm = CheckFunctValueNew(comm, *Func_global_lvls[start_level], Funct_addvec, next_sol,
                                      "at the end of iteration: ", print_level);
+            /*
+            if (built_on_mgtools)
+                funct_currnorm = CheckFunctValue(comm, *Func_global_nobnd_lvls[start_level], Functrhs_global, Funct_addvec, next_sol,
+                                         "at the end of iteration: ", print_level);
+            else
+                funct_currnorm = CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, Funct_addvec, next_sol,
+                                     "at the end of iteration: ", print_level);
+            */
         }
 
     if (!preconditioner_mode)

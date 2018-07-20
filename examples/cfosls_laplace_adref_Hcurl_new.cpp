@@ -342,7 +342,7 @@ int main(int argc, char *argv[])
        bool optimized_localsolvers = true;
        bool with_hcurl_smoothers = true;
 
-       int stopcriteria_type = 1;
+       int stopcriteria_type = 3;
 
        int numblocks_funct = numblocks - 1;
 
@@ -358,7 +358,7 @@ int main(int argc, char *argv[])
        NewSolver->SetRelTol(newsolver_reltol);
        NewSolver->SetMaxIter(200);
        NewSolver->SetPrintLevel(0);
-       NewSolver->SetStopCriteriaType(0);
+       NewSolver->SetStopCriteriaType(stopcriteria_type);
    }
 
    ///////////////////////////////////////////////////////////////
@@ -456,7 +456,10 @@ int main(int argc, char *argv[])
 
 #ifdef REFERENCE_SOLUTION
    Array<BlockVector*> problem_refsols_lvls(0);
+   Array<BlockVector*> problem_refsols_funct_lvls(0);
 #endif
+
+   double saved_functvalue;
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
@@ -499,6 +502,8 @@ int main(int argc, char *argv[])
 #ifdef REFERENCE_SOLUTION
        problem_refsols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
        *problem_refsols_lvls[0] = 0.0;
+       problem_refsols_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
+       *problem_refsols_funct_lvls[0] = 0.0;
 #endif
        //for (int i = 0; i < problem_sols_lvls.Size(); ++i)
            //std::cout << "problem_sols_lvls[" << i << "]'s' size = " << problem_sols_lvls[i]->Size() << "\n";
@@ -521,13 +526,48 @@ int main(int argc, char *argv[])
        if (compute_error)
            problem_mgtools->ComputeError(*problem_refsols_lvls[0], verbose, true);
 
+       for (int blk = 0; blk < numblocks_funct; ++blk)
+           problem_refsols_funct_lvls[0]->GetBlock(blk) = problem_refsols_lvls[0]->GetBlock(blk);
+
+       if (problem_refsols_lvls.Size() > 1)
+       {
+           BlockVector temp(problem->GetTrueOffsetsFunc());
+           for (int blk = 0; blk < numblocks_funct; ++blk)
+           {
+               hierarchy->GetTruePspace( (*space_names_funct)[blk], 0)->Mult
+                   (problem_refsols_lvls[1]->GetBlock(blk), temp.GetBlock(blk));
+           }
+           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
+                           "for the previous level problem solution via saddle-point system ", verbose);
+       }
+
+       /*
        for (int l = 0; l < hierarchy->Nlevels(); ++l)
        {
            if (verbose)
                std::cout << "l = " << l << ", ref problem sol funct value \n";
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+           Vector temp(NewSolver->GetFunctOp_nobnd(0)->Width());
+           if (l == 0)
+               temp = problem_refsols_funct_lvls[0];
+           else
+           {
+               Vector temp2()
+               for (int k = l - 1; k >=0; --k)
+               {
+                   for (int blk = 0; blk < numblocks_funct; ++blk)
+                   {
+                       hierarchy->GetTruePspace( (*space_names_funct)[blk], k)->Mult
+                           (problem_refsols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
+                   }
+
+               }
+
+               temp = proj;
+           }
+           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
                            "for the level problem solution via saddle-point system ", verbose);
        }
+       */
 
 #endif
 //#else
@@ -599,8 +639,8 @@ int main(int argc, char *argv[])
            }
 
            // functional value for the initial guess
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
-                           "for the initial guess ", verbose);
+           double starting_funct_value = CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
+                                                         *initguesses_funct_lvls[l], "for the initial guess ", verbose);
 
            BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
            zero_vec = 0.0;
@@ -631,6 +671,11 @@ int main(int argc, char *argv[])
            problem_l->ZeroBndValues(NewRhs);
 
            NewSolver->SetFunctRhs(NewRhs);
+           if (l == coarsest_lvl && it == 0)
+               NewSolver->SetBaseValue(starting_funct_value);
+           else
+               NewSolver->SetBaseValue(saved_functvalue);
+           NewSolver->SetFunctAdditionalVector(*initguesses_funct_lvls[l]);
 
            HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp()->GetBlock(numblocks - 1, 0));
 
@@ -642,7 +687,7 @@ int main(int argc, char *argv[])
            //if (l == 0)
                //NewSolver->SetPrintLevel(1);
            //else
-               NewSolver->SetPrintLevel(1);
+               NewSolver->SetPrintLevel(2);
 
            if (verbose)
                std::cout << "Solving the minimization problem at level " << l << "\n";
@@ -661,7 +706,7 @@ int main(int argc, char *argv[])
                for (int blk = 0; blk < numblocks_funct; ++blk)
                    tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
-               CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
+               saved_functvalue = CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                                "for the finest level solution ", verbose);
 
                BlockVector tmp2(problem_l->GetTrueOffsetsFunc());

@@ -711,6 +711,7 @@ int main(int argc, char *argv[])
        if (compute_error)
            problem_mgtools->ComputeError(saved_sol, verbose, true);
 
+       /*
        for (int l = 0; l < hierarchy->Nlevels(); ++l)
        {
            if (verbose)
@@ -718,6 +719,7 @@ int main(int argc, char *argv[])
            CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                            "for the level problem solution via saddle-point system ", verbose);
        }
+       */
 #endif
 
 #ifdef PARTSOL_SETUP
