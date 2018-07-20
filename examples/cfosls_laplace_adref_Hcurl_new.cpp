@@ -454,6 +454,10 @@ int main(int argc, char *argv[])
 
    Array<BlockVector*> problem_sols_lvls(0);
 
+#ifdef REFERENCE_SOLUTION
+   Array<BlockVector*> problem_refsols_lvls(0);
+#endif
+
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
@@ -475,7 +479,7 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 10;
+   int max_iter_amr = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -492,6 +496,10 @@ int main(int argc, char *argv[])
        problem_sols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
        *problem_sols_lvls[0] = 0.0;
 
+#ifdef REFERENCE_SOLUTION
+       problem_refsols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
+       *problem_refsols_lvls[0] = 0.0;
+#endif
        //for (int i = 0; i < problem_sols_lvls.Size(); ++i)
            //std::cout << "problem_sols_lvls[" << i << "]'s' size = " << problem_sols_lvls[i]->Size() << "\n";
 
@@ -502,16 +510,25 @@ int main(int argc, char *argv[])
 #ifdef REFERENCE_SOLUTION
        if (verbose)
            std::cout << "Solving the saddle point system \n";
-       problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), *problem_sols_lvls[0], verbose, false);
+       problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), *problem_refsols_lvls[0], verbose, false);
 
        // functional value for the initial guess
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
-           reduced_problem_sol.GetBlock(blk) = problem_sols_lvls[0]->GetBlock(blk);
+           reduced_problem_sol.GetBlock(blk) = problem_refsols_lvls[0]->GetBlock(blk);
        CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
        if (compute_error)
-           problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
+           problem_mgtools->ComputeError(*problem_refsols_lvls[0], verbose, true);
+
+       for (int l = 0; l < hierarchy->Nlevels(); ++l)
+       {
+           if (verbose)
+               std::cout << "l = " << l << ", ref problem sol funct value \n";
+           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+                           "for the level problem solution via saddle-point system ", verbose);
+       }
+
 #endif
 //#else
 

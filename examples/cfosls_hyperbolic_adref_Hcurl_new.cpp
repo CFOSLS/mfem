@@ -61,7 +61,7 @@
 // (i.e., partsol finder is also used)
 //#define APPROACH_1
 
-//#define APPROACH_2
+#define APPROACH_2
 
 // the approach when we go back only for one level, i.e. we use the solution from the previous level
 // to create a starting guess for the finest level
@@ -661,6 +661,10 @@ int main(int argc, char *argv[])
    Array<BlockVector*> initguesses_funct_lvls(0);
 #endif
 
+#ifdef APPROACH_0
+   Array<BlockVector*> problem_refsols_lvls(0);
+#endif
+
    Array<BlockVector*> problem_sols_lvls(0);
 
    // 12. The main AMR loop. In each iteration we solve the problem on the
@@ -690,8 +694,12 @@ int main(int argc, char *argv[])
        *problem_sols_lvls[0] = 0.0;
 
 #ifdef APPROACH_0
+       problem_refsols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
+       *problem_refsols_lvls[0] = 0.0;
+
        BlockVector saved_sol(problem_mgtools->GetTrueOffsets());
        problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), saved_sol, verbose, false);
+       *problem_refsols_lvls[0] = saved_sol;
 
        // functional value for the initial guess
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
@@ -702,6 +710,14 @@ int main(int argc, char *argv[])
 
        if (compute_error)
            problem_mgtools->ComputeError(saved_sol, verbose, true);
+
+       for (int l = 0; l < hierarchy->Nlevels(); ++l)
+       {
+           if (verbose)
+               std::cout << "l = " << l << ", ref problem sol funct value \n";
+           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+                           "for the level problem solution via saddle-point system ", verbose);
+       }
 #endif
 
 #ifdef PARTSOL_SETUP
