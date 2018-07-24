@@ -93,7 +93,7 @@ public:
     ThresholdSmooRefiner(ErrorEstimator &est, double beta_, double gamma_)
         : ThresholdRefiner(est), beta(beta_), gamma(gamma_) {}
 
-    int Beta() const {return beta;}
+    double Beta() const {return beta;}
     void SetBeta(double beta_) {beta = beta_;}
 
     int Gamma() const {return gamma;}

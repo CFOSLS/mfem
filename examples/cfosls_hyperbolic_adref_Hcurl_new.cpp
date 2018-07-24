@@ -59,9 +59,9 @@
 
 // only the finest level consideration, 0 starting guess, solved by minimization solver
 // (i.e., partsol finder is also used)
-//#define APPROACH_1
+#define APPROACH_1
 
-#define APPROACH_2
+//#define APPROACH_2
 
 // the approach when we go back only for one level, i.e. we use the solution from the previous level
 // to create a starting guess for the finest level
@@ -70,7 +70,7 @@
 // the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-#define APPROACH_3
+//#define APPROACH_3
 
 
 // for debugging
@@ -587,7 +587,7 @@ int main(int argc, char *argv[])
        bool optimized_localsolvers = true;
        bool with_hcurl_smoothers = true;
 
-       int stopcriteria_type = 1;
+       int stopcriteria_type = 3;
 
        int numblocks_funct = numblocks - 1;
 
@@ -595,7 +595,7 @@ int main(int argc, char *argv[])
        NewSolver = new GeneralMinConstrSolver(size_funct, *mgtools_hierarchy, with_local_smoothers,
                                         optimized_localsolvers, with_hcurl_smoothers, stopcriteria_type, verbose);
 
-       double newsolver_reltol = 1.0e-10;
+       double newsolver_reltol = 1.0e-8;
 
        if (verbose)
            std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
@@ -603,7 +603,7 @@ int main(int argc, char *argv[])
        NewSolver->SetRelTol(newsolver_reltol);
        NewSolver->SetMaxIter(200);
        NewSolver->SetPrintLevel(0);
-       NewSolver->SetStopCriteriaType(0);
+       //NewSolver->SetStopCriteriaType(0);
    }
 #endif
 
@@ -667,9 +667,16 @@ int main(int argc, char *argv[])
 
    Array<BlockVector*> problem_sols_lvls(0);
 
+   double saved_functvalue;
+
+
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
+#ifdef AMR
    const int max_dofs = 300000;//1600000; 400000;
+#else // uniform refinement
+   const int max_dofs = 600000;
+#endif
 
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
    std::cout << "starting n_el = " << hierarchy->GetFinestParMesh()->GetNE() << "\n";
@@ -681,7 +688,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 6;
+   int max_iter_amr = 20;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -705,18 +712,34 @@ int main(int argc, char *argv[])
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            reduced_problem_sol.GetBlock(blk) = saved_sol.GetBlock(blk);
-       CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+       CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
+
+       // alternative check for studying the functional behavior
+       /*
+       BlockVector temp(problem->GetTrueOffsetsFunc());
+       NewSolver->GetFunctOp_nobnd(0)->Mult(problem_refsols_lvls[0]->GetBlock(0), temp.GetBlock(0));
+       //problem->GetOp_nobnd()->GetBlock(0,0).Mult(problem_refsols_lvls[0]->GetBlock(0), temp.GetBlock(0));
+       if (verbose)
+           std::cout << "temp euclidean norm = " << temp.GetBlock(0).Norml2() << "\n";
+       double func_value_alt = sqrt( temp.GetBlock(0) * problem_refsols_lvls[0]->GetBlock(0)
+               / temp.GetBlock(0).Size());
+       if (verbose)
+           std::cout << "func value alt = " << func_value_alt << "\n";
+       */
 
        if (compute_error)
            problem_mgtools->ComputeError(saved_sol, verbose, true);
+
+       //MPI_Finalize();
+       //return 0;
 
        /*
        for (int l = 0; l < hierarchy->Nlevels(); ++l)
        {
            if (verbose)
                std::cout << "l = " << l << ", ref problem sol funct value \n";
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                            "for the level problem solution via saddle-point system ", verbose);
        }
        */
@@ -790,8 +813,8 @@ int main(int argc, char *argv[])
            //partsol_funct_lvls[0]->GetBlock(blk) = saved_sol.GetBlock(blk);
 
        // functional value for the initial guess
-       CheckFunctValue(comm, *NewSolver->GetFunctOp_nobnd(0), NULL, *partsol_funct_lvls[0],
-                       "for the final particular solution ", verbose);
+       double starting_funct_value = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
+                                                     *partsol_funct_lvls[l], "for the initial guess ", verbose);
 
        // checking the initial guess
        {
@@ -830,12 +853,17 @@ int main(int argc, char *argv[])
        }
 
        NewSolver->SetFunctRhs(NewRhs);
+       if (it == 0)
+           NewSolver->SetBaseValue(starting_funct_value);
+       else
+           NewSolver->SetBaseValue(saved_functvalue);
+       NewSolver->SetFunctAdditionalVector(*partsol_funct_lvls[l]);
 
        // solving for correction
        BlockVector correction(problem_l->GetTrueOffsetsFunc());
        correction = 0.0;
 
-       NewSolver->SetPrintLevel(1);
+       NewSolver->SetPrintLevel(2);
 
        if (verbose)
            std::cout << "Solving the finest level problem... \n";
@@ -854,14 +882,14 @@ int main(int argc, char *argv[])
            for (int blk = 0; blk < numblocks_funct; ++blk)
                tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
+           saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                            "for the finest level solution ", verbose);
 
            BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
            for (int blk = 0; blk < numblocks_funct; ++blk)
                tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
 
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
                            "for the projection of the exact solution ", verbose);
        }
 
@@ -926,6 +954,11 @@ int main(int argc, char *argv[])
            // setting correct bdr values
            problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
 
+           // functional value for the initial guess
+           double starting_funct_value = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
+                                                         *partsol_funct_lvls[l], "for the initial guess ", verbose);
+
+
            // computing funct rhside which absorbs the contribution of the non-homogeneous boundary conditions
            BlockVector padded_initguess(problem_l->GetTrueOffsets());
            padded_initguess = 0.0;
@@ -959,7 +992,7 @@ int main(int argc, char *argv[])
                std::cout << "Finding a particular solution... \n";
 
            // functional value for the initial guess for particular solution
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
                            "for the particular solution ", verbose);
 
 
@@ -982,7 +1015,7 @@ int main(int argc, char *argv[])
            }
 
            // functional value for the initial guess
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
                            "for the particular solution ", verbose);
 
            //BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
@@ -1013,6 +1046,12 @@ int main(int argc, char *argv[])
            }
 
            NewSolver->SetFunctRhs(NewRhs);
+           if (l == coarsest_lvl && it == 0)
+               NewSolver->SetBaseValue(starting_funct_value);
+           else
+               NewSolver->SetBaseValue(saved_functvalue);
+           NewSolver->SetFunctAdditionalVector(*partsol_funct_lvls[l]);
+
 
            // solving for correction
            BlockVector correction(problem_l->GetTrueOffsetsFunc());
@@ -1041,14 +1080,14 @@ int main(int argc, char *argv[])
                for (int blk = 0; blk < numblocks_funct; ++blk)
                    tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
-               CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
+               saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                                "for the finest level solution ", verbose);
 
                BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
                for (int blk = 0; blk < numblocks_funct; ++blk)
                    tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
 
-               CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
+               CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
                                "for the projection of the exact solution ", verbose);
            }
 
@@ -1070,14 +1109,17 @@ int main(int argc, char *argv[])
 
 
        // Send the solution by socket to a GLVis server.
-       if (visualization && it == max_iter_amr - 1)
+       if (visualization ) //&& it % 4 == 0 ) //it == max_iter_amr - 1)
        {
            int ne = pmesh->GetNE();
            for (int elind = 0; elind < ne; ++elind)
                pmesh->SetAttribute(elind, elind);
            ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
            ParGridFunction * S;
-           S = problem_mgtools->GetGrFun(1);
+           if (problem_mgtools->GetFEformulation().Nunknowns() >= 2)
+               S = problem_mgtools->GetGrFun(1);
+           else // only sigma = Hdiv-L2 formulation with eliminated S
+               S = (dynamic_cast<ProblemType*>(problem_mgtools))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
 
            char vishost[] = "localhost";
            int  visport   = 19916;
@@ -1090,7 +1132,10 @@ int main(int argc, char *argv[])
            socketstream s_sock(vishost, visport);
            s_sock << "parallel " << num_procs << " " << myid << "\n";
            s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
-                  << it <<"'" << flush;
+                  << it << "'" << flush;
+
+           if (!(problem_mgtools->GetFEformulation().Nunknowns() >= 2))
+               delete S;
        }
 
 #ifdef AMR
@@ -1115,7 +1160,7 @@ int main(int argc, char *argv[])
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
 
-       if (visualization && it == max_iter_amr - 1)
+       if (visualization) // && it % 4 == 0 ) //it == max_iter_amr - 1)
        {
            const Vector& local_errors = estimator->GetLastLocalErrors();
            if (feorder == 0)
@@ -1138,7 +1183,7 @@ int main(int argc, char *argv[])
            socketstream amr_sock(vishost, visport);
            amr_sock << "parallel " << num_procs << " " << myid << "\n";
            amr_sock << "solution\n" << *pmesh << *local_errors_pgfun <<
-                         "window_title 'local errors, AMR iter No." << it <<"'" << flush;
+                         "window_title 'Local errors, AMR iter No." << it << "'" << flush;
 
            if (feorder > 0)
            {

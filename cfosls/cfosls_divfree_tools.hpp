@@ -52,6 +52,9 @@ double CheckFunctValue(MPI_Comm comm, const BlockMatrix& Funct,
 double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truefunctrhs,
                        const Vector& truevec, char const * string, bool print);
 
+double CheckFunctValueNew(MPI_Comm comm, const Operator& Funct, const Vector* truefunct_addvec,
+                       const Vector& truevec, char const * string, bool print);
+
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
 bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
                                                 char const* string);

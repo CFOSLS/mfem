@@ -16,7 +16,7 @@
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 // combined with RECOARSENING_AMR this leads to a variant of cascadic MG
-//#define CLEVER_STARTING_GUESS
+#define CLEVER_STARTING_GUESS
 
 //#define FOSLS
 
@@ -466,7 +466,7 @@ int main(int argc, char *argv[])
 #ifdef AMR
    const int max_dofs = 200000;//1600000;
 #else
-   const int max_dofs = 400000;
+   const int max_dofs = 600000;
 #endif
 
    //const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
@@ -482,7 +482,7 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 5;
+   int max_iter_amr = 20;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -521,7 +521,7 @@ int main(int argc, char *argv[])
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            reduced_problem_sol.GetBlock(blk) = problem_refsols_lvls[0]->GetBlock(blk);
-       CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+       CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
        if (compute_error)
            problem_mgtools->ComputeError(*problem_refsols_lvls[0], verbose, true);
@@ -537,7 +537,7 @@ int main(int argc, char *argv[])
                hierarchy->GetTruePspace( (*space_names_funct)[blk], 0)->Mult
                    (problem_refsols_lvls[1]->GetBlock(blk), temp.GetBlock(blk));
            }
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
                            "for the previous level problem solution via saddle-point system ", verbose);
        }
 
@@ -564,7 +564,7 @@ int main(int argc, char *argv[])
 
                temp = proj;
            }
-           CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, temp,
                            "for the level problem solution via saddle-point system ", verbose);
        }
        */
@@ -639,7 +639,7 @@ int main(int argc, char *argv[])
            }
 
            // functional value for the initial guess
-           double starting_funct_value = CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
+           double starting_funct_value = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
                                                          *initguesses_funct_lvls[l], "for the initial guess ", verbose);
 
            BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
@@ -687,7 +687,7 @@ int main(int argc, char *argv[])
            //if (l == 0)
                //NewSolver->SetPrintLevel(1);
            //else
-               NewSolver->SetPrintLevel(2);
+               NewSolver->SetPrintLevel(1);
 
            if (verbose)
                std::cout << "Solving the minimization problem at level " << l << "\n";
@@ -706,14 +706,14 @@ int main(int argc, char *argv[])
                for (int blk = 0; blk < numblocks_funct; ++blk)
                    tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
-               saved_functvalue = CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
+               saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                                "for the finest level solution ", verbose);
 
                BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
                for (int blk = 0; blk < numblocks_funct; ++blk)
                    tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
 
-               CheckFunctValue(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
+               CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
                                "for the projection of the exact solution ", verbose);
            }
 

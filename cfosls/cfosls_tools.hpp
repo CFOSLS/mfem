@@ -1510,7 +1510,10 @@ public:
 
     void ComputeFuncError(const Vector& vec) const override;
 
-    ParGridFunction * RecoverS();
+    ParGridFunction * RecoverS() const
+    { return RecoverS(trueX->GetBlock(0));}
+
+    ParGridFunction * RecoverS(const Vector& sigma) const;
 };
 
 /// FIXME: Looks like this shouldn't have happened

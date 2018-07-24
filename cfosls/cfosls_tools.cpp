@@ -2821,7 +2821,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
     ComputeFuncError(vec);
 }
 
-ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
+ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS(const Vector& sigma) const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
     MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
@@ -2843,7 +2843,7 @@ ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS()
     HypreParMatrix * B = Bblock->ParallelAssemble();
 
     Vector bTsigma(C->Height());
-    B->Mult(trueX->GetBlock(0),bTsigma);
+    B->Mult(sigma,bTsigma);
 
     Vector trueS(C->Height());
 

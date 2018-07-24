@@ -72,6 +72,7 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
 {
     Vector trueres(truevec.Size());
     Funct.Mult(truevec, trueres);
+
     double local_func_norm;
     if (truefunctrhs)
     {
@@ -98,17 +99,31 @@ double CheckFunctValueNew(MPI_Comm comm, const Operator& Funct, const Vector* tr
     if (truefunct_addvec)
         truetemp += *truefunct_addvec;
 
+    //std::cout << "truetemp euclidean norm = " << truetemp.Norml2() << "\n";
+
     Vector trueres(truevec.Size());
     Funct.Mult(truetemp, trueres);
 
-    double local_func_norm;
-    local_func_norm = truetemp * trueres / sqrt (trueres.Size());
-    double global_func_norm = 0;
-    MPI_Allreduce(&local_func_norm, &global_func_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+    //std::cout << "trueres euclidean norm = " << trueres.Norml2() << "\n";
+
+    //double local_func_norm;
+    //local_func_norm = truetemp * trueres / sqrt (trueres.Size());
+    //double global_func_norm = 0;
+    //MPI_Allreduce(&local_func_norm, &global_func_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+    int local_size = trueres.Size();
+    int global_size = 0;
+    MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
+
+    double local_func = truetemp * trueres;
+    double global_func = 0;
+    MPI_Allreduce(&local_func, &global_func, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+    global_func = sqrt(global_func /  global_size);
 
     if (print)
-        std::cout << "Functional norm " << string << global_func_norm << " ... \n";
-    return global_func_norm;
+        std::cout << "Functional norm " << string << global_func << " ... \n";
+    return global_func;
 }
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
 bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
