@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
     using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
     using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
     */
@@ -299,8 +299,8 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0) // S is present
         numblocks_funct++;
 
-    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+    FormulType * formulat = new FormulType (dim, numsol, verbose);
+    FEFormulType* fe_formulat = new FEFormulType(*formulat, feorder);
     BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
     // constructing the general hierarchy on top of the coarse mesh,

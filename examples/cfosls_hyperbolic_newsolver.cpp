@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
     */
 
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
@@ -1726,11 +1726,11 @@ int main(int argc, char *argv[])
 
 //#ifdef NEW_INTERFACE
 
-    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
-    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+    FormulType * formulat = new FormulType (dim, numsol, verbose);
+    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
+    BdrCondsType * bdr_conds = new BdrCondsType(*pmesh);
 
-    FOSLSProblem * problem = new ProblemType(*pmesh, *bdr_conds,
+    ProblemType * problem = new ProblemType(*pmesh, *bdr_conds,
                                              *fe_formulat, prec_option, verbose);
 
     int nlevels = ref_levels + 1;

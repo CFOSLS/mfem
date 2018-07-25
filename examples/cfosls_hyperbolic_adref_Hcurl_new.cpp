@@ -26,15 +26,18 @@
 #include <iomanip>
 #include <list>
 
+// avoids elimination of the scalar unknown from L^2, used only temporarily for studying the problem
+// currently, minsolver produces incorrect result for this formulation, but
+// the saddle-point solve is fine, gives approximately the same error
+// as the formulation with eliminated scalar unknown for CYLINDER_CUBE_TEST (same large!)
+#define HDIVL2L2
+
 // if passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 //#define PARTSOL_SETUP
 
 //#define DIVFREE_MINSOLVER
-
-//#define NEWINTERFACE
-//#define MG_DIVFREEPREC
 
 #define RECOARSENING_AMR
 
@@ -59,7 +62,7 @@
 
 // only the finest level consideration, 0 starting guess, solved by minimization solver
 // (i.e., partsol finder is also used)
-#define APPROACH_1
+//#define APPROACH_1
 
 //#define APPROACH_2
 
@@ -140,7 +143,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -156,10 +159,17 @@ int main(int argc, char *argv[])
     */
 
     // Hdiv-L2 case
+#ifdef HDIVL2L2
+    using FormulType = CFOSLSFormulation_HdivL2L2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2L2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2L2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+#else // then we eliminate the scalar unknown
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
+#endif
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -252,8 +262,12 @@ int main(int argc, char *argv[])
         else
             std::cout << "Space for S: L2 \n";
 
+#ifdef HDIVL2L2
+        std::cout << "S: is not eliminated from the system \n";
+#else
         if (strcmp(space_for_S,"L2") == 0)
             std::cout << "S: is eliminated from the system \n";
+#endif
     }
 
     if (verbose)
@@ -275,6 +289,14 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
+
+#ifdef HDIVL2L2
+    if (verbose)
+        std::cout << "HDIVL2L2 active \n";
+#else
+    if (verbose)
+        std::cout << "HDIVL2L2 passive \n";
+#endif
 
 #ifdef AMR
     if (verbose)
@@ -352,22 +374,6 @@ int main(int argc, char *argv[])
         std::cout << "CYLINDER_CUBE_TEST passive \n";
 #endif
 
-#ifdef NEWINTERFACE
-    if (verbose)
-        std::cout << "NEWINTERFACE active \n";
-#else
-    if (verbose)
-        std::cout << "NEWINTERFACE passive \n";
-#endif
-
-#ifdef MG_DIVFREEPREC
-    if (verbose)
-        std::cout << "MG_DIVFREEPREC active \n";
-#else
-    if (verbose)
-        std::cout << "MG_DIVFREEPREC passive \n";
-#endif
-
 #ifdef RECOARSENING_AMR
     if (verbose)
         std::cout << "RECOARSENING_AMR active \n";
@@ -376,6 +382,9 @@ int main(int argc, char *argv[])
         std::cout << "RECOARSENING_AMR passive \n";
 #endif
 
+#ifdef HDIVL2L2
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
+#endif
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
@@ -486,14 +495,18 @@ int main(int argc, char *argv[])
     if (strcmp(formulation,"cfosls") == 0)
         numblocks++;
 
+#ifdef HDIVL2L2
+    numblocks = 3;
+#endif
+
     if (verbose)
         std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
    if (verbose)
        std::cout << "Running AMR ... \n";
 
-   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   FormulType * formulat = new FormulType (dim, numsol, verbose);
+   FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
 #ifdef CYLINDER_CUBE_TEST
@@ -785,8 +798,8 @@ int main(int argc, char *argv[])
        HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
        Vector div_initguess(Constr_l.Height());
-       Constr_l.Mult(*initguesses_funct_lvls[0], div_initguess);
 
+       Constr_l.Mult(initguesses_funct_lvls[0]->GetBlock(0), div_initguess);
 
        *div_rhs_lvls[0] -= div_initguess;
 
@@ -832,6 +845,13 @@ int main(int argc, char *argv[])
        zero_vec = 0.0;
        NewSolver->SetInitialGuess(l, zero_vec);
 
+       //div_rhs_lvls[0]->Print();
+
+
+       Vector div_partsol(Constr_l.Height());
+       Constr_l.Mult(partsol_funct_lvls[0]->GetBlock(0), div_partsol);
+       *div_rhs_lvls[0] -= div_partsol;
+
        NewSolver->SetConstrRhs(*div_rhs_lvls[0]);
 
        NewRhs = 0.0;
@@ -869,6 +889,9 @@ int main(int argc, char *argv[])
            std::cout << "Solving the finest level problem... \n";
 
        NewSolver->Mult(l, &Constr_l, NewRhs, correction);
+
+       *div_rhs_lvls[0] += div_partsol;
+
 
        for (int blk = 0; blk < numblocks_funct; ++blk)
        {
@@ -981,7 +1004,7 @@ int main(int argc, char *argv[])
            HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
            Vector div_initguess(Constr_l.Height());
-           Constr_l.Mult(*initguesses_funct_lvls[l], div_initguess);
+           Constr_l.Mult(initguesses_funct_lvls[l]->GetBlock(0), div_initguess);
 
            *div_rhs_lvls[l] -= div_initguess;
 
@@ -1117,10 +1140,15 @@ int main(int argc, char *argv[])
                pmesh->SetAttribute(elind, elind);
            ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
            ParGridFunction * S;
+
+#ifdef HDIVL2L2
+           S = problem_mgtools->GetGrFun(1);
+#else
            if (problem_mgtools->GetFEformulation().Nunknowns() >= 2)
                S = problem_mgtools->GetGrFun(1);
            else // only sigma = Hdiv-L2 formulation with eliminated S
                S = (dynamic_cast<ProblemType*>(problem_mgtools))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
+#endif
 
            char vishost[] = "localhost";
            int  visport   = 19916;

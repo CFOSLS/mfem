@@ -337,7 +337,7 @@ int main(int argc, char *argv[])
    using FormulType = CFOSLSFormulation_HdivL2Hyper;
    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-   using ProblemType = FOSLSCylProblem_HdivL2L2hyp;
+   using ProblemType = FOSLSCylProblem_HdivL2hyp;
    */
 
    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);

@@ -113,10 +113,10 @@ int main(int argc, char *argv[])
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
 #ifdef DIVFREE_HCURLSETUP
-    using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
-    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
+    using DivfreeFormulType = CFOSLSFormulation_HdivDivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivDivfreeHyp;
 #endif
 
     // solver options
@@ -1779,7 +1779,7 @@ int main(int argc, char *argv[])
            if (strcmp(space_for_S,"H1") == 0)
                S = problem->GetGrFun(1);
            else
-               S = (dynamic_cast<FOSLSProblem_HdivL2L2hyp*>(problem))->RecoverS();
+               S = (dynamic_cast<FOSLSProblem_HdivL2hyp*>(problem))->RecoverS();
 
            char vishost[] = "localhost";
            int  visport   = 19916;

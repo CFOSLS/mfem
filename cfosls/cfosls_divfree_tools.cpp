@@ -4425,8 +4425,13 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
      if (!preconditioner_mode)
      {
         if (Constr_start_lvl)
+        {
+            //tempblock_truedofs->GetBlock(0).Print();
+            //if (Constr_rhs_global)
+                //Constr_rhs_global->Print();
             MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                    "for the initial guess"),"");
+        }
      }
      else
      {

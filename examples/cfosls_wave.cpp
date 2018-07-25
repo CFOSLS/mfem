@@ -220,8 +220,8 @@ int main(int argc, char *argv[])
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Wave;
     using ProblemType = FOSLSProblem_HdivH1wave;
 
-    FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-    FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+    FormulType * formulat = new FormulType (dim, numsol, verbose);
+    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
     BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
     int prec_option = 1;

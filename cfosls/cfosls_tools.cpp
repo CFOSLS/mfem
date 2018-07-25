@@ -441,6 +441,8 @@ FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks,
     blk_structure.resize(numblocks);
 }
 
+/// Hdiv-L2-L2 formulation for transport with eliminated scalar unknown
+/// thus called Hdiv-L2
 CFOSLSFormulation_HdivL2Hyper::CFOSLSFormulation_HdivL2Hyper (int dimension,
                                                               int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 2, 1, true), numsol(num_solution), test(dim, numsol)
@@ -473,6 +475,45 @@ void CFOSLSFormulation_HdivL2Hyper::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[0] = SpaceName::HDIV;
 }
 
+/// Hdiv-L2-L2 formulation for transport with scalar unknown from L2 (cf. with Hdiv-L2 formulation above)
+CFOSLSFormulation_HdivL2L2Hyper::CFOSLSFormulation_HdivL2L2Hyper (int dimension,
+                                                              int num_solution, bool verbose)
+    : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
+{
+    blfis(0,0) = new VectorFEMassIntegrator();
+    blfis(1,1) = new MassIntegrator(*test.GetBtB());
+    blfis(1,0) = new VectorFEMassIntegrator(*test.GetMinB());
+    blfis(2,0) = new VectorFEDivergenceIntegrator;
+
+    lfis[2] = new DomainLFIntegrator(*test.GetRhs());
+
+    InitBlkStructure();
+}
+
+void CFOSLSFormulation_HdivL2L2Hyper::InitBlkStructure()
+{
+    blk_structure[0] = std::make_pair<int,int>(1,0);
+    blk_structure[1] = std::make_pair<int,int>(0,0);
+    blk_structure[2] = std::make_pair<int,int>(-1,-1);
+}
+
+void CFOSLSFormulation_HdivL2L2Hyper::ConstructSpacesDescriptor() const
+{
+    space_names = new Array<SpaceName>(numblocks);
+
+    (*space_names)[0] = SpaceName::HDIV;
+    (*space_names)[1] = SpaceName::L2;
+    (*space_names)[2] = SpaceName::L2;
+}
+
+void CFOSLSFormulation_HdivL2L2Hyper::ConstructFunctSpacesDescriptor() const
+{
+    space_names_funct = new Array<SpaceName>(2);
+    (*space_names_funct)[0] = SpaceName::HDIV;
+    (*space_names_funct)[1] = SpaceName::L2;
+}
+
+/// Hdiv-H1-L2 formulation for transport with scalar unknown from H1
 CFOSLSFormulation_HdivH1Hyper::CFOSLSFormulation_HdivH1Hyper (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
 {
@@ -511,6 +552,8 @@ void CFOSLSFormulation_HdivH1Hyper::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[1] = SpaceName::H1;
 }
 
+/// Hdiv-H1-L2 formulation for transport with first component casted into Hcurl, w/o constraint
+/// thus, called Hdiv-H1-Divfree
 CFOSLSFormulation_HdivH1DivfreeHyp::CFOSLSFormulation_HdivH1DivfreeHyp (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 2, 2, false), numsol(num_solution), test(dim, numsol)
 {
@@ -534,7 +577,6 @@ void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructSpacesDescriptor() const
     (*space_names)[1] = SpaceName::H1;
 }
 
-
 void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructFunctSpacesDescriptor() const
 {
     space_names_funct = new Array<SpaceName>(2);
@@ -543,7 +585,10 @@ void CFOSLSFormulation_HdivH1DivfreeHyp::ConstructFunctSpacesDescriptor() const
 }
 
 
-CFOSLSFormulation_HdivL2DivfreeHyp::CFOSLSFormulation_HdivL2DivfreeHyp (int dimension, int num_solution, bool verbose)
+/// Hdiv-L2-L2 formulation for transport, with first component casted into Hcurl and
+/// second component eliminated, w/o constraint
+/// thus, called Hdiv-L2-Divfree
+CFOSLSFormulation_HdivDivfreeHyp::CFOSLSFormulation_HdivDivfreeHyp (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 1, 1, false), numsol(num_solution), test(dim, numsol)
 {
     blfis(0,0) = new CurlCurlIntegrator();
@@ -551,12 +596,12 @@ CFOSLSFormulation_HdivL2DivfreeHyp::CFOSLSFormulation_HdivL2DivfreeHyp (int dime
     InitBlkStructure();
 }
 
-void CFOSLSFormulation_HdivL2DivfreeHyp::InitBlkStructure()
+void CFOSLSFormulation_HdivDivfreeHyp::InitBlkStructure()
 {
     blk_structure[0] = std::make_pair<int,int>(1,0);
 }
 
-void CFOSLSFormulation_HdivL2DivfreeHyp::ConstructSpacesDescriptor() const
+void CFOSLSFormulation_HdivDivfreeHyp::ConstructSpacesDescriptor() const
 {
     space_names = new Array<SpaceName>(numblocks);
 
@@ -564,12 +609,13 @@ void CFOSLSFormulation_HdivL2DivfreeHyp::ConstructSpacesDescriptor() const
 }
 
 
-void CFOSLSFormulation_HdivL2DivfreeHyp::ConstructFunctSpacesDescriptor() const
+void CFOSLSFormulation_HdivDivfreeHyp::ConstructFunctSpacesDescriptor() const
 {
     space_names_funct = new Array<SpaceName>(1);
     (*space_names_funct)[0] = SpaceName::HCURL;
 }
 
+/// Hdiv-H1-L2 formulation for heat equation
 CFOSLSFormulation_HdivH1Parab::CFOSLSFormulation_HdivH1Parab (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
 {
@@ -607,6 +653,7 @@ void CFOSLSFormulation_HdivH1Parab::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[1] = SpaceName::H1;
 }
 
+/// Hdiv-H1-L2 formulation for wave equation
 CFOSLSFormulation_HdivH1Wave::CFOSLSFormulation_HdivH1Wave (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
 {
@@ -645,6 +692,7 @@ void CFOSLSFormulation_HdivH1Wave::ConstructFunctSpacesDescriptor() const
 }
 
 
+/// Hdiv-H1-L2 formulation for the Laplace equation
 CFOSLSFormulation_Laplace::CFOSLSFormulation_Laplace (int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 3, 2, true), numsol(num_solution), test(dim, numsol)
 {
@@ -682,6 +730,7 @@ void CFOSLSFormulation_Laplace::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[1] = SpaceName::H1;
 }
 
+/// Hdiv-L2 formulation for the Laplace equation, standard mixed formulation
 CFOSLSFormulation_MixedLaplace::CFOSLSFormulation_MixedLaplace (
         int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 2, 1, true), numsol(num_solution), test(dim, numsol)
@@ -715,7 +764,7 @@ void CFOSLSFormulation_MixedLaplace::ConstructFunctSpacesDescriptor() const
     (*space_names_funct)[0] = SpaceName::HDIV;
 }
 
-
+/// H1 formulation for the Laplace equation, standard FEM, no constraint
 FOSLSFormulation_Laplace::FOSLSFormulation_Laplace (
         int dimension, int num_solution, bool verbose)
     : FOSLSFormulation(dimension, 1, 1, false), numsol(num_solution), test(dim, numsol)
@@ -2710,7 +2759,7 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, bool verbose, bool compute_er
         ComputeError(verbose, checkbnd);
 }
 
-void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
+void FOSLSProblem_HdivL2hyp::ComputeExtraError(const Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
@@ -2821,7 +2870,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
     ComputeFuncError(vec);
 }
 
-ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS(const Vector& sigma) const
+ParGridFunction * FOSLSProblem_HdivL2hyp::RecoverS(const Vector& sigma) const
 {
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
     MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
@@ -2875,7 +2924,7 @@ ParGridFunction * FOSLSProblem_HdivL2L2hyp::RecoverS(const Vector& sigma) const
 // 0 for no preconditioner
 // 1 for diag(A) + BoomerAMG (Bt diag(A)^-1 B)
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
-void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
@@ -2937,8 +2986,8 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 
 }
 
-// computes || sigma - L(S) ||
-void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
+// computes || sigma - L(S) || as (K sigma, sigma)^1/2
+void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
 {
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
@@ -3009,6 +3058,184 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
         if (fabs(TempL2[i]) > 1.0e-13 || fabs(Rhs[i]) > 1.0e-13)
             std::cout << "index " << i << ": div sigma = " << TempL2[i] << ", rhs = " << Rhs[i] << "\n";
     */
+
+    TempL2 -= Rhs;
+
+    double mass_loss_loc = TempL2.Norml1();
+    double mass_loss;
+    MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        std::cout << "Sum of local mass loss = " << mass_loss << "\n";
+
+}
+
+void FOSLSProblem_HdivL2L2hyp::ComputeExtraError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
+    MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
+
+    // aliases
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+    ParGridFunction sigma(Hdiv_space);
+    sigma.Distribute(&vec_viewer.GetBlock(0));
+
+    int order_quad = max(2, 2*fe_formul.Feorder() + 1);
+    const IntegrationRule *irs[Geometry::NumGeom];
+    for (int i = 0; i < Geometry::NumGeom; ++i)
+    {
+       irs[i] = &(IntRules.Get(i, order_quad));
+    }
+
+    DiscreteLinearOperator Div(Hdiv_space, L2_space);
+    Div.AddDomainInterpolator(new DivergenceInterpolator());
+    ParGridFunction DivSigma(L2_space);
+    Div.Assemble();
+    Div.Mult(sigma, DivSigma);
+
+    double err_div = DivSigma.ComputeL2Error(*test->GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *test->GetRhs(), pmesh, irs);
+
+    if (verbose)
+    {
+        if (fabs(norm_div) > 1.0e-13)
+             cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                  << err_div/norm_div  << "\n";
+        else
+            cout << "|| div (sigma_h) || = "
+                 << err_div  << " (norm_div = 0) \n";
+    }
+
+    ComputeFuncError(vec);
+}
+
+// prec_option:
+// 0 for no preconditioner
+// 1 for diag(A) + GS(C) + BoomerAMG (Bt diag(A)^-1 B)
+// 2 for ADS(A) + GS(C) + BoomerAMG (Bt diag(A)^-1 B)
+void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
+{
+    MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    if (verbose)
+    {
+        std::cout << "Block diagonal preconditioner: \n";
+        if (prec_option == 2)
+            std::cout << "ADS(A) for H(div) \n";
+        else
+             std::cout << "Diag(A) for H(div) or H1vec \n";
+        std::cout << "GS(C) for L2 for the scalar unknown \n";
+        if (prec_option == 100)
+            std::cout << "Using cheaper Gauss-Seidel smoothers for all blocks! \n";
+
+        std::cout << "BoomerAMG(D Diag^(-1)(A) D^t) for L2 lagrange multiplier \n";
+    }
+
+    HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
+    HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
+    HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
+
+
+    HypreParMatrix *Schur;
+
+    HypreParMatrix *AinvDt = D.Transpose();
+    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+                                         A.GetRowStarts());
+    A.GetDiag(*Ad);
+    AinvDt->InvScaleRows(*Ad);
+    Schur = ParMult(&D, AinvDt);
+
+    Solver *invA, *invC, *invS;
+    if (prec_option == 100)
+    {
+        invA = new HypreSmoother(A, HypreSmoother::Type::l1GS, 1);
+        invC = new HypreSmoother(C, HypreSmoother::Type::l1GS, 1);
+        invS = new HypreSmoother(*Schur, HypreSmoother::Type::l1GS, 1);
+    }
+    else // standard case
+    {
+        if (prec_option == 2)
+            invA = new HypreADS(A, pfes[0]);
+        else // using Diag(A);
+            invA = new HypreDiagScale(A);
+
+        invA->iterative_mode = false;
+
+        invC = new HypreSmoother(C, HypreSmoother::Type::l1GS, 1);
+
+        invS = new HypreBoomerAMG(*Schur);
+        ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
+        ((HypreBoomerAMG *)invS)->iterative_mode = false;
+    }
+
+    prec = new BlockDiagonalPreconditioner(blkoffsets_true);
+    if (prec_option > 0)
+    {
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
+        ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+    }
+    else
+        if (verbose)
+            cout << "No preconditioner is used. \n";
+
+}
+
+// computes || sigma - L(S) ||
+void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
+{
+    BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
+
+    ParFiniteElementSpace * Hdiv_space = pfes[0];
+    ParFiniteElementSpace * L2_space = pfes[1];
+
+    Vector MSigma(Hdiv_space->TrueVSize());
+
+    HypreParMatrix * M = (HypreParMatrix*)(&CFOSLSop->GetBlock(0,0));
+    M->Mult(vec_viewer.GetBlock(0), MSigma);
+    double localFunctional1 = vec_viewer.GetBlock(0) * MSigma;
+
+    Vector GSigma(L2_space->TrueVSize());
+    HypreParMatrix * BT = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,0));
+    BT->Mult(vec_viewer.GetBlock(0), GSigma);
+    localFunctional1 += 2.0 * (vec_viewer.GetBlock(1)*GSigma);
+
+    Vector XtrueS(L2_space->TrueVSize());
+    HypreParMatrix * C = (HypreParMatrix*)(&CFOSLSop->GetBlock(1,1));
+    C->Mult(vec_viewer.GetBlock(1), XtrueS);
+
+    localFunctional1 += vec_viewer.GetBlock(1)*XtrueS;
+
+    double globalFunctional1;
+    MPI_Reduce(&localFunctional1, &globalFunctional1, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+    {
+        std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional1 << "\n";
+        std::cout << "|| sigma_h - L(S_h) || = " << sqrt(globalFunctional1) << "\n";
+    }
+
+    ParLinearForm gform(L2_space);
+    gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.
+                                                     GetFormulation()->GetTest()->GetRhs()));
+    gform.Assemble();
+
+    Vector Rhs(L2_space->TrueVSize());
+    Rhs = *gform.ParallelAssemble();
+
+    double mass_loc = Rhs.Norml1();
+    double mass;
+    MPI_Reduce(&mass_loc, &mass, 1,
+               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (verbose)
+        cout << "Sum of local mass = " << mass << "\n";
+
+    Vector TempL2(L2_space->TrueVSize());
+    HypreParMatrix * Bdiv = (HypreParMatrix*)(&CFOSLSop_nobnd->GetBlock(2,0));
+    Bdiv->Mult(vec_viewer.GetBlock(0), TempL2);
 
     TempL2 -= Rhs;
 

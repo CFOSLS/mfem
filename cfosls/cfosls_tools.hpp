@@ -213,6 +213,26 @@ public:
 
         initialized = true;
     }
+};
+
+struct BdrConditions_CFOSLS_HdivL2L2_Hyper : public BdrConditions
+{
+public:
+    BdrConditions_CFOSLS_HdivL2L2_Hyper(ParMesh& pmesh_)
+        : BdrConditions(pmesh_, 3)
+    {
+        for (int j = 0; j < bdr_attribs[0]->Size(); ++j)
+            (*bdr_attribs[0])[j] = 0;
+        (*bdr_attribs[0])[0] = 1;
+
+        for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
+            (*bdr_attribs[1])[j] = 0;
+
+        for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
+            (*bdr_attribs[2])[j] = 0;
+
+        initialized = true;
+    }
 
 };
 
@@ -793,6 +813,25 @@ public:
     int NumSol() const override {return numsol;}
 };
 
+struct CFOSLSFormulation_HdivL2L2Hyper : public FOSLSFormulation
+{
+protected:
+    int numsol;
+    Hyper_test test;
+protected:
+    void InitBlkStructure() override;
+    void ConstructSpacesDescriptor() const override;
+    void ConstructFunctSpacesDescriptor() const override;
+public:
+    CFOSLSFormulation_HdivL2L2Hyper(int dimension, int num_solution, bool verbose);
+
+    FOSLS_test * GetTest() override {return &test;}
+
+    int GetUnknownWithInitCnd() const override {return 0;}
+
+    int NumSol() const override {return numsol;}
+};
+
 struct CFOSLSFormulation_HdivH1Hyper : public FOSLSFormulation
 {
 protected:
@@ -833,7 +872,7 @@ public:
 
 };
 
-struct CFOSLSFormulation_HdivL2DivfreeHyp : public FOSLSFormulation
+struct CFOSLSFormulation_HdivDivfreeHyp : public FOSLSFormulation
 {
 protected:
     int numsol;
@@ -843,10 +882,10 @@ protected:
     void ConstructSpacesDescriptor() const override;
     void ConstructFunctSpacesDescriptor() const override;
 public:
-    CFOSLSFormulation_HdivL2DivfreeHyp(int dimension, int num_solution, bool verbose);
+    CFOSLSFormulation_HdivDivfreeHyp(int dimension, int num_solution, bool verbose);
 
-    CFOSLSFormulation_HdivL2DivfreeHyp(CFOSLSFormulation_HdivL2Hyper& hdivl2_formul, bool verbose)
-        : CFOSLSFormulation_HdivL2DivfreeHyp(hdivl2_formul.Dim(), hdivl2_formul.NumSol(), verbose) {}
+    CFOSLSFormulation_HdivDivfreeHyp(CFOSLSFormulation_HdivL2Hyper& hdivl2_formul, bool verbose)
+        : CFOSLSFormulation_HdivDivfreeHyp(hdivl2_formul.Dim(), hdivl2_formul.NumSol(), verbose) {}
 
     FOSLS_test * GetTest() override {return &test;}
 
@@ -985,13 +1024,10 @@ public:
 
 // specific FOSLSFEFormulation
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivL2L2 problem but take
-/// a general FOSLSFEFormulation as an input.
 struct CFOSLSFEFormulation_HdivL2Hyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivL2Hyper(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivL2Hyper(CFOSLSFormulation_HdivL2Hyper& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1004,13 +1040,27 @@ public:
     }
 };
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivL2L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+struct CFOSLSFEFormulation_HdivL2L2Hyper : FOSLSFEFormulation
+{
+public:
+    CFOSLSFEFormulation_HdivL2L2Hyper(CFOSLSFormulation_HdivL2L2Hyper& formulation, int fe_order)
+        : FOSLSFEFormulation(formulation, fe_order)
+    {
+        int dim = formul.Dim();
+        if (dim == 4)
+            fecolls[0] = new RT0_4DFECollection;
+        else
+            fecolls[0] = new RT_FECollection(feorder, dim);
+
+        fecolls[1] = new L2_FECollection(feorder, dim);
+        fecolls[2] = new L2_FECollection(feorder, dim);
+    }
+};
+
 struct CFOSLSFEFormulation_HdivH1Hyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Hyper(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1Hyper(CFOSLSFormulation_HdivH1Hyper& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1028,11 +1078,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1DivfreeHyper : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1DivfreeHyper(CFOSLSFormulation_HdivH1DivfreeHyp& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1050,11 +1099,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
-struct CFOSLSFEFormulation_HdivL2DivfreeHyper : FOSLSFEFormulation
+struct CFOSLSFEFormulation_HdivDivfreeHyp : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivL2DivfreeHyper(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivDivfreeHyp(CFOSLSFormulation_HdivDivfreeHyp& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1066,12 +1114,10 @@ public:
     }
 };
 
-
-/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1Parab : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Parab(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1Parab(CFOSLSFormulation_HdivH1Parab& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1089,11 +1135,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1Wave : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1Wave(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1Wave(CFOSLSFormulation_HdivH1Wave& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1111,11 +1156,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_HdivH1L2_Laplace : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_HdivH1L2_Laplace(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_HdivH1L2_Laplace(CFOSLSFormulation_Laplace& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1133,11 +1177,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
 struct CFOSLSFEFormulation_MixedLaplace : FOSLSFEFormulation
 {
 public:
-    CFOSLSFEFormulation_MixedLaplace(FOSLSFormulation& formulation, int fe_order)
+    CFOSLSFEFormulation_MixedLaplace(CFOSLSFormulation_MixedLaplace& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1150,11 +1193,10 @@ public:
     }
 };
 
-/// FIXME: See previous FIXME messages
 struct FOSLSFEFormulation_Laplace : FOSLSFEFormulation
 {
 public:
-    FOSLSFEFormulation_Laplace(FOSLSFormulation& formulation, int fe_order)
+    FOSLSFEFormulation_Laplace(FOSLSFormulation_Laplace& formulation, int fe_order)
         : FOSLSFEFormulation(formulation, fe_order)
     {
         int dim = formul.Dim();
@@ -1474,6 +1516,53 @@ public:
 /// FIXME: Looks like this shouldn't have happened
 /// that I create a specific HdivL2L2 problem but take
 /// a general FOSLSFEFormulation as an input.
+/// However, if one changes the parameter type to a specific FOSLSFEFormulation (a child)
+/// Then problems occur in the constructor of FOSLSProbHierarchy
+/// which relies on the fact that all FOSLSProblem's children have exactly the same
+/// signature for their constructors.
+class FOSLSProblem_HdivL2hyp : virtual public FOSLSProblem
+{
+protected:
+    virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+public:
+    FOSLSProblem_HdivL2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
+                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivL2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    FOSLSProblem_HdivL2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
+                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+    {
+        SetPrecOption(precond_option);
+        CreatePrec(*CFOSLSop, prec_option, verbose);
+        UpdateSolverPrec();
+    }
+
+    void ComputeExtraError(const Vector& vec) const override;
+
+    void ComputeFuncError(const Vector& vec) const override;
+
+    ParGridFunction * RecoverS() const
+    { return RecoverS(trueX->GetBlock(0));}
+
+    ParGridFunction * RecoverS(const Vector& sigma) const;
+};
+
+/// See the previous FIXME message
 class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
 {
 protected:
@@ -1509,16 +1598,9 @@ public:
     void ComputeExtraError(const Vector& vec) const override;
 
     void ComputeFuncError(const Vector& vec) const override;
-
-    ParGridFunction * RecoverS() const
-    { return RecoverS(trueX->GetBlock(0));}
-
-    ParGridFunction * RecoverS(const Vector& sigma) const;
 };
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivH1L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+/// See the previous FIXME message
 class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
 {
 protected:
@@ -1555,9 +1637,7 @@ public:
     void ComputeFuncError(const Vector& vec) const override;
 };
 
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivH1L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+/// See the previous FIXME message
 class FOSLSProblem_HdivH1parab : virtual public FOSLSProblem
 {
 protected:
@@ -1595,10 +1675,7 @@ public:
     void ComputeFuncError(const Vector& vec) const override;
 };
 
-
-/// FIXME: Looks like this shouldn't have happened
-/// that I create a specific HdivH1L2 problem but take
-/// a general FOSLSFEFormulation as an input.
+/// See the previous FIXME message
 class FOSLSProblem_HdivH1wave : virtual public FOSLSProblem
 {
 protected:

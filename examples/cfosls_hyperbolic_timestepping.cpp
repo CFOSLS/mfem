@@ -317,12 +317,12 @@ int main(int argc, char *argv[])
    using FormulType = CFOSLSFormulation_HdivL2Hyper;
    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-   using ProblemType = FOSLSCylProblem_HdivL2L2hyp;
+   using ProblemType = FOSLSCylProblem_HdivL2hyp;
    */
 
-   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
-   BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
+   FormulType * formulat = new FormulType (dim, numsol, verbose);
+   FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
+   BdrCondsType * bdr_conds = new BdrCondsType(*pmesh);
 
    //ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
