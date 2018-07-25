@@ -43,7 +43,7 @@
 #include <list>
 #include <unistd.h>
 
-#include "divfree_solver_tools.hpp"
+//#include "divfree_solver_tools.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -148,6 +148,9 @@ int main(int argc, char *argv[])
        delete mesh;
    }
 
+   Array<int> ess_bdr(pmesh->bdr_attributes.Max());
+   ess_bdr = 1;
+
    int dim = nDimensions;
 
    // For geometric multigrid
@@ -174,6 +177,7 @@ int main(int argc, char *argv[])
    }
    H_space = new ParFiniteElementSpace(pmesh, h1_coll);
    Array<HypreParMatrix*> TrueP_H(par_ref_levels);
+   std::vector<Array<int>* > EssBdrTrueDofs_H1(num_levels);
    Array< SparseMatrix* > P_H_lvls(num_levels - 1);
    const SparseMatrix* P_H_local;
 
@@ -193,6 +197,9 @@ int main(int argc, char *argv[])
 
        // creating pfespaces for level l
        H_space_lvls[l] = new ParFiniteElementSpace(pmesh_lvls[l], h1_coll);
+
+       EssBdrTrueDofs_H1[l] = new Array<int>();
+       H_space_lvls[l]->GetEssentialTrueDofs(ess_bdr, *EssBdrTrueDofs_H1[l]);
 
        // for all but one levels we create projection matrices between levels
        // and projectors assembled on true dofs if MG preconditioner is used
@@ -223,8 +230,6 @@ int main(int argc, char *argv[])
    Array<int> ess_tdof_list;
    if (pmesh_lvls[0]->bdr_attributes.Size())
    {
-      Array<int> ess_bdr(pmesh_lvls[0]->bdr_attributes.Max());
-      ess_bdr = 1;
       H_space_lvls[0]->GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
    }
 
@@ -265,8 +270,11 @@ int main(int argc, char *argv[])
 
    // 12. Define and apply a parallel CG solver for AX=B with the geometric multigrid preconditioner.
 
+#ifdef BND_FOR_MULTIGRID
+   Multigrid * prec = new Multigrid(A, TrueP_H, EssBdrTrueDofs_H1);
+#else
    Multigrid * prec = new Multigrid(A, TrueP_H);
-
+#endif
    CGSolver solver(comm);
    if (verbose)
        cout << "Linear solver: CG \n";
