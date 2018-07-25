@@ -27,12 +27,12 @@
 #include <iomanip>
 #include <list>
 
-#include"cfosls_testsuite.hpp"
+//#include"cfosls_testsuite.hpp"
 
 //#define TESTING
 //#define TESTING2
 
-#define COARSER_MULTIPLIER
+//#define COARSER_MULTIPLIER
 
 //#define REGULARIZE_A
 
@@ -142,990 +142,6 @@ void MyOperator::Mult(const Vector& x, Vector& y) const
     leftmat.Mult(tmp2, y);
 }
 
-
-/// Integrator for (q * u, v)
-/// where q is a scalar coefficient, u and v are from vector FE space
-/// created from scalar FE collection (called improper vector FE)
-class ImproperVectorMassIntegrator : public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   void Init(Coefficient *q)
-   { Q = q; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector scalar_shape;
-   DenseMatrix vector_vshape; // components are test shapes
-#endif
-
-public:
-   ImproperVectorMassIntegrator() { Init(NULL); }
-   ImproperVectorMassIntegrator(Coefficient *_q) { Init(_q); }
-   ImproperVectorMassIntegrator(Coefficient &q) { Init(&q); }
-
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-void ImproperVectorMassIntegrator::AssembleElementMatrix(
-   const FiniteElement &el, ElementTransformation &Trans, DenseMatrix &elmat)
-{
-    MFEM_ASSERT(el.GetRangeType() == FiniteElement::SCALAR,
-                "The improper vector FE should have a scalar type in the current implementation \n");
-
-    int dim  = el.GetDim();
-    int nd = el.GetDof();
-    int improper_nd = nd * dim;
-
-    double w;
-
-#ifdef MFEM_THREAD_SAFE
-    Vector scalar_shape.SetSize(nd);
-    DenseMatrix vector_vshape(improper_nd, dim);
-#else
-    scalar_shape.SetSize(nd);
-    vector_vshape.SetSize(improper_nd, dim);
-#endif
-    elmat.SetSize (improper_nd, improper_nd);
-
-    const IntegrationRule *ir = IntRule;
-    if (ir == NULL)
-    {
-       int order = (Trans.OrderW() + el.GetOrder() + el.GetOrder());
-       ir = &IntRules.Get(el.GetGeomType(), order);
-    }
-
-    elmat = 0.0;
-    for (int i = 0; i < ir->GetNPoints(); i++)
-    {
-       const IntegrationPoint &ip = ir->IntPoint(i);
-
-       Trans.SetIntPoint (&ip);
-
-       el.CalcShape(ip, scalar_shape);
-       for (int d = 0; d < dim; ++d )
-           for (int l = 0; l < dim; ++l)
-               for (int k = 0; k < nd; ++k)
-               {
-                   if (l == d)
-                       vector_vshape(l*nd+k,d) = scalar_shape(k);
-                   else
-                       vector_vshape(l*nd+k,d) = 0.0;
-               }
-       // now vector_vshape is of size improper_nd x dim
-       //el.CalcVShape(Trans, vector_vshape); // would be easy but this doesn't work for improper vector L2
-
-       w = ip.weight * Trans.Weight();
-       if (Q)
-          w *= Q->Eval(Trans, ip);
-
-       AddMult_a_AAt (w, vector_vshape, elmat);
-
-    }
-}
-
-
-/// Integrator for (q * u, v)
-/// where q is a scalar coefficient, u is from vector FE space created
-/// from scalar FE collection (called improper vector FE) and v is from
-/// proper vector FE space (like RT or ND)
-class MixedVectorVectorFEMassIntegrator : public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   void Init(Coefficient *q)
-   { Q = q; }
-
-#ifndef MFEM_THREAD_SAFE
-   DenseMatrix test_vshape;
-   Vector scalar_shape;
-   DenseMatrix trial_vshape; // components are test shapes
-#endif
-
-public:
-   MixedVectorVectorFEMassIntegrator() { Init(NULL); }
-   MixedVectorVectorFEMassIntegrator(Coefficient *_q) { Init(_q); }
-   MixedVectorVectorFEMassIntegrator(Coefficient &q) { Init(&q); }
-
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-void MixedVectorVectorFEMassIntegrator::AssembleElementMatrix2(
-   const FiniteElement &trial_fe, const FiniteElement &test_fe,
-   ElementTransformation &Trans, DenseMatrix &elmat)
-{
-    // here we assume for a moment that proper vector FE is the trial one
-    MFEM_ASSERT(test_fe.GetRangeType() == FiniteElement::SCALAR,
-                "The improper vector FE should have a scalar type in the current implementation \n");
-
-    int dim  = test_fe.GetDim();
-    int trial_dof = trial_fe.GetDof();
-    int test_dof = test_fe.GetDof();
-    int improper_testdof = dim * test_dof;
-
-    double w;
-
-#ifdef MFEM_THREAD_SAFE
-    DenseMatrix trial_vshape(trial_dof, dim);
-    DenseMatrix test_vshape(improper_testdof,dim);
-    Vector scalar_shape(test_dof);
-#else
-    trial_vshape.SetSize(trial_dof, dim);
-    test_vshape.SetSize(improper_testdof,dim);
-    scalar_shape.SetSize(test_dof);
-#endif
-
-    elmat.SetSize (improper_testdof, trial_dof);
-
-    const IntegrationRule *ir = IntRule;
-    if (ir == NULL)
-    {
-       int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
-       ir = &IntRules.Get(test_fe.GetGeomType(), order);
-    }
-
-    elmat = 0.0;
-    for (int i = 0; i < ir->GetNPoints(); i++)
-    {
-       const IntegrationPoint &ip = ir->IntPoint(i);
-
-       Trans.SetIntPoint (&ip);
-
-       trial_fe.CalcVShape(Trans, trial_vshape);
-
-       test_fe.CalcShape(ip, scalar_shape);
-       for (int d = 0; d < dim; ++d )
-           for (int l = 0; l < dim; ++l)
-               for (int k = 0; k < test_dof; ++k)
-               {
-                   if (l == d)
-                       test_vshape(l*test_dof+k,d) = scalar_shape(k);
-                   else
-                       test_vshape(l*test_dof+k,d) = 0.0;
-               }
-       // now test_vshape is of size trial_dof(scalar)*dim x dim
-       //test_fe.CalcVShape(Trans, test_vshape); // would be easy but this doesn't work for improper vector L2
-
-       //std::cout << "trial_vshape \n";
-       //trial_vshape.Print();
-
-       //std::cout << "scalar_shape \n";
-       //scalar_shape.Print();
-       //std::cout << "improper test_vshape \n";
-       //test_vshape.Print();
-
-       w = ip.weight * Trans.Weight();
-       if (Q)
-          w *= Q->Eval(Trans, ip);
-
-       for (int l = 0; l < dim; ++l)
-       {
-          for (int j = 0; j < test_dof; j++)
-          {
-             for (int k = 0; k < trial_dof; k++)
-             {
-                 for (int d = 0; d < dim; d++)
-                 {
-                    elmat(l*test_dof+j, k) += w * test_vshape(l*test_dof+j, d) * trial_vshape(k, d);
-                 }
-             }
-          }
-       }
-
-       //std::cout << "elmat \n";
-       //elmat.Print();
-       //int p = 2;
-       //p++;
-
-    }
-
-}
-
-/// Integrator for (Q u, v)
-/// where Q is a vector coefficient, u is from vector FE space created
-/// from scalar FE collection and v is from scalar FE space
-class MixedVectorScalarIntegrator : public BilinearFormIntegrator
-{
-private:
-   VectorCoefficient *VQ;
-   void Init(VectorCoefficient *vq)
-   { VQ = vq; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector shape;
-   Vector D;
-   Vector test_shape;
-   Vector b;
-   Vector trial_shape;
-   DenseMatrix trial_vshape; // components are test shapes
-#endif
-
-public:
-   MixedVectorScalarIntegrator() { Init(NULL); }
-   MixedVectorScalarIntegrator(VectorCoefficient *_vq) { Init(_vq); }
-   MixedVectorScalarIntegrator(VectorCoefficient &vq) { Init(&vq); }
-
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-void MixedVectorScalarIntegrator::AssembleElementMatrix2(
-        const FiniteElement &trial_fe, const FiniteElement &test_fe,
-        ElementTransformation &Trans, DenseMatrix &elmat)
-{
-    // assume trial_fe is vector FE but created from scalar f.e. collection,
-    // and test_fe is scalar FE
-
-    MFEM_ASSERT(test_fe.GetRangeType() == FiniteElement::SCALAR && trial_fe.GetRangeType() == FiniteElement::SCALAR,
-                "The improper vector FE should have a scalar type in the current implementation \n");
-
-    int dim  = test_fe.GetDim();
-    //int vdim = dim;
-    int trial_dof = trial_fe.GetDof();
-    int test_dof = test_fe.GetDof();
-    double w;
-
-    if (VQ == NULL)
-        mfem_error("MixedVectorScalarIntegrator::AssembleElementMatrix2(...)\n"
-                "   is not implemented for non-vector coefficients");
-
-#ifdef MFEM_THREAD_SAFE
-    Vector trial_shape(trial_dof);
-    DenseMatrix test_vshape(test_dof,dim);
-#else
-    trial_vshape.SetSize(trial_dof*dim,dim);
-    test_shape.SetSize(test_dof);
-#endif
-    elmat.SetSize (test_dof, trial_dof * dim);
-
-    const IntegrationRule *ir = IntRule;
-    if (ir == NULL)
-    {
-        int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
-        ir = &IntRules.Get(test_fe.GetGeomType(), order);
-    }
-
-    elmat = 0.0;
-    for (int i = 0; i < ir->GetNPoints(); i++)
-    {
-        const IntegrationPoint &ip = ir->IntPoint(i);
-        test_fe.CalcShape(ip, test_shape);
-
-        Trans.SetIntPoint (&ip);
-        trial_fe.CalcShape(ip, trial_shape);
-
-        //std::cout << "trial_shape \n";
-        //trial_shape.Print();
-
-        for (int d = 0; d < dim; ++d )
-            for (int l = 0; l < dim; ++l)
-                for (int k = 0; k < trial_dof; ++k)
-                {
-                    if (l == d)
-                        trial_vshape(l*trial_dof+k,d) = trial_shape(k);
-                    else
-                        trial_vshape(l*trial_dof+k,d) = 0.0;
-                }
-        // now trial_vshape is of size trial_dof(scalar)*dim x dim
-
-        //trial_fe.CalcVShape(Trans, trial_vshape); would be nice if it worked but no
-
-        w = ip.weight * Trans.Weight();
-        VQ->Eval (b, Trans, ip);
-
-        for (int l = 0; l < dim; ++l)
-            for (int j = 0; j < trial_dof; j++)
-                for (int k = 0; k < test_dof; k++)
-                    for (int d = 0; d < dim; d++ )
-                    {
-                        elmat(k, l*trial_dof + j) += w*trial_vshape(l*trial_dof + j,d)*b(d)*test_shape(k);
-                    }
-    }
-}
-
-//********* NEW STUFF FOR 4D CFOSLS
-//-----------------------
-/// Integrator for (Q u, v) for VectorFiniteElements
-
-class PAUVectorFEMassIntegrator: public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   VectorCoefficient *VQ;
-   MatrixCoefficient *MQ;
-   void Init(Coefficient *q, VectorCoefficient *vq, MatrixCoefficient *mq)
-   { Q = q; VQ = vq; MQ = mq; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector shape;
-   Vector D;
-   Vector test_shape;
-   Vector b;
-   DenseMatrix trial_vshape;
-#endif
-
-public:
-   PAUVectorFEMassIntegrator() { Init(NULL, NULL, NULL); }
-   PAUVectorFEMassIntegrator(Coefficient *_q) { Init(_q, NULL, NULL); }
-   PAUVectorFEMassIntegrator(Coefficient &q) { Init(&q, NULL, NULL); }
-   PAUVectorFEMassIntegrator(VectorCoefficient *_vq) { Init(NULL, _vq, NULL); }
-   PAUVectorFEMassIntegrator(VectorCoefficient &vq) { Init(NULL, &vq, NULL); }
-   PAUVectorFEMassIntegrator(MatrixCoefficient *_mq) { Init(NULL, NULL, _mq); }
-   PAUVectorFEMassIntegrator(MatrixCoefficient &mq) { Init(NULL, NULL, &mq); }
-
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                      ElementTransformation &Trans,
-                                      DenseMatrix &elmat);
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-//=-=-=-=--=-=-=-=-=-=-=-=-=
-/// Integrator for (Q u, v) for VectorFiniteElements
-class PAUVectorFEMassIntegrator2: public BilinearFormIntegrator
-{
-private:
-   Coefficient *Q;
-   VectorCoefficient *VQ;
-   MatrixCoefficient *MQ;
-   void Init(Coefficient *q, VectorCoefficient *vq, MatrixCoefficient *mq)
-   { Q = q; VQ = vq; MQ = mq; }
-
-#ifndef MFEM_THREAD_SAFE
-   Vector shape;
-   Vector D;
-   Vector trial_shape;
-   Vector test_shape;//<<<<<<<
-   DenseMatrix K;
-   DenseMatrix test_vshape;
-   DenseMatrix trial_vshape;
-   DenseMatrix trial_dshape;//<<<<<<<<<<<<<<
-   DenseMatrix test_dshape;//<<<<<<<<<<<<<<
-   DenseMatrix dshape;
-   DenseMatrix dshapedxt;
-   DenseMatrix invdfdx;
-#endif
-
-public:
-   PAUVectorFEMassIntegrator2() { Init(NULL, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(Coefficient *_q) { Init(_q, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(Coefficient &q) { Init(&q, NULL, NULL); }
-   PAUVectorFEMassIntegrator2(VectorCoefficient *_vq) { Init(NULL, _vq, NULL); }
-   PAUVectorFEMassIntegrator2(VectorCoefficient &vq) { Init(NULL, &vq, NULL); }
-   PAUVectorFEMassIntegrator2(MatrixCoefficient *_mq) { Init(NULL, NULL, _mq); }
-   PAUVectorFEMassIntegrator2(MatrixCoefficient &mq) { Init(NULL, NULL, &mq); }
-
-   virtual void AssembleElementMatrix(const FiniteElement &el,
-                                      ElementTransformation &Trans,
-                                      DenseMatrix &elmat);
-   virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                       const FiniteElement &test_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-};
-
-//=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-
-
-void PAUVectorFEMassIntegrator::AssembleElementMatrix(
-        const FiniteElement &el,
-        ElementTransformation &Trans,
-        DenseMatrix &elmat)
-{}
-
-
-void PAUVectorFEMassIntegrator::AssembleElementMatrix2(
-        const FiniteElement &trial_fe, const FiniteElement &test_fe,
-        ElementTransformation &Trans, DenseMatrix &elmat)
-{
-    // assume both test_fe is vector FE, trial_fe is scalar FE
-    int dim  = test_fe.GetDim();
-    int trial_dof = trial_fe.GetDof();
-    int test_dof = test_fe.GetDof();
-    double w;
-
-    if (VQ == NULL) // || = or
-        mfem_error("VectorFEMassIntegrator::AssembleElementMatrix2(...)\n"
-                "   is not implemented for non-vector coefficients");
-
-#ifdef MFEM_THREAD_SAFE
-    Vector trial_shape(trial_dof);
-    DenseMatrix test_vshape(test_dof,dim);
-#else
-    trial_vshape.SetSize(trial_dof,dim);
-    test_shape.SetSize(test_dof);
-#endif
-    elmat.SetSize (test_dof, trial_dof);
-
-    const IntegrationRule *ir = IntRule;
-    if (ir == NULL)
-    {
-        int order = (Trans.OrderW() + test_fe.GetOrder() + trial_fe.GetOrder());
-        ir = &IntRules.Get(test_fe.GetGeomType(), order);
-    }
-
-    elmat = 0.0;
-//    b.SetSize(dim);
-    for (int i = 0; i < ir->GetNPoints(); i++)
-    {
-        const IntegrationPoint &ip = ir->IntPoint(i);
-        test_fe.CalcShape(ip, test_shape);
-
-        Trans.SetIntPoint (&ip);
-        trial_fe.CalcVShape(Trans, trial_vshape);
-
-        w = ip.weight * Trans.Weight();
-        VQ->Eval (b, Trans, ip);
-
-        for (int j = 0; j < trial_dof; j++)
-            for (int k = 0; k < test_dof; k++)
-                for (int d = 0; d < dim; d++ )
-                    elmat(k, j) += w*trial_vshape(j,d)*b(d)*test_shape(k);
-    }
-}
-///////////////////////////
-
-void PAUVectorFEMassIntegrator2::AssembleElementMatrix(
-        const FiniteElement &el,
-        ElementTransformation &Trans,
-        DenseMatrix &elmat)
-{
-    int dof = el.GetDof();
-    int dim  = el.GetDim();
-    double w;
-
-    if (VQ || MQ) // || = or
-        mfem_error("VectorFEMassIntegrator::AssembleElementMatrix2(...)\n"
-                "   is not implemented for vector/tensor permeability");
-
-#ifdef MFEM_THREAD_SAFE
-    Vector shape(dof);
-    DenseMatrix dshape(dof,dim);
-    DenseMatrix dshapedxt(dof,dim);
-    DenseMatrix invdfdx(dim,dim);
-#else
-    shape.SetSize(dof);
-    dshape.SetSize(dof,dim);
-    dshapedxt.SetSize(dof,dim);
-    invdfdx.SetSize(dim,dim);
-#endif
-    //elmat.SetSize (test_dof, trial_dof);
-    elmat.SetSize (dof, dof);
-    elmat = 0.0;
-
-    const IntegrationRule *ir = IntRule;
-    if (ir == NULL)
-    {
-        int order = (Trans.OrderW() + el.GetOrder() + el.GetOrder());
-        ir = &IntRules.Get(el.GetGeomType(), order);
-    }
-
-    elmat = 0.0;
-    for (int i = 0; i < ir->GetNPoints(); i++)
-    {
-        const IntegrationPoint &ip = ir->IntPoint(i);
-
-        //chak Trans.SetIntPoint (&ip);
-
-        el.CalcShape(ip, shape);
-        el.CalcDShape(ip, dshape);
-
-        Trans.SetIntPoint (&ip);
-        CalcInverse(Trans.Jacobian(), invdfdx);
-        w = ip.weight * Trans.Weight();
-        Mult(dshape, invdfdx, dshapedxt);
-
-        if (Q)
-        {
-            w *= Q -> Eval (Trans, ip);
-        }
-
-        for (int j = 0; j < dof; j++)
-        {
-            for (int k = 0; k < dof; k++)
-            {
-                for (int d = 0; d < dim - 1; d++ )
-                    elmat(j, k) +=  w * dshapedxt(j, d) * dshapedxt(k, d);
-                elmat(j, k) +=  w * shape(j) * shape(k);
-            }
-        }
-    }
-}
-
-void PAUVectorFEMassIntegrator2::AssembleElementMatrix2(
-        const FiniteElement &trial_fe, const FiniteElement &test_fe,
-        ElementTransformation &Trans, DenseMatrix &elmat)
-{}
-
-//********* END OF NEW STUFF FOR CFOSLS 4D
-
-//********* NEW STUFF FOR 4D CFOSLS
-//---------
-class VectordivDomainLFIntegrator : public LinearFormIntegrator
-{
-   Vector divshape;
-   Coefficient &Q;
-   int oa, ob;
-public:
-   /// Constructs a domain integrator with a given Coefficient
-   VectordivDomainLFIntegrator(Coefficient &QF, int a = 2, int b = 0)
-   // the old default was a = 1, b = 1
-   // for simple elliptic problems a = 2, b = -2 is ok
-      : Q(QF), oa(a), ob(b) { }
-
-   /// Constructs a domain integrator with a given Coefficient
-   VectordivDomainLFIntegrator(Coefficient &QF, const IntegrationRule *ir)
-      : LinearFormIntegrator(ir), Q(QF), oa(1), ob(1) { }
-
-   /** Given a particular Finite Element and a transformation (Tr)
-       computes the element right hand side element vector, elvect. */
-   virtual void AssembleRHSElementVect(const FiniteElement &el,
-                                       ElementTransformation &Tr,
-                                       Vector &elvect);
-
-   using LinearFormIntegrator::AssembleRHSElementVect;
-};
-//---------
-
-//------------------
-void VectordivDomainLFIntegrator::AssembleRHSElementVect(
-   const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)//don't need the matrix but the vector
-{
-   int dof = el.GetDof();
-
-   divshape.SetSize(dof);       // vector of size dof
-   elvect.SetSize(dof);
-   elvect = 0.0;
-
-   const IntegrationRule *ir = IntRule;
-   if (ir == NULL)
-   {
-      // ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob + Tr.OrderW());
-      ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
-     // int order = 2 * el.GetOrder() ; // <--- OK for RTk
-     // ir = &IntRules.Get(el.GetGeomType(), order);
-   }
-
-   for (int i = 0; i < ir->GetNPoints(); i++)
-   {
-      const IntegrationPoint &ip = ir->IntPoint(i);
-      el.CalcDivShape(ip, divshape);
-
-      Tr.SetIntPoint (&ip);
-//      double val = Tr.Weight() * Q.Eval(Tr, ip);
-      // Chak: Looking at how MFEM assembles in VectorFEDivergenceIntegrator, I think you dont need Tr.Weight() here
-      // I think this is because the RT (or other vector FE) basis is scaled by the geometry of the mesh
-      double val = Q.Eval(Tr, ip);
-
-      add(elvect, ip.weight * val, divshape, elvect);
-   }
-}
-
-class GradDomainLFIntegrator : public LinearFormIntegrator
-{
-   DenseMatrix dshape;
-   DenseMatrix invdfdx;
-   DenseMatrix dshapedxt;
-   Vector bf;
-   Vector bfdshapedxt;
-   VectorCoefficient &Q;
-   int oa, ob;
-public:
-   /// Constructs a domain integrator with a given Coefficient
-   GradDomainLFIntegrator(VectorCoefficient &QF, int a = 2, int b = 0)
-   // the old default was a = 1, b = 1
-   // for simple elliptic problems a = 2, b = -2 is ok
-      : Q(QF), oa(a), ob(b) { }
-
-   /// Constructs a domain integrator with a given Coefficient
-   GradDomainLFIntegrator(VectorCoefficient &QF, const IntegrationRule *ir)
-      : LinearFormIntegrator(ir), Q(QF), oa(1), ob(1) { }
-
-   /** Given a particular Finite Element and a transformation (Tr)
-       computes the element right hand side element vector, elvect. */
-   virtual void AssembleRHSElementVect(const FiniteElement &el,
-                                       ElementTransformation &Tr,
-                                       Vector &elvect);
-
-   using LinearFormIntegrator::AssembleRHSElementVect;
-};
-
-void GradDomainLFIntegrator::AssembleRHSElementVect(
-   const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)
-{
-   int dof = el.GetDof();
-   int dim  = el.GetDim();
-
-   dshape.SetSize(dof,dim);       // vector of size dof
-   elvect.SetSize(dof);
-   elvect = 0.0;
-
-   invdfdx.SetSize(dim,dim);
-   dshapedxt.SetSize(dof,dim);
-   bf.SetSize(dim);
-   bfdshapedxt.SetSize(dof);
-   double w;
-
-   const IntegrationRule *ir = IntRule;
-   if (ir == NULL)
-   {
-//       ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob
-//                          + Tr.OrderW());
-//      ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
-     // int order = 2 * el.GetOrder() ; // <--- OK for RTk
-      int order = (Tr.OrderW() + el.GetOrder() + el.GetOrder());
-      ir = &IntRules.Get(el.GetGeomType(), order);
-   }
-
-   for (int i = 0; i < ir->GetNPoints(); i++)
-   {
-      const IntegrationPoint &ip = ir->IntPoint(i);
-      el.CalcDShape(ip, dshape);
-
-      Tr.SetIntPoint (&ip);
-      w = ip.weight;// * Tr.Weight();
-      CalcAdjugate(Tr.Jacobian(), invdfdx);
-      Mult(dshape, invdfdx, dshapedxt);
-
-      Q.Eval(bf, Tr, ip);
-
-      dshapedxt.Mult(bf, bfdshapedxt);
-
-      add(elvect, w, bfdshapedxt, elvect);
-   }
-}
-
-//------------------
-//********* END OF NEW STUFF FOR CFOSLS 4D
-
-
-//------------------
-//********* END OF NEW BilinearForm and LinearForm integrators FOR CFOSLS 4D (used only for heat equation, so can be deleted)
-
-double uFun_ex(const Vector& x); // Exact Solution
-double uFun_ex_dt(const Vector& xt);
-void uFun_ex_gradx(const Vector& xt, Vector& grad);
-
-void bFun_ex (const Vector& xt, Vector& b);
-double  bFundiv_ex(const Vector& xt);
-
-double uFun3_ex(const Vector& x); // Exact Solution
-double uFun3_ex_dt(const Vector& xt);
-void uFun3_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun4_ex(const Vector& x); // Exact Solution
-double uFun4_ex_dt(const Vector& xt);
-void uFun4_ex_gradx(const Vector& xt, Vector& grad);
-
-//void bFun4_ex (const Vector& xt, Vector& b);
-
-//void bFun6_ex (const Vector& xt, Vector& b);
-
-double uFun5_ex(const Vector& x); // Exact Solution
-double uFun5_ex_dt(const Vector& xt);
-void uFun5_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun6_ex(const Vector& x); // Exact Solution
-double uFun6_ex_dt(const Vector& xt);
-void uFun6_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFunCylinder_ex(const Vector& x); // Exact Solution
-double uFunCylinder_ex_dt(const Vector& xt);
-void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun66_ex(const Vector& x); // Exact Solution
-double uFun66_ex_dt(const Vector& xt);
-void uFun66_ex_gradx(const Vector& xt, Vector& grad);
-
-
-double uFun2_ex(const Vector& x); // Exact Solution
-double uFun2_ex_dt(const Vector& xt);
-void uFun2_ex_gradx(const Vector& xt, Vector& grad);
-
-void Hdivtest_fun(const Vector& xt, Vector& out );
-double  L2test_fun(const Vector& xt);
-
-double uFun33_ex(const Vector& x); // Exact Solution
-double uFun33_ex_dt(const Vector& xt);
-void uFun33_ex_gradx(const Vector& xt, Vector& grad);
-
-double uFun10_ex(const Vector& x); // Exact Solution
-double uFun10_ex_dt(const Vector& xt);
-void uFun10_ex_gradx(const Vector& xt, Vector& grad);
-
-template <double (*Sfunc)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )>
-    void sigmaTemplate(const Vector& xt, Vector& sigma);
-template <void (*bvecfunc)(const Vector&, Vector& )>
-    void KtildaTemplate(const Vector& xt, DenseMatrix& Ktilda);
-template <void (*bvecfunc)(const Vector&, Vector& )>
-        void bbTTemplate(const Vector& xt, DenseMatrix& bbT);
-template <void (*bvecfunc)(const Vector&, Vector& )>
-    double bTbTemplate(const Vector& xt);
-template<void(*bvec)(const Vector & x, Vector & vec)>
-    void minbTemplate(const Vector& xt, Vector& minb);
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-    double rhsideTemplate(const Vector& xt);
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-        void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
-        void bfTemplate(const Vector& xt, Vector& bf);
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-        void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-        double divsigmaTemplate(const Vector& xt);
-
-template<double (*S)(const Vector & xt) > double uNonhomoTemplate(const Vector& xt);
-
-
-class Transport_test
-    {
-    protected:
-        int dim;
-        int numsol;
-
-    public:
-        FunctionCoefficient * scalarS;
-        FunctionCoefficient * scalardivsigma;         // = dS/dt + div (bS) = div sigma
-        FunctionCoefficient * bTb;
-        VectorFunctionCoefficient * sigma;
-        VectorFunctionCoefficient * b;
-        VectorFunctionCoefficient * minb;
-        VectorFunctionCoefficient * bf;
-        MatrixFunctionCoefficient * Ktilda;
-        MatrixFunctionCoefficient * bbT;
-    public:
-        Transport_test (int Dim, int NumSol);
-
-        int GetDim() {return dim;}
-        int GetNumSol() {return numsol;}
-        void SetDim(int Dim) { dim = Dim;}
-        void SetNumSol(int NumSol) { numsol = NumSol;}
-        bool CheckTestConfig();
-
-        ~Transport_test () {}
-    private:
-        template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-                 void(*bvec)(const Vector & x, Vector & vec), double (*divbvec)(const Vector & xt)> \
-        void SetTestCoeffs ( );
-
-        void SetScalarSFun( double (*S)(const Vector & xt))
-        { scalarS = new FunctionCoefficient(S);}
-
-        template< void(*bvec)(const Vector & x, Vector & vec)>  \
-        void SetScalarBtB()
-        {
-            bTb = new FunctionCoefficient(bTbTemplate<bvec>);
-        }
-
-        template<double (*S)(const Vector & xt), void(*bvec)(const Vector & x, Vector & vec)> \
-        void SetSigmaVec()
-        {
-            sigma = new VectorFunctionCoefficient(dim, sigmaTemplate<S,bvec>);
-        }
-
-        void SetbVec( void(*bvec)(const Vector & x, Vector & vec))
-        { b = new VectorFunctionCoefficient(dim, bvec);}
-
-        template<void(*bvec)(const Vector & x, Vector & vec)> \
-        void SetminbVec()
-        { minb = new VectorFunctionCoefficient(dim, minbTemplate<bvec>);}
-
-        template< void(*f2)(const Vector & x, Vector & vec)>  \
-        void SetKtildaMat()
-        {
-            Ktilda = new MatrixFunctionCoefficient(dim, KtildaTemplate<f2>);
-        }
-
-        template< void(*bvec)(const Vector & x, Vector & vec)>  \
-        void SetBBtMat()
-        {
-            bbT = new MatrixFunctionCoefficient(dim, bbTTemplate<bvec>);
-        }
-
-        template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-                 void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-        void SetbfVec()
-        { bf = new VectorFunctionCoefficient(dim, bfTemplate<S,dSdt,Sgradxvec,bvec,divbfunc>);}
-
-        template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-                 void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
-        void SetDivSigma()
-        { scalardivsigma = new FunctionCoefficient(divsigmaTemplate<S, dSdt, Sgradxvec, bvec, divbfunc>);}
-
-    };
-
-    template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx),  \
-             void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
-    void Transport_test::SetTestCoeffs ()
-    {
-        SetScalarSFun(S);
-        SetbVec(bvec);
-        SetminbVec<bvec>();
-        SetbfVec<S, dSdt, Sgradxvec, bvec, divbfunc>();
-        SetSigmaVec<S,bvec>();
-        SetKtildaMat<bvec>();
-        SetScalarBtB<bvec>();
-        SetDivSigma<S, dSdt, Sgradxvec, bvec, divbfunc>();
-        SetBBtMat<bvec>();
-        return;
-    }
-
-
-    bool Transport_test::CheckTestConfig()
-    {
-        if (dim == 4 || dim == 3)
-        {
-            if (numsol == 0)
-                return true;
-            if ( numsol == 1 && dim == 3 )
-                return true;
-            if ( numsol == 2 && dim == 4 )
-                return true;
-            if ( numsol == 3 && dim == 3 )
-                return true;
-            if ( numsol == 33 && dim == 4 )
-                return true;
-            if ( numsol == 4 && dim == 3 )
-                return true;
-            if ( numsol == 44 && dim == 3 )
-                return true;
-            if ( numsol == 100 && dim == 3 )
-                return true;
-            if ( numsol == 200 && dim == 3 )
-                return true;
-            if ( numsol == 5 && dim == 3 )
-                return true;
-            if ( numsol == 55 && dim == 4 )
-                return true;
-            if ( numsol == 444 && dim == 4 )
-                return true;
-            if ( numsol == 1000 && dim == 3 )
-                return true;
-            if ( numsol == 8 && dim == 3 )
-                return true;
-            if (numsol == 10 && dim == 4)
-                return true;
-            if (numsol == -3 && dim == 3)
-                return true;
-            if (numsol == -4 && dim == 4)
-                return true;
-            return false;
-        }
-        else
-            return false;
-
-    }
-
-    Transport_test::Transport_test (int Dim, int NumSol)
-    {
-        dim = Dim;
-        numsol = NumSol;
-
-        if ( CheckTestConfig() == false )
-            std::cout << "Inconsistent dim and numsol \n" << std::flush;
-        else
-        {
-            if (numsol == -3) // 3D test for the paper
-            {
-                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
-            }
-            if (numsol == -4) // 4D test for the paper
-            {
-                SetTestCoeffs<&uFunTest_ex, &uFunTest_ex_dt, &uFunTest_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
-            }
-            if (numsol == 0)
-            {
-                //std::cout << "The domain is rectangular or cubic, velocity does not"
-                             //" satisfy divergence condition" << std::endl << std::flush;
-                SetTestCoeffs<&uFun_ex, &uFun_ex_dt, &uFun_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
-                //SetTestCoeffs<&uFun_ex, &uFun_ex_dt, &uFun_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
-            }
-            if (numsol == 1)
-            {
-                //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
-                SetTestCoeffs<&uFun2_ex, &uFun2_ex_dt, &uFun2_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 100)
-            {
-                //std::cout << "The domain must be a cylinder over a unit square" << std::endl << std::flush;
-                SetTestCoeffs<&uFun_ex, &uFun_ex_dt, &uFun_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
-            }
-            if (numsol == 200)
-            {
-                //std::cout << "The domain must be a cylinder over a unit circle" << std::endl << std::flush;
-                SetTestCoeffs<&uFun_ex, &uFun_ex_dt, &uFun_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 2)
-            {
-                //std::cout << "The domain must be a cylinder over a 3D cube, velocity does not"
-                             //" satisfy divergence condition" << std::endl << std::flush;
-                SetTestCoeffs<&uFun3_ex, &uFun3_ex_dt, &uFun3_ex_gradx, &bFun_ex, &bFundiv_ex>();
-            }
-            if (numsol == 3)
-            {
-                //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
-                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 4) // no exact solution in fact, ~ unsuccessfully trying to get a picture from the report
-            {
-                //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
-                //std::cout << "Using new interface \n";
-                SetTestCoeffs<&uFun5_ex, &uFun5_ex_dt, &uFun5_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 44) // no exact solution in fact, ~ unsuccessfully trying to get a picture from the report
-            {
-                //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
-                //std::cout << "Using new interface \n";
-                SetTestCoeffs<&uFun6_ex, &uFun6_ex_dt, &uFun6_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 8)
-            {
-                //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
-                SetTestCoeffs<&uFunCylinder_ex, &uFunCylinder_ex_dt, &uFunCylinder_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
-            }
-            if (numsol == 5)
-            {
-                //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
-                SetTestCoeffs<&uFun4_ex, &uFun4_ex_dt, &uFun4_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
-            }
-            if (numsol == 1000)
-            {
-                //std::cout << "The domain must be a cylinder over a square" << std::endl << std::flush;
-                SetTestCoeffs<&uFun_ex, &uFun_ex_dt, &uFun_ex_gradx, &bFunRect2D_ex, &bFunRect2Ddiv_ex>();
-            }
-            if (numsol == 33)
-            {
-                //std::cout << "The domain must be a cylinder over a sphere" << std::endl << std::flush;
-                SetTestCoeffs<&uFun33_ex, &uFun33_ex_dt, &uFun33_ex_gradx, &bFunSphere3D_ex, &bFunSphere3Ddiv_ex>();
-            }
-            if (numsol == 444) // no exact solution in fact, ~ unsuccessfully trying to get something beauitiful
-            {
-                //std::cout << "The domain must be a cylinder over a sphere" << std::endl << std::flush;
-                SetTestCoeffs<&uFun66_ex, &uFun66_ex_dt, &uFun66_ex_gradx, &bFunSphere3D_ex, &bFunSphere3Ddiv_ex>();
-            }
-            if (numsol == 55)
-            {
-                //std::cout << "The domain must be a cylinder over a cube" << std::endl << std::flush;
-                SetTestCoeffs<&uFun33_ex, &uFun33_ex_dt, &uFun33_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
-            }
-            if (numsol == 10)
-            {
-                SetTestCoeffs<&uFun10_ex, &uFun10_ex_dt, &uFun10_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
-            }
-        } // end of setting test coefficients in correct case
-    }
-
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
@@ -1140,13 +156,13 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 0;
+    int numsol          = 8;
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 3;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
@@ -1265,6 +281,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Running tests for the paper: \n";
 
+    /*
     if (nDimensions == 3)
     {
         numsol = -3;
@@ -1275,11 +292,13 @@ int main(int argc, char *argv[])
         numsol = -4;
         mesh_file = "../data/cube4d_96.MFEM";
     }
+    */
+
+    mesh_file = "../data/cube_3d_moderate.mesh";
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
-
 
     switch (prec_option)
     {
@@ -1366,6 +385,41 @@ int main(int argc, char *argv[])
     for (int l = 0; l < par_ref_levels; l++)
     {
        pmesh->UniformRefinement();
+    }
+
+    if (numsol == 8)
+    {
+        Vector vert_coos;
+        pmesh->GetVertices(vert_coos);
+        int nv = pmesh->GetNV();
+        for (int vind = 0; vind < nv; ++vind)
+        {
+            for (int j = 0; j < nDimensions; ++j)
+            {
+                if (j < nDimensions - 1) // shift only in space
+                {
+                    // translation by -0.5 in space variables
+                    vert_coos(j*nv + vind) -= 0.5;
+                    // dilation so that the resulting mesh covers [-1,1] ^d in space
+                    vert_coos(j*nv + vind) *= 2.0;
+                }
+                // dilation in time so that final time interval is [0,2]
+                if (j == nDimensions - 1)
+                    vert_coos(j*nv + vind) *= 2.0;
+            }
+        }
+        pmesh->SetVertices(vert_coos);
+
+        /*
+        std::stringstream fname;
+        fname << "checkmesh.mesh";
+        std::ofstream ofid(fname.str().c_str());
+        ofid.precision(8);
+        pmesh->Print(ofid);
+
+        MPI_Finalize();
+        return 0;
+        */
     }
 
     //if(dim==3) pmesh->ReorientTetMesh();
@@ -1554,15 +608,37 @@ int main(int argc, char *argv[])
    //----------------------------------------------------------
 
    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
-   ess_bdrS = 0;
-   if (strcmp(space_for_S,"H1") == 0)
-       ess_bdrS[0] = 1; // t = 0
    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
+
+
+   ess_bdrS = 0;
    ess_bdrSigma = 0;
-   if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr condition for sigma at t = 0
+
+   if (numsol == 8)
    {
-       ess_bdrSigma[0] = 1;
+       MFEM_ASSERT(pmesh->bdr_attributes.Max() == 6, "");
+       if (strcmp(space_for_S,"H1") == 0)
+       {
+           ess_bdrS = 1;
+           ess_bdrS[5] = 0;
+       }
+       else // L2 case
+       {
+           ess_bdrSigma = 1;
+           ess_bdrSigma[5] = 0;
+       }
+
    }
+   else
+   {
+       if (strcmp(space_for_S,"H1") == 0)
+           ess_bdrS[0] = 1; // t = 0
+       if (strcmp(space_for_S,"L2") == 0) // S is from L2, so we impose bdr condition for sigma at t = 0
+       {
+           ess_bdrSigma[0] = 1;
+       }
+   }
+
 
    if (verbose)
    {
@@ -2049,13 +1125,17 @@ int main(int argc, char *argv[])
    // 12. Solve the linear system with MINRES.
    //     Check the norm of the unpreconditioned residual.
 
+   if (verbose)
+       std::cout << "Dofs for main unknowns + Lagrange multiplier = " << CFOSLSop->ColOffsets()[numblocks] << "\n";
+
    chrono.Clear();
    chrono.Start();
    MINRESSolver solver(MPI_COMM_WORLD);
    solver.SetAbsTol(atol);
    solver.SetRelTol(rtol);
-   solver.SetMaxIter(max_iter);
+   solver.SetMaxIter(4000);
    solver.SetOperator(*CFOSLSop);
+   solver.iterative_mode = false;
    if (prec_option > 0)
         solver.SetPreconditioner(prec);
    solver.SetPrintLevel(1);
@@ -2101,7 +1181,19 @@ int main(int argc, char *argv[])
 
        Vector trueS(C->Height());
 
-       CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+       //(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
+
+       CGSolver cg;
+       cg.SetPrintLevel(0);
+       cg.SetMaxIter(5000);
+       cg.SetRelTol(sqrt(1.0e-12));
+       cg.SetAbsTol(sqrt(1.0e-15));
+       cg.SetOperator(*C);
+       cg.iterative_mode = false;
+
+       cg.Mult(bTsigma, trueS);
+
+
        S->Distribute(trueS);
    }
 
@@ -2133,8 +1225,12 @@ int main(int argc, char *argv[])
 
    if (verbose)
    {
-       cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+       if (fabs(norm_div) > 1.0e-13)
+           cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
                  << err_div/norm_div  << "\n";
+       else
+           cout << "|| div sigma_h || ( div (sigma_ex) == 0) = "
+                 << err_div << "\n";
    }
 
    if (verbose)
@@ -2330,602 +1426,4 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-template <void (*bvecfunc)(const Vector&, Vector& )> \
-void KtildaTemplate(const Vector& xt, DenseMatrix& Ktilda)
-{
-    int nDimensions = xt.Size();
-    Vector b;
-    bvecfunc(xt,b);
-    double bTbInv = (-1./(b*b));
-    Ktilda.Diag(1.0,nDimensions);
-    AddMult_a_VVt(bTbInv,b,Ktilda);
-}
-
-template <void (*bvecfunc)(const Vector&, Vector& )> \
-void bbTTemplate(const Vector& xt, DenseMatrix& bbT)
-{
-//    int nDimensions = xt.Size();
-    Vector b;
-    bvecfunc(xt,b);
-    MultVVt(b, bbT);
-}
-
-template <double (*ufunc)(const Vector&), void (*bvecfunc)(const Vector&, Vector& )> \
-void sigmaTemplate(const Vector& xt, Vector& sigma)
-{
-    Vector b;
-    bvecfunc(xt, b);
-    sigma.SetSize(xt.Size());
-    sigma(xt.Size()-1) = ufunc(xt);
-    for (int i = 0; i < xt.Size()-1; i++)
-        sigma(i) = b(i) * sigma(xt.Size()-1);
-
-    return;
-}
-
-template <void (*bvecfunc)(const Vector&, Vector& )> \
-double bTbTemplate(const Vector& xt)
-{
-    Vector b;
-    bvecfunc(xt,b);
-    return b*b;
-}
-
-template<void(*bvec)(const Vector & x, Vector & vec)>
-void minbTemplate(const Vector& xt, Vector& minb)
-{
-    minb.SetSize(xt.Size());
-
-    bvec(xt,minb);
-
-    minb *= -1;
-}
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-double divsigmaTemplate(const Vector& xt)
-{
-    Vector b;
-    bvec(xt,b);
-
-    Vector gradS;
-    Sgradxvec(xt,gradS);
-
-    double res = 0.0;
-
-    res += dSdt(xt);
-    for ( int i= 0; i < xt.Size() - 1; ++i )
-        res += b(i) * gradS(i);
-    res += divbfunc(xt) * S(xt);
-
-    return res;
-}
-
-template<double (*S)(const Vector & xt) > double uNonhomoTemplate(const Vector& xt)
-{
-    Vector xt0(xt.Size());
-    xt0 = xt;
-    xt0 (xt0.Size() - 1) = 0;
-
-    return S(xt0);
-}
-
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt) > \
-double rhsideTemplate(const Vector& xt)
-{
-    Vector b;
-    bvec(xt,b);
-
-    Vector gradS;
-    Sgradxvec(xt,gradS);
-
-    Vector xt0(xt.Size());
-    xt0 = xt;
-    xt0 (xt0.Size() - 1) = 0;
-
-    Vector gradS0;
-    Sgradxvec(xt0,gradS0);
-
-    double res = 0.0;
-
-    res += dSdt(xt);
-    for ( int i= 0; i < xt.Size() - 1; ++i )
-        res += b(i) * (gradS(i) - gradS0(i));
-    res += divbfunc(xt) * (S(xt) - S(xt0));
-
-    // only for debugging casuality weight usage
-    //double t = xt[xt.Size()-1];
-    //res *= exp (-t / 0.01);
-
-    return res;
-
-    /*
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    Vector b(3);
-    bFunCircle2D_ex(xt,b);
-    return 0.0 - (
-           -100.0 * 2.0 * (x-0.5) * exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y)) * b(0) +
-           -100.0 * 2.0 *    y    * exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y)) * b(1) );
-    */
-}
-
-template<double (*S)(const Vector & xt), double (*dSdt)(const Vector & xt), void(*Sgradxvec)(const Vector & x, Vector & gradx), \
-         void(*bvec)(const Vector & x, Vector & vec), double (*divbfunc)(const Vector & xt)> \
-void bfTemplate(const Vector& xt, Vector& bf)
-{
-    Vector b;
-    bvec(xt,b);
-
-    Vector gradS;
-    Sgradxvec(xt,gradS);
-
-    Vector xt0(xt.Size());
-    xt0 = xt;
-    xt0 (xt0.Size() - 1) = 0;
-
-    Vector gradS0;
-    Sgradxvec(xt0,gradS0);
-
-    double res = 0.0;
-
-    res += dSdt(xt);
-    for ( int i= 0; i < xt.Size() - 1; ++i )
-        res += b(i) * (gradS(i) - gradS0(i));
-    res += divbfunc(xt) * (S(xt) - S(xt0));
-
-    bf.SetSize(xt.Size());
-
-    for (int i = 0; i < bf.Size(); ++i)
-        bf(i) = res * b(i);
-}
-
-
-
-double uFun_ex(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    //return t;
-    ////setback
-    return sin(t)*exp(t);
-}
-
-double uFun_ex_dt(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    return (cos(t) + sin(t)) * exp(t);
-}
-
-void uFun_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    gradx.SetSize(xt.Size() - 1);
-    gradx = 0.0;
-}
-
-
-/*
-
-double fFun(const Vector& xt)
-{
-    double t = xt(xt.Size()-1);
-    //double tmp = (xt.Size()==4) ? 1.0 - 2.0 * xt(2) : 0;
-    double tmp = (xt.Size()==4) ? 2*M_PI * sin(2*xt(2)*M_PI) : 0;
-    //double tmp = (xt.Size()==4) ? M_PI * cos(xt(2)*M_PI) : 0;
-    //double tmp = (xt.Size()==4) ? M_PI * sin(xt(2)*M_PI) : 0;
-    return cos(t)*exp(t)+sin(t)*exp(t)+(M_PI*cos(xt(1)*M_PI)*cos(xt(0)*M_PI)+
-                   2*M_PI*cos(xt(0)*2*M_PI)*cos(xt(1)*M_PI)+tmp) *uFun_ex(xt);
-    //return cos(t)*exp(t)+sin(t)*exp(t)+(1.0 - 2.0 * xt(0) + 1.0 - 2.0 * xt(1) +tmp) *uFun_ex(xt);
-}
-*/
-
-void bFun_ex(const Vector& xt, Vector& b )
-{
-    b.SetSize(xt.Size());
-
-    //for (int i = 0; i < xt.Size()-1; i++)
-        //b(i) = xt(i) * (1 - xt(i));
-
-    //if (xt.Size() == 4)
-        //b(2) = 1-cos(2*xt(2)*M_PI);
-        //b(2) = sin(xt(2)*M_PI);
-        //b(2) = 1-cos(xt(2)*M_PI);
-
-    b(0) = sin(xt(0)*2*M_PI)*cos(xt(1)*M_PI);
-    b(1) = sin(xt(1)*M_PI)*cos(xt(0)*M_PI);
-    b(2) = 1-cos(2*xt(2)*M_PI);
-
-    b(xt.Size()-1) = 1.;
-
-}
-
-double bFundiv_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-    if (xt.Size() == 4)
-        return 2*M_PI * cos(x*2*M_PI)*cos(y*M_PI) + M_PI * cos(y*M_PI)*cos(x*M_PI) + 2*M_PI * sin(2*z*M_PI);
-    if (xt.Size() == 3)
-        return 2*M_PI * cos(x*2*M_PI)*cos(y*M_PI) + M_PI * cos(y*M_PI)*cos(x*M_PI);
-    return 0.0;
-}
-
-double uFun2_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    return t * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun2_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return (1.0 + t) * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-void uFun2_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = t * exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y));
-    gradx(1) = t * exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-/*
-double fFun2(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    Vector b(3);
-    bFunCircle2D_ex(xt,b);
-    return (t + 1) * exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y)) +
-             t * exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(0) +
-             t * exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(1);
-}
-*/
-
-double uFun3_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return sin(t)*exp(t) * sin ( M_PI * (x + y + z));
-}
-
-double uFun3_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return (sin(t) + cos(t)) * exp(t) * sin ( M_PI * (x + y + z));
-}
-
-void uFun3_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-    gradx(1) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-    gradx(2) = sin(t) * exp(t) * M_PI * cos ( M_PI * (x + y + z));
-}
-
-
-/*
-double fFun3(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    Vector b(4);
-    bFun_ex(xt,b);
-
-    return (cos(t)*exp(t)+sin(t)*exp(t)) * sin ( M_PI * (x + y + z)) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(0) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(1) +
-            sin(t)*exp(t) * M_PI * cos ( M_PI * (x + y + z)) * b(2) +
-            (2*M_PI*cos(x*2*M_PI)*cos(y*M_PI) +
-             M_PI*cos(y*M_PI)*cos(x*M_PI)+
-             + 2*M_PI*sin(z*2*M_PI)) * uFun3_ex(xt);
-}
-*/
-
-double uFun4_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun4_ex_dt(const Vector& xt)
-{
-    return uFun4_ex(xt);
-}
-
-void uFun4_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y));
-    gradx(1) = exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y));
-}
-
-double uFun33_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25) ));
-}
-
-double uFun33_ex_dt(const Vector& xt)
-{
-    return uFun33_ex(xt);
-}
-
-void uFun33_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-    gradx(1) = exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-    gradx(2) = exp(t) * 2.0 * (z -0.25) * cos (((x - 0.5)*(x - 0.5) + y*y + (z -0.25)*(z-0.25)));
-}
-/*
-double fFun4(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    Vector b(3);
-    bFunCircle2D_ex(xt,b);
-    return exp(t) * sin (((x - 0.5)*(x - 0.5) + y*y)) +
-             exp(t) * 2.0 * (x - 0.5) * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(0) +
-             exp(t) * 2.0 * y         * cos (((x - 0.5)*(x - 0.5) + y*y)) * b(1);
-}
-
-
-double f_natural(const Vector & xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    if ( t > MYZEROTOL)
-        return 0.0;
-    else
-        return (-uFun5_ex(xt));
-}
-*/
-
-double uFun5_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    if ( t < MYZEROTOL)
-        return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
-    else
-        return 0.0;
-}
-
-double uFun5_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-    return 0.0;
-}
-
-void uFun5_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5) * uFun5_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y * uFun5_ex(xt);
-}
-
-
-double uFun6_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y)) * exp(-10.0*t);
-}
-
-double uFun6_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-    return -10.0 * uFun6_ex(xt);
-}
-
-void uFun6_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5) * uFun6_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y * uFun6_ex(xt);
-}
-
-
-double GaussianHill(const Vector&xvec)
-{
-    double x = xvec(0);
-    double y = xvec(1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y));
-}
-
-double uFunCylinder_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double r = sqrt(x*x + y*y);
-    double teta = atan(y/x);
-    /*
-    if (fabs(x) < MYZEROTOL && y > 0)
-        teta = M_PI / 2.0;
-    else if (fabs(x) < MYZEROTOL && y < 0)
-        teta = - M_PI / 2.0;
-    else
-        teta = atan(y,x);
-    */
-    double t = xt(xt.Size()-1);
-    Vector xvec(2);
-    xvec(0) = r * cos (teta - t);
-    xvec(1) = r * sin (teta - t);
-    return GaussianHill(xvec);
-}
-
-double uFunCylinder_ex_dt(const Vector& xt)
-{
-    return 0.0;
-}
-
-void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = 0.0;
-    gradx(1) = 0.0;
-}
-
-
-double uFun66_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25)*(z - 0.25))) * exp(-10.0*t);
-}
-
-double uFun66_ex_dt(const Vector& xt)
-{
-//    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-    return -10.0 * uFun6_ex(xt);
-}
-
-void uFun66_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = -100.0 * 2.0 * (x - 0.5)  * uFun6_ex(xt);
-    gradx(1) = -100.0 * 2.0 * y          * uFun6_ex(xt);
-    gradx(2) = -100.0 * 2.0 * (z - 0.25) * uFun6_ex(xt);
-}
-
-void Hdivtest_fun(const Vector& xt, Vector& out )
-{
-    out.SetSize(xt.Size());
-
-    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    out(0) = x;
-    out(1) = 0.0;
-    out(2) = 0.0;
-    out(xt.Size()-1) = 0.;
-
-}
-
-double L2test_fun(const Vector& xt)
-{
-    double x = xt(0);
-//    double y = xt(1);
-//    double z = xt(2);
-//    double t = xt(xt.Size()-1);
-
-    return x;
-}
-
-
-double uFun10_ex(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-    double t = xt(xt.Size()-1);
-    return sin(t)*exp(t)*x*y;
-}
-
-double uFun10_ex_dt(const Vector& xt)
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double z = xt(2);
-    double t = xt(xt.Size()-1);
-    return (cos(t)*exp(t) + sin(t)*exp(t)) * x * y;
-}
-
-void uFun10_ex_gradx(const Vector& xt, Vector& gradx )
-{
-    double x = xt(0);
-    double y = xt(1);
-//    double z = xt(2);
-    double t = xt(xt.Size()-1);
-
-    gradx.SetSize(xt.Size() - 1);
-
-    gradx(0) = sin(t)*exp(t)*y;
-    gradx(1) = sin(t)*exp(t)*x;
-    gradx(2) = 0.0;
-}
 

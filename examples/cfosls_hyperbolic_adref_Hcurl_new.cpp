@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    int ser_ref_levels  = 2;
+    int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -601,7 +601,7 @@ int main(int argc, char *argv[])
            std::cout << "newsolver_reltol = " << newsolver_reltol << "\n";
 
        NewSolver->SetRelTol(newsolver_reltol);
-       NewSolver->SetMaxIter(200);
+       NewSolver->SetMaxIter(500);
        NewSolver->SetPrintLevel(0);
        //NewSolver->SetStopCriteriaType(0);
    }
@@ -1109,7 +1109,8 @@ int main(int argc, char *argv[])
 
 
        // Send the solution by socket to a GLVis server.
-       if (visualization ) //&& it % 4 == 0 ) //it == max_iter_amr - 1)
+
+       if (visualization && (it % 5 == 0 || it == max_iter_amr - 1)) //&& it % 4 == 0 ) //it == max_iter_amr - 1)
        {
            int ne = pmesh->GetNE();
            for (int elind = 0; elind < ne; ++elind)
@@ -1128,6 +1129,18 @@ int main(int argc, char *argv[])
            sigma_sock << "parallel " << num_procs << " " << myid << "\n";
            sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
                   << it <<"'" << flush;
+
+           ParGridFunction * sigma_ex = new ParGridFunction(problem_mgtools->GetPfes(0));
+           BlockVector * exactsol_proj = problem_mgtools->GetExactSolProj();
+           sigma_ex->SetFromTrueDofs(exactsol_proj->GetBlock(0));
+
+           socketstream sigmaex_sock(vishost, visport);
+           sigmaex_sock << "parallel " << num_procs << " " << myid << "\n";
+           sigmaex_sock << "solution\n" << *pmesh << *sigma_ex << "window_title 'sigma exact, AMR iter No."
+                  << it <<"'" << flush;
+
+           delete exactsol_proj;
+           delete sigma_ex;
 
            socketstream s_sock(vishost, visport);
            s_sock << "parallel " << num_procs << " " << myid << "\n";
@@ -1160,7 +1173,7 @@ int main(int argc, char *argv[])
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
 
-       if (visualization) // && it % 4 == 0 ) //it == max_iter_amr - 1)
+       if (visualization && (it % 5 == 0 || it == max_iter_amr - 1) ) //it == max_iter_amr - 1)
        {
            const Vector& local_errors = estimator->GetLastLocalErrors();
            if (feorder == 0)
