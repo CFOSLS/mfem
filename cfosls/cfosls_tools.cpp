@@ -2953,6 +2953,9 @@ void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
 
     Solver * invA, *invS;
     if (prec_option == 100)
