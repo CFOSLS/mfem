@@ -4904,8 +4904,12 @@ void GeneralHierarchy::Update()
     // TODO: Instead of checking the mesh number of elements to define
     // TODO: whether the hierarchy is to be updated one can use the same
     // TODO: trick as in FOSLSEstimator method MeshIsModified
-    bool update_required = (pmesh.GetNE() != pmesh_ne);
-    if (update_required)
+    bool local_update_required = (pmesh.GetNE() != pmesh_ne);
+
+    bool global_update_required = false;
+    MPI_Allreduce(&local_update_required, &global_update_required, 1, MPI::BOOL, MPI_LOR, pmesh.GetComm());
+
+    if (global_update_required)
     {
         MFEM_ASSERT(pmesh.GetLastOperation() == Mesh::Operation::REFINE,
                     "It is assumed that a refinement was done \n");

@@ -30,39 +30,33 @@
 // currently, minsolver produces incorrect result for this formulation, but
 // the saddle-point solve is fine, gives approximately the same error
 // as the formulation with eliminated scalar unknown for CYLINDER_CUBE_TEST (same large!)
-#define HDIVL2L2
+//#define HDIVL2L2
+
+// A test with a rotating Gaussian hill in the cubic domain.
+// The actual inflow for a rotation when the space domain is [-1,1]^2 is actually two corners
+// and one has to split bdr attributes for the faces, which is quite a pain
+// Instead, we prescribe homogeneous bdr conditions at the entire boundary except for the top,
+// since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
+#define CYLINDER_CUBE_TEST
 
 // if passive, the mesh is simply uniformly refined at each iteration
-//#define AMR
-
-//#define PARTSOL_SETUP
-
-//#define DIVFREE_MINSOLVER
-
-#define RECOARSENING_AMR
+#define AMR
 
 // activates using the solution at the previous mesh as a starting guess for the next problem
 //#define CLEVER_STARTING_GUESS
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
+// never used now
 //#define USE_GS_PREC
 
 #define MULTILEVEL_PARTSOL
-
-// activates using the particular solution at the previous mesh as a starting guess
-// when finding the next particular solution (i.e., particular solution on the next mesh)
-#define CLEVER_STARTING_PARTSOL
-
-// is wrong, because the inflow for a rotation when the space domain is [-1,1]^2 is actually two corners
-// and one has to split bdr attributes for the faces, which is quite a pain
-#define CYLINDER_CUBE_TEST
 
 // used as a reference solution
 #define APPROACH_0
 
 // only the finest level consideration, 0 starting guess, solved by minimization solver
 // (i.e., partsol finder is also used)
-//#define APPROACH_1
+#define APPROACH_1
 
 //#define APPROACH_2
 
@@ -75,8 +69,6 @@
 // which time reusing the previous solution
 //#define APPROACH_3
 
-
-// for debugging
 #ifdef APPROACH_0
 #define     DIVFREE_MINSOLVER
 #endif
@@ -111,22 +103,24 @@
 //#define     CLEVER_STARTING_GUESS
 #endif
 
-
-
 using namespace std;
 using namespace mfem;
 using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
-void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version, std::vector<std::pair<int,int> >& grfuns_descriptor,
-                          Array<ParGridFunction*>& extra_grfuns, Array2D<BilinearFormIntegrator *> & integs, bool verbose);
+void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version,
+                               std::vector<std::pair<int,int> >& grfuns_descriptor,
+                               Array<ParGridFunction*>& extra_grfuns,
+                               Array2D<BilinearFormIntegrator *> & integs, bool verbose);
 
+void PrintDefinedMacrosStats(bool verbose);
 
 int main(int argc, char *argv[])
 {
     int num_procs, myid;
     bool visualization = 1;
+    bool output_solution = false;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -285,102 +279,11 @@ int main(int argc, char *argv[])
         std::cout << "WARNING: CYLINDER_CUBE_TEST works only when the domain is a cube [0,1]! \n";
 #endif
 
-
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
 
-#ifdef HDIVL2L2
-    if (verbose)
-        std::cout << "HDIVL2L2 active \n";
-#else
-    if (verbose)
-        std::cout << "HDIVL2L2 passive \n";
-#endif
-
-#ifdef AMR
-    if (verbose)
-        std::cout << "AMR active \n";
-#else
-    if (verbose)
-        std::cout << "AMR passive \n";
-#endif
-
-#ifdef PARTSOL_SETUP
-    if (verbose)
-        std::cout << "PARTSOL_SETUP active \n";
-#else
-    if (verbose)
-        std::cout << "PARTSOL_SETUP passive \n";
-#endif
-
-#if defined(PARTSOL_SETUP) && (!(defined(DIVFREE_HCURLSETUP) || defined(DIVFREE_MINSOLVER)))
-    MFEM_ABORT("For PARTSOL_SETUP one of the divfree options must be active");
-#endif
-
-#ifdef DIVFREE_MINSOLVER
-    if (verbose)
-        std::cout << "DIVFREE_MINSOLVER active \n";
-#else
-    if (verbose)
-        std::cout << "DIVFREE_MINSOLVER passive \n";
-#endif
-
-#if defined(DIVFREE_MINSOLVER) && defined(DIVFREE_HCURLSETUP)
-    MFEM_ABORT("Cannot have both \n");
-#endif
-
-#ifdef CLEVER_STARTING_GUESS
-    if (verbose)
-        std::cout << "CLEVER_STARTING_GUESS active \n";
-#else
-    if (verbose)
-        std::cout << "CLEVER_STARTING_GUESS passive \n";
-#endif
-
-#if defined(CLEVER_STARTING_PARTSOL) && !defined(MULTILEVEL_PARTSOL)
-    MFEM_ABORT("CLEVER_STARTING_PARTSOL cannot be active if MULTILEVEL_PARTSOL is not \n");
-#endif
-
-#ifdef CLEVER_STARTING_PARTSOL
-    if (verbose)
-        std::cout << "CLEVER_STARTING_PARTSOL active \n";
-#else
-    if (verbose)
-        std::cout << "CLEVER_STARTING_PARTSOL passive \n";
-#endif
-
-#ifdef USE_GS_PREC
-    if (verbose)
-        std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
-#else
-    if (verbose)
-        std::cout << "USE_GS_PREC passive \n";
-#endif
-
-#ifdef MULTILEVEL_PARTSOL
-    if (verbose)
-        std::cout << "MULTILEVEL_PARTSOL active \n";
-#else
-    if (verbose)
-        std::cout << "MULTILEVEL_PARTSOL passive \n";
-#endif
-
-#ifdef CYLINDER_CUBE_TEST
-    if (verbose)
-        std::cout << "CYLINDER_CUBE_TEST active \n";
-#else
-    if (verbose)
-        std::cout << "CYLINDER_CUBE_TEST passive \n";
-#endif
-
-#ifdef RECOARSENING_AMR
-    if (verbose)
-        std::cout << "RECOARSENING_AMR active \n";
-#else
-    if (verbose)
-        std::cout << "RECOARSENING_AMR passive \n";
-#endif
+    PrintDefinedMacrosStats(verbose);
 
 #ifdef HDIVL2L2
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
@@ -662,7 +565,7 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem_mgtools, grfuns_descriptor, NULL, integs, verbose);
    problem_mgtools->AddEstimator(*estimator);
 
-   //ThresholdSmooRefiner refiner(*estimator); // 0.1, 0.001
+   //ThresholdSmooRefiner refiner(*estimator, 0.0001); // 0.1, 0.001
    ThresholdRefiner refiner(*estimator);
 
    refiner.SetTotalErrorFraction(0.9); // 0.5
@@ -701,7 +604,8 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 20;
+   int max_iter_amr = 2;
+   int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -883,7 +787,7 @@ int main(int argc, char *argv[])
        BlockVector correction(problem_l->GetTrueOffsetsFunc());
        correction = 0.0;
 
-       NewSolver->SetPrintLevel(2);
+       NewSolver->SetPrintLevel(1);
 
        if (verbose)
            std::cout << "Solving the finest level problem... \n";
@@ -1177,6 +1081,53 @@ int main(int argc, char *argv[])
 
            if (!(problem_mgtools->GetFEformulation().Nunknowns() >= 2))
                delete S;
+
+       }
+
+       if (output_solution && it % it_print_step == 0)
+       {
+           // don't know what exactly ref is used for
+           int ref = 1;
+
+           //std::ofstream fp_sigma("sigma_test_it0.vtk");
+           std::string filename_sig;
+           filename_sig = "sigma_it_";
+           filename_sig.append(std::to_string(it));
+           filename_sig.append(".vtk");
+           std::ofstream fp_sigma(filename_sig);
+
+           pmesh->PrintVTK(fp_sigma, ref, true);
+           //pmesh->PrintVTK(fp_sigma);
+
+           ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
+           ParGridFunction * S;
+
+#ifdef HDIVL2L2
+           S = problem_mgtools->GetGrFun(1);
+#else
+           if (problem_mgtools->GetFEformulation().Nunknowns() >= 2)
+               S = problem_mgtools->GetGrFun(1);
+           else // only sigma = Hdiv-L2 formulation with eliminated S
+               S = (dynamic_cast<ProblemType*>(problem_mgtools))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
+#endif
+           std::string field_name_sigma("sigma_h");
+           sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
+
+           //std::ofstream fp_S("u_test_it0.vtk");
+           std::string filename_S;
+           filename_S = "u_it_";
+           filename_S.append(std::to_string(it));
+           filename_S.append(".vtk");
+           std::ofstream fp_S(filename_S);
+
+           pmesh->PrintVTK(fp_S, ref, true);
+           //pmesh->PrintVTK(fp_S);
+
+           std::string field_name_S("u_h");
+           S->SaveVTK(fp_S, field_name_S, ref);
+
+           //MPI_Finalize();
+           //return 0;
        }
 
 #ifdef AMR
@@ -1189,16 +1140,29 @@ int main(int argc, char *argv[])
 
        // true AMR
        refiner.Apply(*hierarchy->GetFinestParMesh());
-       int nmarked_el = refiner.GetNumMarkedElements();
+       if (verbose)
+           std::cout << "\nRefinement statistics: \n";
+
+       int local_nmarked_el = refiner.GetNumMarkedElements();
+       int global_nmarked_el = 0;
+       MPI_Reduce(&local_nmarked_el, &global_nmarked_el, 1, MPI_INT, MPI_SUM, 0, comm);
+
+       int local_nel_before = nel_before;
+       int global_nel_before;
+       MPI_Reduce(&local_nel_before, &global_nel_before, 1, MPI_INT, MPI_SUM, 0, comm);
+
+       int local_nel_after = hierarchy->GetFinestParMesh()->GetNE();
+       int global_nel_after = 0;
+       MPI_Reduce(&local_nel_after, &global_nel_after, 1, MPI_INT, MPI_SUM, 0, comm);
+
        if (verbose)
        {
-           std::cout << "Marked elements percentage = " << 100 * nmarked_el * 1.0 / nel_before << " % \n";
-           std::cout << "nmarked_el = " << nmarked_el << ", nel_before = " << nel_before << "\n";
-           int nel_after = hierarchy->GetFinestParMesh()->GetNE();
-           std::cout << "nel_after = " << nel_after << "\n";
-           std::cout << "number of elements introduced = " << nel_after - nel_before << "\n";
+           std::cout << "Marked elements percentage = " << 100 * global_nmarked_el * 1.0 / global_nel_before << " % \n";
+           std::cout << "nmarked_el = " << global_nmarked_el << ", nel_before = " << global_nel_before << "\n";
+           std::cout << "nel_after = " << global_nel_after << "\n";
+           std::cout << "number of elements introduced = " << global_nel_after - global_nel_before << "\n";
            std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
-                        100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
+                        100.0 * (global_nel_after - global_nel_before) * 1.0 / global_nel_before << "% \n\n";
        }
 
        if (visualization && (it % 5 == 0 || it == max_iter_amr - 1) ) //it == max_iter_amr - 1)
@@ -1246,6 +1210,7 @@ int main(int argc, char *argv[])
 
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
+
        problem = prob_hierarchy->GetProblem(0);
 
        problem_mgtools->BuildSystem(verbose);
@@ -1362,7 +1327,100 @@ void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version, s
     }
 }
 
+void PrintDefinedMacrosStats(bool verbose)
+{
+#ifdef HDIVL2L2
+    if (verbose)
+        std::cout << "HDIVL2L2 active \n";
+#else
+    if (verbose)
+        std::cout << "HDIVL2L2 passive \n";
+#endif
 
+#ifdef AMR
+    if (verbose)
+        std::cout << "AMR active \n";
+#else
+    if (verbose)
+        std::cout << "AMR passive \n";
+#endif
+
+#ifdef PARTSOL_SETUP
+    if (verbose)
+        std::cout << "PARTSOL_SETUP active \n";
+#else
+    if (verbose)
+        std::cout << "PARTSOL_SETUP passive \n";
+#endif
+
+#if defined(PARTSOL_SETUP) && (!(defined(DIVFREE_HCURLSETUP) || defined(DIVFREE_MINSOLVER)))
+    MFEM_ABORT("For PARTSOL_SETUP one of the divfree options must be active");
+#endif
+
+#ifdef DIVFREE_MINSOLVER
+    if (verbose)
+        std::cout << "DIVFREE_MINSOLVER active \n";
+#else
+    if (verbose)
+        std::cout << "DIVFREE_MINSOLVER passive \n";
+#endif
+
+#if defined(DIVFREE_MINSOLVER) && defined(DIVFREE_HCURLSETUP)
+    MFEM_ABORT("Cannot have both \n");
+#endif
+
+#ifdef CLEVER_STARTING_GUESS
+    if (verbose)
+        std::cout << "CLEVER_STARTING_GUESS active \n";
+#else
+    if (verbose)
+        std::cout << "CLEVER_STARTING_GUESS passive \n";
+#endif
+
+#if defined(CLEVER_STARTING_PARTSOL) && !defined(MULTILEVEL_PARTSOL)
+    MFEM_ABORT("CLEVER_STARTING_PARTSOL cannot be active if MULTILEVEL_PARTSOL is not \n");
+#endif
+
+#ifdef CLEVER_STARTING_PARTSOL
+    if (verbose)
+        std::cout << "CLEVER_STARTING_PARTSOL active \n";
+#else
+    if (verbose)
+        std::cout << "CLEVER_STARTING_PARTSOL passive \n";
+#endif
+
+#ifdef USE_GS_PREC
+    if (verbose)
+        std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
+#else
+    if (verbose)
+        std::cout << "USE_GS_PREC passive \n";
+#endif
+
+#ifdef MULTILEVEL_PARTSOL
+    if (verbose)
+        std::cout << "MULTILEVEL_PARTSOL active \n";
+#else
+    if (verbose)
+        std::cout << "MULTILEVEL_PARTSOL passive \n";
+#endif
+
+#ifdef CYLINDER_CUBE_TEST
+    if (verbose)
+        std::cout << "CYLINDER_CUBE_TEST active \n";
+#else
+    if (verbose)
+        std::cout << "CYLINDER_CUBE_TEST passive \n";
+#endif
+
+#ifdef RECOARSENING_AMR
+    if (verbose)
+        std::cout << "RECOARSENING_AMR active \n";
+#else
+    if (verbose)
+        std::cout << "RECOARSENING_AMR passive \n";
+#endif
+}
 
 
 

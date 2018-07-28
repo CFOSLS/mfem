@@ -899,6 +899,7 @@ void CoarsestProblemSolver::Setup() const
     coarseSolver->SetPrintLevel(0);
     //Operator * coarse_id = new IdentityOperator(coarse_offsets[numblocks + 2] - coarse_offsets[0]);
     //coarseSolver->SetOperator(*coarse_id);
+    coarseSolver->iterative_mode = false;
 
     finalized = true;
 }
@@ -2750,7 +2751,7 @@ void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Co
     // 0. Compute rhs in the functional for the finest level
     UpdateTrueResidual(level, NULL, start_guess_viewer, *trueresfunc_lvls[level] );
 
-    if (report_funct && verbose)
+    if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[level], Functrhs_global, start_guess, "for starting guess: ", true);
 
     Qlminus1_f = rhs_constr;
@@ -2808,7 +2809,7 @@ void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Co
     partsol = start_guess;
     partsol += *truesolupdate_lvls[level];
 
-    if (report_funct && verbose)
+    if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[level], Functrhs_global, partsol, "for final partsol: ", true);
 
 #ifdef CHECK_CONSTR
@@ -2870,7 +2871,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     // 0. Compute rhs in the functional for the finest level
     UpdateTrueResidual(start_level, Functrhs_global, start_guess_viewer, *trueresfunc_lvls[start_level] );
 
-    if (report_funct && verbose)
+    if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, start_guess, "for starting guess: ", true);
 
     Qlminus1_f = rhs_constr;
@@ -2969,7 +2970,7 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
 
     partsol += *truesolupdate_lvls[start_level];
 
-    if (report_funct && verbose)
+    if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, partsol, "for final partsol: ", true);
 
 #ifdef CHECK_CONSTR
