@@ -1387,7 +1387,13 @@ public:
 
     FOSLSFEFormulation& GetFEformulation() { return fe_formul; }
 
-    int GlobalTrueProblemSize() const {return CFOSLSop->Height();}
+    int TrueProblemSize() const {return CFOSLSop->Height();}
+    int GlobalTrueProblemSize() const {
+        int local_size = TrueProblemSize();
+        int global_size = 0;
+        MPI_Allreduce(&local_size, &global_size, 1, MPI::INT, MPI_SUM, pmesh.GetComm());
+        return global_size;
+    }
 
     MPI_Comm GetComm() {return pmesh.GetComm();}
 

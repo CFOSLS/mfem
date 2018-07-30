@@ -2728,6 +2728,24 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bo
     chrono.Clear();
     chrono.Start();
 
+    /*
+    MPI_Barrier(MPI_COMM_WORLD);
+    int num_procs, myid;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    for (int i = 0; i < num_procs; ++i)
+    {
+        if (myid == i)
+        {
+            std::cout << "I am " << myid << "\n";
+            std::cout << "rhs norm = " << rhs.Norml2() << "\n" << std::flush;
+            std::cout << "sol norm = " << sol.Norml2() << "\n" << std::flush;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    */
+
     solver->Mult(rhs, sol);
 
     chrono.Stop();

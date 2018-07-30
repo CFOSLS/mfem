@@ -622,6 +622,7 @@ int main(int argc, char *argv[])
        *problem_refsols_lvls[0] = 0.0;
 
        BlockVector saved_sol(problem_mgtools->GetTrueOffsets());
+       saved_sol = 0.0;
        problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), saved_sol, verbose, false);
        *problem_refsols_lvls[0] = saved_sol;
 
@@ -787,7 +788,7 @@ int main(int argc, char *argv[])
        BlockVector correction(problem_l->GetTrueOffsetsFunc());
        correction = 0.0;
 
-       NewSolver->SetPrintLevel(1);
+       NewSolver->SetPrintLevel(0);
 
        if (verbose)
            std::cout << "Solving the finest level problem... \n";

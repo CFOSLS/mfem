@@ -5075,7 +5075,7 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
 
     // some monitoring service calls
     if (!preconditioner_mode)
-        if (print_level || stopcriteria_type == 0)
+        if (print_level || stopcriteria_type == 0 || stopcriteria_type == 3)
         {
             if (built_on_mgtools)
                 funct_currnorm = CheckFunctValueNew(comm, *Func_global_nobnd_lvls[start_level], Funct_addvec, next_sol,
