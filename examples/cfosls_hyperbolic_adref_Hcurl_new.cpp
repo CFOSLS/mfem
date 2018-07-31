@@ -56,7 +56,7 @@
 
 // only the finest level consideration, 0 starting guess, solved by minimization solver
 // (i.e., partsol finder is also used)
-#define APPROACH_1
+//#define APPROACH_1
 
 //#define APPROACH_2
 
@@ -70,7 +70,7 @@
 //#define APPROACH_3
 
 #ifdef APPROACH_0
-#define     DIVFREE_MINSOLVER
+//#define     DIVFREE_MINSOLVER
 #endif
 
 #ifdef APPROACH_1
@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
 {
     int num_procs, myid;
     bool visualization = 1;
-    bool output_solution = false;
+    bool output_solution = true;
 
     // 1. Initialize MPI
     MPI_Init(&argc, &argv);
@@ -193,7 +193,7 @@ int main(int argc, char *argv[])
     //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
     //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
 
-    int feorder         = 0;
+    int feorder         = 1;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
@@ -458,14 +458,19 @@ int main(int argc, char *argv[])
    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
    */
 
-
-//#if 0
+    //#if 0
+#ifdef DIVFREE_MINSOLVER
    bool with_hcurl = true;
+#else
+   bool with_hcurl = false;
+#endif
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
    hierarchy->ConstructDofTrueDofs();
-   hierarchy->ConstructDivfreeDops();
 
+#ifdef DIVFREE_MINSOLVER
+   hierarchy->ConstructDivfreeDops();
+#endif
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
@@ -595,7 +600,8 @@ int main(int argc, char *argv[])
 #endif
 
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
-   std::cout << "starting n_el = " << hierarchy->GetFinestParMesh()->GetNE() << "\n";
+   if (verbose)
+       std::cout << "starting n_el = " << hierarchy->GetFinestParMesh()->GetNE() << "\n";
 
    double fixed_rtol = 1.0e-12; // 1.0e-10
    double fixed_atol = 1.0e-15;
@@ -604,7 +610,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2;
+   int max_iter_amr = 21; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -630,9 +636,10 @@ int main(int argc, char *argv[])
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            reduced_problem_sol.GetBlock(blk) = saved_sol.GetBlock(blk);
+#ifdef DIVFREE_MINSOLVER
        CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
-
+#endif
        // alternative check for studying the functional behavior
        /*
        BlockVector temp(problem->GetTrueOffsetsFunc());
@@ -1028,6 +1035,10 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+#if defined(APPROACH_0) && (!defined(APPROACH_1) && !defined(APPROACH_2) && !defined(APPROACH_3))
+       *problem_sols_lvls[0] = *problem_refsols_lvls[0];
+#endif
+
        if (compute_error)
            problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
 
@@ -1094,6 +1105,11 @@ int main(int argc, char *argv[])
            std::string filename_sig;
            filename_sig = "sigma_it_";
            filename_sig.append(std::to_string(it));
+           if (num_procs > 1)
+           {
+               filename_sig.append("_proc_");
+               filename_sig.append(std::to_string(myid));
+           }
            filename_sig.append(".vtk");
            std::ofstream fp_sigma(filename_sig);
 
@@ -1118,6 +1134,11 @@ int main(int argc, char *argv[])
            std::string filename_S;
            filename_S = "u_it_";
            filename_S.append(std::to_string(it));
+           if (num_procs > 1)
+           {
+               filename_S.append("_proc_");
+               filename_S.append(std::to_string(myid));
+           }
            filename_S.append(".vtk");
            std::ofstream fp_S(filename_S);
 
@@ -1144,9 +1165,7 @@ int main(int argc, char *argv[])
        if (verbose)
            std::cout << "\nRefinement statistics: \n";
 
-       int local_nmarked_el = refiner.GetNumMarkedElements();
-       int global_nmarked_el = 0;
-       MPI_Reduce(&local_nmarked_el, &global_nmarked_el, 1, MPI_INT, MPI_SUM, 0, comm);
+       int nmarked_el = refiner.GetNumMarkedElements(); // already makes a reduction over all processes
 
        int local_nel_before = nel_before;
        int global_nel_before;
@@ -1158,8 +1177,8 @@ int main(int argc, char *argv[])
 
        if (verbose)
        {
-           std::cout << "Marked elements percentage = " << 100 * global_nmarked_el * 1.0 / global_nel_before << " % \n";
-           std::cout << "nmarked_el = " << global_nmarked_el << ", nel_before = " << global_nel_before << "\n";
+           std::cout << "Marked elements percentage = " << 100 * nmarked_el * 1.0 / global_nel_before << " % \n";
+           std::cout << "nmarked_el = " << nmarked_el << ", nel_before = " << global_nel_before << "\n";
            std::cout << "nel_after = " << global_nel_after << "\n";
            std::cout << "number of elements introduced = " << global_nel_after - global_nel_before << "\n";
            std::cout << "percentage (w.r.t to # before) of elements introduced = " <<
@@ -1180,7 +1199,7 @@ int main(int argc, char *argv[])
            if (feorder == 0)
                L2_space = problem_mgtools->GetPfes(numblocks_funct);
            else
-               L2_space = new ParFiniteElementSpace(problem_mgtools->GetParMesh(), l2_coll);
+               L2_space = new ParFiniteElementSpace(problem->GetParMesh(), l2_coll);
            ParGridFunction * local_errors_pgfun = new ParGridFunction(L2_space);
            local_errors_pgfun->SetFromTrueDofs(local_errors);
            char vishost[] = "localhost";
