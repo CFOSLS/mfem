@@ -4133,8 +4133,9 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
             Func_global_lvls.push_front(mgtools_hierarchy->GetOps()[0]);
             Func_global_nobnd_lvls.push_front(mgtools_hierarchy->GetBlockOps_nobnd()[0]);
 
+#ifdef CHECK_CONSTR
             Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-
+#endif
             num_levels = hierarchy->Nlevels();
 
             // recoarsening local and global matrices
