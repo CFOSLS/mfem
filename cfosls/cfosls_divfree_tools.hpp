@@ -1008,7 +1008,9 @@ public:
 
     void SetInitialGuess(int level, Vector& InitGuess) const;
 
+#ifdef CHECK_CONSTR
     void SetConstrRhs(Vector& ConstrRhs) const;
+#endif
 
     // have to define these to mimic useful routines from IterativeSolver class
     void SetRelTol(double RelTol) const {rel_tol = RelTol;}

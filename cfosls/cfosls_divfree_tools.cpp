@@ -3852,10 +3852,12 @@ void GeneralMinConstrSolver::SetInitialGuess(int level, Vector& InitGuess) const
         init_guess->Update(InitGuess.GetData(), TrueP_Func[level]->RowOffsets());
 }
 
+#ifdef CHECK_CONSTR
 void GeneralMinConstrSolver::SetConstrRhs(Vector& ConstrRhs) const
 {
     Constr_rhs_global = &ConstrRhs;
 }
+#endif
 
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
                                                   double value_scalefactor, double stop_tol,
