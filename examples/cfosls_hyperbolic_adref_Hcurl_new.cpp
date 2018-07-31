@@ -38,6 +38,8 @@
 // Instead, we prescribe homogeneous bdr conditions at the entire boundary except for the top,
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
 #define CYLINDER_CUBE_TEST
+// defines whether boundary conditions for CYLINDER_CUBE_TEST are overconstraining (see above)
+//#define OVERCONSTRAINED
 
 // if passive, the mesh is simply uniformly refined at each iteration
 #define AMR
@@ -115,6 +117,7 @@ void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version,
                                Array2D<BilinearFormIntegrator *> & integs, bool verbose);
 
 void PrintDefinedMacrosStats(bool verbose);
+void ReArrangeBdrAttributes(Mesh* mesh4cube);
 
 int main(int argc, char *argv[])
 {
@@ -193,7 +196,7 @@ int main(int argc, char *argv[])
     //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
     //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
 
-    int feorder         = 1;
+    int feorder         = 0;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
@@ -273,6 +276,7 @@ int main(int argc, char *argv[])
 
     //mesh_file = "../data/pmesh_check.mesh";
     mesh_file = "../data/cube_3d_moderate.mesh";
+    //mesh_file = "../examples/amr_1storder_it_10.mesh";
 
 #ifdef CYLINDER_CUBE_TEST
     if (verbose)
@@ -332,29 +336,14 @@ int main(int argc, char *argv[])
     }
     //mesh = new Mesh(2, 2, 2, Element::HEXAHEDRON, 1);
 
-    if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
-    {
-        for (int l = 0; l < ser_ref_levels; l++)
-            mesh->UniformRefinement();
-
-        if ( verbose )
-            cout << "Creating parmesh(" << nDimensions <<
-                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
-        pmesh = make_shared<ParMesh>(comm, *mesh);
-        delete mesh;
-    }
-
-    for (int l = 0; l < par_ref_levels; l++)
-    {
-       pmesh->UniformRefinement();
-    }
-
     int dim = nDimensions;
 
+//#if 0
 #ifdef CYLINDER_CUBE_TEST
+
     Vector vert_coos;
-    pmesh->GetVertices(vert_coos);
-    int nv = pmesh->GetNV();
+    mesh->GetVertices(vert_coos);
+    int nv = mesh->GetNV();
     for (int vind = 0; vind < nv; ++vind)
     {
         for (int j = 0; j < dim; ++j)
@@ -371,7 +360,7 @@ int main(int argc, char *argv[])
                 vert_coos(j*nv + vind) *= 2.0;
         }
     }
-    pmesh->SetVertices(vert_coos);
+    mesh->SetVertices(vert_coos);
 
     /*
     std::stringstream fname;
@@ -383,8 +372,40 @@ int main(int argc, char *argv[])
     MPI_Finalize();
     return 0;
     */
+#ifndef OVERCONSTRAINED
+    // rearranging boundary attributes which are now assigned to cube faces,
+    // not to bot + square corners + top as we need
+    ReArrangeBdrAttributes(mesh);
+
+    std::string filename_mesh;
+    filename_mesh = "checkmesh_cube4transport.mesh";
+    std::ofstream ofid(filename_mesh);
+    ofid.precision(8);
+    mesh->Print(ofid);
+
+    MPI_Finalize();
+    return 0;
+#endif
 
 #endif
+//#endif
+
+    if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
+    {
+        for (int l = 0; l < ser_ref_levels; l++)
+            mesh->UniformRefinement();
+
+        if ( verbose )
+            cout << "Creating parmesh(" << nDimensions <<
+                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
+        pmesh = make_shared<ParMesh>(comm, *mesh);
+        delete mesh;
+    }
+
+    for (int l = 0; l < par_ref_levels; l++)
+    {
+       pmesh->UniformRefinement();
+    }
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
@@ -421,6 +442,7 @@ int main(int argc, char *argv[])
    for (int i = 0; i < formulat->Nblocks(); ++i)
        bdr_attribs_data[i] = new Array<int>(pmesh->bdr_attributes.Max());
 
+#ifdef OVERCONSTRAINED
    if (strcmp(space_for_S,"L2") == 0)
    {
        *bdr_attribs_data[0] = 1;
@@ -433,7 +455,31 @@ int main(int argc, char *argv[])
        (*bdr_attribs_data[1])[5] = 0;
    }
    *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
+#else
+   if (strcmp(space_for_S,"L2") == 0)
+   {
+       *bdr_attribs_data[0] = 0;
+       (*bdr_attribs_data[0])[0] = 1;
+       (*bdr_attribs_data[0])[1] = 0;
+       (*bdr_attribs_data[0])[2] = 1;
+       (*bdr_attribs_data[0])[3] = 0;
+       (*bdr_attribs_data[0])[4] = 1;
+       (*bdr_attribs_data[0])[5] = 0;
+   }
+   else // S from H^1
+   {
+       *bdr_attribs_data[0] = 0;
 
+       *bdr_attribs_data[1] = 0;
+       (*bdr_attribs_data[1])[0] = 1;
+       (*bdr_attribs_data[1])[1] = 0;
+       (*bdr_attribs_data[1])[2] = 1;
+       (*bdr_attribs_data[1])[3] = 0;
+       (*bdr_attribs_data[1])[4] = 1;
+       (*bdr_attribs_data[1])[5] = 0;
+   }
+   *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
+#endif
    bdr_conds = new BdrConditions(*pmesh, formulat->Nblocks());
    bdr_conds->Set(bdr_attribs_data);
 #endif
@@ -1365,6 +1411,38 @@ void PrintDefinedMacrosStats(bool verbose)
         std::cout << "AMR passive \n";
 #endif
 
+#ifdef APPROACH_0
+    if (verbose)
+        std::cout << "APPROACH_0 \n";
+#else
+    if (verbose)
+        std::cout << "APPROACH_0 \n";
+#endif
+
+#ifdef APPROACH_1
+    if (verbose)
+        std::cout << "APPROACH_1 \n";
+#else
+    if (verbose)
+        std::cout << "APPROACH_1 \n";
+#endif
+
+#ifdef APPROACH_2
+    if (verbose)
+        std::cout << "APPROACH_2 \n";
+#else
+    if (verbose)
+        std::cout << "APPROACH_20 \n";
+#endif
+
+#ifdef APPROACH_3
+    if (verbose)
+        std::cout << "APPROACH_3 \n";
+#else
+    if (verbose)
+        std::cout << "APPROACH_3 \n";
+#endif
+
 #ifdef PARTSOL_SETUP
     if (verbose)
         std::cout << "PARTSOL_SETUP active \n";
@@ -1433,6 +1511,15 @@ void PrintDefinedMacrosStats(bool verbose)
         std::cout << "CYLINDER_CUBE_TEST passive \n";
 #endif
 
+#ifdef OVERCONSTRAINED
+    if (verbose)
+        std::cout << "OVERCONSTRAINED active \n";
+#else
+    if (verbose)
+        std::cout << "OVERCONSTRAINED passive \n";
+#endif
+
+
 #ifdef RECOARSENING_AMR
     if (verbose)
         std::cout << "RECOARSENING_AMR active \n";
@@ -1443,4 +1530,196 @@ void PrintDefinedMacrosStats(bool verbose)
 }
 
 
+void ReArrangeBdrAttributes(Mesh* mesh4cube)
+{
+    Mesh * mesh = mesh4cube;
 
+    int dim = mesh->Dimension();
+
+    int nbe = mesh->GetNBE();
+
+    // Assume we have [-1,1] x [-1,1] x [0,2]
+    // cube faces:
+    // 0: bottom (z = 0)
+    // 1: x = -1
+    // 2: y = -1
+    // 3: x = 1
+    // 4: y = 1
+    // 5: z = 2
+    // final boundary parts (=attributes):
+    // 1: bottom cube face
+    // lateral boundary parts at the square corners:
+    // 2: (face == 1 && y < 0) || (face == 2 && x < 0), here face = cube face
+    // 3: (face == 2 && x >=0) || (face == 3 && y < 0)
+    // 4: (face == 3 && y >=0) || (face == 4 && x >=0)
+    // 5: (face == 4 && x < 0) || (face == 1 && y >=0)
+    // and
+    // 6: top cube face
+    for (int beind = 0; beind < nbe; ++beind)
+    {
+        //std::cout << "beind = " << beind << "\n";
+        // determine which cube face the be belongs to, via vertex coordinate dispersion
+        int cubeface = -1;
+        Element * bel = mesh->GetBdrElement(beind);
+        int be_nv = bel->GetNVertices();
+        Array<int> vinds(be_nv);
+        bel->GetVertices(vinds);
+        //vinds.Print();
+
+        //std::cout << "mesh nv =  " << pmesh->GetNV() << "\n";
+
+        Array<double> av_coords(dim);
+        av_coords = 0.0;
+        for (int vno = 0; vno < be_nv; ++vno)
+        {
+            //std::cout << "vinds[vno] = " << vinds[vno] << "\n";
+            double * vcoos = mesh->GetVertex(vinds[vno]);
+            for (int coo = 0; coo < dim; ++coo)
+            {
+                //std::cout << vcoos[coo] << " ";
+                av_coords[coo] += vcoos[coo];
+            }
+            //std::cout << "\n";
+        }
+        //av_coords.Print();
+
+        for (int coo = 0; coo < dim; ++coo)
+        {
+            av_coords[coo] /= 1.0 * be_nv;
+        }
+
+        //std::cout << "average be coordinates: \n";
+        //av_coords.Print();
+
+        int face_coo = -1;
+        for (int coo = 0; coo < dim; ++coo)
+        {
+            bool coo_fixed = true;
+            //std::cout << "coo = " << coo << "\n";
+            for (int vno = 0; vno < be_nv; ++vno)
+            {
+                double * vcoos = mesh->GetVertex(vinds[vno]);
+                //std::cout << "vcoos[coo] = " << vcoos[coo] << "\n";
+                if (fabs(vcoos[coo] - av_coords[coo]) > 1.0e-13)
+                    coo_fixed = false;
+            }
+            if (coo_fixed)
+            {
+                if (face_coo > -1)
+                {
+                    MFEM_ABORT("Found a second coordinate which is fixed \n");
+                }
+                else
+                {
+                    face_coo = coo;
+                }
+            }
+        }
+
+        MFEM_ASSERT(face_coo != -1,"Didn't find a fixed coordinate \n");
+
+        double value = av_coords[face_coo];
+        if (face_coo == 0 && fabs(value - (-1.0)) < 1.0e-13)
+            cubeface = 1;
+        if (face_coo== 1 && fabs(value - (-1.0)) < 1.0e-13)
+            cubeface = 2;
+        if (face_coo == 2 && fabs(value - (0.0)) < 1.0e-13)
+            cubeface = 0;
+        if (face_coo == 0 && fabs(value - (1.0)) < 1.0e-13)
+            cubeface = 3;
+        if (face_coo == 1 && fabs(value - (1.0)) < 1.0e-13)
+            cubeface = 4;
+        if (face_coo == 2 && fabs(value - (2.0)) < 1.0e-13)
+            cubeface = 5;
+
+        //std::cout << "cubeface = " << cubeface << "\n";
+
+        // determine to which vertical stripe of the cube face the be belongs to
+        Array<int> signs(dim);
+        int x,y;
+        if (cubeface != 0 && cubeface != 5)
+        {
+            for (int coo = 0; coo < dim; ++coo)
+            {
+                Array<int> coo_signs(be_nv);
+                for (int vno = 0; vno < be_nv; ++vno)
+                {
+                    double * vcoos = mesh->GetVertex(vinds[vno]);
+                    if (vcoos[coo] - 0.0 > 1.0e-13)
+                        coo_signs[vno] = 1;
+                    else if (vcoos[coo] - 0.0 < -1.0e-13)
+                        coo_signs[vno] = -1;
+                    else
+                        coo_signs[vno] = 0;
+                }
+
+                int first_sign = -2; // anything which is not -1, 0 or 1
+                for (int i = 0; i < be_nv; ++i)
+                {
+                    if (abs(coo_signs[i]) > 0)
+                    {
+                        first_sign = coo_signs[i];
+                        break;
+                    }
+                }
+
+                MFEM_ASSERT(first_sign != -2, "All signs were 0 for this coordinate, i.e. triangle"
+                                              " is on the line");
+
+                for (int i = 0; i < be_nv; ++i)
+                {
+                    if (coo_signs[i] != 0 && coo_signs[i] != first_sign)
+                    {
+                        MFEM_ABORT("Boundary element intersects the face middle line");
+                    }
+                }
+
+                signs[coo] = first_sign;
+            }
+            x = signs[0];
+            y = signs[1];
+        }
+
+        switch(cubeface)
+        {
+        case 0:
+            bel->SetAttribute(1);
+            break;
+        case 1:
+        {
+            if (y < 0)
+                bel->SetAttribute(2);
+            else
+                bel->SetAttribute(5);
+        }
+            break;
+        case 2:
+            if (x < 0)
+                bel->SetAttribute(2);
+            else
+                bel->SetAttribute(3);
+            break;
+        case 3:
+            if (y < 0)
+                bel->SetAttribute(3);
+            else
+                bel->SetAttribute(4);
+            break;
+        case 4:
+            if (x < 0)
+                bel->SetAttribute(5);
+            else
+                bel->SetAttribute(4);
+            break;
+        case 5:
+            bel->SetAttribute(6);
+            break;
+        default:
+        {
+            MFEM_ABORT("Could not find a cube face for the boundary element \n");
+        }
+            break;
+        }
+    } // end of loop ove be elements
+
+}

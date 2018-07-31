@@ -480,8 +480,8 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "Running AMR ... \n";
 
-   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   FormulType * formulat = new FormulType (dim, numsol, verbose);
+   FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
 #ifdef CYLINDER_CUBE_TEST

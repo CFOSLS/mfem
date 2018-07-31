@@ -340,8 +340,8 @@ int main(int argc, char *argv[])
    using ProblemType = FOSLSCylProblem_HdivL2hyp;
    */
 
-   FOSLSFormulation * formulat = new FormulType (dim, numsol, verbose);
-   FOSLSFEFormulation * fe_formulat = new FEFormulType(*formulat, feorder);
+   FormulType * formulat = new FormulType (dim, numsol, verbose);
+   FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
    //ProblemType * problem = new ProblemType
