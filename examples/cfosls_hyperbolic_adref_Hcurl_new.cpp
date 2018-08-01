@@ -39,7 +39,7 @@
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
 #define CYLINDER_CUBE_TEST
 // defines whether boundary conditions for CYLINDER_CUBE_TEST are overconstraining (see above)
-//#define OVERCONSTRAINED
+#define OVERCONSTRAINED
 
 // if passive, the mesh is simply uniformly refined at each iteration
 #define AMR
@@ -656,7 +656,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 21; // 21;
+   int max_iter_amr = 2; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -1302,6 +1302,34 @@ int main(int argc, char *argv[])
        }
 
    } // end of the main AMR loop
+
+   for (int i = 0; i < formulat->Nblocks(); ++i)
+       delete bdr_attribs_data[i];
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
+   delete hierarchy;
+   delete prob_hierarchy;
+   delete estimator;
+
+#ifdef PARTSOL_SETUP
+   for (int i = 0; i < div_rhs_lvls.Size(); ++i)
+       delete div_rhs_lvls[i];
+   for (int i = 0; i < partsol_lvls.Size(); ++i)
+       delete partsol_lvls[i];
+   for (int i = 0; i < partsol_funct_lvls.Size(); ++i)
+       delete partsol_funct_lvls[i];
+   for (int i = 0; i < initguesses_funct_lvls.Size(); ++i)
+       delete initguesses_funct_lvls[i];
+#endif
+
+#ifdef APPROACH_0
+   for (int i = 0; i < problem_refsols_lvls.Size(); ++i)
+       delete problem_refsols_lvls[i];
+#endif
+
+   for (int i = 0; i < problem_sols_lvls.Size(); ++i)
+       delete problem_sols_lvls[i];
 
    MPI_Finalize();
    return 0;
