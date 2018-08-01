@@ -441,6 +441,23 @@ FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks,
     blk_structure.resize(numblocks);
 }
 
+FOSLSFormulation::~FOSLSFormulation()
+{
+    if (space_names)
+        delete space_names;
+    if (space_names_funct)
+        delete space_names_funct;
+
+    for (int i = 0; i < blfis.NumRows(); ++i)
+        for (int j = 0; j < blfis.NumCols(); ++j)
+            if (blfis(i,j))
+                delete blfis(i,j);
+    for (int i = 0; i < lfis.Size(); ++i)
+        if (lfis[i])
+            delete lfis[i];
+}
+
+
 /// Hdiv-L2-L2 formulation for transport with eliminated scalar unknown
 /// thus called Hdiv-L2
 CFOSLSFormulation_HdivL2Hyper::CFOSLSFormulation_HdivL2Hyper (int dimension,

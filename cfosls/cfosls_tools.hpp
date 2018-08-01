@@ -743,6 +743,7 @@ protected:
     virtual void ConstructSpacesDescriptor() const = 0;
     virtual void ConstructFunctSpacesDescriptor() const = 0;
 public:
+    virtual ~FOSLSFormulation();
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
     const Array<SpaceName>* GetSpacesDescriptor() const
