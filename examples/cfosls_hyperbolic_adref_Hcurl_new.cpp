@@ -1303,6 +1303,8 @@ int main(int argc, char *argv[])
 
    } // end of the main AMR loop
 
+   //delete space_names_funct;
+
    for (int i = 0; i < formulat->Nblocks(); ++i)
        delete bdr_attribs_data[i];
    delete bdr_conds;
@@ -1310,7 +1312,15 @@ int main(int argc, char *argv[])
    delete fe_formulat;
    delete hierarchy;
    delete prob_hierarchy;
+
    delete estimator;
+   for (int i = 0; i < extra_grfuns.Size(); ++i)
+       if (extra_grfuns[i])
+           delete extra_grfuns[i];
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           if (integs(i,j))
+               delete integs(i,j);
 
 #ifdef PARTSOL_SETUP
    for (int i = 0; i < div_rhs_lvls.Size(); ++i)

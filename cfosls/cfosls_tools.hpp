@@ -167,6 +167,14 @@ public:
         initialized = true;
     }
 
+    virtual ~BdrConditions()
+    {
+        for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+            if (bdr_attribs[i])
+                delete bdr_attribs[i];
+    }
+
+
     std::vector< Array<int>* >& GetAllBdrAttribs()
     {
         MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
@@ -1213,6 +1221,16 @@ protected:
     Array2D<ParMixedBilinearForm*> offd_forms;
     bool initialized_forms;
 public:
+    ~BlockProblemForms()
+    {
+        for (int i = 0; i < diag_forms.Size(); ++i)
+            delete diag_forms[i];
+
+        for (int i = 0; i < offd_forms.NumRows(); ++i)
+            for (int j = 0; j < offd_forms.NumCols(); ++j)
+                delete offd_forms(i,j);
+    }
+
     BlockProblemForms(int num_blocks) : numblocks(num_blocks), initialized_forms(false)
     {
         diag_forms.SetSize(num_blocks);
@@ -1319,6 +1337,7 @@ protected:
     void DistributeSolution() const;
 
 public:
+    virtual ~FOSLSProblem();
     void InitSolver(bool verbose);
 
     void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }

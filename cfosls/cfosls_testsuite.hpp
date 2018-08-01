@@ -215,6 +215,7 @@ protected:
     Array<MatrixFunctionCoefficient*> mat_coeffs;
 
 public:
+    virtual ~FOSLS_test();
     FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients);
 
     int Dim() const {return dim;}

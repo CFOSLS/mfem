@@ -1586,6 +1586,55 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
     }
 }
 
+FOSLSProblem::~FOSLSProblem()
+{
+    for (int i = 0; i < estimators.Size(); ++i)
+        if (estimators[i])
+            delete estimators[i];
+
+    for (int i = 0; i < pfes.Size(); ++i)
+        delete pfes[i];
+
+    for (int i = 0; i < grfuns.Size(); ++i)
+        delete grfuns[i];
+
+    for (int i = 0; i < plforms.Size(); ++i)
+        delete plforms[i];
+
+    if (trueRhs)
+        delete trueRhs;
+    if (trueX)
+        delete trueX;
+    if (trueBnd)
+        delete trueBnd;
+    if (x)
+        delete x;
+
+    if (solver)
+        delete solver;
+    if (prec)
+        delete prec;
+
+    if (hpmats_initialized)
+        for (int i = 0; i < hpmats.NumRows(); ++i)
+            for (int j = 0; j < hpmats.NumCols(); ++j)
+                if (hpmats(i,j))
+                    delete hpmats(i,j);
+
+    if (hpmats_initialized)
+        for (int i = 0; i < hpmats_nobnd.NumRows(); ++i)
+            for (int j = 0; j < hpmats_nobnd.NumCols(); ++j)
+                if (hpmats_nobnd(i,j))
+                    delete hpmats_nobnd(i,j);
+
+    if  (CFOSLSop)
+        delete CFOSLSop;
+
+    if (CFOSLSop_nobnd)
+        delete CFOSLSop_nobnd;
+}
+
+
 void FOSLSProblem::Update()
 {
     if (!is_dynamic && verbose)

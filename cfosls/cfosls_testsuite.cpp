@@ -482,6 +482,25 @@ FOSLS_test::FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficie
         mat_coeffs[i] = NULL;
 }
 
+FOSLS_test::~FOSLS_test()
+{
+    for (int i = 0; i < func_coeffs.Size(); ++i)
+        if (func_coeffs[i])
+            delete func_coeffs[i];
+
+    vec_coeffs.SetSize(nvec_coeffs);
+    for (int i = 0; i < vec_coeffs.Size(); ++i)
+        if (vec_coeffs[i])
+            delete vec_coeffs[i];
+
+    mat_coeffs.SetSize(nmat_coeffs);
+    for (int i = 0; i < mat_coeffs.Size(); ++i)
+        if (mat_coeffs[i])
+            delete mat_coeffs[i];
+
+}
+
+
 Hyper_test::Hyper_test(int dimension, int num_solution)
     : FOSLS_test(dimension, 3, 4, 2), numsol(num_solution)
 {
