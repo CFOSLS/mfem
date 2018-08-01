@@ -408,8 +408,9 @@ void BlkHypreOperator::MultTranspose(const Vector &x, Vector &y) const
 
 void BdrConditions::Set(const std::vector<Array<int>* >& bdr_attribs_)
 {
-    MFEM_ASSERT(!initialized, "BdrConditions are already initialized! "
-                              "If you intend to re-define them, call Reset() before Set() \n");
+    for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
+        if (bdr_attribs[i])
+            delete bdr_attribs[i];
 
     bdr_attribs.resize(bdr_attribs_.size());
     for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
@@ -418,8 +419,6 @@ void BdrConditions::Set(const std::vector<Array<int>* >& bdr_attribs_)
         for (int j = 0; j < bdr_attribs_[i]->Size(); ++j)
             (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
     }
-
-    initialized = true;
 }
 
 
@@ -3028,18 +3027,20 @@ void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
 
-
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
     SparseMatrix Schur_diag;
     Schur->GetDiag(Schur_diag);
     Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver * invA, *invS;
     if (prec_option == 100)
@@ -3225,15 +3226,20 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     HypreParMatrix & C = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,1)));
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
-
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver *invA, *invC, *invS;
     if (prec_option == 100)
@@ -3518,14 +3524,20 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver *invA, *invC, *invS;
     if (prec_option == 100)
@@ -3585,14 +3597,20 @@ void FOSLSProblem_HdivH1parab::CreatePrec(BlockOperator& op, int prec_option, bo
 
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver *invA, *invC, *invS;
     if (prec_option == 100)
@@ -3752,14 +3770,20 @@ void FOSLSProblem_HdivH1wave::CreatePrec(BlockOperator& op, int prec_option, boo
 
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver *invA, *invC, *invS;
     if (prec_option == 100)
@@ -3918,14 +3942,20 @@ void FOSLSProblem_HdivH1lapl::CreatePrec(BlockOperator& op, int prec_option, boo
 
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver *invA, *invC, *invS;
     if (prec_option == 100)
@@ -4085,14 +4115,20 @@ void FOSLSProblem_MixedLaplace::CreatePrec(BlockOperator& op, int prec_option, b
     HypreParMatrix & A = ((HypreParMatrix&)(CFOSLSop->GetBlock(0,0)));
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
 
-    HypreParMatrix *Schur;
-
     HypreParMatrix *AinvDt = D.Transpose();
     HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
     Schur = ParMult(&D, AinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    SparseMatrix Schur_diag;
+    Schur->GetDiag(Schur_diag);
+    Schur_diag.MoveDiagonalFirst();
+
+    delete AinvDt;
+    delete Ad;
 
     Solver * invA, *invS;
     if (prec_option == 100)
@@ -6483,6 +6519,9 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
         } // end of if row corresponds to the non-boundary range dof
 
     }
+
+    delete td_btd_hpmat;
+    delete C_td_btd;
 }
 
 

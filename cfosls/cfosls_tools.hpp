@@ -113,13 +113,12 @@ struct BdrConditions
 protected:
     int numblocks;
     int nattribs;
-    bool initialized;
 protected:
     std::vector<Array<int>* > bdr_attribs;
 
 public:
     BdrConditions(ParMesh& pmesh_, int nblocks)
-    : numblocks(nblocks), nattribs(pmesh_.bdr_attributes.Max()), initialized(false)
+    : numblocks(nblocks), nattribs(pmesh_.bdr_attributes.Max())
     {
         bdr_attribs.resize(numblocks);
         for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
@@ -145,8 +144,6 @@ public:
             for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
                 (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
         }
-
-        initialized = true;
     }
 
     BdrConditions(const std::vector<const Array<int>* >& bdr_attribs_)
@@ -163,8 +160,6 @@ public:
             for (int j = 0; j < bdr_attribs[i]->Size(); ++j)
                 (*bdr_attribs[i])[j] = (*bdr_attribs_[i])[j];
         }
-
-        initialized = true;
     }
 
     virtual ~BdrConditions()
@@ -176,33 +171,24 @@ public:
 
 
     std::vector< Array<int>* >& GetAllBdrAttribs()
-    {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-        return bdr_attribs;
-    }
+    { return bdr_attribs; }
 
     const Array<int>& GetBdrAttribs(int blk)
     {
-        MFEM_ASSERT(initialized, "Boundary conditions were not initialized \n");
-        if (!(blk >= 0 && blk < numblocks))
-            std::cout << "Breakpoint \n";
         MFEM_ASSERT(blk >= 0 && blk < numblocks,
                     "Invalid block number in BdrConditions::GetBdrAttribs()");
 
         return *bdr_attribs[blk];
     }
 
-    bool Initialized() const {return initialized;}
-
     // copies the provided bdr_attribs inside
     void Set(const std::vector<Array<int>* >& bdr_attribs_);
 
     void Reset()
     {
-        MFEM_ASSERT(initialized, "Cannot reset bdr conditions which were not initialized");
         for (unsigned int i = 0; i < bdr_attribs.size(); ++i)
-            delete bdr_attribs[i];
-        initialized = false;
+            if (bdr_attribs[i])
+                delete bdr_attribs[i];
     }
 };
 
@@ -218,8 +204,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
             (*bdr_attribs[1])[j] = 0;
-
-        initialized = true;
     }
 };
 
@@ -238,8 +222,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
             (*bdr_attribs[2])[j] = 0;
-
-        initialized = true;
     }
 
 };
@@ -259,8 +241,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
             (*bdr_attribs[2])[j] = 0;
-
-        initialized = true;
     }
 
 };
@@ -280,8 +260,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
             (*bdr_attribs[2])[j] = 0;
-
-        initialized = true;
     }
 };
 
@@ -301,8 +279,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
             (*bdr_attribs[2])[j] = 0;
-
-        initialized = true;
     }
 
 };
@@ -321,8 +297,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[2]->Size(); ++j)
             (*bdr_attribs[2])[j] = 0;
-
-        initialized = true;
     }
 };
 
@@ -339,8 +313,6 @@ public:
 
         for (int j = 0; j < bdr_attribs[1]->Size(); ++j)
             (*bdr_attribs[1])[j] = 0;
-
-        initialized = true;
     }
 
 };
@@ -353,7 +325,6 @@ public:
         : BdrConditions(pmesh_, 1)
     {
         *bdr_attribs[0] = 1;
-        initialized = true;
     }
 
 };
@@ -1007,6 +978,13 @@ protected:
     Array<FiniteElementCollection*> fecolls;
     int feorder;
 public:
+    virtual ~FOSLSFEFormulation()
+    {
+        for (int i = 0; i < fecolls.Size(); ++i)
+            if (fecolls[i])
+                delete fecolls[i];
+    }
+
     FOSLSFEFormulation(FOSLSFormulation& formulation) : FOSLSFEFormulation(formulation, 0) {}
     FOSLSFEFormulation(FOSLSFormulation& formulation, int fe_order) : formul(formulation), feorder(fe_order)
     {
@@ -1549,11 +1527,18 @@ public:
 class FOSLSProblem_HdivL2hyp : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix *Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivL2hyp()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivL2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1562,7 +1547,7 @@ public:
 
     FOSLSProblem_HdivL2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1571,7 +1556,7 @@ public:
 
     FOSLSProblem_HdivL2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1592,11 +1577,18 @@ public:
 class FOSLSProblem_HdivL2L2hyp : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix *Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivL2L2hyp()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivL2L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1605,7 +1597,7 @@ public:
 
     FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1614,7 +1606,7 @@ public:
 
     FOSLSProblem_HdivL2L2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1630,11 +1622,18 @@ public:
 class FOSLSProblem_HdivH1L2hyp : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix * Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivH1L2hyp()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivH1L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1643,7 +1642,7 @@ public:
 
     FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1652,7 +1651,7 @@ public:
 
     FOSLSProblem_HdivH1L2hyp(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1667,11 +1666,18 @@ public:
 class FOSLSProblem_HdivH1parab : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix * Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivH1parab()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivH1parab(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1680,7 +1686,7 @@ public:
 
     FOSLSProblem_HdivH1parab(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1689,7 +1695,7 @@ public:
 
     FOSLSProblem_HdivH1parab(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1705,11 +1711,18 @@ public:
 class FOSLSProblem_HdivH1wave : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix * Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivH1wave()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivH1wave(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1718,7 +1731,7 @@ public:
 
     FOSLSProblem_HdivH1wave(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1727,7 +1740,7 @@ public:
 
     FOSLSProblem_HdivH1wave(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1743,11 +1756,18 @@ public:
 class FOSLSProblem_HdivH1lapl : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix *Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_HdivH1lapl()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_HdivH1lapl(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1756,7 +1776,7 @@ public:
 
     FOSLSProblem_HdivH1lapl(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1765,7 +1785,7 @@ public:
 
     FOSLSProblem_HdivH1lapl(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1781,11 +1801,18 @@ public:
 class FOSLSProblem_MixedLaplace : virtual public FOSLSProblem
 {
 protected:
+    HypreParMatrix * Schur;
+
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
 public:
+    virtual ~FOSLSProblem_MixedLaplace()
+    {
+        delete Schur;
+    }
+
     FOSLSProblem_MixedLaplace(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1794,7 +1821,7 @@ public:
 
     FOSLSProblem_MixedLaplace(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
@@ -1803,7 +1830,7 @@ public:
 
     FOSLSProblem_MixedLaplace(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_)
+        : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose_), Schur(NULL)
     {
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
