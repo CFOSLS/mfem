@@ -91,7 +91,7 @@ void uFunTestLapLshape_grad(const Vector& xt, Vector& grad );
 double delta_center_ex(const Vector& xt);
 
 
-///// tests which can be used for any problem
+///// tests which can be used for various problem (e.g., used for the CFOSLS paper)
 double uFunTest_ex(const Vector& x); // Exact Solution
 double uFunTest_ex_dt(const Vector& xt);
 double uFunTest_ex_dt2(const Vector & xt);
@@ -111,10 +111,12 @@ void uFunTestNh_ex_gradxt(const Vector& xt, Vector& gradxt);
 void uFunTestNh_ex_dtgradx(const Vector& xt, Vector& gradx );
 
 ////// additional functions (mainly for the hyperbolic problems)
+/// rotating Gaussian hill
 double uFunCylinder_ex(const Vector& xt);
 double uFunCylinder_ex_dt(const Vector& xt);
 void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
 
+/// velocity functions for various domains (for transport equation)
 void bFunRect2D_ex(const Vector& xt, Vector& b );
 double  bFunRect2Ddiv_ex(const Vector& xt);
 
@@ -519,6 +521,7 @@ private:
 
 };
 
+/// Legacy code, one should better use the newer Hyper_test
 class Transport_test_divfree
 {
 protected:

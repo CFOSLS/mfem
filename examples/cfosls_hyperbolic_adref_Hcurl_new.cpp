@@ -1308,7 +1308,7 @@ int main(int argc, char *argv[])
 
    } // end of the main AMR loop
 
-   // Deallocaing the mem
+   // Deallocating memory
 
    for (int i = 0; i < formulat->Nblocks(); ++i)
        delete bdr_attribs_data[i];

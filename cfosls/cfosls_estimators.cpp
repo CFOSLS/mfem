@@ -6,8 +6,10 @@ using namespace std;
 namespace mfem
 {
 
-// old implementation, now is a simplified form of the blocked case
-// here FOSLS functional is given as a bilinear form(sigma, sigma)
+/// old implementation, now is a simplified form of the blocked case
+/// here FOSLS functional is given as a bilinear form(sigma, sigma)
+/// UPD: A more general FOSLSErrorEstimator() is used currently in the
+/// UPD: error estimators, which allows one to use several blfis
 double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma,
                            Vector &error_estimates)
 {
@@ -49,8 +51,10 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi, GridFunction &sigma,
     return std::sqrt(total_error);
 }
 
-// here FOSLS functional is given as a symmetric block matrix with bilinear forms for
-// different grid functions (each for all solution and rhs components)
+/// Main function to compute the local error estimates for a given array of GridFunctions
+/// and BilinearFormIntegrators in the output vector (error_estimates).
+/// here FOSLS functional is given as a symmetric block matrix with bilinear forms for
+/// different grid functions (each for all solution and rhs components)
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates)
 {
@@ -70,6 +74,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
     error_estimates.SetSize(ne);
 
     double total_error = 0.0;
+    // loop oer all elements, computing error estimates for each element
     for (int i = 0; i < ne; ++i)
     {
         double err = 0.0;
@@ -77,7 +82,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
         {
             for (int colblk = rowblk; colblk < blfis.NumCols(); ++colblk)
             {
-                if (rowblk == colblk)
+                if (rowblk == colblk) // diagonal case
                 {
                     if (blfis(rowblk,colblk))
                     {
@@ -100,6 +105,7 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                 else
                 // only using one of the off-diagonal integrators at symmetric places,
                 // since a FOSLS functional must be symmetric
+                // one can provide only one of them
                 {
                     if (blfis(rowblk,colblk) || blfis(colblk,rowblk))
                     {

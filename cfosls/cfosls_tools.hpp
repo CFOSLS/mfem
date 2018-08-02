@@ -5,7 +5,8 @@
 #ifndef MFEM_CFOSLS_TOOLS
 #define MFEM_CFOSLS_TOOLS
 
-// some constants used for vtk visualization
+// some constants used for vtk-related visualization
+// (computing mesh and grid functions slices)
 #define VTKTETRAHEDRON 10
 #define VTKWEDGE 13
 #define VTKTRIANGLE 5
@@ -13,9 +14,6 @@
 
 using namespace std;
 using namespace mfem;
-
-/// TODO: Replace references by pointers for return arguments to the
-/// TODO: dynamically allocated objects (e.g., bdr attributes)
 
 namespace mfem
 {
@@ -31,15 +29,36 @@ class MonolithicGSBlockSmoother;
 
 SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 
+/// Takes a ParFiniteElementSpace and a tdofs link between top and bottom bases
+/// and creates a HypreParMatrix which restricts given tdofs in the entire domain
+/// onto tdofs at the top (if top_or_bot = "top") or bottom(top_or_bot = "bot") bases
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
                                    std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
-std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels, bool verbose = false);
 
-void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom, const Array<int>& EssBdrTrueDofs_range );
+/// This routine takes type of the elements (eltype), corresponding fespace,
+/// link between bot and top boundary elements
+/// and creates a link between dofs on the top and bottom bases of the cylinder
+/// The output link is in the form of a vector of pairs (int,int) where each pair matches dofs
+/// of fespace which correspond to the matching top to bottom boundary elements
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype,
+                                                         FiniteElementSpace& fespace,
+                                                         std::vector<std::pair<int,int> > & bot_to_top_bels,
+                                                         bool verbose = false);
+
+/// Takes a HypreParMatrix and a list of boundary tdofs for rows and columns and
+/// eliminates (sets to zero) all entries for the "ib" block, which match internal
+/// (not-boundary) tdofs with boundary tdofs.
+/// "boundary" here is defined by EssBdrTrueDof lists (_dom and _range)
+void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom,
+                        const Array<int>& EssBdrTrueDofs_range );
+
+/// Takes a HypreParMatrix and a list of boundary tdofs for rows and columns and
+/// eliminates (sets to zero) all entries for the "bb" block, which match boundary tdofs
+/// with boundary tdofs.
+/// "boundary" here is defined by EssBdrTrueDof lists (_dom and _range)
 void Eliminate_bb_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs );
 
-/// Conjugate gradient method which checks for boundary conditions (used for debugging)
+/// Conjugate gradient method which checks for boundary conditions (was used for debugging)
 class CGSolver_mod : public CGSolver
 {
 protected:
@@ -108,6 +127,9 @@ public:
     virtual void MultTranspose(const Vector &x, Vector &y) const;
 };
 
+/// simple structure for storing boundary attributes for different unknowns
+/// Briefly speaking, it stores an array of ints which define essential boundary
+/// for each unknown (block)
 struct BdrConditions
 {
 protected:
@@ -191,6 +213,8 @@ public:
                 delete bdr_attribs[i];
     }
 };
+
+// specific classes which define boundary conditions for various problems
 
 struct BdrConditions_CFOSLS_HdivL2_Hyper : public BdrConditions
 {
@@ -300,7 +324,8 @@ public:
     }
 };
 
-// one of the choices which is not from a singular problem
+// one of the choices which correspond to a non-singular problem
+// for the mixed formulation of Laplace
 struct BdrConditions_MixedLaplace : public BdrConditions
 {
 public:
@@ -317,7 +342,8 @@ public:
 
 };
 
-// one of the choices which is not from a singular problem
+// one of the choices which correspond to a non-singular problem
+// for the standard formulation of Laplace
 struct BdrConditions_Laplace : public BdrConditions
 {
 public:
@@ -333,7 +359,8 @@ enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
 
 class FOSLSFormulation;
 
-// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
+/// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
+///
 class GeneralHierarchy
 {
 protected:
@@ -341,9 +368,12 @@ protected:
 
     // the finest mesh (a copy of it is also stored in pmesh_lvls)
     // used for updating the hierarchy when the hierarchy's finest mesh is refined
+    // this is sort of a "dynamic" object which always represents the finest level
     ParMesh& pmesh;
+
     // pfespaces and fecolls which live on the pmesh
     // used for updating the hierarchy
+    // these are also "dynamic" objects which always represents the finest level
     ParFiniteElementSpace * Hdiv_space;
     ParFiniteElementSpace * Hcurl_space;
     ParFiniteElementSpace * H1_space;
@@ -359,8 +389,9 @@ protected:
     /// stores meshes at all levels
     /// when the hierarchy gets more levels, new meshes are prepended
     /// but not changed!
-    /// (*) for dynamic update of an aboject build on finest level of the hierarchy
+    /// (*) for dynamic update of an object build on finest level of the hierarchy
     /// one should use pmesh and corresponding spaces
+    /// These and all the rest are called "static", unlike omesh and f.e. spaces above
     Array<ParMesh*> pmesh_lvls;
     Array<ParFiniteElementSpace* > Hdiv_space_lvls;
     Array<ParFiniteElementSpace* > Hcurl_space_lvls;
@@ -380,23 +411,33 @@ protected:
     Array<HypreParMatrix*> TrueP_Hcurl_lvls;
     Array<HypreParMatrix*> TrueP_Hdivskew_lvls;
 
+    // discrete divfree operators HypreParMatrices
     Array<const HypreParMatrix*> DivfreeDops_lvls;
 
+    // the matrices data are actually owned by pfespaces
+    // thus, they are deallocated by the destructors of pfespaces
     Array< HypreParMatrix* > DofTrueDof_L2_lvls;
     Array< HypreParMatrix* > DofTrueDof_H1_lvls;
     Array< HypreParMatrix* > DofTrueDof_Hdiv_lvls;
     Array< HypreParMatrix* > DofTrueDof_Hcurl_lvls;
     Array< HypreParMatrix* > DofTrueDof_Hdivskew_lvls;
 
+    // defines whether Hcurl f.e. space must be built in the hierarchy
+    // one might not want to built it, because of the limitations on Hcurl f.e. spaces
+    // e.g., higher-order f.e. Nedelec space doesn't allow to refine the mesh
     bool with_hcurl;
 
+    // flags which define whether divfree discrete operators (doftruedofs) were constructed
     bool divfreedops_constructed;
     bool doftruedofs_constructed;
 
+    // used to define whether the mesh has changed (when we want to update the hierarchy)
     int pmesh_ne;
 
     int update_counter;
 
+    // array of attached problems
+    // they don't belong to the hierarchy but they will be updated when the hierarchy is.
     Array<FOSLSProblem*> problems;
 
 public:
@@ -415,10 +456,15 @@ public:
     // one wants to extend the hierarchy
     virtual void Update();
 
+    // tells the hierarchy to construct divfree discrete operators
     void ConstructDivfreeDops();
+
+    // tells the hierarchy to construct dof_truedof matrices
+    // uses Dof_TrueDof_Matrix() inside, thus,
+    // the matrices data are actually owned by pfespaces
     void ConstructDofTrueDofs();
 
-    void RefineAndCopy(int lvl, ParMesh* pmesh);
+    // various getters
 
     ParMesh * GetPmesh(int l) {return pmesh_lvls[l];}
 
@@ -454,28 +500,42 @@ public:
 
     int Nlevels() const {return num_lvls;}
 
+    // creates truedof offsets for a given array of space names
     const Array<int>* ConstructTrueOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+
+    // creates dof offsets for a given array of space names
+    const Array<int>* ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+
+    // two routines which construct TrueP (interpolation on true dofs) at given level
+    // of the hierarchy either given space names or a FOSLSFormulation
     BlockOperator* ConstructTruePforFormul(int level, const Array<SpaceName>& space_names,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
     BlockOperator* ConstructTruePforFormul(int level, const FOSLSFormulation& formul,
                                            const Array<int>& row_offsets, const Array<int> &col_offsets);
 
-    const Array<int>* ConstructOffsetsforFormul(int level, const Array<SpaceName>& space_names);
+    // constructs P (interpolation on dofs) at given level
+    // of the hierarchy given an array of space names
     BlockMatrix* ConstructPforFormul(int level, const Array<SpaceName>& space_names,
                                                              const Array<int>& row_offsets, const Array<int>& col_offsets);
 
-
+    // gets the essential boundary dofs (or true dofs, depending on the value of tdof_or_dof)
+    // for a given space name and essential boundary attributes at the given level
+    // FIXME: Allocated memory which will be never be deleted
     Array<int>& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
                                            const Array<int>& essbdr_attribs, int level) const;
 
+    // block version of GetEssBdrTdofsOrDofs
+    // FIXME: Allocated memory which will be never be deleted
     std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<Array<int>*>& essbdr_attribs, int level) const;
 
     /*
+     * out-of-date
     std::vector<Array<int>* >& GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<const Array<int>*>& essbdr_attribs, int level) const;
     */
 
+    // more getters
     SparseMatrix* GetElementToDofs(SpaceName space_name, int level) const;
 
     BlockMatrix* GetElementToDofs(const Array<SpaceName>& space_names, int level,
@@ -492,7 +552,7 @@ public:
     int GetUpdateCounter() const {return update_counter;}
 
     // constructs a FOSLSProblem of given (by template parameter) subtype
-    // using the spaces at level l (defined on pmesh_lvls[l])
+    // using the spaces at level l (defined on pmesh_lvls[l], thus, "static")
     template <class Problem> Problem* BuildStaticProblem(int l, BdrConditions& bdr_conditions,
                                                          FOSLSFEFormulation& fe_formulation,
                                                          int prec_option, bool verbose);
@@ -503,12 +563,20 @@ public:
                                                           FOSLSFEFormulation& fe_formulation,
                                                           int prec_option, bool verbose);
 
-    // attaches a given problem living at the finest level to the problems (defined on pmesh)
-    // which is useful for updating the problem
+    // attaches a given "dynamic" problem living at the finest level to the problems
+    // (defined on pmesh) which is useful for updating the problem along with
+    // updating the hierarchy
     void AttachProblem(FOSLSProblem* problem);
 
     FOSLSProblem* GetProblem(int i) {return problems[i];}
     int Nproblems() const {return problems.Size();}
+
+protected:
+    // a wrapper around UniformRefinement which also allows one to refine a ParMeshCyl
+    // with its modified Refine() routine
+    // used in constructing the hierarchy of meshes
+    void RefineAndCopy(int lvl, ParMesh* pmesh);
+
 };
 
 template <class Problem> Problem*
@@ -525,12 +593,22 @@ GeneralHierarchy::BuildDynamicProblem(BdrConditions& bdr_conditions, FOSLSFEForm
     return new Problem(*this, bdr_conditions, fe_formulation, prec_option, verbose);
 }
 
-
+/// a specific GeneralHierarchy which is built on a hierarchy of ParMeshCyl
+/// (cylinder meshes) objects.
+/// As a consequence, this hierarchy additionally constructs for each level
+/// links between tdofs, interpolation and restriction operators acting on
+/// the bases of the cylinder
+/// Current implementation works only for linear H1 elements and RT0,
+/// and it is assumed that the mesh has exactly the same structure at the top
+/// and bottom bases
 class GeneralCylHierarchy : public GeneralHierarchy
 {
 protected:
+    // to address underlying meshes without pointers casting
     Array<ParMeshCyl*> pmeshcyl_lvls;
 
+    // links between true dofs for H1 (1st order) and Hdiv (RT0 only)
+    // which belong to the top and bottom bases of the cylinder mesh
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_H1_lvls;
     std::vector<std::vector<std::pair<int,int> > > tdofs_link_Hdiv_lvls;
 
@@ -545,9 +623,35 @@ protected:
 protected:
     void ConstructRestrictions();
     void ConstructInterpolations();
+
+    // constructs first links between dofs at the top and bottom bases, and then
+    // postprocesses them to create a link between tdofs
     void ConstructTdofsLinks();
 
 public:
+    virtual ~GeneralCylHierarchy()
+    {
+        for (int i = 0; i < TrueP_bndbot_H1_lvls.Size(); ++i)
+            delete TrueP_bndbot_H1_lvls[i];
+        for (int i = 0; i < TrueP_bndbot_H1_lvls.Size(); ++i)
+            delete TrueP_bndbot_Hdiv_lvls[i];
+
+        for (int i = 0; i < TrueP_bndtop_H1_lvls.Size(); ++i)
+            delete TrueP_bndtop_H1_lvls[i];
+        for (int i = 0; i < TrueP_bndtop_Hdiv_lvls.Size(); ++i)
+            delete TrueP_bndtop_Hdiv_lvls[i];
+
+        for (int i = 0; i < Restrict_bot_H1_lvls.Size(); ++i)
+            delete Restrict_bot_H1_lvls[i];
+        for (int i = 0; i < Restrict_bot_Hdiv_lvls.Size(); ++i)
+            delete Restrict_bot_Hdiv_lvls[i];
+
+        for (int i = 0; i < Restrict_top_H1_lvls.Size(); ++i)
+            delete Restrict_top_H1_lvls[i];
+        for (int i = 0; i < Restrict_top_Hdiv_lvls.Size(); ++i)
+            delete Restrict_top_Hdiv_lvls[i];
+    }
+
     GeneralCylHierarchy(int num_levels, ParMeshCyl& pmesh, int feorder, bool verbose)
         : GeneralHierarchy(num_levels, pmesh, feorder, verbose)
     {
@@ -570,9 +674,10 @@ public:
     }
 
     // should be called if the finest mesh was refined and
-    // one wants to extend the hierarchy
+    // one wants to extend the hierarchy, by adding an additional level
     virtual void Update() override { MFEM_ABORT("Update() is not implemented for GeneralCylHierarchy!");}
 
+    /// various getters
     ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
 
     std::vector<std::pair<int,int> > * GetTdofs_Hdiv_link(int l) {return &(tdofs_link_Hdiv_lvls[l]);}
@@ -696,7 +801,7 @@ public:
 
 /// It is implicitly assumed that first (unknowns_number) of equations
 /// are related to the FOSLS functional and the rest (up to the total number
-/// equal numblocks) are constrains.
+/// equal numblocks) are constraints.
 /// Thus, in FOSLSEstimator the first block of (unknowns_number) x (unknowns_number)
 /// of integrators is used as functional integrators(forms)
 struct FOSLSFormulation
@@ -706,7 +811,9 @@ protected:
     const int numblocks;
     const int unknowns_number;
     const bool have_constraint;
+    // stores and owns the BilinearFormIntegrators for the formulation
     Array2D<BilinearFormIntegrator*> blfis;
+    // stores and owns the LinearFormIntegrators for the formulation
     Array<LinearFormIntegrator*> lfis;
     std::vector<std::pair<int,int> > blk_structure;
     mutable Array<SpaceName>* space_names;
@@ -717,16 +824,38 @@ protected:
     // then when this form will be deleted, it will also delete the integrator(blfi)
     // and a mechanism for FOSLFFormulation was required to know that this was the case
     // Otherwise, already deleted blfis will be re-deleted in the destructor of FOSLSFormulation
+    // FIXME: This doesn't fix the problem when multiple BilinearForms capture the same
+    // FIXME: BilinearFormIntegrator and then all of them try to delete the integrator
     Array2D<bool> blfis_capturedflags;
     Array<bool> lfis_capturedflags;
+
 protected:
+    // sets the block structure of the problem
+    // as a vector of pairs (int,int)
+    // Each pair (a,b) corresponds to a variable in the system
+    // Here "a" defines type of the variable:
+    // a = -1: constraint
+    // a = 0: scalar unknown
+    // a = 1: vector unknown
+    // and "b" defines the index in the FOSLS_test of the problem
+    // for this unknown:
+    // E.g, "b" = 0 with a = 0 says, that the scalar unknown corresponds
+    // to the func_coeff[0] of the test
+    //
+    // For the constraint (a = -1) the default value of b = -1 as well
     virtual void InitBlkStructure() = 0;
+
+    // constructs space_names which set the spaces (from SpaceName enum) for each variable
     virtual void ConstructSpacesDescriptor() const = 0;
+
+    // same as ConstructSpacesDescriptor(), but only for the variable in the FOSLS functional
     virtual void ConstructFunctSpacesDescriptor() const = 0;
+
 public:
     virtual ~FOSLSFormulation();
     FOSLSFormulation(int dimension, int num_blocks, int num_unknowns, bool do_have_constraint);
 
+    // getters (if needed, constructs the space names)
     const Array<SpaceName>* GetSpacesDescriptor() const
     {
         if (!space_names)
@@ -751,13 +880,20 @@ public:
         return (*space_names)[i];
     }
 
+    // For a problem with initial condition, in the children classes one can
+    // override this function and make this function return the number of unknown
+    // for which we have initial condition
+    // E.g., for CFOSLS formulation of the heat equation (Hdiv-H1-L2) we could define
+    // this function to return 1 (since we have initial condition for H1 variable)
     virtual int GetUnknownWithInitCnd() const
     {
         MFEM_ABORT("FOSLSFormulation::GetUnknownWithInitCnd() is not overriden! \n");
         return -1;
     }
 
-    std::pair<int,int>& GetPair(int pair) {return blk_structure[pair];}
+    const std::pair<int,int>& GetPair(int pair) {return blk_structure[pair];}
+
+    // It is assumed that all children will have a specific FOSLS_test inside it
     virtual FOSLS_test * GetTest() = 0;
 
     int Dim() const {return dim;}
@@ -765,9 +901,7 @@ public:
     int Nunknowns() const {return unknowns_number;}
 
     BilinearFormIntegrator* GetBlfi(int i, int j)
-    {
-        return GetBlfi(i,j,false);
-    }
+    { return GetBlfi(i,j,false); }
 
     BilinearFormIntegrator* GetBlfi(int i, int j, bool capture)
     {
@@ -779,9 +913,7 @@ public:
     }
 
     LinearFormIntegrator* GetLfi(int i)
-    {
-        return GetLfi(i, false);
-    }
+    { return GetLfi(i, false); }
 
     LinearFormIntegrator* GetLfi(int i, bool capture)
     {
@@ -993,12 +1125,15 @@ public:
     int NumSol() const override {return numsol;}
 };
 
-/// general class for FOSLS finite element formulations
+/// General class for FOSLS finite element formulations
 /// constructed on top of the FOSLS formulation
+/// In addition to FOSLSFormulation, also has f.e. collections
+/// for each unknown
 struct FOSLSFEFormulation
 {
 protected:
     FOSLSFormulation& formul;
+    // owns f.e. collection
     Array<FiniteElementCollection*> fecolls;
     int feorder;
 public:
@@ -1017,13 +1152,17 @@ public:
             fecolls[i] = NULL;
     }
 
+    // getters
     FOSLSFormulation * GetFormulation() {return &formul;}
 
     BilinearFormIntegrator* GetBlfi(int i, int j) {return formul.GetBlfi(i,j);}
     LinearFormIntegrator* GetLfi(int i) {return formul.GetLfi(i);}
 
+    // if capture = yes, tells the formulation that its blfi was captured
+    // then, when deleted, formulation will not try to delete this blfi
     BilinearFormIntegrator* GetBlfi(int i, int j, bool capture) {return formul.GetBlfi(i,j, capture);}
     LinearFormIntegrator* GetLfi(int i, bool capture) {return formul.GetLfi(i, capture);}
+
     FiniteElementCollection* GetFeColl(int i)
     {
         MFEM_ASSERT( i >= 0 && i < fecolls.Size(), "i < 0 or i > size fo fecolls \n");
@@ -1033,7 +1172,6 @@ public:
     int Nblocks() const {return formul.Nblocks();}
     int Nunknowns() const {return formul.Nunknowns();}
     int Feorder() const {return feorder;}
-
 };
 
 // specific FOSLSFEFormulation
@@ -1218,7 +1356,11 @@ public:
     }
 };
 
-
+/// A convenient structure to store bilinear forms related to the weak
+/// formulation of the problem
+/// Overcomes a difficulty that diagonal (BilinearForms) and off-diagonal
+/// blocks(MixedBilinearForms) don't have a common base
+/// Used in FOSLSProblem
 class BlockProblemForms
 {
 protected:
@@ -1248,8 +1390,12 @@ public:
                 offd_forms(i,j) = NULL;
     }
 
+    // initializes the forms taking the integrators from the FOSLSFEFormulation
+    // and f.e. spaces from pfes
+    // TODO: Probably, this function should better take FOSLSFormulation
     void InitForms(FOSLSFEFormulation& fe_formul, Array<ParFiniteElementSpace *> &pfes);
 
+    // TODO: Reference to pointers, needed?
     ParBilinearForm* & diag(int i)
     {
         MFEM_ASSERT(initialized_forms, "Calling diag() when forms were not initialized is forbidden");
@@ -1261,10 +1407,15 @@ public:
         return offd_forms(i,j);
     }
 
+    // updates the underlying diagonal and off-diagonal forms
     void Update();
 };
 
-// class for general CFOSLS problem
+/// Base class for general CFOSLS problem
+/// On top of FOSLSFEFormulation and given a mesh, it constructs
+/// everything related to a discrete problem
+/// TODO: Add functiona which adjust righthand side due to the nonhomogeneous
+/// TODO: boundary conditions, as in the time stepping code
 class FOSLSProblem
 {
 protected:
@@ -1285,11 +1436,15 @@ protected:
     int attached_index;
 
     /// true if Update() is possible when the underlying pmesh is updated
-    /// false, otherwise (if it was created as a "static" problem from the hierarchy)
+    /// false, otherwise (e.g., if it was created as a "static" problem from the hierarchy)
     bool is_dynamic;
 
+    // array of attached estimators
+    // doesn't own the estimator and thus doesn't call destructors for them
+    // but updates them each time when the Update() is called
     Array<FOSLSEstimator*> estimators; // (optional)
 
+    // flags to control what components are present in the FOSLSProblem
     bool spaces_initialized;
     bool forms_initialized;
     bool system_assembled;
@@ -1297,32 +1452,56 @@ protected:
     bool hierarchy_initialized;
     bool hpmats_initialized;
 
-    // all par grid functions which are relevant to the formulation
+    // all ParGridFunctions which are relevant to the formulation
     // e.g., solution components and right hand sides (2 * numblocks)
     // with that, righthand sides are essentially vector representations
     // of the linear forms in the rhs of the variational formulation
     Array<ParGridFunction*> grfuns;
 
+    // pfespaces for the problem variables
+    // owns pfes only if problem didn't take this from the hierarchy
     Array<ParFiniteElementSpace*> pfes;
+
+    // parallel bilinear forms (for diagonal and block-diagonal blocks)
+    // and linear forms for the weak formulaton on the mesh
     BlockProblemForms pbforms;
     Array<ParLinearForm*> plforms;
 
+    // block vector offsets for truedofs
     Array<int> blkoffsets_true;
     Array<int> blkoffsets_func_true;
+    // for dofs
     Array<int> blkoffsets;
+
+    // Two operators and their blocks: with boundary condition imposed (CFOSLSop)
+    // and without considering any boundary conditions (CFOSLSop_nobnd)
+    // hpmats and hpmats_nobnd can be used to address the underlying HypreParMatrices
+    // for the operator blocks (probably, redundant)
     Array2D<HypreParMatrix*> hpmats;
     BlockOperator *CFOSLSop;
     Array2D<HypreParMatrix*> hpmats_nobnd;
     BlockOperator *CFOSLSop_nobnd;
 
+    // block vectors for rhs and solution of the problem
     BlockVector * trueRhs;
     BlockVector * trueX;
+
+    // block vector on truedofs which has exact boundary conditions on essential boundary
+    // and is zero for all the rest indices
+    // used to account for boundary conditions in the righthand side
     BlockVector * trueBnd;
-    BlockVector * x; // inital condition (~bnd conditions)
+
+    // inital condition (~bnd conditions) on dofs
+    BlockVector * x;
+
     int prec_option;
+    // by default, preconditioner is NULL
+    // but children are welcome to override CreatePrec() and define a specific
+    // preconditioner for the problem
     Solver *prec;
     IterativeSolver * solver;
 
+    // currently used only to measure the solution time
     mutable StopWatch chrono;
 
     bool verbose;
@@ -1344,26 +1523,11 @@ protected:
 
 public:
     virtual ~FOSLSProblem();
-    void InitSolver(bool verbose);
-
-    void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
-
-    void SetPrec(Solver & Prec)
-    {
-        MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
-        prec = &Prec;
-        solver->SetPreconditioner(*prec);
-    }
-
-    void DistributeToGrfuns(const Vector& vec) const;
-
-    BlockVector * GetInitialCondition();
-    BlockVector * GetTrueInitialCondition();
-    BlockVector * GetTrueInitialConditionFunc();
-    BlockVector * GetExactSolProj();
 
     /// builds a Problem on a given mesh, creating f.e. spaces and all the necessary data inside
     /// (unlike constructors wghich take the hierarchy as an input argument)
+    /// assemble_system is introduced for divfree problems where we don't want to assemble the matrix
+    /// but rather to compute it via divfree operators
     FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                  bool verbose_, bool assemble_system);
 
@@ -1399,6 +1563,26 @@ public:
     void BuildSystem(bool verbose);
     virtual void Update();
 
+    void InitSolver(bool verbose);
+
+    void UpdateSolverPrec() { solver->SetPreconditioner(*prec); }
+
+    void SetPrec(Solver & Prec)
+    {
+        MFEM_ASSERT(solver_initialized, "Cannot set a preconditioner before the solver is initialized \n");
+        prec = &Prec;
+        solver->SetPreconditioner(*prec);
+    }
+
+    // Distributes a given vector (considered as a blockvector) to the grfuns
+    void DistributeToGrfuns(const Vector& vec) const;
+
+    // getters
+    BlockVector * GetInitialCondition();
+    BlockVector * GetTrueInitialCondition();
+    BlockVector * GetTrueInitialConditionFunc();
+    BlockVector * GetExactSolProj();
+
     ParMesh * GetParMesh(int level = 0)
     {
         if (level == 0)
@@ -1412,37 +1596,15 @@ public:
 
     FOSLSFEFormulation& GetFEformulation() { return fe_formul; }
 
-    int TrueProblemSize() const {return CFOSLSop->Height();}
-    int GlobalTrueProblemSize() const {
-        int local_size = TrueProblemSize();
-        int global_size = 0;
-        MPI_Allreduce(&local_size, &global_size, 1, MPI::INT, MPI_SUM, pmesh.GetComm());
-        return global_size;
-    }
-
     MPI_Comm GetComm() {return pmesh.GetComm();}
 
     int GetNEstimators() const {return estimators.Size();}
-
-    int AddEstimator(FOSLSEstimator& estimator)
-    {
-        estimators.Append(&estimator);
-        return estimators.Size();
-    }
 
     FOSLSEstimator* GetEstimator(int i)
     {
         MFEM_ASSERT(i >=0 && i < estimators.Size(), "Index for estimators out of bounds");
         return estimators[i];
     }
-
-    /*
-    virtual void CreateEstimator(int option)
-    {
-        // TODO: Implement a default error estimator here, FOSLS block + constraints
-        MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
-    }
-    */
 
     Array<ParGridFunction*> & GetGrFuns() {return grfuns;}
 
@@ -1462,16 +1624,49 @@ public:
 
     BlockOperator* GetOp_nobnd() { return CFOSLSop_nobnd; }
 
-    void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
-    void ComputeAnalyticalRhs(Vector& rhs) const;
-
-    void ComputeRhsBlock(Vector& rhs, int blk) const;
-
     BlockVector& GetSol() {return *trueX;}
 
     BlockVector& GetRhs() {return *trueRhs;}
 
     BdrConditions& GetBdrConditions() {return bdr_conds;}
+
+    Solver * GetPrec() {return prec;}
+
+    int GetAttachedIndex() const {return attached_index;}
+
+    bool IsDynamic() const {return is_dynamic;}
+
+    // local-to-process size of the system
+    int TrueProblemSize() const {return CFOSLSop->Height();}
+
+    // global problem size
+    int GlobalTrueProblemSize() const {
+        int local_size = TrueProblemSize();
+        int global_size = 0;
+        MPI_Allreduce(&local_size, &global_size, 1, MPI::INT, MPI_SUM, pmesh.GetComm());
+        return global_size;
+    }
+
+    // attaches an estimator to the problem
+    // see the comments for estimators above
+    int AddEstimator(FOSLSEstimator& estimator)
+    {
+        estimators.Append(&estimator);
+        return estimators.Size();
+    }
+
+    /*
+    virtual void CreateEstimator(int option)
+    {
+        // TODO: Implement a default error estimator here, FOSLS block + constraints
+        MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
+    }
+    */
+
+    void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
+    void ComputeAnalyticalRhs(Vector& rhs) const;
+
+    void ComputeRhsBlock(Vector& rhs, int blk) const;
 
     //void ResetSolverOp(Operator& op) {solver->SetOperator(op);}
 
@@ -1494,23 +1689,24 @@ public:
 
     void SetExactBndValues(Vector& vec) const;
 
+    void ComputeError(bool verbose, bool checkbnd) const
+    { ComputeError(*trueX, verbose, checkbnd);}
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd) const;
     void ComputeError(const Vector& vec, bool verbose, bool checkbnd, int blk) const;
 
+    // virtual functions to allow the children to compute something additional
+    // during a call to ComputeError()
     virtual void ComputeExtraError(const Vector& vec) const {}
     virtual void ComputeFuncError(const Vector& vec) const {}
 
-
     void ComputeBndError(const Vector& vec) const;
     void ComputeBndError(const Vector& vec, int blk) const;
-
-    void ComputeError(bool verbose, bool checkbnd) const
-    { ComputeError(*trueX, verbose, checkbnd);}
 
     void ComputeExtraError() const
     { ComputeExtraError(*trueX); }
 
     // constructs the BlockMatrix and the offsets, if given NULL
+    // TODO: Does "virtual" make sense here?
     virtual BlockMatrix* ConstructFunctBlkMat(const Array<int> &offsets);
 
     void CreateOffsetsRhsSol();
@@ -1535,13 +1731,7 @@ public:
             }
     }
 
-    Solver * GetPrec() {return prec;}
-
-    bool IsDynamic() const {return is_dynamic;}
-
     friend void GeneralHierarchy::AttachProblem(FOSLSProblem* problem);
-
-    int GetAttachedIndex() const {return attached_index;}
 };
 
 /// FIXME: Looks like this shouldn't have happened
@@ -1945,33 +2135,10 @@ public:
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) override;
 };
 
-/*
-class FOSLSProblem_HcurlH1hyp : virtual public FOSLSProblem
-{
-protected:
-public:
-    FOSLSProblem_HcurlH1hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
-                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-    FOSLSProblem_HcurlH1hyp(GeneralHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
-                   FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
-        : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_)
-    {
-        SetPrecOption(precond_option);
-        CreatePrec(*CFOSLSop, prec_option, verbose);
-        UpdateSolverPrec();
-    }
-
-};
-*/
-
-
+/// templated class for a hierarchy of problems defined on a hierarchy of meshes
+/// Remark: If you want to have a single problem living on the hierarchy,
+/// consider using BuildDynamicProblem() in GeneralHierarchy
+/// instead of this class
 template <class Problem, class Hierarchy>
 class FOSLSProblHierarchy
 {
@@ -1982,6 +2149,9 @@ protected:
     Hierarchy& hierarchy;
     Array<Problem*> problems_lvls;
     Array<BlockOperator*> TrueP_lvls;
+    // in addition to the operators which exist for each problem
+    // as a part of FOSLSProblems, the hierarchy also
+    // has a hiearchy of coarsened operators
     Array<BlockOperator*> CoarsenedOps_lvls;
     Array<BlockOperator*> CoarsenedOps_nobnd_lvls;
     int prec_option;
@@ -2005,13 +2175,10 @@ public:
     FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
+    // Updates the object
+    // FIXME: Looks like new problem will be created even if the underlying GeneralHierarchy
+    // doesn't get more levels
     virtual void Update(bool recoarsen);
-
-    Problem* GetProblem(int l)
-    {
-        MFEM_ASSERT(l >=0 && l < nlevels, "Index in GetProblem() is out of bounds");
-        return problems_lvls[l];
-    }
 
     // from coarser to finer
     void Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out);
@@ -2019,17 +2186,26 @@ public:
     // from finer to coarser
     void Restrict(int fine_lvl, int coarse_lvl, const Vector& vec_in, Vector& vec_out);
 
+    // constructs bnd indices for the entire problem at level l, not as a block of Arrays
+    // but for a contiguous vector
+    Array<int>* ConstructBndIndices(int level);
+
+    void ConstructCoarsenedOps();
+    void ConstructCoarsenedOps_nobnd();
+
+    // getters
+    Problem* GetProblem(int l)
+    {
+        MFEM_ASSERT(l >=0 && l < nlevels, "Index in GetProblem() is out of bounds");
+        return problems_lvls[l];
+    }
+
     int Nlevels() const {return hierarchy.Nlevels();}
     Hierarchy& GetHierarchy() const {return hierarchy;}
 
     BlockOperator * GetCoarsenedOp (int level) { return CoarsenedOps_lvls[level];}
     BlockOperator * GetCoarsenedOp_nobnd (int level) { return CoarsenedOps_nobnd_lvls[level];}
     BlockOperator * GetTrueP(int level) { return TrueP_lvls[level];}
-
-    Array<int>* ConstructBndIndices(int level);
-
-    void ConstructCoarsenedOps();
-    void ConstructCoarsenedOps_nobnd();
 
     int GetUpdateCounter() const {return hierarchy.GetUpdateCounter();}
 
@@ -2219,11 +2395,11 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Restrict(int fine_lvl, int coarse_
     // I guess, no.
 }
 
-
-// coarsens and restores boundary conditions
-// level l is the level where interpolation matrix should be taken
-// e.g., for coarsening from 0th level to the 1st level,
-// one should use interpolation matrix from level 0
+/// coarsens and restores boundary conditions
+/// (zero ib and bi blocks, and set bb to identity)
+/// level l is the level where interpolation matrix should be taken
+/// e.g., for coarsening from 0th level to the 1st level,
+/// one should use interpolation matrix from level 0
 template <class Problem, class Hierarchy>
 HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 (int l, int i, int j, HypreParMatrix& input)
@@ -2256,7 +2432,7 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
         delete temphpmat;
     }
-    else
+    else // off-diagonal blocks (cannot use RAP)
     {
         HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
         HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
@@ -2377,6 +2553,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
     } // end of loop over levels
 }
 
+/// A hierarchy of problems in the cylinders on a hierarchy of cylinder meshes
 template <class Problem, class Hierarchy> class FOSLSCylProblHierarchy : public FOSLSProblHierarchy<Problem, Hierarchy>
 {
     // additional routines and data members related to the cylinder structure go here
@@ -2385,11 +2562,12 @@ public:
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
 public:
+    // Interpolates initial condition between levels at the cylinder bases (top or bottom)
     void InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
     void RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)
     { MFEM_ABORT("RestrictAtBase has not been implemented properly \n"); }
 
-    // probably, there is no need of this
+    // probably, there is no usage of this
     Vector *GetExactBase(const char * top_or_bot, int level)
     { return FOSLSProblHierarchy<Problem, Hierarchy>::problems_lvls[level]->GetExactBase(top_or_bot); }
 };
@@ -2419,10 +2597,12 @@ void FOSLSCylProblHierarchy<Problem,Hierarchy>::InterpolateAtBase(const char * t
     FOSLSProblHierarchy<Problem, Hierarchy>::hierarchy.GetTrueP_bnd(top_or_bot, lvl, space_name)->Mult(vec_in, vec_out);
 }
 
+/// Abstract multigrid class with multigrid cycles as main functionality
 class GeneralMultigrid : public Solver
 {
 protected:
     int nlevels;
+    // doesn't own these
     const Array<Operator*> &P_lvls;
     const Array<Operator*> &Op_lvls;
     const Operator& CoarseOp;
@@ -2450,8 +2630,10 @@ public:
                      const Array<Operator*> &Op_lvls_, const Operator& CoarseOp_,
                      const Array<Operator*> &PreSmoothers_lvls_, const Array<Operator*> &PostSmoothers_lvls_);
 
+    // main multigrid cycle
     void MG_Cycle() const;
 
+    // performs a single V cycle
     virtual void Mult(const Vector & x, Vector & y) const override;
 
     virtual void SetOperator(const Operator &op) override
@@ -2460,6 +2642,7 @@ public:
 };
 
 /// The operator x -> R*A*P*x.
+/// Doesn't own the operators R, A and P.
 class RAPBlockHypreOperator : public BlockOperator
 {
 protected:
@@ -2471,6 +2654,7 @@ public:
    RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_, const Array<int>& Offsets);
 };
 
+/// Seems to be unused now
 class OperatorProduct : public Operator
 {
 protected:
@@ -2480,10 +2664,10 @@ protected:
     mutable Vector * tmp;
     mutable Vector * tmp_tr;
 public:
+    ~OperatorProduct() {delete tmp; delete tmp_tr;}
+
     OperatorProduct(const Operator & op1, const Operator& op2) : op_first(op1), op_second(op2)
     { tmp = new Vector(op1.Height()); tmp_tr = new Vector(op2.Height());}
-
-    ~OperatorProduct() {delete tmp; delete tmp_tr;}
 
     void Mult(const Vector & x, Vector & y) const override
     { op_first.Mult(x, *tmp); op_second.Mult(*tmp, y); }
@@ -2493,8 +2677,9 @@ public:
 
 };
 
-// SmootherSum   * x = (Smoo1 + Smoo2 - Smoo2 * A * Smoo1) * x
-// SmootherSum^T * x = (Smoo2^T + Smoo1^T - Smoo1^T * A * Smoo2^T) * x
+/// Construct a smoother which is a combination of a given pair of smoothers
+/// SmootherSum   * x = (Smoo1 + Smoo2 - Smoo2 * A * Smoo1) * x
+/// SmootherSum^T * x = (Smoo2^T + Smoo1^T - Smoo1^T * A * Smoo2^T) * x
 class SmootherSum : public Operator
 {
 protected:
@@ -2506,100 +2691,70 @@ protected:
     mutable Vector * tmp2;
 
 public:
+    virtual ~SmootherSum() {delete tmp1; delete tmp2;}
+
     SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) : smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
     {
         tmp1 = new Vector(smoo_fst.Height()); tmp2 = new Vector(smoo_snd.Height());
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << "sizes are: \n";
-        //std::cout << "smoo1: " << smoo_fst.Height() << " x " << smoo_fst.Width() << "\n";
-        //std::cout << "smoo2: " << smoo_snd.Height() << " x " << smoo_snd.Width() << "\n";
-        //std::cout << "op: " << op.Height() << " x " << op.Width() << "\n";
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
     }
-
-    ~SmootherSum() {delete tmp1; delete tmp2;}
 
     void Mult(const Vector & x, Vector & y) const override
     {
-        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
         smoo_snd.Mult(x, y);
 
-        //std::cout << "Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
-
-        //Vector temp(y.Size());
-        //temp = y;
-
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
-
         smoo_fst.Mult(x, *tmp1);
-
-        //std::cout << "Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
-
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << "I am here \n";
-        //std::cout << "y size = " << y.Size() << "\n";
-        //std::cout << "tmp1 size = " << tmp1->Size() << "\n";
-        //std::cout << "tmp1 norm = " << tmp1->Norml2() / sqrt (tmp1->Size()) << "\n";
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
 
         y += *tmp1;
         //y.Add(1.0, *tmp1);
 
-        //std::cout << "Smoo1 * x + Smoo2 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
-
         op.Mult(*tmp1, *tmp2);
         smoo_snd.Mult(*tmp2, *tmp1);
 
-        //std::cout << "Smoo2 * A * Smoo1 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
-
-        //temp -= *tmp1;
-        //std::cout << "Smoo2 * x - Smoo2 * A * Smoo1 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
-
         y -= *tmp1;
-
-        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
-
-        //MPI_Barrier(MPI_COMM_WORLD);
-        //std::cout << std::flush;
-        //MPI_Barrier(MPI_COMM_WORLD);
     }
 
     void MultTranspose(const Vector & x, Vector & y) const override
     {
-        //std::cout << "input to SmootherSum, x, norm = " << x.Norml2() / sqrt(x.Size()) << "\n";
-
         smoo_fst.MultTranspose(x, y);
-
-        //Vector temp(y.Size());
-        //temp = y;
-
-        //std::cout << "Smoo1 * x, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
 
         smoo_snd.MultTranspose(x, *tmp1);
         y += *tmp1;
 
-        //std::cout << "Smoo2 * x, norm = " << tmp1->Norml2() / sqrt(tmp1->Size()) << "\n";
-
         op.Mult(*tmp1, *tmp2);
         smoo_fst.MultTranspose(*tmp2, *tmp1);
 
-        //temp -= *tmp1;
-        //std::cout << "Smoo1 * x - Smoo1 * A * Smoo2 * x, norm = " << temp.Norml2() / sqrt(temp.Size()) << "\n";
-
         y -= *tmp1;
-
-        //std::cout << "output to SmootherSum, y, norm = " << y.Norml2() / sqrt(y.Size()) << "\n";
     }
 
 };
 
+/// A class for an interpolation operator s.t. in the action of transpose operator
+/// boundary values are set to zero
+class InterpolationWithBNDforTranspose : public Operator
+{
+protected:
+    Operator& P;
+    // doesn't own them
+    Array<int> * bnd_indices;
+public:
+    InterpolationWithBNDforTranspose(Operator& P_, Array<int>& BndIndices_)
+        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(&BndIndices_) {}
+
+    InterpolationWithBNDforTranspose(Operator& P_, Array<int>* BndIndices_)
+        : Operator(P_.Height(), P_.Width()), P(P_)
+    {
+        MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
+        bnd_indices = new Array<int>(BndIndices_->Size());
+        for (int i = 0; i < bnd_indices->Size(); ++i)
+            (*bnd_indices)[i] = (*BndIndices_)[i];
+    }
+
+    void Mult(const Vector &x, Vector &y) const override {P.Mult(x,y);}
+
+    void MultTranspose(const Vector &x, Vector &y) const override;
+};
+
+/// A blocked version for class for InterpolationWithBNDforTranspose
 class BlkInterpolationWithBNDforTranspose : public BlockOperator
 {
 protected:
@@ -2607,6 +2762,10 @@ protected:
     BlockOperator& P;
     const Array<int>& row_offsets;
     const Array<int>& col_offsets;
+    // Must have contiguous enumeration over blocks, since it's not a blocked object
+    // Such array can be generated, e.g., by FOSLSProblHierarchy::ConstructBndIndices()
+
+    // doesn't own them
     Array<int> * bnd_indices;
 public:
     BlkInterpolationWithBNDforTranspose(BlockOperator& P_, Array<int>& BndIndices_,
@@ -2641,30 +2800,9 @@ public:
     void MultTranspose(const Vector &x, Vector &y) const override;
 };
 
-
-class InterpolationWithBNDforTranspose : public Operator
-{
-protected:
-    Operator& P;
-    Array<int> * bnd_indices;
-public:
-    InterpolationWithBNDforTranspose(Operator& P_, Array<int>& BndIndices_)
-        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(&BndIndices_) {}
-
-    InterpolationWithBNDforTranspose(Operator& P_, Array<int>* BndIndices_)
-        : Operator(P_.Height(), P_.Width()), P(P_)
-    {
-        MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
-        bnd_indices = new Array<int>(BndIndices_->Size());
-        for (int i = 0; i < bnd_indices->Size(); ++i)
-            (*bnd_indices)[i] = (*BndIndices_)[i];
-    }
-
-    void Mult(const Vector &x, Vector &y) const override {P.Mult(x,y);}
-
-    void MultTranspose(const Vector &x, Vector &y) const override;
-};
-
+/// A handy and simple structure to define components which will be constructed for
+/// MultigridToolsHierarchy object
+/// Basically, just a bunch of flags
 struct ComponentsDescriptor
 {
     bool with_Schwarz;
@@ -2674,6 +2812,7 @@ struct ComponentsDescriptor
     bool with_coarsest_hcurl;
     bool with_monolithic_GS;
 public:
+    virtual ~ComponentsDescriptor() {}
     ComponentsDescriptor() : ComponentsDescriptor(false, false, false, false, false, false) {}
 
     ComponentsDescriptor(bool with_Schwarz_, bool optimized_Schwarz_, bool with_Hcurl_,
@@ -2687,6 +2826,12 @@ public:
     {}
 };
 
+/// A wrapper class for various objects that can be used for multigrid: specific smoothers,
+/// interpolation operators, and other objects that may appear to be natural to exist on a
+/// hierarchy of meshes (problems)
+/// This object is constructed on top of the hierarchy and a "dynamic" problem defined
+/// at the finest level of the hierarchy
+/// TODO: Add destructor for MultigridToolsHierarchy and test it
 class MultigridToolsHierarchy
 {
 protected:
@@ -2717,26 +2862,26 @@ protected:
 
     std::deque<Array<int>* > el2dofs_row_offsets;
     std::deque<Array<int>* > el2dofs_col_offsets;
-    /*
-    Array<int> row_offsets_coarse, col_offsets_coarse;
-    std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
-    std::vector<Array<int>* > essbdr_dofs_funct_coarse;
-    std::vector<Array<int>* > fullbdr_attribs;
-    */
 
-protected:
+    // is used to control if the object is to be updated because the underlying
+    // hierarchy was updated
     int update_counter;
 
 public:
+    virtual ~MultigridToolsHierarchy();
+
     MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, int problem_index,
                             ComponentsDescriptor& descriptor_)
         : MultigridToolsHierarchy(hierarchy_, *hierarchy_.GetProblem(problem_index), descriptor_) {}
 
+    // Updates the tools hierarchy if the underlying GeneralHierarchy was updated
     void Update(bool recoarsen);
 
 protected:
-    // troubles with such a constructor is the implementation of Update(), in particular,
+    // Troubles with such a constructor is the implementation of Update(), in particular,
     // for the problem when it is not attached to the hierarchy's finest level
+    // This is why externally one should call the public constructor
+    // which operates with a hierarchy and at attached "dynamic" problem
     MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
                             ComponentsDescriptor& descriptor_);
 public:
@@ -2769,36 +2914,62 @@ public:
     bool With_Coarsest_hcurl() {return descr.with_coarsest_hcurl;}
 };
 
+/// simple copy by using Transpose (and temporarily allocating
+/// additional memory of size = size of the input matrix)
 HypreParMatrix * CopyHypreParMatrix(const HypreParMatrix& hpmat);
 
+/// Takes a BlockOperator constructed as a block HypreParMatrix
+/// "Unfortunately", MFEM doesn't have something like BlockHypreParMatrix
+/// and eliminates boundary tdofs
+/// I.e., sets "bb" blocks to identity, and "ib" and "bi" blocks to 0
+/// where "b" means the boundary tdofs and "i" means internal, non-boundary tdofs
+/// By tdofs here we actually simply mean indices
 void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int>* > esstdofs_blks);
 
+/// Construct el_to_dofs relation table as a SparseMatrix for a given finite element space
 SparseMatrix *ElementToDofs(const FiniteElementSpace &fes);
 
+/// RAP for BlockMatrices (somehow non-present in MFEM)
 BlockMatrix *RAP(const BlockMatrix &Rt, const BlockMatrix &A, const BlockMatrix &P);
 
+/// Finds a particular solution to the equation div sigma = rhs, where
+/// sigma is from given Hdiv space, B is assembled on the given space div
+/// bilinear form (not a discrete operator!) (div theta, q) for theta from Hdiv and q from L2
+ParGridFunction * FindParticularSolution(ParFiniteElementSpace *Hdiv_space, const HypreParMatrix & B,
+                                         const Vector& rhs, bool verbose);
+
+/// Replaces a diagonal block of the given BlockOperator by an identity matrix as a HypreParMatrix
+void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i);
+
+/// Takes a problem and a divfree problem and converts the first variable
+/// ("sigma", which is assumed to be from Hdiv) into Hcurl space
+/// by substituting "sigma" = curl "psi"
+/// The output is stored in the operator of the divfree problem
+/// Non-changed blocks of the original problem are copied (with all data) inside the output operator
+BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem);
+
+
+/// Several routines used for slicing 3d and 4d meshes and grid functions
+/// See the usage in ... <example name>
 // time moments: t0 + i * deltat, i = 0, ... Nmoments - 1
 void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid);
-void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double deltat, std::vector<std::vector<int> > & elpartition);
+void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double deltat,
+                          std::vector<std::vector<int> > & elpartition);
 void computeSliceCell (const Mesh& mesh, int elind, std::vector<std::vector<double> > & pvec,
                        std::vector<std::vector<double> > & ipoints, std::vector<int>& edgemarkers,
-                       std::vector<std::vector<double> >& cellpnts, std::vector<int>& elvertslocal, int & nip, int & vertex_count);
+                       std::vector<std::vector<double> >& cellpnts, std::vector<int>& elvertslocal,
+                       int & nip, int & vertex_count);
 void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
 std::list<int> &celltypes, int cellstructusize, std::list<std::vector<int> > &elvrtindices);
 
-void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts, std::vector<int> & elvertexes);
+void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts,
+                            std::vector<int> & elvertexes);
 bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation);
 bool sortQuadril2d(std::vector<std::vector<double> > & Points, int * permutation);
 double l2Norm(std::vector<double> vec);
 double sprod(std::vector<double> vec1, std::vector<double> vec2);
 // compares pairs<int,double> with respect to the second (double) elements
 bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
-
-ParGridFunction * FindParticularSolution(ParFiniteElementSpace *Hdiv_space, const HypreParMatrix & B, const Vector& rhs, bool verbose);
-
-void ReplaceBlockByIdentityHpmat(BlockOperator& block_op, int i);
-
-BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, FOSLSProblem& problem);
 
 } // for namespace mfem
 

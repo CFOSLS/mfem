@@ -19,11 +19,20 @@ double FOSLSErrorEstimator(BilinearFormIntegrator &blfi,
 /// more general implementation of a class for FOSLS error estimator.
 /// The FOSLS functional is given as a symmetric block matrix with bilinear forms for
 /// different grid functions (for all solution and rhs components)
+/// Used in FOSLSEstimator::ComputeEstimates()
 double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates);
 
+/// not used currently
 enum FOSLSMarkingStrategy {DEFAULT = 0, DOERFLER = 1};
 
+/// Basic class for error estimator in FOSLS context
+/// It takes an array of GridFUnctions which can be dynamically updated
+/// and integrators and computes local errors by computing local matrices
+/// for the FOSLS functional (defined by integs) and then local FOSLS energy
+/// from the grid functions (grfuns)
+/// Doesn't own grfuns and integs, and thus doesn't deallocated them
+/// in the destructor
 class FOSLSEstimator : public ErrorEstimator
 {
 protected:
@@ -65,10 +74,14 @@ public:
     double GetEstimate() {ComputeEstimates(); return global_total_error;}
     virtual void Reset () override { current_sequence = -1; }
 
-    /// This routine is called by the FOSLSProblem::Update() if the
-    /// estimator was added via AddEstimator() to the problem
+    /// Updates grid functions (grfuns) which are used inside the estimator
+    /// For example, this routine is called by the FOSLSProblem::Update() if the
+    /// estimator was added via AddEstimator() to the FOSLSproblem
     void Update();
 
+    /// Can be used to view the lastly computed local error estimates
+    /// when the mesh was already refined, but we don't want to recompute
+    /// the error estimates
     const Vector & GetLastLocalErrors() const { return error_estimates; }
 };
 

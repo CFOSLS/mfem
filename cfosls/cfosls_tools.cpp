@@ -859,6 +859,12 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
     initialized_forms = true;
 }
 
+MultigridToolsHierarchy::~MultigridToolsHierarchy()
+{
+    MFEM_ABORT("Not implemented \n");
+}
+
+
 MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, FOSLSProblem& problem_,
                                                  ComponentsDescriptor& descriptor_)
     : hierarchy(hierarchy_), nlevels(hierarchy.Nlevels()), problem(&problem_), descr(descriptor_),
@@ -5701,6 +5707,11 @@ SparseMatrix * GeneralHierarchy::GetPspace(SpaceName space, int level)
     return NULL;
 }
 
+/// If lvl is not the coarsest level
+/// calls either UniformRefinement (if pmesh is a standard ParMesh)
+/// or Refine(1) if the pmesh is dynamically typed as ParMeshCyl
+/// and copies the new mesh into pmesh_lvls;
+/// Otherwise, just copies the pmesh into pmesh_lvls
 void GeneralHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
 {
     //if (!dynamic_cast<ParMeshCyl*> (pmesh))
@@ -5956,10 +5967,14 @@ void GeneralCylHierarchy::ConstructRestrictions()
 
     for (int l = num_lvls - 1; l >= 0; --l)
     {
-        Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
-        Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
-        Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l], tdofs_link_H1_lvls[l]);
-        Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l], tdofs_link_Hdiv_lvls[l]);
+        Restrict_bot_H1_lvls[l] = CreateRestriction("bot", *H1_space_lvls[l],
+                                                    tdofs_link_H1_lvls[l]);
+        Restrict_bot_Hdiv_lvls[l] = CreateRestriction("bot", *Hdiv_space_lvls[l],
+                                                      tdofs_link_Hdiv_lvls[l]);
+        Restrict_top_H1_lvls[l] = CreateRestriction("top", *H1_space_lvls[l],
+                                                    tdofs_link_H1_lvls[l]);
+        Restrict_top_Hdiv_lvls[l] = CreateRestriction("top", *Hdiv_space_lvls[l],
+                                                      tdofs_link_Hdiv_lvls[l]);
     }
 }
 
@@ -6067,6 +6082,9 @@ void GeneralCylHierarchy::ConstructTdofsLinks()
     }
 }
 
+/// Takes a ParFiniteElementSpace and a tdofs link between top and bottom bases
+/// and creates a HypreParMatrix which restricts given tdofs in the entire domain
+/// onto tdofs at the top (if top_or_bot = "top") or bottom(top_or_bot = "bot") bases
 HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
                                    std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
 {
@@ -6214,11 +6232,16 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     return res;
 }
 
-// eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
-// the fespace must correspond to the eltype provided
-// bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
-// which can be taken out of ParMeshCyl
-
+/// This routine takes type of the elements (eltype), corresponding fespace,
+/// link between bot and top boundary elements
+/// and creates a link between dofs on the top and bottom bases of the cylinder
+/// The output link is in the form of a vector of pairs (int,int) where each pair matches dofs
+/// of fespace which correspond to the matching top to bottom boundary elements
+/// More details:
+/// eltype must be "linearH1" or "RT0", for any other finite element the code doesn't work
+/// the fespace must match the provided eltype
+/// bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
+/// which can be taken out of ParMeshCyl
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
                                                          std::vector<std::pair<int,int> > & bot_to_top_bels,
                                                          bool verbose)
@@ -6854,6 +6877,9 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
             const Array<int> *temp_dom = esstdofs_blks[j];
 
             HypreParMatrix * op_blk = dynamic_cast<HypreParMatrix*>(&(BlockOp.GetBlock(i,j)));
+
+            MFEM_ASSERT(op_blk,"Unsuccessful cast into HypreParMatrix in EliminateBoundaryBlocks(). "
+                               "Cannot proceed");
 
 #if 0
             /*
@@ -7966,7 +7992,7 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
     return;
 }
 
-// finds a prticular solution to a divergence constraint
+// finds a particular solution to a divergence constraint (in weak form)
 // by solving a Poisson equation
 ParGridFunction * FindParticularSolution(ParFiniteElementSpace * Hdiv_space,
                                          const HypreParMatrix & B, const Vector& rhs, bool verbose)
