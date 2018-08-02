@@ -2151,10 +2151,10 @@ void FOSLSProblem::AssembleSystem(bool verbose)
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
             if (i == j)
-                pbforms.diag(i)->LoseMat();
+                pbforms.diag(i)->Update();
             else
                 //if (pbforms.offd(i,j))
-                    pbforms.offd(i,j)->LoseMat();
+                    pbforms.offd(i,j)->Update();
 
     hpmats.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)
