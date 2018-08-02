@@ -430,12 +430,20 @@ FOSLSFormulation::FOSLSFormulation(int dimension, int num_blocks,
       space_names(NULL), space_names_funct(NULL)
 {    
     blfis.SetSize(numblocks, numblocks);
+    blfis_capturedflags.SetSize(numblocks, numblocks);
     for (int i = 0; i < numblocks; ++i)
         for (int j = 0; j < numblocks; ++j)
+        {
             blfis(i,j) = NULL;
+            blfis_capturedflags = false;
+        }
     lfis.SetSize(numblocks);
+    lfis_capturedflags.SetSize(numblocks);
     for (int i = 0; i < numblocks; ++i)
+    {
         lfis[i] = NULL;
+        lfis_capturedflags = false;
+    }
 
     blk_structure.resize(numblocks);
 }
@@ -449,10 +457,10 @@ FOSLSFormulation::~FOSLSFormulation()
 
     for (int i = 0; i < blfis.NumRows(); ++i)
         for (int j = 0; j < blfis.NumCols(); ++j)
-            if (blfis(i,j))
+            if (!blfis_capturedflags(i,j) && blfis(i,j))
                 delete blfis(i,j);
     for (int i = 0; i < lfis.Size(); ++i)
-        if (lfis[i])
+        if (!lfis_capturedflags[i] && lfis[i])
             delete lfis[i];
 }
 
@@ -839,12 +847,12 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
             else
                 offd_forms(i,j) = new ParMixedBilinearForm(pfes[j], pfes[i]);
 
-            if (fe_formul.GetBlfi(i,j))
+            if (fe_formul.GetBlfi(i,j, false))
             {
                 if (i == j)
-                    diag_forms[i]->AddDomainIntegrator(fe_formul.GetBlfi(i,j));
+                    diag_forms[i]->AddDomainIntegrator(fe_formul.GetBlfi(i,j, true));
                 else
-                    offd_forms(i,j)->AddDomainIntegrator(fe_formul.GetBlfi(i,j));
+                    offd_forms(i,j)->AddDomainIntegrator(fe_formul.GetBlfi(i,j, true));
             }
         }
 
@@ -1511,7 +1519,8 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
 {
     estimators.SetSize(0);
 
-    InitSpacesFromHierarchy(*hierarchy, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitSpacesFromHierarchy(*hierarchy,
+                            *fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
 
@@ -1546,7 +1555,8 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 {
     estimators.SetSize(0);
 
-    InitSpacesFromHierarchy(*hierarchy, level, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitSpacesFromHierarchy(*hierarchy, level,
+                            *fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
 
@@ -1604,18 +1614,21 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
 
 FOSLSProblem::~FOSLSProblem()
 {
-    for (int i = 0; i < estimators.Size(); ++i)
-        if (estimators[i])
-            delete estimators[i];
+    // estimators do not belong to the problem,
+    // they are simply attached to it, thus deleting them
+    // would be incorrect
+    //for (int i = 0; i < estimators.Size(); ++i)
+        //delete estimators[i];
 
-    for (int i = 0; i < pfes.Size(); ++i)
-        delete pfes[i];
+    for (int i = 0; i < plforms.Size(); ++i)
+        delete plforms[i];
 
     for (int i = 0; i < grfuns.Size(); ++i)
         delete grfuns[i];
 
-    for (int i = 0; i < plforms.Size(); ++i)
-        delete plforms[i];
+    if (!hierarchy)
+        for (int i = 0; i < pfes.Size(); ++i)
+            delete pfes[i];
 
     if (trueRhs)
         delete trueRhs;
@@ -1628,6 +1641,7 @@ FOSLSProblem::~FOSLSProblem()
 
     if (solver)
         delete solver;
+
     if (prec)
         delete prec;
 
@@ -1735,9 +1749,9 @@ void FOSLSProblem::InitForms()
     {
         plforms[i] = new ParLinearForm(pfes[i]);
 
-        if (fe_formul.GetLfi(i))
+        if (fe_formul.GetLfi(i, false))
         {
-            plforms[i]->AddDomainIntegrator(fe_formul.GetLfi(i));
+            plforms[i]->AddDomainIntegrator(fe_formul.GetLfi(i, true));
         }
     }
 
@@ -2100,7 +2114,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
         {
             if (i == j)
             {
-                if (fe_formul.GetFormulation()->GetBlfi(i,i))
+                if (fe_formul.GetFormulation()->GetBlfi(i,i, false))
                 {
                     pbforms.diag(i)->Assemble();
                     pbforms.diag(i)->Finalize();
@@ -2109,8 +2123,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
             }
             else // off-diagonal
             {
-                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j) != NULL);
-                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i) != NULL);
+                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j, false) != NULL);
+                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i, false) != NULL);
                 if ((ij_exist || ji_exist) && !hpmats_nobnd(i,j))
                 {
                     int exist_row, exist_col;
@@ -2152,7 +2166,7 @@ void FOSLSProblem::AssembleSystem(bool verbose)
         {
             if (i == j)
             {
-                if (fe_formul.GetFormulation()->GetBlfi(i,i))
+                if (fe_formul.GetFormulation()->GetBlfi(i,i, false))
                 {
                     pbforms.diag(i)->Assemble();
 
@@ -2185,8 +2199,8 @@ void FOSLSProblem::AssembleSystem(bool verbose)
             }
             else // off-diagonal
             {
-                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j) != NULL);
-                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i) != NULL);
+                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j, false) != NULL);
+                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i, false) != NULL);
                 if ((ij_exist || ji_exist) && !hpmats(i,j))
                 {
                     int exist_row, exist_col;
@@ -2684,7 +2698,7 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
             funct_blocks(i,j) = NULL;
             if (i == j)
             {
-                if (fe_formul.GetFormulation()->GetBlfi(0,0))
+                if (fe_formul.GetFormulation()->GetBlfi(i,j, false))
                 {
                     //pbforms.diag(i)->Update();
                     //pbforms.diag(i)->Assemble();
@@ -2695,8 +2709,8 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
             }
             else // off-diagonal
             {
-                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j) != NULL);
-                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i) != NULL);
+                bool ij_exist = (fe_formul.GetFormulation()->GetBlfi(i,j, false) != NULL);
+                bool ji_exist = (fe_formul.GetFormulation()->GetBlfi(j,i, false) != NULL);
 
                 if ( (ij_exist || ji_exist) && !funct_blocks(i,j))
                 {
@@ -5021,6 +5035,115 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
 
     } // end of loop over levels
 }
+
+GeneralHierarchy::~GeneralHierarchy()
+{
+    int dim = pmesh.Dimension();
+
+    delete Hdiv_space;
+    if (with_hcurl)
+        delete Hcurl_space;
+    delete H1_space;
+    delete L2_space;
+    if (dim == 4)
+        delete Hdivskew_space;
+
+    delete hdiv_coll;
+    if (with_hcurl)
+        delete hcurl_coll;
+    delete h1_coll;
+    delete l2_coll;
+    if (dim == 4)
+        delete hdivskew_coll;
+
+    for (int i = 0; i < pmesh_lvls.Size(); ++i)
+        delete pmesh_lvls[i];
+
+    for (int i = 0; i < Hdiv_space_lvls.Size(); ++i)
+        delete Hdiv_space_lvls[i];
+
+    if (with_hcurl)
+        for (int i = 0; i < Hcurl_space_lvls.Size(); ++i)
+            delete Hcurl_space_lvls[i];
+
+    for (int i = 0; i < H1_space_lvls.Size(); ++i)
+        delete H1_space_lvls[i];
+
+    for (int i = 0; i < L2_space_lvls.Size(); ++i)
+        delete L2_space_lvls[i];
+
+    if (dim == 4)
+        for (int i = 0; i < Hdivskew_space_lvls.Size(); ++i)
+            delete Hdivskew_space_lvls[i];
+
+    for (int i = 0; i < P_H1_lvls.Size(); ++i)
+        delete P_H1_lvls[i];
+
+    for (int i = 0; i < P_Hdiv_lvls.Size(); ++i)
+        delete P_Hdiv_lvls[i];
+
+    for (int i = 0; i < P_L2_lvls.Size(); ++i)
+        delete P_L2_lvls[i];
+
+    if (with_hcurl)
+        for (int i = 0; i < P_Hcurl_lvls.Size(); ++i)
+            delete P_Hcurl_lvls[i];
+
+    if (dim == 4)
+        for (int i = 0; i < P_Hdivskew_lvls.Size(); ++i)
+            delete P_Hdivskew_lvls[i];
+
+    for (int i = 0; i < TrueP_H1_lvls.Size(); ++i)
+        delete TrueP_H1_lvls[i];
+
+    for (int i = 0; i < TrueP_Hdiv_lvls.Size(); ++i)
+        delete TrueP_Hdiv_lvls[i];
+
+    for (int i = 0; i < TrueP_L2_lvls.Size(); ++i)
+        delete TrueP_L2_lvls[i];
+
+    if (with_hcurl)
+        for (int i = 0; i < TrueP_Hcurl_lvls.Size(); ++i)
+            delete TrueP_Hcurl_lvls[i];
+
+    if (dim == 4)
+        for (int i = 0; i < TrueP_Hdivskew_lvls.Size(); ++i)
+            delete TrueP_Hdivskew_lvls[i];
+
+    if (divfreedops_constructed)
+        for (int i = 0; i < DivfreeDops_lvls.Size(); ++i)
+            delete DivfreeDops_lvls[i];
+
+    /*
+    if (doftruedofs_constructed)
+    {
+        for (int i = 0; i < DofTrueDof_L2_lvls.Size(); ++i)
+            delete DofTrueDof_L2_lvls[i];
+
+        for (int i = 0; i < DofTrueDof_H1_lvls.Size(); ++i)
+            delete DofTrueDof_H1_lvls[i];
+
+        for (int i = 0; i < DofTrueDof_Hdiv_lvls.Size(); ++i)
+            delete DofTrueDof_Hdiv_lvls[i];
+
+        if (with_hcurl)
+            for (int i = 0; i < DofTrueDof_Hcurl_lvls.Size(); ++i)
+                delete DofTrueDof_Hcurl_lvls[i];
+
+        if (dim == 4)
+            for (int i = 0; i < DofTrueDof_Hdivskew_lvls.Size(); ++i)
+                delete DofTrueDof_Hdivskew_lvls[i];
+    }
+    */
+
+
+    // the problems don't belong to the hierarchy, they are merely attached
+    // thus, calling problems destructor would be incorrect
+    //for (int i = 0; i < problems.Size(); ++i)
+        //delete problems[i];
+
+}
+
 
 void GeneralHierarchy::Update()
 {

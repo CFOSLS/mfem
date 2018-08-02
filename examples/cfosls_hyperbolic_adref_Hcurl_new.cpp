@@ -656,7 +656,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   int max_iter_amr = 1; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -1273,6 +1273,7 @@ int main(int argc, char *argv[])
              cout << "Stopping criterion satisfied. Stop. \n";
           break;
        }
+#if 0
 
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
@@ -1300,20 +1301,17 @@ int main(int argc, char *argv[])
              cout << "Reached the maximum number of dofs. Stop. \n";
           break;
        }
+#endif
 
    } // end of the main AMR loop
 
-   //delete space_names_funct;
+   // Deallocaing the mem
 
    for (int i = 0; i < formulat->Nblocks(); ++i)
        delete bdr_attribs_data[i];
-   delete bdr_conds;
-   delete formulat;
-   delete fe_formulat;
    delete hierarchy;
    delete prob_hierarchy;
 
-   delete estimator;
    for (int i = 0; i < extra_grfuns.Size(); ++i)
        if (extra_grfuns[i])
            delete extra_grfuns[i];
@@ -1340,6 +1338,13 @@ int main(int argc, char *argv[])
 
    for (int i = 0; i < problem_sols_lvls.Size(); ++i)
        delete problem_sols_lvls[i];
+
+   delete problem_mgtools;
+   delete estimator;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
 
    MPI_Finalize();
    return 0;

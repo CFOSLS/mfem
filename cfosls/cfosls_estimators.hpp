@@ -44,6 +44,8 @@ protected:
     void ComputeEstimates();
 
 public:
+    virtual ~FOSLSEstimator() {}
+
     /// Constructor which explicitly takes all the grid functions as an input.
     /// The local error estimator is using the locally assembled forms provided
     /// as integrators in the input

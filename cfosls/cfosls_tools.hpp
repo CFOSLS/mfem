@@ -400,6 +400,8 @@ protected:
     Array<FOSLSProblem*> problems;
 
 public:
+    virtual ~GeneralHierarchy();
+
     // by default we construct div-free space (Hcurl) in 3D
     GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose)
         : GeneralHierarchy(num_levels, pmesh_, feorder, verbose, true) {}
@@ -709,6 +711,14 @@ protected:
     std::vector<std::pair<int,int> > blk_structure;
     mutable Array<SpaceName>* space_names;
     mutable Array<SpaceName>* space_names_funct;
+
+    // holds true if someone captures blfis(i,j) and false otherwise
+    // this is required because if a BilinearForm somewhere uses GetBlfi(),
+    // then when this form will be deleted, it will also delete the integrator(blfi)
+    // and a mechanism for FOSLFFormulation was required to know that this was the case
+    // Otherwise, already deleted blfis will be re-deleted in the destructor of FOSLSFormulation
+    Array2D<bool> blfis_capturedflags;
+    Array<bool> lfis_capturedflags;
 protected:
     virtual void InitBlkStructure() = 0;
     virtual void ConstructSpacesDescriptor() const = 0;
@@ -756,14 +766,28 @@ public:
 
     BilinearFormIntegrator* GetBlfi(int i, int j)
     {
+        return GetBlfi(i,j,false);
+    }
+
+    BilinearFormIntegrator* GetBlfi(int i, int j, bool capture)
+    {
         MFEM_ASSERT(i >=0 && i < blfis.NumRows()
                     && j >=0 && j < blfis.NumCols(), "Index pair for blfis out of bounds \n");
+        if (capture)
+            blfis_capturedflags(i,j) = true;
         return blfis(i,j);
     }
 
     LinearFormIntegrator* GetLfi(int i)
     {
+        return GetLfi(i, false);
+    }
+
+    LinearFormIntegrator* GetLfi(int i, bool capture)
+    {
         MFEM_ASSERT(i >=0 && i < lfis.Size(), "Index for lfis out of bounds \n");
+        if (capture)
+            lfis_capturedflags[i] = true;
         return lfis[i];
     }
 
@@ -997,6 +1021,9 @@ public:
 
     BilinearFormIntegrator* GetBlfi(int i, int j) {return formul.GetBlfi(i,j);}
     LinearFormIntegrator* GetLfi(int i) {return formul.GetLfi(i);}
+
+    BilinearFormIntegrator* GetBlfi(int i, int j, bool capture) {return formul.GetBlfi(i,j, capture);}
+    LinearFormIntegrator* GetLfi(int i, bool capture) {return formul.GetLfi(i, capture);}
     FiniteElementCollection* GetFeColl(int i)
     {
         MFEM_ASSERT( i >= 0 && i < fecolls.Size(), "i < 0 or i > size fo fecolls \n");
