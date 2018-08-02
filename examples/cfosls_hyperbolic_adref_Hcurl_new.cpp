@@ -1194,6 +1194,11 @@ int main(int argc, char *argv[])
            std::string field_name_S("u_h");
            S->SaveVTK(fp_S, field_name_S, ref);
 
+#ifndef HDIVL2L2
+           if (problem_mgtools->GetFEformulation().Nunknowns() < 2)
+               delete S;
+#endif
+
            //MPI_Finalize();
            //return 0;
        }

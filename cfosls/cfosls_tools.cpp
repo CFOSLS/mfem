@@ -3142,7 +3142,7 @@ void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -3331,7 +3331,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -3408,7 +3408,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -3739,7 +3739,7 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -3912,7 +3912,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -4084,7 +4084,7 @@ void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -4291,7 +4291,7 @@ void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
     gform.Assemble();
 
     Vector Rhs(L2_space->TrueVSize());
-    Rhs = *gform.ParallelAssemble();
+    gform.ParallelAssemble(Rhs);
 
     double mass_loc = Rhs.Norml1();
     double mass;
@@ -4384,7 +4384,7 @@ void FOSLSProblem_Laplace::ComputeFuncError(const Vector& vec) const
     gform.AddDomainIntegrator(new DomainLFIntegrator(*fe_formul.GetFormulation()->GetTest()->GetRhs()));
     gform.Assemble();
     Vector * Rhs = new Vector(H1_space->TrueVSize());
-    Rhs = gform.ParallelAssemble();
+    gform.ParallelAssemble(*Rhs);
 
     double second_term = vec_viewer.GetBlock(0) * (*Rhs);
 
