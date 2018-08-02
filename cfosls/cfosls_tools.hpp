@@ -1987,6 +1987,21 @@ protected:
     int prec_option;
     bool verbose;
 public:
+    virtual ~FOSLSProblHierarchy()
+    {
+        for (int i = 0; i < problems_lvls.Size(); ++i)
+            delete problems_lvls[i];
+
+        for (int i = 0; i < TrueP_lvls.Size(); ++i)
+            delete TrueP_lvls[i];
+
+        for (int i = 0; i < CoarsenedOps_lvls.Size(); ++i)
+            delete CoarsenedOps_lvls[i];
+
+        for (int i = 0; i < CoarsenedOps_nobnd_lvls.Size(); ++i)
+            delete CoarsenedOps_nobnd_lvls[i];
+    }
+
     FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
