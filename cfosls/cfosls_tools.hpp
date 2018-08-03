@@ -2501,6 +2501,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
             for (int j = i; j < numblocks; ++j)
                 if (coarseop_lvl(i,j))
                     CoarsenedOps_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+        CoarsenedOps_lvls[l]->owns_blocks = true;
 
     } // end of loop over levels
 }
@@ -2553,6 +2554,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
             for (int j = i; j < numblocks; ++j)
                 if (coarseop_lvl(i,j))
                     CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
+        CoarsenedOps_nobnd_lvls[l]->owns_blocks = true;
 
     } // end of loop over levels
 }
