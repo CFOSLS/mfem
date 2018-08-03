@@ -636,7 +636,7 @@ int main(int argc, char *argv[])
 
    double saved_functvalue;
 
-#if 0
+//#if 0
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
@@ -656,7 +656,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   int max_iter_amr = 1; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -1327,7 +1327,7 @@ int main(int argc, char *argv[])
        delete problem_refsols_lvls[i];
 #endif
 
-#endif // for #if 0
+//#endif // for #if 0
 
    for (int i = 0; i < problem_sols_lvls.Size(); ++i)
        delete problem_sols_lvls[i];
