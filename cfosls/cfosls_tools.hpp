@@ -1714,7 +1714,9 @@ public:
     void SetRelTol(double rtol) {solver->SetRelTol(rtol);}
     void SetAbsTol(double atol) {solver->SetAbsTol(atol);}
 
-    void ResetPrec (int new_prec_option)
+    // it's made virtual to allow the children to delete additional data,
+    // related to the preconditioner, like Schur
+    virtual void ResetPrec (int new_prec_option)
     {
         if (new_prec_option != prec_option)
         {
@@ -1747,10 +1749,17 @@ protected:
     HypreParMatrix *Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivL2hyp()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivL2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -1797,10 +1806,17 @@ protected:
     HypreParMatrix *Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivL2L2hyp()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivL2L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -1842,10 +1858,17 @@ protected:
     HypreParMatrix * Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivH1L2hyp()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivH1L2hyp(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -1886,10 +1909,17 @@ protected:
     HypreParMatrix * Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivH1parab()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivH1parab(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -1931,10 +1961,17 @@ protected:
     HypreParMatrix * Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivH1wave()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivH1wave(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -1976,10 +2013,17 @@ protected:
     HypreParMatrix *Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_HdivH1lapl()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_HdivH1lapl(ParMesh& Pmesh, BdrConditions& bdr_conditions,
@@ -2021,10 +2065,17 @@ protected:
     HypreParMatrix * Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
+    }
+
 public:
     virtual ~FOSLSProblem_MixedLaplace()
     {
-        delete Schur;
+        if (Schur)
+            delete Schur;
     }
 
     FOSLSProblem_MixedLaplace(ParMesh& Pmesh, BdrConditions& bdr_conditions,

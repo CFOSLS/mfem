@@ -2087,7 +2087,9 @@ void FOSLSProblem::BuildSystem(bool verbose)
 
     InitSolver(verbose);
 
-    CreatePrec(*CFOSLSop, prec_option, verbose);
+    ResetPrec(prec_option);
+    //CreatePrec(*CFOSLSop, prec_option, verbose);
+
     UpdateSolverPrec();
 }
 
