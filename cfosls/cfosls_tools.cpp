@@ -3087,6 +3087,7 @@ void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool
     {
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -3290,6 +3291,7 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -3587,6 +3589,7 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -3660,6 +3663,7 @@ void FOSLSProblem_HdivH1parab::CreatePrec(BlockOperator& op, int prec_option, bo
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -3833,6 +3837,7 @@ void FOSLSProblem_HdivH1wave::CreatePrec(BlockOperator& op, int prec_option, boo
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -4005,6 +4010,7 @@ void FOSLSProblem_HdivH1lapl::CreatePrec(BlockOperator& op, int prec_option, boo
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -4175,6 +4181,7 @@ void FOSLSProblem_MixedLaplace::CreatePrec(BlockOperator& op, int prec_option, b
     {
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invS);
+        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
     }
     else
         if (verbose)
@@ -4617,6 +4624,7 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
     ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, invA);
     if (op.NumRowBlocks() > 1) // case when S is present
         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, invC);
+    ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
 
     /*
     Vector testvec1(invC->Width());
