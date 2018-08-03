@@ -2475,6 +2475,9 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
         Eliminate_ib_block(*res, temp_i, temp_i );
         HypreParMatrix * temphpmat = res->Transpose();
+        temphpmat->CopyRowStarts();
+        temphpmat->CopyColStarts();
+        delete res;
         Eliminate_ib_block(*temphpmat, temp_i, temp_i );
         res = temphpmat->Transpose();
         Eliminate_bb_block(*res, temp_i);
@@ -2503,6 +2506,10 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
         Eliminate_ib_block(*res, temp_j, temp_i );
         HypreParMatrix * temphpmat = res->Transpose();
+        temphpmat->CopyRowStarts();
+        temphpmat->CopyColStarts();
+        delete res;
+
         Eliminate_ib_block(*temphpmat, temp_i, temp_j );
         res = temphpmat->Transpose();
         res->CopyRowStarts();
@@ -2528,6 +2535,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
             for (int j = i; j < numblocks; ++j)
             {
                 coarseop_lvl(i,j) = NULL;
+                coarseop_lvl(j,i) = NULL;
 
                 if (!CoarsenedOps_lvls[l - 1]->IsZeroBlock(i,j))
                 {
