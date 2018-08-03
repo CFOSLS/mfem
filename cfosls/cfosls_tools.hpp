@@ -2214,7 +2214,7 @@ public:
     int GetUpdateCounter() const {return hierarchy.GetUpdateCounter();}
 
 protected:
-    HypreParMatrix& CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
+    HypreParMatrix *CoarsenFineBlockWithBND(int level, int i, int j, HypreParMatrix& input);
 };
 
 template <class Problem, class Hierarchy>
@@ -2405,7 +2405,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Restrict(int fine_lvl, int coarse_
 /// e.g., for coarsening from 0th level to the 1st level,
 /// one should use interpolation matrix from level 0
 template <class Problem, class Hierarchy>
-HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
+HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 (int l, int i, int j, HypreParMatrix& input)
 {
     HypreParMatrix * res;
@@ -2461,7 +2461,7 @@ HypreParMatrix& FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
         delete TrueP_i_T;
         delete temp_prod;
     }
-    return *res;
+    return res;
 }
 
 template <class Problem, class Hierarchy>
@@ -2483,10 +2483,10 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
                     HypreParMatrix& Fine_blk_ij = (HypreParMatrix&)(CoarsenedOps_lvls[l - 1]->GetBlock(i,j));
 
                     if (i == j)
-                        coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+                        coarseop_lvl(i,j) = CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
                     else
                     {
-                        coarseop_lvl(i,j) = &CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
+                        coarseop_lvl(i,j) = CoarsenFineBlockWithBND(l - 1, i, j, Fine_blk_ij );
 
                         coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
                         coarseop_lvl(j,i)->CopyRowStarts();

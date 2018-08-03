@@ -6666,6 +6666,7 @@ void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDo
 
     }
 
+    delete td_btd_diag;
     delete td_btd_hpmat;
     delete C_td_btd;
 }
