@@ -636,7 +636,7 @@ int main(int argc, char *argv[])
 
    double saved_functvalue;
 
-
+#if 0
    // 12. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
@@ -1310,18 +1310,6 @@ int main(int argc, char *argv[])
 
    // Deallocating memory
 
-   for (int i = 0; i < formulat->Nblocks(); ++i)
-       delete bdr_attribs_data[i];
-   delete hierarchy;
-   delete prob_hierarchy;
-
-   for (int i = 0; i < extra_grfuns.Size(); ++i)
-       if (extra_grfuns[i])
-           delete extra_grfuns[i];
-   for (int i = 0; i < integs.NumRows(); ++i)
-       for (int j = 0; j < integs.NumCols(); ++j)
-           if (integs(i,j))
-               delete integs(i,j);
 
 #ifdef PARTSOL_SETUP
    for (int i = 0; i < div_rhs_lvls.Size(); ++i)
@@ -1339,8 +1327,22 @@ int main(int argc, char *argv[])
        delete problem_refsols_lvls[i];
 #endif
 
+#endif // for #if 0
+
    for (int i = 0; i < problem_sols_lvls.Size(); ++i)
        delete problem_sols_lvls[i];
+   for (int i = 0; i < formulat->Nblocks(); ++i)
+       delete bdr_attribs_data[i];
+   delete hierarchy;
+   delete prob_hierarchy;
+
+   for (int i = 0; i < extra_grfuns.Size(); ++i)
+       if (extra_grfuns[i])
+           delete extra_grfuns[i];
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           if (integs(i,j))
+               delete integs(i,j);
 
    delete problem_mgtools;
    delete estimator;
