@@ -200,22 +200,51 @@ void BilinearForm::Finalize (int skip_zeros)
 void BilinearForm::AddDomainIntegrator (BilinearFormIntegrator * bfi)
 {
    dbfi.Append (bfi);
+   dbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowDomainIntegrator (BilinearFormIntegrator * bfi)
+{
+   dbfi.Append (bfi);
+   dbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBoundaryIntegrator (BilinearFormIntegrator * bfi)
 {
    bbfi.Append (bfi);
+   bbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowBoundaryIntegrator (BilinearFormIntegrator * bfi)
+{
+   bbfi.Append (bfi);
+   bbfi_owned.Append (false);
 }
 
 void BilinearForm::AddInteriorFaceIntegrator (BilinearFormIntegrator * bfi)
 {
    fbfi.Append (bfi);
+   fbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowInteriorFaceIntegrator (BilinearFormIntegrator * bfi)
+{
+   fbfi.Append (bfi);
+   fbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi)
 {
    bfbfi.Append(bfi);
    bfbfi_marker.Append(NULL); // NULL marker means apply everywhere
+   bfbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowBdrFaceIntegrator(BilinearFormIntegrator *bfi)
+{
+   bfbfi.Append(bfi);
+   bfbfi_marker.Append(NULL); // NULL marker means apply everywhere
+   bfbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi,
@@ -223,6 +252,7 @@ void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi,
 {
    bfbfi.Append(bfi);
    bfbfi_marker.Append(&bdr_marker);
+   bfbfi_owned.Append (true);
 }
 
 void BilinearForm::ComputeElementMatrix(int i, DenseMatrix &elmat)
@@ -882,10 +912,10 @@ BilinearForm::~BilinearForm()
    if (!extern_bfs)
    {
       int k;
-      for (k=0; k < dbfi.Size(); k++) { delete dbfi[k]; }
-      for (k=0; k < bbfi.Size(); k++) { delete bbfi[k]; }
-      for (k=0; k < fbfi.Size(); k++) { delete fbfi[k]; }
-      for (k=0; k < bfbfi.Size(); k++) { delete bfbfi[k]; }
+      for (k=0; k < dbfi.Size(); k++) { if (dbfi_owned[k]) delete dbfi[k]; }
+      for (k=0; k < bbfi.Size(); k++) { if (bbfi_owned[k]) delete bbfi[k]; }
+      for (k=0; k < fbfi.Size(); k++) { if (fbfi_owned[k]) delete fbfi[k]; }
+      for (k=0; k < bfbfi.Size(); k++) { if (bfbfi_owned[k]) delete bfbfi[k]; }
    }
 }
 
@@ -897,6 +927,42 @@ MixedBilinearForm::MixedBilinearForm (FiniteElementSpace *tr_fes,
    trial_fes = tr_fes;
    test_fes = te_fes;
    mat = NULL;
+   extern_bfs = 0;
+}
+
+MixedBilinearForm::MixedBilinearForm (FiniteElementSpace *tr_fes,
+                                      FiniteElementSpace *te_fes,
+                                      MixedBilinearForm * mbf)
+   : Matrix(te_fes->GetVSize(), tr_fes->GetVSize())
+{
+   int i;
+   Array<BilinearFormIntegrator*> *bfi;
+
+   trial_fes = tr_fes;
+   test_fes = te_fes;
+   mat = NULL;
+   extern_bfs = 1;
+
+   bfi = mbf->GetDBFI();
+   dom.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      dom[i] = (*bfi)[i];
+   }
+
+   bfi = mbf->GetBBFI();
+   bdr.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      bdr[i] = (*bfi)[i];
+   }
+
+   bfi = mbf->GetTFBFI();
+   skt.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      skt[i] = (*bfi)[i];
+   }
 }
 
 double & MixedBilinearForm::Elem (int i, int j)
@@ -951,16 +1017,37 @@ void MixedBilinearForm::GetBlocks(Array2D<SparseMatrix *> &blocks) const
 void MixedBilinearForm::AddDomainIntegrator (BilinearFormIntegrator * bfi)
 {
    dom.Append (bfi);
+   dom_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowDomainIntegrator (BilinearFormIntegrator * bfi)
+{
+   dom.Append (bfi);
+   dom_owned.Append (false);
 }
 
 void MixedBilinearForm::AddBoundaryIntegrator (BilinearFormIntegrator * bfi)
 {
    bdr.Append (bfi);
+   bdr_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowBoundaryIntegrator (BilinearFormIntegrator * bfi)
+{
+   bdr.Append (bfi);
+   bdr_owned.Append (false);
 }
 
 void MixedBilinearForm::AddTraceFaceIntegrator (BilinearFormIntegrator * bfi)
 {
    skt.Append (bfi);
+   skt_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowTraceFaceIntegrator (BilinearFormIntegrator * bfi)
+{
+   skt.Append (bfi);
+   skt_owned.Append (false);
 }
 
 void MixedBilinearForm::Assemble (int skip_zeros)
@@ -1136,9 +1223,9 @@ MixedBilinearForm::~MixedBilinearForm()
    int i;
 
    if (mat) { delete mat; }
-   for (i = 0; i < dom.Size(); i++) { delete dom[i]; }
-   for (i = 0; i < bdr.Size(); i++) { delete bdr[i]; }
-   for (i = 0; i < skt.Size(); i++) { delete skt[i]; }
+   for (i = 0; i < dom.Size(); i++) { if (dom_owned[i]) delete dom[i]; }
+   for (i = 0; i < bdr.Size(); i++) { if (bdr_owned[i]) delete bdr[i]; }
+   for (i = 0; i < skt.Size(); i++) { if (skt_owned[i]) delete skt[i]; }
 }
 
 

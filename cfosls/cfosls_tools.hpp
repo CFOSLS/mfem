@@ -2165,11 +2165,15 @@ public:
         for (int i = 0; i < TrueP_lvls.Size(); ++i)
             delete TrueP_lvls[i];
 
+        // for i = 0 CoarsenedOps belongs to the finest level problem and
+        // is already deleted by that point
         for (int i = 0; i < CoarsenedOps_lvls.Size(); ++i)
-            delete CoarsenedOps_lvls[i];
+            if (i > 0)
+                delete CoarsenedOps_lvls[i];
 
         for (int i = 0; i < CoarsenedOps_nobnd_lvls.Size(); ++i)
-            delete CoarsenedOps_nobnd_lvls[i];
+            if (i > 0)
+                delete CoarsenedOps_nobnd_lvls[i];
     }
 
     FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,

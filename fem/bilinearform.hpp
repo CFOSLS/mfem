@@ -46,16 +46,20 @@ protected:
 
    /// Set of Domain Integrators to be applied.
    Array<BilinearFormIntegrator*> dbfi;
+   Array<bool> dbfi_owned;
 
    /// Set of Boundary Integrators to be applied.
    Array<BilinearFormIntegrator*> bbfi;
+   Array<bool> bbfi_owned;
 
    /// Set of interior face Integrators to be applied.
    Array<BilinearFormIntegrator*> fbfi;
+   Array<bool> fbfi_owned;
 
    /// Set of boundary face Integrators to be applied.
    Array<BilinearFormIntegrator*> bfbfi;
    Array<Array<int>*>             bfbfi_marker;
+   Array<bool> bfbfi_owned;
 
    DenseMatrix elemmat;
    Array<int>  vdofs;
@@ -189,6 +193,8 @@ public:
    }
    SparseMatrix &SpMat()
    {
+      if (!mat)
+          std::cout << "Bug, mat =  " << mat << "\n";
       MFEM_VERIFY(mat, "mat is NULL and can't be dereferenced");
       return *mat;
    }
@@ -209,14 +215,26 @@ public:
    /// Adds new Domain Integrator.
    void AddDomainIntegrator(BilinearFormIntegrator *bfi);
 
+   /// Adds new Domain Integrator, but doesn't take the ownership.
+   void BorrowDomainIntegrator(BilinearFormIntegrator *bfi);
+
    /// Adds new Boundary Integrator.
    void AddBoundaryIntegrator(BilinearFormIntegrator *bfi);
+
+   /// Adds new Boundary Integrator, but doesn't take the ownership.
+   void BorrowBoundaryIntegrator(BilinearFormIntegrator *bfi);
 
    /// Adds new interior Face Integrator.
    void AddInteriorFaceIntegrator(BilinearFormIntegrator *bfi);
 
+   /// Adds new interior Face Integrator, but doesn't take the ownership.
+   void BorrowInteriorFaceIntegrator(BilinearFormIntegrator *bfi);
+
    /// Adds new boundary Face Integrator.
    void AddBdrFaceIntegrator(BilinearFormIntegrator *bfi);
+
+   /// Adds new boundary Face Integrator, but doesn't take the ownership.
+   void BorrowBdrFaceIntegrator(BilinearFormIntegrator *bfi);
 
    /** @brief Adds new boundary Face Integrator, restricted to specific boundary
        attributes. */
@@ -359,13 +377,23 @@ protected:
 
    FiniteElementSpace *trial_fes, *test_fes;
 
+   /// Indicates the BilinerFormIntegrators are owned by another BilinearForm
+   int extern_bfs;
+
    Array<BilinearFormIntegrator*> dom;
+   Array<bool> dom_owned;
    Array<BilinearFormIntegrator*> bdr;
+   Array<bool> bdr_owned;
    Array<BilinearFormIntegrator*> skt; // trace face integrators
+   Array<bool> skt_owned;
 
 public:
    MixedBilinearForm (FiniteElementSpace *tr_fes,
                       FiniteElementSpace *te_fes);
+
+   MixedBilinearForm (FiniteElementSpace *tr_fes,
+                      FiniteElementSpace *te_fes,
+                      MixedBilinearForm * mbf);
 
    virtual double& Elem (int i, int j);
 
@@ -397,12 +425,21 @@ public:
 
    void AddDomainIntegrator (BilinearFormIntegrator * bfi);
 
+   // unlike AddDomainIntegrator, doesn't take the ownership.
+   void BorrowDomainIntegrator (BilinearFormIntegrator * bfi);
+
    void AddBoundaryIntegrator (BilinearFormIntegrator * bfi);
+
+   // unlike AddBoundaryIntegrator, doesn't take the ownership.
+   void BorrowBoundaryIntegrator (BilinearFormIntegrator * bfi);
 
    /** Add a trace face integrator. This type of integrator assembles terms
        over all faces of the mesh using the face FE from the trial space and the
        two adjacent volume FEs from the test space. */
    void AddTraceFaceIntegrator (BilinearFormIntegrator * bfi);
+
+   // unlike AddTraceFaceIntegrator, doesn't take the ownership.
+   void BorrowTraceFaceIntegrator (BilinearFormIntegrator * bfi);
 
    Array<BilinearFormIntegrator*> *GetDBFI() { return &dom; }
 

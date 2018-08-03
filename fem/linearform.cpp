@@ -16,20 +16,77 @@
 namespace mfem
 {
 
+LinearForm::LinearForm (FiniteElementSpace * f, LinearForm *lf)
+   : Vector(f -> GetVSize())
+{
+   int i;
+   Array<LinearFormIntegrator*> *lfi;
+
+   fes = f;
+   extern_lfs = 1;
+
+   lfi = lf->GetDLFI();
+   dlfi.SetSize (lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
+   {
+      dlfi[i] = (*lfi)[i];
+   }
+
+   lfi = lf->GetBLFI();
+   blfi.SetSize (lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
+   {
+      blfi[i] = (*lfi)[i];
+   }
+
+   lfi = lf->GetFLFI();
+   flfi.SetSize (lfi->Size());
+   flfi_marker.SetSize(lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
+   {
+      flfi[i] = (*lfi)[i];
+      flfi_marker[i] = NULL;
+   }
+
+}
+
 void LinearForm::AddDomainIntegrator (LinearFormIntegrator * lfi)
 {
    dlfi.Append (lfi);
+   dlfi_owned.Append (true);
 }
+
+void LinearForm::BorrowDomainIntegrator (LinearFormIntegrator * lfi)
+{
+    dlfi.Append (lfi);
+    dlfi_owned.Append (false);
+}
+
 
 void LinearForm::AddBoundaryIntegrator (LinearFormIntegrator * lfi)
 {
    blfi.Append (lfi);
+   blfi_owned.Append (true);
+}
+
+void LinearForm::BorrowBoundaryIntegrator (LinearFormIntegrator * lfi)
+{
+   blfi.Append (lfi);
+   blfi_owned.Append (false);
 }
 
 void LinearForm::AddBdrFaceIntegrator (LinearFormIntegrator * lfi)
 {
    flfi.Append(lfi);
    flfi_marker.Append(NULL); // NULL -> all attributes are active
+   flfi_owned.Append (true);
+}
+
+void LinearForm::BorrowBdrFaceIntegrator (LinearFormIntegrator * lfi)
+{
+   flfi.Append(lfi);
+   flfi_marker.Append(NULL); // NULL -> all attributes are active
+   flfi_owned.Append (false);
 }
 
 void LinearForm::AddBdrFaceIntegrator(LinearFormIntegrator *lfi,
@@ -37,6 +94,7 @@ void LinearForm::AddBdrFaceIntegrator(LinearFormIntegrator *lfi,
 {
    flfi.Append(lfi);
    flfi_marker.Append(&bdr_attr_marker);
+   flfi_owned.Append (true);
 }
 
 void LinearForm::Assemble()
@@ -131,9 +189,9 @@ void LinearForm::Update(FiniteElementSpace *f, Vector &v, int v_offset)
 LinearForm::~LinearForm()
 {
    int k;
-   for (k=0; k < dlfi.Size(); k++) { delete dlfi[k]; }
-   for (k=0; k < blfi.Size(); k++) { delete blfi[k]; }
-   for (k=0; k < flfi.Size(); k++) { delete flfi[k]; }
+   for (k=0; k < dlfi.Size(); k++) { if (dlfi_owned[k]) delete dlfi[k]; }
+   for (k=0; k < blfi.Size(); k++) { if (blfi_owned[k]) delete blfi[k]; }
+   for (k=0; k < flfi.Size(); k++) { if (flfi_owned[k]) delete flfi[k]; }
 }
 
 }

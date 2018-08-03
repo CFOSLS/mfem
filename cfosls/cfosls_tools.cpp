@@ -850,9 +850,9 @@ void BlockProblemForms::InitForms(FOSLSFEFormulation& fe_formul, Array<ParFinite
             if (fe_formul.GetBlfi(i,j, false))
             {
                 if (i == j)
-                    diag_forms[i]->AddDomainIntegrator(fe_formul.GetBlfi(i,j, true));
+                    diag_forms[i]->BorrowDomainIntegrator(fe_formul.GetBlfi(i,j));
                 else
-                    offd_forms(i,j)->AddDomainIntegrator(fe_formul.GetBlfi(i,j, true));
+                    offd_forms(i,j)->BorrowDomainIntegrator(fe_formul.GetBlfi(i,j));
             }
         }
 
@@ -1757,7 +1757,7 @@ void FOSLSProblem::InitForms()
 
         if (fe_formul.GetLfi(i, false))
         {
-            plforms[i]->AddDomainIntegrator(fe_formul.GetLfi(i, true));
+            plforms[i]->BorrowDomainIntegrator(fe_formul.GetLfi(i));
         }
     }
 
