@@ -6484,7 +6484,6 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
         }
     }
 
-
     return res;
 }
 
