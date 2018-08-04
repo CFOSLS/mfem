@@ -2528,7 +2528,7 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
         HypreParMatrix * temphpmat = temp_rap->Transpose();
         temphpmat->CopyRowStarts();
         temphpmat->CopyColStarts();
-        //delete temp_rap;
+        delete temp_rap;
 
         Eliminate_ib_block(*temphpmat, temp_i, temp_j );
         res = temphpmat->Transpose();
