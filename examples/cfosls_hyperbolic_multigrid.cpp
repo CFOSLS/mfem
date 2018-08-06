@@ -322,9 +322,11 @@ int main(int argc, char *argv[])
         bool with_coarsest_partfinder = true;
         bool with_coarsest_hcurl = true;
         bool with_monolithic_GS = false;
+        bool with_nobnd_op = true;
         descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
-                                                      with_Hcurl, with_coarsest_partfinder,
-                                                      with_coarsest_hcurl, with_monolithic_GS);
+                                              with_Hcurl, with_coarsest_partfinder,
+                                              with_coarsest_hcurl, with_monolithic_GS,
+                                              with_nobnd_op);
     }
     MultigridToolsHierarchy * mgtools_hierarchy =
             new MultigridToolsHierarchy(*hierarchy, 0, *descriptor);
@@ -719,9 +721,11 @@ int main(int argc, char *argv[])
         bool with_coarsest_partfinder = false;
         bool with_coarsest_hcurl = false;
         bool with_monolithic_GS = true;
+        bool with_nobnd_op = false;
         divfree_descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
                                                       with_Hcurl, with_coarsest_partfinder,
-                                                      with_coarsest_hcurl, with_monolithic_GS);
+                                                      with_coarsest_hcurl, with_monolithic_GS,
+                                                      with_nobnd_op);
     }
 
     MultigridToolsHierarchy * mgtools_divfree_hierarchy =
@@ -1052,11 +1056,20 @@ int main(int argc, char *argv[])
     //GeneralMultigrid * GeneralMGprec_plus =
             //new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
 
+    Array<Operator*> Smoo_ops(nlevels - 1);
+#ifdef SOLVE_WITH_LOCALSOLVERS
+    for (int i = 0; i < Smoo_ops.Size(); ++i)
+        Smoo_ops[i] = mgtools_hierarchy->GetCombinedSmoothers()[i];
+#else
+    for (int i = 0; i < Smoo_ops.Size(); ++i)
+        Smoo_ops[i] = mgtools_hierarchy->GetHcurlSmoothers()[i];
+#endif
+
     // newer interface using MultigridTools
     GeneralMultigrid * GeneralMGprec_plus =
             new GeneralMultigrid(nlevels, mgtools_hierarchy->GetPs_bnd(), mgtools_hierarchy->GetOps(),
                                  *mgtools_hierarchy->GetCoarsestSolver_Hcurl(),
-                                 mgtools_hierarchy->GetCombinedSmoothers());
+                                 Smoo_ops);
 
 #ifdef WITH_DIVCONSTRAINT_SOLVER
     if (verbose)
@@ -1171,7 +1184,8 @@ int main(int argc, char *argv[])
     //MPI_Finalize();
     //return 0;
 #else
-    Sigmahat->ParallelProject(ParticSol.GetBlock(0));
+    ParticSol.GetBlock(0) = Sigmahat_truedofs;
+    //Sigmahat->ParallelProject(ParticSol.GetBlock(0));
 #endif
 
     chrono.Stop();

@@ -3701,9 +3701,11 @@ int main(int argc, char *argv[])
         bool with_coarsest_partfinder = true;
         bool with_coarsest_hcurl = true;
         bool with_monolithic_GS = false;
+        bool with_nobnd_op = true;
         descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
-                                                      with_Hcurl, with_coarsest_partfinder,
-                                                      with_coarsest_hcurl, with_monolithic_GS);
+                                              with_Hcurl, with_coarsest_partfinder,
+                                              with_coarsest_hcurl, with_monolithic_GS,
+                                              with_nobnd_op);
     }
     MultigridToolsHierarchy * mgtools_hierarchy =
             new MultigridToolsHierarchy(*hierarchy, problem_mgtools->GetAttachedIndex(), *descriptor);

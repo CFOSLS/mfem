@@ -902,7 +902,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     FunctOps_lvls[0] = problem->GetFunctOp(*offsets_funct[0]);
 
     FunctOps_nobnd_lvls.SetSize(nlevels);
-    FunctOps_nobnd_lvls[0] = problem->GetFunctOp_nobnd(*offsets_funct[0]);
+    FunctOps_nobnd_lvls[0] = NULL;
+    if (descr.with_nobnd_op)
+        FunctOps_nobnd_lvls[0] = problem->GetFunctOp_nobnd(*offsets_funct[0]);
 
     BlockP_nobnd_lvls.SetSize(nlevels - 1);
     P_bnd_lvls.SetSize(nlevels - 1);
@@ -986,8 +988,11 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
         Ops_lvls[l] = FunctOps_lvls[l];
 
-        FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+        if (descr.with_nobnd_op)
+            FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
                 *FunctOps_nobnd_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
+        else
+            FunctOps_nobnd_lvls[l] = NULL;
 
 
         if (descr.with_Schwarz)
@@ -1205,7 +1210,8 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             for (int l = 0; l < nlevels; ++l)
             {
                 delete FunctOps_lvls[l];
-                delete FunctOps_nobnd_lvls[l];
+                if (descr.with_nobnd_op)
+                    delete FunctOps_nobnd_lvls[l];
                 if (descr.with_Schwarz || descr.with_coarsest_partfinder)
                 {
                     delete Constraint_mat_lvls[l];
@@ -1233,8 +1239,13 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         for (int i = 0; i < Ops_lvls.Size(); ++i)
             Ops_lvls[i] = FunctOps_lvls[i];
 
-        BlockOperator * FunctOp_nobnd_new = problem->GetFunctOp_nobnd(*offsets_funct[0]);
-        FunctOps_nobnd_lvls.Prepend(FunctOp_nobnd_new);
+        if (descr.with_nobnd_op)
+        {
+            BlockOperator * FunctOp_nobnd_new = problem->GetFunctOp_nobnd(*offsets_funct[0]);
+            FunctOps_nobnd_lvls.Prepend(FunctOp_nobnd_new);
+        }
+        else
+            FunctOps_nobnd_lvls.Prepend(NULL);
 
         if (descr.with_Schwarz || descr.with_coarsest_partfinder)
         {

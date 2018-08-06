@@ -3100,18 +3100,21 @@ struct ComponentsDescriptor
     bool with_coarsest_partfinder;
     bool with_coarsest_hcurl;
     bool with_monolithic_GS;
+    bool with_nobnd_op;
 public:
     virtual ~ComponentsDescriptor() {}
-    ComponentsDescriptor() : ComponentsDescriptor(false, false, false, false, false, false) {}
+    ComponentsDescriptor() : ComponentsDescriptor(false, false, false,
+                                                  false, false, false, false) {}
 
     ComponentsDescriptor(bool with_Schwarz_, bool optimized_Schwarz_, bool with_Hcurl_,
                          bool with_coarsest_partfinder_, bool with_coarsest_hcurl_,
-                         bool with_monolithic_GS_)
+                         bool with_monolithic_GS_, bool with_nobnd_op_)
         : with_Schwarz(with_Schwarz_), optimized_Schwarz(optimized_Schwarz_),
           with_Hcurl(with_Hcurl_),
           with_coarsest_partfinder(with_coarsest_partfinder_),
           with_coarsest_hcurl(with_coarsest_hcurl_),
-          with_monolithic_GS(with_monolithic_GS_)
+          with_monolithic_GS(with_monolithic_GS_),
+          with_nobnd_op(with_nobnd_op_)
     {}
 };
 
@@ -3167,7 +3170,7 @@ public:
     void Update(bool recoarsen);
 
 protected:
-    // Troubles with such a constructor is the implementation of Update(), in particular,
+    // Troubles with such a constructor given in public is the implementation of Update(),
     // for the problem when it is not attached to the hierarchy's finest level
     // This is why externally one should call the public constructor
     // which operates with a hierarchy and at attached "dynamic" problem
