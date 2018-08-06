@@ -45,8 +45,9 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
 
+    /*
     // Hdiv-H1 case
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
@@ -54,16 +55,15 @@ int main(int argc, char *argv[])
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
     using DivfreeFormulType = CFOSLSFormulation_HdivH1DivfreeHyp;
     using DivfreeFEFormulType = CFOSLSFEFormulation_HdivH1DivfreeHyper;
+    */
 
-    /*
     // Hdiv-L2 case
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2hyp;
-    using DivfreeFormulType = CFOSLSFormulation_HdivL2DivfreeHyp;
-    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivL2DivfreeHyper;
-    */
+    using DivfreeFormulType = CFOSLSFormulation_HdivDivfreeHyp;
+    using DivfreeFEFormulType = CFOSLSFEFormulation_HdivDivfreeHyp;
 
     bool aniso_refine = false;
     bool refine_t_first = false;
