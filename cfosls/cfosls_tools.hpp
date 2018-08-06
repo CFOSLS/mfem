@@ -2220,11 +2220,13 @@ public:
         // is already deleted by that point
         for (int i = 0; i < CoarsenedOps_lvls.Size(); ++i)
             if (i > 0)
-                delete CoarsenedOps_lvls[i];
+                if (CoarsenedOps_lvls[i])
+                    delete CoarsenedOps_lvls[i];
 
         for (int i = 0; i < CoarsenedOps_nobnd_lvls.Size(); ++i)
             if (i > 0)
-                delete CoarsenedOps_nobnd_lvls[i];
+                if (CoarsenedOps_nobnd_lvls[i])
+                    delete CoarsenedOps_nobnd_lvls[i];
     }
 
     FOSLSProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
@@ -2312,7 +2314,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     for (int l = 0; l < nlevels; ++l )
         CoarsenedOps_nobnd_lvls[l] = NULL;
 
-    ConstructCoarsenedOps();
+    //ConstructCoarsenedOps();
     ConstructCoarsenedOps_nobnd();
 }
 
@@ -2349,10 +2351,10 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
     // if l == 0, these are the operators of the previous finest problem
     // so we don't delete them
     for (int l = 1; l < CoarsenedOps_lvls.Size(); ++l )
-    {
         delete CoarsenedOps_lvls[l];
+
+    for (int l = 1; l < CoarsenedOps_nobnd_lvls.Size(); ++l )
         delete CoarsenedOps_nobnd_lvls[l];
-    }
 
     CoarsenedOps_lvls.SetSize(nlevels);
     for (int l = 1; l < nlevels; ++l)
@@ -2445,9 +2447,6 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::Restrict(int fine_lvl, int coarse_
     BlockVector viewer_in(vec_in.GetData(), blkoffsets_true_fine);
     BlockVector viewer_out(vec_out.GetData(), blkoffsets_true_coarse);
     TrueP_lvls[fine_lvl]->MultTranspose(viewer_in, viewer_out);
-
-    // FIXME: Do we need to clear the boundary conditions on the coarse level after that?
-    // I guess, no.
 }
 
 /// coarsens and restores boundary conditions
@@ -2461,23 +2460,69 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 {
     HypreParMatrix * res;
 
-    const HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(i,i)));
+    HypreParMatrix * TrueP_i = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(i,i)));
+    TrueP_i->CopyRowStarts();
+    TrueP_i->CopyColStarts();
 
     const Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(i);
     Array<int> temp_i;
     problems_lvls[l + 1]->GetPfes(i)->GetEssentialTrueDofs(essbdr_attrs, temp_i);
 
+    // new version, no RAP
+    HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
+    TrueP_i_T->CopyColStarts();
+    TrueP_i_T->CopyRowStarts();
+
+    HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
+    TrueP_j->CopyRowStarts();
+    TrueP_j->CopyColStarts();
+
+    const Array<int> &essbdr_attrs_j = bdr_conditions.GetBdrAttribs(j);
+    Array<int> temp_j;
+    problems_lvls[l + 1]->GetPfes(j)->GetEssentialTrueDofs(essbdr_attrs_j, temp_j);
+
+    HypreParMatrix * temp_prod = ParMult(&input, TrueP_j);
+    temp_prod->CopyColStarts();
+    temp_prod->CopyRowStarts();
+
+    HypreParMatrix * temp_rap = ParMult(TrueP_i_T, temp_prod);
+    temp_rap->CopyRowStarts();
+    temp_rap->CopyColStarts();
+
+    Eliminate_ib_block(*temp_rap, temp_j, temp_i );
+    HypreParMatrix * temphpmat = temp_rap->Transpose();
+    temphpmat->CopyRowStarts();
+    temphpmat->CopyColStarts();
+
+    Eliminate_ib_block(*temphpmat, temp_i, temp_j );
+    res = temphpmat->Transpose();
+    res->CopyRowStarts();
+    res->CopyColStarts();
+    delete temphpmat;
+
+    delete TrueP_i_T;
+    delete temp_prod;
+    delete temp_rap;
+
+    // old version, which suffers from a strange memory leask which lead to oncisstent results
+    // if cured
+    // the decision for similar code for no bnd stuff was not to use RAP for HypreParMatrices
+    /*
+
     if (i == j) // we can use RAP for diagonal blocks
     {
         HypreParMatrix * temp_rap = RAP(TrueP_i, &input, TrueP_i);
         temp_rap->CopyRowStarts();
-        temp_rap->CopyRowStarts();
+        temp_rap->CopyColStarts();
 
         Eliminate_ib_block(*temp_rap, temp_i, temp_i );
         HypreParMatrix * temphpmat = temp_rap->Transpose();
         temphpmat->CopyRowStarts();
         temphpmat->CopyColStarts();
-        //delete temp_rap;
+        // FIXME: A memory leak is reported related to this RAP (which creates temp_rap above).
+        // FIXME: However, if delete is uncommented, the code crashes in the else clause
+        // FIXME: with temp_rap having 0 rows
+        delete temp_rap;
 
         Eliminate_ib_block(*temphpmat, temp_i, temp_i );
         res = temphpmat->Transpose();
@@ -2490,12 +2535,14 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
 
         delete temphpmat;
     }
-    else // off-diagonal blocks (cannot use RAP)
+    else // off-diagonal blocks (cannot use RAP) FIXME: Why?
     {
         HypreParMatrix * TrueP_i_T = TrueP_i->Transpose();
         TrueP_i_T->CopyColStarts();
         TrueP_i_T->CopyRowStarts();
         HypreParMatrix * TrueP_j = &((HypreParMatrix&)(TrueP_lvls[l]->GetBlock(j,j)));
+        TrueP_j->CopyRowStarts();
+        TrueP_j->CopyColStarts();
 
         const Array<int> &essbdr_attrs = bdr_conditions.GetBdrAttribs(j);
 
@@ -2539,6 +2586,7 @@ HypreParMatrix* FOSLSProblHierarchy<Problem, Hierarchy>::CoarsenFineBlockWithBND
         delete TrueP_i_T;
         delete temp_prod;
     }
+    */
     return res;
 }
 
@@ -2550,6 +2598,51 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
     int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
     for (int l = 1; l < nlevels; ++l )
     {
+        // new version, no temporary Array2D
+        CoarsenedOps_lvls[l] = new BlockOperator(problems_lvls[l]->GetTrueOffsets());
+        CoarsenedOps_lvls[l]->owns_blocks = true;
+
+        for (int i = 0; i < numblocks; ++i)
+        {
+            for (int j = i; j < numblocks; ++j)
+            {
+                HypreParMatrix * block_ij = NULL;
+                HypreParMatrix * block_ji;
+
+                if (!CoarsenedOps_lvls[l - 1]->IsZeroBlock(i,j))
+                {
+                    HypreParMatrix * Fine_blk_ij = dynamic_cast<HypreParMatrix*>
+                            (&CoarsenedOps_lvls[l - 1]->GetBlock(i,j));
+                    MFEM_ASSERT(Fine_blk_ij, "Unsuccessful cast into HypreParMatrix*");
+
+                    if (i == j)
+                        block_ij = CoarsenFineBlockWithBND(l - 1, i, j, *Fine_blk_ij );
+                    else
+                    {
+                        block_ij = CoarsenFineBlockWithBND(l - 1, i, j, *Fine_blk_ij );
+
+                        block_ji = block_ij->Transpose();
+                        block_ji->CopyRowStarts();
+                        block_ji->CopyColStarts();
+                    }
+                }
+
+                if (block_ij)
+                {
+                    if (i == j)
+                        CoarsenedOps_lvls[l]->SetBlock(i,j, block_ij);
+                    else
+                    {
+                        CoarsenedOps_lvls[l]->SetBlock(i,j, block_ij);
+                        CoarsenedOps_lvls[l]->SetBlock(j,i, block_ji);
+                    }
+                }
+
+            } // end of an iteration for fixed (i,j)
+        }
+
+        // old version
+        /*
         Array2D<HypreParMatrix*> coarseop_lvl(numblocks, numblocks);
         for (int i = 0; i < numblocks; ++i)
         {
@@ -2584,6 +2677,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps()
                 if (coarseop_lvl(i,j))
                     CoarsenedOps_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
         CoarsenedOps_lvls[l]->owns_blocks = true;
+        */
 
     } // end of loop over levels
 }
@@ -2596,6 +2690,113 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
     int numblocks = problems_lvls[0]->GetFEformulation().Nblocks();
     for (int l = 1; l < nlevels; ++l )
     {
+        // new version, without additional temporary Array2D
+        // FIXME: This leads to incorrect result for i = 0, l = 2 (Update() after iteration 1)
+        // FIXME: block_ij happens to be of the wrong size, either height = width = 0
+        // FIXME: or height = width = much larger
+        // FIXME: With that, nothing suspicious has been found about the input arguments to the RAP
+        // FIXME: But the RAP for diagonals works fine.
+        // FIXME: Doing RAP as two ParMult seems to work.
+        CoarsenedOps_nobnd_lvls[l] = new BlockOperator(problems_lvls[l]->GetTrueOffsets());
+        CoarsenedOps_nobnd_lvls[l]->owns_blocks = true;
+
+        for (int i = 0; i < numblocks; ++i)
+        {
+            HypreParMatrix * TrueP_i = dynamic_cast<HypreParMatrix*>
+                            (&TrueP_lvls[l - 1]->GetBlock(i,i));
+            MFEM_ASSERT(TrueP_i, "Unsuccessful cast into HypreParMatrix*");
+
+            for (int j = i; j < numblocks; ++j)
+            {
+                HypreParMatrix * block_ij = NULL;
+                HypreParMatrix * block_ji;
+
+                if (!CoarsenedOps_nobnd_lvls[l - 1]->IsZeroBlock(i,j))
+                {
+                    HypreParMatrix * Fine_blk_ij = dynamic_cast<HypreParMatrix*>
+                            (&CoarsenedOps_nobnd_lvls[l - 1]->GetBlock(i,j));
+                    MFEM_ASSERT(Fine_blk_ij, "Unsuccessful cast into HypreParMatrix*");
+
+                    if (i == j)
+                    {
+                        //SparseMatrix fineblock_ij_diag;
+                        //Fine_blk_ij->GetDiag(fineblock_ij_diag);
+                        //fineblock_ij_diag.Print();
+                        //fineblock_ij_diag.MoveDiagonalFirst();
+
+                        //SparseMatrix truep_i_diag;
+                        //TrueP_i->GetDiag(truep_i_diag);
+                        //truep_i_diag.Print();
+
+                        HypreParMatrix * temp1 = ParMult(Fine_blk_ij, TrueP_i);
+                        temp1->CopyColStarts();
+                        temp1->CopyRowStarts();
+
+                        HypreParMatrix * temp2 = TrueP_i->Transpose();
+                        temp2->CopyColStarts();
+                        temp2->CopyRowStarts();
+
+                        block_ij = ParMult(temp2,temp1);
+
+                        //block_ij = RAP(TrueP_i, Fine_blk_ij, TrueP_i);
+                        block_ij->CopyRowStarts();
+                        block_ij->CopyColStarts();
+                        //SparseMatrix block_ij_diag;
+                        //block_ij->GetDiag(block_ij_diag);
+                        //block_ij_diag.Print();
+                        //block_ij_diag.MoveDiagonalFirst();
+
+                        //SparseMatrix * product = RAP(truep_i_diag, fineblock_ij_diag, truep_i_diag);
+                        //product->Print();
+
+                        delete temp1;
+                        delete temp2;
+                    }
+                    else
+                    {
+                        HypreParMatrix * TrueP_j = dynamic_cast<HypreParMatrix*>
+                                        (&TrueP_lvls[l - 1]->GetBlock(j,j));
+                        MFEM_ASSERT(TrueP_j, "Unsuccessful cast into HypreParMatrix*");
+
+                        HypreParMatrix * temp1 = ParMult(Fine_blk_ij, TrueP_j);
+                        temp1->CopyColStarts();
+                        temp1->CopyRowStarts();
+
+                        HypreParMatrix * temp2 = TrueP_i->Transpose();
+                        temp2->CopyColStarts();
+                        temp2->CopyRowStarts();
+
+                        block_ij = ParMult(temp2,temp1);
+
+                        //block_ij = RAP(TrueP_i, Fine_blk_ij, TrueP_j);
+                        block_ij->CopyRowStarts();
+                        block_ij->CopyColStarts();
+
+                        block_ji = block_ij->Transpose();
+                        block_ji->CopyRowStarts();
+                        block_ji->CopyColStarts();
+
+                        delete temp1;
+                        delete temp2;
+                    }
+                }
+
+                if (block_ij)
+                {
+                    if (i == j)
+                        CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, block_ij);
+                    else
+                    {
+                        CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, block_ij);
+                        CoarsenedOps_nobnd_lvls[l]->SetBlock(j,i, block_ji);
+                    }
+                }
+            } // end of loop over j
+
+        } // end of an iteration for fixed (i,j)
+
+        // old version
+        /*
         Array2D<HypreParMatrix*> coarseop_lvl(numblocks, numblocks);
         for (int i = 0; i < numblocks; ++i)
         {
@@ -2613,7 +2814,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
                     {
                         coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_i);
                         coarseop_lvl(i,j)->CopyRowStarts();
-                        coarseop_lvl(i,j)->CopyRowStarts();
+                        coarseop_lvl(i,j)->CopyColStarts();
                     }
                     else
                     {
@@ -2621,7 +2822,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
 
                         coarseop_lvl(i,j) = RAP(TrueP_i, &Fine_blk_ij, TrueP_j);
                         coarseop_lvl(i,j)->CopyRowStarts();
-                        coarseop_lvl(i,j)->CopyRowStarts();
+                        coarseop_lvl(i,j)->CopyColStarts();
 
                         coarseop_lvl(j,i) = coarseop_lvl(i,j)->Transpose();
                         coarseop_lvl(j,i)->CopyRowStarts();
@@ -2637,7 +2838,7 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
                 if (coarseop_lvl(i,j))
                     CoarsenedOps_nobnd_lvls[l]->SetBlock(i,j, coarseop_lvl(i,j));
         CoarsenedOps_nobnd_lvls[l]->owns_blocks = true;
-
+        */
     } // end of loop over levels
 }
 
