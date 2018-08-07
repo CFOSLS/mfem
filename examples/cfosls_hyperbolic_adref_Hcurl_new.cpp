@@ -528,6 +528,7 @@ int main(int argc, char *argv[])
            GetFunctSpacesDescriptor();
 #endif
 
+   // FIXME: Change the name problem_mgtools, why _mgtools?
    FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
            (*bdr_conds, *fe_formulat, prec_option, verbose);
    hierarchy->AttachProblem(problem_mgtools);
