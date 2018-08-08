@@ -2909,6 +2909,8 @@ protected:
     mutable int current_level;
 
 public:
+    virtual ~GeneralMultigrid();
+
     GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_, const Array<Operator*> &Op_lvls_,
                      const Operator& CoarseOp_, const Array<Operator*> &Smoothers_lvls_)
         : GeneralMultigrid(Nlevels, P_lvls_, Op_lvls_, CoarseOp_, Smoothers_lvls_, Smoothers_lvls_)

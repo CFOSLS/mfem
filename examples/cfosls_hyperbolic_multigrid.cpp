@@ -651,11 +651,13 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             divfree_offsets[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
+            // FIXME: Memory leak here because of ConstructTruePforFormul
             P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                         *hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                             *divfree_offsets[l], *divfree_offsets[l + 1]),
                         *coarsebnd_indces_divfree_lvls[l],
                         *divfree_offsets[l], *divfree_offsets[l + 1]);
+            // FIXME: Memory leak here because of ConstructTruePforFormul
             BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                                     *divfree_offsets[l],
                                                                     *divfree_offsets[l + 1]);
@@ -990,8 +992,9 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             offsets_hdivh1[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_funct);
-            offsets_hdivh1[l]->Print();
-            offsets_hdivh1[l + 1]->Print();
+            //offsets_hdivh1[l]->Print();
+            //offsets_hdivh1[l + 1]->Print();
+            // FIXME: Memory leak for BlockP_mg_nobnd_plus
             BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, space_names_funct,
                                                                          *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
             P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
@@ -1406,6 +1409,7 @@ int main(int argc, char *argv[])
     delete descriptor;
     delete mgtools_hierarchy;
 
+    delete divfree_descriptor;
     delete mgtools_divfree_hierarchy;
 
     for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
@@ -1413,6 +1417,9 @@ int main(int argc, char *argv[])
 
     for (unsigned int i = 0; i < coarsebnd_indces_funct_lvls.size(); ++i)
         delete coarsebnd_indces_funct_lvls[i];
+
+    for (unsigned int i = 0; i < coarsebnd_indces_divfree_lvls.size(); ++i)
+        delete coarsebnd_indces_divfree_lvls[i];
 
     for (int i = 0; i < P_mg.Size(); ++i)
         delete P_mg[i];
