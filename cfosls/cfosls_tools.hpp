@@ -2167,8 +2167,8 @@ public:
         delete divfree_hpmat_nobnd;
         if (own_hdiv)
         {
-            delete hdiv_fecoll;
             delete hdiv_pfespace;
+            delete hdiv_fecoll;
         }
     }
 

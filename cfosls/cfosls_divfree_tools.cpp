@@ -431,6 +431,10 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                 Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
+                temphpmat->CopyColStarts();
+                temphpmat->CopyRowStarts();
+                delete HcurlFunct_global(blk1, blk2);
+
                 Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                 HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
                 if (blk1 == blk2)
@@ -4108,6 +4112,10 @@ void HcurlGSSSmoother::Setup() const
 
                 Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
+                temphpmat->CopyColStarts();
+                temphpmat->CopyRowStarts();
+                delete HcurlFunct_global(blk1, blk2);
+
                 Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                 HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
                 if (blk1 == blk2)

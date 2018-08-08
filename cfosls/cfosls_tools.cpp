@@ -4566,7 +4566,8 @@ void FOSLSProblem_Laplace::ChangeSolver(double new_rtol, double new_atol)
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level,
                                          BdrConditions& bdr_conditions, FOSLSFEFormulation& fe_formulation,
                                          int precond_option, bool verbose)
-    : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose, false)
+    : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose, false),
+      own_hdiv(false)
 {
     int dim = pmesh.Dimension();
     MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
@@ -4580,7 +4581,8 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, int level,
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
              FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose)
-    : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose, false)
+    : FOSLSProblem(Hierarchy, bdr_conditions, fe_formulation, verbose, false),
+      own_hdiv(false)
 {
     int dim = pmesh.Dimension();
     MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");

@@ -477,6 +477,7 @@ int main(int argc, char *argv[])
 
         delete coarse_essbdr_dofs_Hdiv;
 
+        delete M_local;
         delete B_local;
     }
     else
@@ -652,6 +653,16 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             divfree_offsets[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
+
+            BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_divfree,
+                                                                    *divfree_offsets[l],
+                                                                    *divfree_offsets[l + 1]);
+            P_mg[l] = new BlkInterpolationWithBNDforTranspose(
+                        *BlockP_mg_nobnd[l],
+                        *coarsebnd_indces_divfree_lvls[l],
+                        *divfree_offsets[l], *divfree_offsets[l + 1]);
+
+            /*
             // FIXME: Memory leak here because of ConstructTruePforFormul
             P_mg[l] = new BlkInterpolationWithBNDforTranspose(
                         *hierarchy->ConstructTruePforFormul(l, space_names_divfree,
@@ -662,6 +673,7 @@ int main(int argc, char *argv[])
             BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                                     *divfree_offsets[l],
                                                                     *divfree_offsets[l + 1]);
+            */
         }
 
         if (l == 0)
@@ -1069,10 +1081,14 @@ int main(int argc, char *argv[])
             std::vector<Array<int>*> fullbdr_dofs_funct = hierarchy->GetEssBdrTdofsOrDofs
                     ("dof", space_names_funct, fullbdr_attribs, l);
 
+            Array<int> * essbdr_hcurl = hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                       essbdr_attribs_Hcurl, l);
+
             HcurlSmoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_mg_plus[l],
                                                      *hierarchy->GetDivfreeDop(l),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                               essbdr_attribs_Hcurl, l),
+                                                     //*hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                               //essbdr_attribs_Hcurl, l),
+                                                     *essbdr_hcurl,
                                                      //hierarchy->GetEssBdrTdofsOrDofs("tdof",
                                                                                //space_names_funct,
                                                                                //essbdr_attribs, l),
@@ -1124,6 +1140,8 @@ int main(int argc, char *argv[])
 
             for (unsigned int i = 0; i < essbdr_dofs_funct.size(); ++i)
                 delete essbdr_dofs_funct[i];
+
+            delete essbdr_hcurl;
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
             Smoo_mg_plus[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
@@ -1418,6 +1436,7 @@ int main(int argc, char *argv[])
 
     delete hierarchy;
     delete problem;
+    delete divfree_problem;
 
     delete descriptor;
     delete mgtools_hierarchy;
@@ -1437,14 +1456,24 @@ int main(int argc, char *argv[])
     for (int i = 0; i < P_mg.Size(); ++i)
         delete P_mg[i];
 
+    for (int i = 0; i < BlockP_mg_nobnd.Size(); ++i)
+        delete BlockP_mg_nobnd[i];
+
     for (int i = 0; i < BlockOps_mg.Size(); ++i)
         delete BlockOps_mg[i];
+
+    delete A00;
+    delete A01;
+    delete A10;
 
     for (int i = 0; i < Smoo_mg.Size(); ++i)
         delete Smoo_mg[i];
 
     for (int i = 0; i < P_mg_plus.Size(); ++i)
         delete P_mg_plus[i];
+
+    for (int i = 0; i < BlockP_mg_nobnd_plus.Size(); ++i)
+        delete BlockP_mg_nobnd_plus[i];
 
     for (int i = 0; i < BlockOps_mg_plus.Size(); ++i)
         delete BlockOps_mg_plus[i];

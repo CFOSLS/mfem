@@ -1208,6 +1208,10 @@ public:
 
         SparseMatrix * B_finer = B_fine;
         SparseMatrix * B_lvl;
+
+        SparseMatrix * M_finer = M_fine;
+        SparseMatrix * M_lvl;
+
 //        chrono.Clear();
 //        chrono.Start();
 
@@ -1294,27 +1298,32 @@ public:
                 // 4. Creating matrices for the coarse problem:
                 SparseMatrix *P_WT2 = Transpose(*P_W[l-1]);
                 SparseMatrix *P_RT2;
-                if (M_fine)
+                if (M_finer)
                     P_RT2 = Transpose(*P_R[l-1]);
 
                 SparseMatrix *B_PR = Mult(*B_finer, *P_R[l-1]);
                 B_lvl = Mult(*P_WT2, *B_PR);
 
-                if (M_fine)
+                if (M_finer)
                 {
-                    SparseMatrix *M_PR = Mult(*M_fine, *P_R[l-1]);
-                    M_fine = Mult(*P_RT2, *M_PR);
+                    SparseMatrix *M_PR = Mult(*M_finer, *P_R[l-1]);
+                    M_lvl = Mult(*P_RT2, *M_PR);
 
                     delete M_PR;
                 }
+                else
+                    M_lvl = NULL;
 
                 delete B_PR;
                 delete P_WT2;
-                if (M_fine)
+                if (M_lvl)
                     delete P_RT2;
             }
             else
+            {
                 B_lvl = B_finer;
+                M_lvl = M_finer;
+            }
 
             //5. Setting for the coarse problem
             DenseMatrix sub_M;
@@ -1338,7 +1347,7 @@ public:
                 Array<int> Wtmp_j(AE_W->GetRowColumns(e), AE_W->RowSize(e));
 
                 // Setting size of Dense Matrices
-                if (M_fine)
+                if (M_lvl)
                     sub_M.SetSize(Rtmp_j.Size());
                 sub_B.SetSize(Wtmp_j.Size(),Rtmp_j.Size());
                 sub_BT.SetSize(Rtmp_j.Size(),Wtmp_j.Size());
@@ -1346,8 +1355,8 @@ public:
 //                sub_F.SetSize(Wtmp_j.Size());
 
                 // Obtaining submatrices:
-                if (M_fine)
-                    M_fine->GetSubMatrix(Rtmp_j,Rtmp_j, sub_M);
+                if (M_lvl)
+                    M_lvl->GetSubMatrix(Rtmp_j,Rtmp_j, sub_M);
                 B_lvl->GetSubMatrix(Wtmp_j,Rtmp_j, sub_B);
                 sub_BT.Transpose(sub_B);
 
@@ -1414,6 +1423,10 @@ public:
             if (l > 1)
                 delete B_finer;
             B_finer = B_lvl;
+
+            if (l > 1)
+                delete M_finer;
+            M_finer = M_lvl;
         } // end of loop over levels
 
         // The coarse problem::
@@ -1427,7 +1440,7 @@ public:
 
         SparseMatrix *P_WT2 = Transpose(*P_W[ref_levels-1]);
         SparseMatrix *P_RT2;
-        if (M_fine)
+        if (M_lvl)
             P_RT2 = Transpose(*P_R[ref_levels-1]);
 
         SparseMatrix *B_PR = Mult(*B_lvl, *P_R[ref_levels-1]);
@@ -1435,9 +1448,9 @@ public:
 
         B_coarse->EliminateCols(ess_dof_coarsestlvl_list);
 
-        if (M_fine)
+        if (M_lvl)
         {
-            SparseMatrix *M_PR = Mult(*M_fine, *P_R[ref_levels-1]);
+            SparseMatrix *M_PR = Mult(*M_lvl, *P_R[ref_levels-1]);
 
             M_coarse =  Mult(*P_RT2, *M_PR);
 
@@ -1449,7 +1462,7 @@ public:
         }
 
         delete P_WT2;
-        if (M_fine)
+        if (M_lvl)
             delete P_RT2;
         delete B_PR;
 
@@ -1462,7 +1475,7 @@ public:
 
         Vector Truesig_c(B_Global->Width());
 
-        if (M_fine)
+        if (M_lvl)
         {
             //std::cout << "second LeftDiagMult \n";
             auto d_td_M = d_td_coarse_R->LeftDiagMult(*M_coarse, R_offsets);
@@ -1591,7 +1604,7 @@ public:
         }
 
         delete B_coarse;
-        if (M_fine)
+        if (M_lvl)
             delete M_coarse;
         delete B_Global;
 
