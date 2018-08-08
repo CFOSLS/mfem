@@ -1390,9 +1390,7 @@ int main(int argc, char *argv[])
     CoarsestSolver = new CoarsestProblemHcurlSolver(size_sp,
                                                      *Funct_hpmat_lvls[num_levels - 1],
                                                      *Divfree_hpmat_mod_lvls[num_levels - 1],
-                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1],
-                                                     *EssBdrDofs_Hcurl[num_levels - 1],
                                                      *EssBdrTrueDofs_Hcurl[num_levels - 1]);
 
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);

@@ -80,10 +80,11 @@ private:
     const HypreParMatrix& Divfreeop;
     mutable HypreParMatrix * Divfreeop_T;
 
-    const std::vector<Array<int>* > & essbdrdofs_blocks;
     const std::vector<Array<int>* > & essbdrtruedofs_blocks;
-    const Array<int> & essbdrdofs_Hcurl;
     const Array<int> & essbdrtruedofs_Hcurl;
+
+    std::vector<Array<int>* > essbdrtruedofs_blocks_copy;
+    Array<int> * essbdrtruedofs_Hcurl_copy;
 
     mutable Array<int> coarse_offsets;
     mutable BlockOperator* coarse_matrix;
@@ -97,6 +98,8 @@ private:
     mutable BlockVector* xblock;
     mutable BlockVector* yblock;
 
+    bool own_essbdr;
+
 protected:
     mutable int maxIter;
     mutable double rtol;
@@ -105,21 +108,42 @@ protected:
     void Setup() const;
 
 public:
-    ~CoarsestProblemHcurlSolver();
+    virtual ~CoarsestProblemHcurlSolver();
     // for older code
     CoarsestProblemHcurlSolver(int Size,
                                Array2D<HypreParMatrix*> & Funct_Global,
                                const HypreParMatrix& DivfreeOp,
-                               const std::vector<Array<int>* >& EssBdrDofs_blks,
-                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
-                               const Array<int>& EssBdrTrueDofs_Hcurl);
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const Array<int>& EssBdrTrueDofs_Hcurl)
+        : CoarsestProblemHcurlSolver(Size, Funct_Global, DivfreeOp,
+                                     EssBdrTrueDofs_blks,
+                                     EssBdrTrueDofs_Hcurl,
+                                     true)
+    {}
+
+    CoarsestProblemHcurlSolver(int Size,
+                               Array2D<HypreParMatrix*> & Funct_Global,
+                               const HypreParMatrix& DivfreeOp,
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const Array<int>& EssBdrTrueDofs_Hcurl,
+                               bool copy_essbdr);
 
     CoarsestProblemHcurlSolver(int Size,
                                BlockOperator& Funct_Op,
                                const HypreParMatrix& DivfreeOp,
-                               const std::vector<Array<int>* >& EssBdrDofs_blks,
-                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks, const Array<int> &EssBdrDofs_Hcurl,
-                               const Array<int>& EssBdrTrueDofs_Hcurl);
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const Array<int>& EssBdrTrueDofs_Hcurl)
+        : CoarsestProblemHcurlSolver(Size, Funct_Op, DivfreeOp,
+                                     EssBdrTrueDofs_blks,
+                                     EssBdrTrueDofs_Hcurl, true)
+    {}
+
+    CoarsestProblemHcurlSolver(int Size,
+                               BlockOperator& Funct_Op,
+                               const HypreParMatrix& DivfreeOp,
+                               const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                               const Array<int>& EssBdrTrueDofs_Hcurl,
+                               bool copy_essbdr);
 
 
     // Operator application: `y=A(x)`.
@@ -176,6 +200,9 @@ private:
     const std::vector<Array<int>* > & essbdrdofs_blocks;
     const std::vector<Array<int>* > & essbdrtruedofs_blocks;
 
+    std::vector<Array<int>* > essbdrdofs_blocks_copy;
+    std::vector<Array<int>* > essbdrtruedofs_blocks_copy;
+
     mutable Array<int> coarse_offsets;
     mutable BlockOperator* coarse_matrix;
     mutable BlockDiagonalPreconditioner * coarse_prec;
@@ -191,6 +218,8 @@ private:
     mutable BlockVector* yblock;
 
     mutable HypreParMatrix *Schur;
+
+    bool own_essbdr;
 protected:
     mutable int maxIter;
     mutable double rtol;
@@ -200,19 +229,43 @@ protected:
 
 public:
     ~CoarsestProblemSolver();
+
     CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
                           const std::vector<HypreParMatrix*>& D_tD_blks,
                           const HypreParMatrix& D_tD_L2,
                           const std::vector<Array<int>* >& EssBdrDofs_blks,
-                          const std::vector<Array<int> *> &EssBdrTrueDofs_blks);
+                          const std::vector<Array<int> *> &EssBdrTrueDofs_blks)
+        : CoarsestProblemSolver(Size, Op_Blksmat, Constr_Spmat, D_tD_blks, D_tD_L2,
+                                EssBdrDofs_blks, EssBdrTrueDofs_blks, true)
+    {}
 
-    // for the new interface
+    CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat, SparseMatrix& Constr_Spmat,
+                          const std::vector<HypreParMatrix*>& D_tD_blks,
+                          const HypreParMatrix& D_tD_L2,
+                          const std::vector<Array<int>* >& EssBdrDofs_blks,
+                          const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
+                          bool copy_essbdr);
+
+    // for the new interface,
+    // by default copies the ess bdr indices array to internals
+    // and then the inputs could be destroyed
     CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
                           SparseMatrix& Constr_Spmat,
                           BlockOperator * D_tD_blkop,
                           const HypreParMatrix& D_tD_L2,
                           const std::vector<Array<int>* >& EssBdrDofs_blks,
-                          const std::vector<Array<int>* >& EssBdrTrueDofs_blks);
+                          const std::vector<Array<int>* >& EssBdrTrueDofs_blks)
+        : CoarsestProblemSolver(Size, Op_Blksmat, Constr_Spmat, D_tD_blkop, D_tD_L2,
+                                EssBdrDofs_blks, EssBdrTrueDofs_blks, true)
+    {}
+
+    CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
+                          SparseMatrix& Constr_Spmat,
+                          BlockOperator * D_tD_blkop,
+                          const HypreParMatrix& D_tD_L2,
+                          const std::vector<Array<int>* >& EssBdrDofs_blks,
+                          const std::vector<Array<int>* >& EssBdrTrueDofs_blks,
+                          bool copy_essbdr);
 
     // Operator application: `y=A(x)`.
     virtual void Mult(const Vector &x, Vector &y) const { Mult(x,y, NULL); }
@@ -269,6 +322,9 @@ protected:
     const std::vector<Array<int>* >& bdrdofs_blocks;
     const std::vector<Array<int>* >& essbdrdofs_blocks;
 
+    std::vector<Array<int>* > bdrdofs_blocks_copy;
+    std::vector<Array<int>* > essbdrdofs_blocks_copy;
+
     // Store (except the coarsest) LU factors of the local
     // problems' matrices for each agglomerate (2 per agglomerate)
     mutable std::vector<std::vector<DenseMatrixInverse* > > LUfactors;
@@ -284,6 +340,8 @@ protected:
 
     mutable BlockVector* temprhs_func;
     mutable BlockVector* tempsol;
+
+    bool own_essbdr;
 
 protected:
     mutable bool optimized_localsolve;
@@ -308,7 +366,7 @@ protected:
     void Setup();
 
 public:
-    ~LocalProblemSolver();
+    virtual ~LocalProblemSolver();
     // main constructor
     LocalProblemSolver(int size, const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
@@ -319,6 +377,20 @@ public:
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                        bool Optimized_LocalSolve)
+        : LocalProblemSolver(size, Op_Blksmat, Constr_Spmat, D_tD_blks, AE_el,
+                             El_to_Dofs_Op, El_to_Dofs_L2, BdrDofs_blks, EssBdrDofs_blks,
+                             Optimized_LocalSolve, true)
+    {}
+
+    LocalProblemSolver(int size, const BlockMatrix& Op_Blksmat,
+                       const SparseMatrix& Constr_Spmat,
+                       const std::vector<HypreParMatrix*>& D_tD_blks,
+                       const SparseMatrix& AE_el,
+                       const BlockMatrix& El_to_Dofs_Op,
+                       const SparseMatrix& El_to_Dofs_L2,
+                       const std::vector<Array<int>* >& BdrDofs_blks,
+                       const std::vector<Array<int>* >& EssBdrDofs_blks,
+                       bool Optimized_LocalSolve, bool copy_essbdr)
         : Operator(size, size),
           numblocks(Op_Blksmat.NumRowBlocks()),
           Op_blkspmat(Op_Blksmat), Constr_spmat(Constr_Spmat),
@@ -327,7 +399,8 @@ public:
           el_to_dofs_Op(El_to_Dofs_Op),
           el_to_dofs_L2(El_to_Dofs_L2),
           bdrdofs_blocks(BdrDofs_blks),
-          essbdrdofs_blocks(EssBdrDofs_blks)
+          essbdrdofs_blocks(EssBdrDofs_blks),
+          own_essbdr(copy_essbdr)
     {
         finalized = 0;
         optimized_localsolve = Optimized_LocalSolve;
@@ -344,6 +417,25 @@ public:
         {
             compute_AEproblem_matrices = false;
             compute_AEproblem_matrices(numblocks, numblocks) = true;
+        }
+
+        if (copy_essbdr)
+        {
+            bdrdofs_blocks_copy.resize(bdrdofs_blocks.size());
+            for (unsigned int i = 0; i < bdrdofs_blocks.size(); ++i)
+            {
+                bdrdofs_blocks_copy[i] = new Array<int>(bdrdofs_blocks[i]->Size());
+                for (int j = 0; j < bdrdofs_blocks[i]->Size(); ++j)
+                    (*bdrdofs_blocks_copy[i])[j] = (*bdrdofs_blocks[i])[j];
+            }
+
+            essbdrdofs_blocks_copy.resize(essbdrdofs_blocks.size());
+            for (unsigned int i = 0; i < essbdrdofs_blocks.size(); ++i)
+            {
+                essbdrdofs_blocks_copy[i] = new Array<int>(essbdrdofs_blocks[i]->Size());
+                for (int j = 0; j < essbdrdofs_blocks[i]->Size(); ++j)
+                    (*essbdrdofs_blocks_copy[i])[j] = (*essbdrdofs_blocks[i])[j];
+            }
         }
 
         Setup();
@@ -392,13 +484,31 @@ public:
                        const std::vector<Array<int>* >& BdrDofs_blks,
                        const std::vector<Array<int>* >& EssBdrDofs_blks,
                        bool Optimized_LocalSolve)
+        : LocalProblemSolverWithS(size, Op_Blksmat,
+                              Constr_Spmat,
+                              D_tD_blks,
+                              AE_el,
+                              El_to_Dofs_Op, El_to_Dofs_L2,
+                              BdrDofs_blks, EssBdrDofs_blks,
+                              false, false)
+    {}
+
+    LocalProblemSolverWithS(int size, const BlockMatrix& Op_Blksmat,
+                       const SparseMatrix& Constr_Spmat,
+                       const std::vector<HypreParMatrix*>& D_tD_blks,
+                       const SparseMatrix& AE_el,
+                       const BlockMatrix& El_to_Dofs_Op,
+                       const SparseMatrix& El_to_Dofs_L2,
+                       const std::vector<Array<int>* >& BdrDofs_blks,
+                       const std::vector<Array<int>* >& EssBdrDofs_blks,
+                       bool Optimized_LocalSolve, bool copy_essbdr)
         : LocalProblemSolver(size, Op_Blksmat,
                               Constr_Spmat,
                               D_tD_blks,
                               AE_el,
                               El_to_Dofs_Op, El_to_Dofs_L2,
                               BdrDofs_blks, EssBdrDofs_blks,
-                              false)
+                              false, copy_essbdr)
     {
         optimized_localsolve = Optimized_LocalSolve;
         compute_AEproblem_matrices.SetSize(numblocks + 1, numblocks + 1);
@@ -415,6 +525,8 @@ public:
 
 
     }
+
+
 
 };
 
@@ -640,12 +752,19 @@ protected:
     const std::vector<HypreParMatrix*> d_td_Funct_blocks;
 
     // Lists of essential boundary dofs and true dofs for Hcurl
-    const Array<int> * essbdrdofs_Hcurl;
-    const Array<int> & essbdrtruedofs_Hcurl;
+    // not owned
+    const Array<int> * essbdrtruedofs_Hcurl;
+    Array<int> * essbdrtruedofs_Hcurl_copy;
 
     // Lists of essential boundary dofs and true dofs for functional variables
-    const std::vector<Array<int>*> essbdrdofs_Funct;
-    const std::vector<Array<int>*> & essbdrtruedofs_Funct;
+    // not owned
+    const std::vector<Array<int>*> essbdrtruedofs_Funct;
+    std::vector<Array<int>*> essbdrtruedofs_Funct_copy;
+
+    //const Array<int> * essbdrdofs_Hcurl;
+    //const std::vector<Array<int>*> essbdrdofs_Funct;
+
+    bool own_essbdr;
 
     // block structure (on true dofs)
     mutable Array<int> block_offsets;
@@ -664,7 +783,18 @@ public:
                                         const Array<int>& EssBdrtruedofs_Hcurl,
                                         const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                         const Array<int> * SweepsNum,
-                                        const Array<int>& Block_Offsets);
+                                        const Array<int>& Block_Offsets)
+        : HcurlGSSSmoother(Funct_HpMat, Divfree_HpMat_nobnd, EssBdrtruedofs_Hcurl,
+                           EssBdrTrueDofs_Funct, SweepsNum, Block_Offsets, true)
+    {}
+
+    HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
+                                        const HypreParMatrix& Divfree_HpMat_nobnd,
+                                        const Array<int>& EssBdrtruedofs_Hcurl,
+                                        const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                        const Array<int> * SweepsNum,
+                                        const Array<int>& Block_Offsets,
+                                        bool copy_essbdr);
 
     // constructor which takes funct matrix as a block operator
     HcurlGSSSmoother (BlockOperator& Funct_BlockHpMat,
@@ -672,7 +802,19 @@ public:
                                         const Array<int>& EssBdrtruedofs_Hcurl,
                                         const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                         const Array<int> * SweepsNum,
-                                        const Array<int>& Block_Offsets);
+                                        const Array<int>& Block_Offsets)
+        : HcurlGSSSmoother(Funct_BlockHpMat, Divfree_HpMat_nobnd, EssBdrtruedofs_Hcurl,
+                           EssBdrTrueDofs_Funct, SweepsNum, Block_Offsets, true)
+    {}
+
+    HcurlGSSSmoother (BlockOperator& Funct_BlockHpMat,
+                                        const HypreParMatrix& Divfree_HpMat_nobnd,
+                                        const Array<int>& EssBdrtruedofs_Hcurl,
+                                        const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
+                                        const Array<int> * SweepsNum,
+                                        const Array<int>& Block_Offsets,
+                                        bool copy_essbdr);
+    /*
     // constructor, deprecated
     HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
                      const SparseMatrix& Discrete_Curl,
@@ -682,6 +824,7 @@ public:
                      const std::vector<Array<int>* >& EssBdrDofs_Funct,
                      const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                      const Array<int> * SweepsNum, const Array<int> &Block_Offsets);
+    */
 
     virtual void Setup() const;
 

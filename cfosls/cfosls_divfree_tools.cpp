@@ -204,20 +204,18 @@ bool CheckBdrError (const Vector& Candidate, const Vector* Given_bdrdata, const 
 CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
                                                        Array2D<HypreParMatrix*> & Funct_Global,
                                                        const HypreParMatrix& DivfreeOp,
-                                                       const std::vector<Array<int>* >& EssBdrDofs_blks,
                                                        const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
-                                                       const Array<int>& EssBdrDofs_Hcurl,
-                                                       const Array<int>& EssBdrTrueDofs_Hcurl)
+                                                       const Array<int>& EssBdrTrueDofs_Hcurl,
+                                                       bool copy_essbdr)
     : Operator(Size),
       numblocks(Funct_Global.NumRows()),
       comm(DivfreeOp.GetComm()),
       Funct_global(&Funct_Global),
       using_blockop(false),
       Divfreeop(DivfreeOp),
-      essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
-      essbdrdofs_Hcurl(EssBdrDofs_Hcurl),
-      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl)
+      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl),
+      own_essbdr(copy_essbdr)
 {
     finalized = false;
 
@@ -234,6 +232,22 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
     atol = 1.e-4;
 
     sweeps_num = 1;
+
+    if (copy_essbdr)
+    {
+        essbdrtruedofs_Hcurl_copy = new Array<int>(EssBdrTrueDofs_Hcurl.Size());
+        for (int i = 0; i < EssBdrTrueDofs_Hcurl.Size(); ++i)
+            (*essbdrtruedofs_Hcurl_copy)[i] = EssBdrTrueDofs_Hcurl[i];
+
+        essbdrtruedofs_blocks_copy.resize(essbdrtruedofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks.size(); ++i)
+        {
+            essbdrtruedofs_blocks_copy[i] = new Array<int>(essbdrtruedofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_blocks[i]->Size(); ++j)
+                (*essbdrtruedofs_blocks_copy[i])[j] = (*essbdrtruedofs_blocks[i])[j];
+        }
+    }
+
     Setup();
 
 }
@@ -241,20 +255,18 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
 CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
                                                        BlockOperator& Funct_BlockOp,
                                                        const HypreParMatrix& DivfreeOp,
-                                                       const std::vector<Array<int>* >& EssBdrDofs_blks,
                                                        const std::vector<Array<int> *> &EssBdrTrueDofs_blks,
-                                                       const Array<int>& EssBdrDofs_Hcurl,
-                                                       const Array<int>& EssBdrTrueDofs_Hcurl)
+                                                       const Array<int>& EssBdrTrueDofs_Hcurl,
+                                                       bool copy_essbdr)
     : Operator(Size),
       numblocks(Funct_BlockOp.NumRowBlocks()),
       comm(DivfreeOp.GetComm()),
       Funct_op(&Funct_BlockOp),
       using_blockop(true),
       Divfreeop(DivfreeOp),
-      essbdrdofs_blocks(EssBdrDofs_blks),
       essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
-      essbdrdofs_Hcurl(EssBdrDofs_Hcurl),
-      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl)
+      essbdrtruedofs_Hcurl(EssBdrTrueDofs_Hcurl),
+      own_essbdr(copy_essbdr)
 {
     finalized = false;
 
@@ -271,6 +283,22 @@ CoarsestProblemHcurlSolver::CoarsestProblemHcurlSolver(int Size,
     atol = 1.e-4;
 
     sweeps_num = 1;
+
+    if (copy_essbdr)
+    {
+        essbdrtruedofs_Hcurl_copy = new Array<int>(EssBdrTrueDofs_Hcurl.Size());
+        for (int i = 0; i < EssBdrTrueDofs_Hcurl.Size(); ++i)
+            (*essbdrtruedofs_Hcurl_copy)[i] = EssBdrTrueDofs_Hcurl[i];
+
+        essbdrtruedofs_blocks_copy.resize(essbdrtruedofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks.size(); ++i)
+        {
+            essbdrtruedofs_blocks_copy[i] = new Array<int>(essbdrtruedofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_blocks[i]->Size(); ++j)
+                (*essbdrtruedofs_blocks_copy[i])[j] = (*essbdrtruedofs_blocks[i])[j];
+        }
+    }
+
     Setup();
 
 }
@@ -296,6 +324,13 @@ CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
     delete coarseSolver;
 
     delete Divfreeop_T;
+
+    if (own_essbdr)
+    {
+        delete essbdrtruedofs_Hcurl_copy;
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks_copy.size(); ++i)
+            delete essbdrtruedofs_blocks_copy[i];
+    }
 }
 
 void CoarsestProblemHcurlSolver::Setup() const
@@ -359,14 +394,40 @@ void CoarsestProblemHcurlSolver::Setup() const
                 const Array<int> *temp_range;
                 const Array<int> *temp_dom;
                 if (blk1 == 0)
-                    temp_range = &essbdrtruedofs_Hcurl;
+                {
+                    if (own_essbdr)
+                        temp_range = essbdrtruedofs_Hcurl_copy;
+                    else
+                        temp_range = &essbdrtruedofs_Hcurl;
+                    //temp_range = &essbdrtruedofs_Hcurl;
+                }
                 else
-                    temp_range = essbdrtruedofs_blocks[blk1];
+                {
+                    if (own_essbdr)
+                        temp_range = essbdrtruedofs_blocks_copy[blk1];
+                    else
+                        temp_range = essbdrtruedofs_blocks[blk1];
+
+                    //temp_range = essbdrtruedofs_blocks[blk1];
+                }
 
                 if (blk2 == 0)
-                    temp_dom = &essbdrtruedofs_Hcurl;
+                {
+                    if (own_essbdr)
+                        temp_dom = essbdrtruedofs_Hcurl_copy;
+                    else
+                        temp_dom = &essbdrtruedofs_Hcurl;
+                    //temp_dom = &essbdrtruedofs_Hcurl;
+                }
                 else
-                    temp_dom = essbdrtruedofs_blocks[blk2];
+                {
+                    if (own_essbdr)
+                        temp_dom = essbdrtruedofs_blocks_copy[blk2];
+                    else
+                        temp_dom = essbdrtruedofs_blocks[blk2];
+
+                    //temp_dom = essbdrtruedofs_blocks[blk2];
+                }
 
                 Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
@@ -498,7 +559,10 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
 
 #ifdef CHECK_BNDCND
             const Array<int> * temp;
-            temp = essbdrtruedofs_blocks[blk];
+            if (own_essbdr)
+                temp = essbdrtruedofs_blocks_copy[blk];
+            else
+                temp = essbdrtruedofs_blocks[blk];
 
             for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
@@ -541,9 +605,20 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     {
         const Array<int> * temp;
         if (blk == 0)
-            temp = &essbdrtruedofs_Hcurl;
+        {
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = &essbdrtruedofs_Hcurl;
+        }
         else
-            temp = essbdrtruedofs_blocks[blk];
+        {
+            if (own_essbdr)
+                temp = essbdrtruedofs_blocks_copy[blk];
+            else
+                temp = essbdrtruedofs_blocks[blk];
+            //temp = essbdrtruedofs_blocks[blk];
+        }
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
@@ -559,9 +634,21 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     {
         const Array<int> * temp;
         if (blk == 0)
-            temp = &essbdrtruedofs_Hcurl;
+        {
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = &essbdrtruedofs_Hcurl;
+            //temp = &essbdrtruedofs_Hcurl;
+        }
         else
-            temp = essbdrtruedofs_blocks[blk];
+        {
+            if (own_essbdr)
+                temp = essbdrtruedofs_blocks_copy[blk];
+            else
+                temp = essbdrtruedofs_blocks[blk];
+            //temp = essbdrtruedofs_blocks[blk];
+        }
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
@@ -589,7 +676,14 @@ void CoarsestProblemHcurlSolver::Mult(const Vector &x, Vector &y) const
     for ( int blk = 0; blk < numblocks; ++blk)
     {
         const Array<int> * temp;
-        temp = essbdrtruedofs_blocks[blk];
+        //std::cout << "essbdrtruedofs_blocks size = " << essbdrtruedofs_blocks.size() << "\n";
+        //std::cout << "essbdrtruedofs_block [blk] = " << essbdrtruedofs_blocks[blk]->Size() << "\n";
+        if (own_essbdr)
+            temp = essbdrtruedofs_blocks_copy[blk];
+        else
+            temp = essbdrtruedofs_blocks[blk];
+
+        //temp = essbdrtruedofs_blocks[blk];
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
@@ -612,7 +706,8 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
                                              const std::vector<HypreParMatrix*>& D_tD_blks,
                                              const HypreParMatrix& D_tD_L2,
                                              const std::vector<Array<int>* >& EssBdrDofs_blks,
-                                             const std::vector<Array<int>* >& EssBdrTrueDofs_blks)
+                                             const std::vector<Array<int>* >& EssBdrTrueDofs_blks,
+                                             bool copy_essbdr)
     : Operator(Size),
       numblocks(Op_Blksmat.NumRowBlocks()),
       comm(D_tD_L2.GetComm()),
@@ -623,7 +718,8 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
       using_blockop(false),
       dof_trueDof_L2(D_tD_L2),
       essbdrdofs_blocks(EssBdrDofs_blks),
-      essbdrtruedofs_blocks(EssBdrTrueDofs_blks)
+      essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
+      own_essbdr(copy_essbdr)
 {
     finalized = false;
 
@@ -640,6 +736,25 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
     rtol = 1.e-4;
     atol = 1.e-4;
 
+    if (copy_essbdr)
+    {
+        essbdrdofs_blocks_copy.resize(essbdrdofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrdofs_blocks.size(); ++i)
+        {
+            essbdrdofs_blocks_copy[i] = new Array<int>(essbdrdofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrdofs_blocks[i]->Size(); ++j)
+                (*essbdrdofs_blocks_copy[i])[j] = (*essbdrdofs_blocks[i])[j];
+        }
+
+        essbdrtruedofs_blocks_copy.resize(essbdrtruedofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks.size(); ++i)
+        {
+            essbdrtruedofs_blocks_copy[i] = new Array<int>(essbdrtruedofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_blocks[i]->Size(); ++j)
+                (*essbdrtruedofs_blocks_copy[i])[j] = (*essbdrtruedofs_blocks[i])[j];
+        }
+    }
+
     Setup();
 }
 
@@ -648,7 +763,8 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
                                              BlockOperator * D_tD_blkop,
                                              const HypreParMatrix& D_tD_L2,
                                              const std::vector<Array<int>* >& EssBdrDofs_blks,
-                                             const std::vector<Array<int>* >& EssBdrTrueDofs_blks)
+                                             const std::vector<Array<int>* >& EssBdrTrueDofs_blks,
+                                             bool copy_essbdr)
     : Operator(Size),
       numblocks(Op_Blksmat.NumRowBlocks()),
       comm(D_tD_L2.GetComm()),
@@ -659,7 +775,8 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
       using_blockop(true),
       dof_trueDof_L2(D_tD_L2),
       essbdrdofs_blocks(EssBdrDofs_blks),
-      essbdrtruedofs_blocks(EssBdrTrueDofs_blks)
+      essbdrtruedofs_blocks(EssBdrTrueDofs_blks),
+      own_essbdr(copy_essbdr)
 {
     finalized = false;
 
@@ -675,6 +792,25 @@ CoarsestProblemSolver::CoarsestProblemSolver(int Size, BlockMatrix& Op_Blksmat,
     maxIter = 50;
     rtol = 1.e-4;
     atol = 1.e-4;
+
+    if (copy_essbdr)
+    {
+        essbdrdofs_blocks_copy.resize(essbdrdofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrdofs_blocks.size(); ++i)
+        {
+            essbdrdofs_blocks_copy[i] = new Array<int>(essbdrdofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrdofs_blocks[i]->Size(); ++j)
+                (*essbdrdofs_blocks_copy[i])[j] = (*essbdrdofs_blocks[i])[j];
+        }
+
+        essbdrtruedofs_blocks_copy.resize(essbdrtruedofs_blocks.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks.size(); ++i)
+        {
+            essbdrtruedofs_blocks_copy[i] = new Array<int>(essbdrtruedofs_blocks[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_blocks[i]->Size(); ++j)
+                (*essbdrtruedofs_blocks_copy[i])[j] = (*essbdrtruedofs_blocks[i])[j];
+        }
+    }
 
     Setup();
 }
@@ -699,6 +835,15 @@ CoarsestProblemSolver::~CoarsestProblemSolver()
     delete coarse_matrix;
 
     delete Schur;
+
+    if (own_essbdr)
+    {
+        for (unsigned int i = 0; i < essbdrdofs_blocks_copy.size(); ++i)
+            delete essbdrdofs_blocks_copy[i];
+
+        for (unsigned int i = 0; i < essbdrtruedofs_blocks_copy.size(); ++i)
+            delete essbdrtruedofs_blocks_copy[i];
+    }
 }
 
 void CoarsestProblemSolver::Setup() const
@@ -707,17 +852,34 @@ void CoarsestProblemSolver::Setup() const
     yblock = new BlockVector(block_offsets);
 
     // 1. eliminating boundary conditions at coarse level
-    const Array<int> * temp = essbdrdofs_blocks[0];
+    const Array<int>* temp;
+    if (own_essbdr)
+        temp = essbdrdofs_blocks_copy[0];
+    else
+        temp = essbdrdofs_blocks[0];
+    //const Array<int> * temp = essbdrdofs_blocks[0];
 
     Constr_spmat->EliminateCols(*temp);
 
     // latest version of the bnd conditions imposing code
     for ( int blk1 = 0; blk1 < numblocks; ++blk1)
     {
-        const Array<int> * temp1 = essbdrdofs_blocks[blk1];
+        const Array<int>* temp1;
+        if (own_essbdr)
+            temp1 = essbdrdofs_blocks_copy[blk1];
+        else
+            temp1 = essbdrdofs_blocks[blk1];
+        //const Array<int> * temp1 = essbdrdofs_blocks[blk1];
+
         for ( int blk2 = 0; blk2 < numblocks; ++blk2)
         {
-            const Array<int> * temp2 = essbdrdofs_blocks[blk2];
+            const Array<int>* temp2;
+            if (own_essbdr)
+                temp2 = essbdrdofs_blocks_copy[blk2];
+            else
+                temp2 = essbdrdofs_blocks[blk2];
+            //const Array<int> * temp2 = essbdrdofs_blocks[blk2];
+
             Op_blkspmat->GetBlock(blk1,blk2).EliminateCols(*temp2);
 
             for ( int dof1 = 0; dof1 < temp1->Size(); ++dof1)
@@ -923,7 +1085,13 @@ void CoarsestProblemSolver::Mult(const Vector &x, Vector &y, Vector* rhs_constr)
         coarsetrueRhs->GetBlock(blk) = xblock->GetBlock(blk);
 
         // imposing boundary conditions on true dofs
-        Array<int> * temp = essbdrtruedofs_blocks[blk];
+        const Array<int> * temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_blocks_copy[blk];
+        else
+            temp = essbdrtruedofs_blocks[blk];
+
+        //const Array<int> * temp = essbdrtruedofs_blocks[blk];
 
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
@@ -977,6 +1145,16 @@ LocalProblemSolver::~LocalProblemSolver()
             for (unsigned int j = 0; j < LUfactors[i].size(); ++j)
                 if (LUfactors[i][j])
                     delete LUfactors[i][j];
+
+    if (own_essbdr)
+    {
+        for (unsigned int i = 0; i < bdrdofs_blocks_copy.size(); ++i)
+            delete bdrdofs_blocks_copy[i];
+
+        for (unsigned int i = 0; i < essbdrdofs_blocks_copy.size(); ++i)
+            delete essbdrdofs_blocks_copy[i];
+    }
+
 }
 
 void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) const
@@ -993,7 +1171,10 @@ void LocalProblemSolver::Mult(const Vector &x, Vector &y, Vector * rhs_constr) c
 void LocalProblemSolver::Setup()
 {
     AE_edofs_L2 = mfem::Mult(AE_e, el_to_dofs_L2);
-    AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Op, essbdrdofs_blocks, bdrdofs_blocks);
+    if (own_essbdr)
+        AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Op, essbdrdofs_blocks_copy, bdrdofs_blocks_copy);
+    else
+        AE_eintdofs_blocks = Get_AE_eintdofs(el_to_dofs_Op, essbdrdofs_blocks, bdrdofs_blocks);
 
     xblock = new BlockVector(block_offsets);
     yblock = new BlockVector(block_offsets);
@@ -1062,11 +1243,24 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                 {
                     for (int i = 0; i < Local_inds[blk]->Size(); ++i)
                     {
-                        if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
-                             (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                        if (own_essbdr)
                         {
-                            is_degenerate = false;
-                            break;
+                            if ( (*bdrdofs_blocks_copy[blk])[(*Local_inds[blk])[i]] != 0 &&
+                                 (*essbdrdofs_blocks_copy[blk])[(*Local_inds[blk])[i]] == 0)
+                            {
+                                is_degenerate = false;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
+                                 (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                            {
+                                is_degenerate = false;
+                                break;
+                            }
+
                         }
                     }
                 } // end of if blk == 0
@@ -1289,12 +1483,25 @@ void LocalProblemSolver::SaveLocalLUFactors() const
 
             for (int i = 0; i < Local_inds->Size(); ++i)
             {
-                if ( (*bdrdofs_blocks[0])[(*Local_inds)[i]] != 0 &&
-                     (*essbdrdofs_blocks[0])[(*Local_inds)[i]] == 0)
+                if (own_essbdr)
                 {
-                    //std::cout << "then local problem is non-degenerate \n";
-                    is_degenerate = false;
-                    break;
+                    if ( (*bdrdofs_blocks_copy[0])[(*Local_inds)[i]] != 0 &&
+                         (*essbdrdofs_blocks_copy[0])[(*Local_inds)[i]] == 0)
+                    {
+                        //std::cout << "then local problem is non-degenerate \n";
+                        is_degenerate = false;
+                        break;
+                    }
+                }
+                else
+                {
+                    if ( (*bdrdofs_blocks[0])[(*Local_inds)[i]] != 0 &&
+                         (*essbdrdofs_blocks[0])[(*Local_inds)[i]] == 0)
+                    {
+                        //std::cout << "then local problem is non-degenerate \n";
+                        is_degenerate = false;
+                        break;
+                    }
                 }
             }
 
@@ -1522,12 +1729,25 @@ void LocalProblemSolverWithS::SaveLocalLUFactors() const
                 {
                     for (int i = 0; i < Local_inds[blk]->Size(); ++i)
                     {
-                        if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
-                             (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                        if (own_essbdr)
                         {
-                            is_degenerate = false;
-                            break;
+                            if ( (*bdrdofs_blocks_copy[blk])[(*Local_inds[blk])[i]] != 0 &&
+                                 (*essbdrdofs_blocks_copy[blk])[(*Local_inds[blk])[i]] == 0)
+                            {
+                                is_degenerate = false;
+                                break;
+                            }
                         }
+                        else
+                        {
+                            if ( (*bdrdofs_blocks[blk])[(*Local_inds[blk])[i]] != 0 &&
+                                 (*essbdrdofs_blocks[blk])[(*Local_inds[blk])[i]] == 0)
+                            {
+                                is_degenerate = false;
+                                break;
+                            }
+                        }
+
                     }
                 } // end of if blk == 0
             } // end of loop over blocks
@@ -2258,16 +2478,19 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         Func_global_lvls[l + 1] = BlockOps_lvls[l + 1];
 
 
-        std::vector<Array<int>* > &essbdr_tdofs_funct =
+        std::vector<Array<int>* > essbdr_tdofs_funct =
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
         EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
+
+        for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
+            delete essbdr_tdofs_funct[i];
 
         if (with_hcurl_smoothers)
         {
             SweepsNum = ipow(1, l); // = 1
             Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
                                                      *hierarchy->GetDivfreeDop(l),
-                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                essbdr_attribs_Hcurl, l),
                                                      hierarchy->GetEssBdrTdofsOrDofs("tdof",
                                                                                *space_names_funct,
@@ -2548,7 +2771,7 @@ void DivConstraintSolver::Update(bool recoarsen)
         if (with_hcurl_smoothers)
         {
             Smoother_new = new HcurlGSSSmoother(*BlockOps_lvls[0], *hierarchy->GetDivfreeDop(0),
-                    hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
+                    *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
                     hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
                     &SweepsNum, *offsets_funct[0]);
         }
@@ -2603,7 +2826,7 @@ void DivConstraintSolver::Update(bool recoarsen)
                 BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
                         *BlockOps_lvls[l], *TrueP_Func[l], *offsets_funct[l + 1]);
 
-                std::vector<Array<int>* > &essbdr_tdofs_funct =
+                std::vector<Array<int>* > essbdr_tdofs_funct =
                         hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
                 EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
 
@@ -2654,7 +2877,7 @@ void DivConstraintSolver::Update(bool recoarsen)
                         SweepsNum = ipow(1, l); // = 1
                         Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
                                                                  *hierarchy->GetDivfreeDop(l + 1),
-                                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                 *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                            essbdr_attribs_Hcurl, l + 1),
                                                                  hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
                                                                                            essbdr_attribs, l + 1),
@@ -3122,8 +3345,16 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
 
     for (int i = 0; i < Smoothers.Size(); ++i)
         delete Smoothers[i];
+
+    if (own_essbdr)
+    {
+        delete essbdrtruedofs_Hcurl_copy;
+        for (unsigned int i = 0; i < essbdrtruedofs_Funct_copy.size(); ++i)
+            delete essbdrtruedofs_Funct_copy[i];
+    }
 }
 
+/*
 // FIXME: Remove this, too old and unused
 // deprecated
 HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
@@ -3179,13 +3410,15 @@ HcurlGSSSmoother::HcurlGSSSmoother (const BlockMatrix& Funct_Mat,
 
     Setup();
 }
+*/
 
 HcurlGSSSmoother::HcurlGSSSmoother (BlockOperator& Funct_HpBlockMat,
                                     const HypreParMatrix& Divfree_HpMat_nobnd,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
                                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                     const Array<int> * SweepsNum,
-                                    const Array<int>& Block_Offsets)
+                                    const Array<int>& Block_Offsets,
+                                    bool copy_essbdr)
     : BlockOperator(Block_Offsets),
       numblocks(Funct_HpBlockMat.NumRowBlocks()),
       print_level(0),
@@ -3193,8 +3426,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (BlockOperator& Funct_HpBlockMat,
       Funct_op (&Funct_HpBlockMat),
       using_blockop(true),
       Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
-      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
-      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
+      essbdrtruedofs_Hcurl(&EssBdrtruedofs_Hcurl),
+      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct),
+      own_essbdr(copy_essbdr)
 {
     block_offsets.SetSize(numblocks + 1);
     for ( int i = 0; i < numblocks + 1; ++i)
@@ -3234,6 +3468,21 @@ HcurlGSSSmoother::HcurlGSSSmoother (BlockOperator& Funct_HpBlockMat,
         for (int colblk = 0; colblk < numblocks; ++colblk)
             HcurlFunct_global(rowblk, colblk) = NULL;
 
+    if (copy_essbdr)
+    {
+        essbdrtruedofs_Hcurl_copy = new Array<int>(EssBdrtruedofs_Hcurl.Size());
+        for (int i = 0; i < EssBdrtruedofs_Hcurl.Size(); ++i)
+            (*essbdrtruedofs_Hcurl_copy)[i] = EssBdrtruedofs_Hcurl[i];
+
+        essbdrtruedofs_Funct_copy.resize(essbdrtruedofs_Funct.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_Funct.size(); ++i)
+        {
+            essbdrtruedofs_Funct_copy[i] = new Array<int>(essbdrtruedofs_Funct[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_Funct[i]->Size(); ++j)
+                (*essbdrtruedofs_Funct_copy[i])[j] = (*essbdrtruedofs_Funct[i])[j];
+        }
+    }
+
     Setup();
 }
 
@@ -3242,7 +3491,8 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
                                     const Array<int>& EssBdrtruedofs_Hcurl,
                                     const std::vector<Array<int>* >& EssBdrTrueDofs_Funct,
                                     const Array<int> * SweepsNum,
-                                    const Array<int>& Block_Offsets)
+                                    const Array<int>& Block_Offsets,
+                                    bool copy_essbdr)
     : BlockOperator(Block_Offsets),
       numblocks(Funct_HpMat.NumRows()),
       print_level(0),
@@ -3250,8 +3500,9 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
       Funct_hpmat (&Funct_HpMat),
       using_blockop(false),
       Divfree_hpmat_nobnd (&Divfree_HpMat_nobnd),
-      essbdrtruedofs_Hcurl(EssBdrtruedofs_Hcurl),
-      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct)
+      essbdrtruedofs_Hcurl(&EssBdrtruedofs_Hcurl),
+      essbdrtruedofs_Funct(EssBdrTrueDofs_Funct),
+      own_essbdr(copy_essbdr)
 {
 
     block_offsets.SetSize(numblocks + 1);
@@ -3292,6 +3543,22 @@ HcurlGSSSmoother::HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
         for (int colblk = 0; colblk < numblocks; ++colblk)
             HcurlFunct_global(rowblk, colblk) = NULL;
 
+    if (copy_essbdr)
+    {
+        essbdrtruedofs_Hcurl_copy = new Array<int>(EssBdrtruedofs_Hcurl.Size());
+        for (int i = 0; i < EssBdrtruedofs_Hcurl.Size(); ++i)
+            (*essbdrtruedofs_Hcurl_copy)[i] = EssBdrtruedofs_Hcurl[i];
+
+        essbdrtruedofs_Funct_copy.resize(essbdrtruedofs_Funct.size());
+        for (unsigned int i = 0; i < essbdrtruedofs_Funct.size(); ++i)
+        {
+            essbdrtruedofs_Funct_copy[i] = new Array<int>(essbdrtruedofs_Funct[i]->Size());
+            for (int j = 0; j < essbdrtruedofs_Funct[i]->Size(); ++j)
+                (*essbdrtruedofs_Funct_copy[i])[j] = (*essbdrtruedofs_Funct[i])[j];
+        }
+    }
+
+
     Setup();
 }
 
@@ -3319,7 +3586,11 @@ void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
     }
@@ -3327,7 +3598,13 @@ void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
 #ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        //const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
+
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
@@ -3347,11 +3624,19 @@ void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
 
         // imposing boundary conditions on the righthand side
         if (blk == 0) // in Hcurl
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = essbdrtruedofs_Hcurl;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                int tdof = (*temp)[tdofind];
                 truerhs->GetBlock(0)[tdof] = 0.0;
             }
+        }
     }
 
     *truex = 0.0;
@@ -3389,11 +3674,19 @@ void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // in Hcurl
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = essbdrtruedofs_Hcurl;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                int tdof = (*temp)[tdofind];
                 truex->GetBlock(blk)[tdof] = 0.0;
             }
+        }
     }
 
     // computing the solution update in the H(div) x other blocks space
@@ -3409,7 +3702,12 @@ void HcurlGSSSmoother::MultTranspose(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
+
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
@@ -3501,7 +3799,12 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
+
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             xblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
     }
@@ -3509,7 +3812,12 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #ifdef CHECK_BNDCND
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
+
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             if ( fabs(xblock->GetBlock(blk)[(*temp)[tdofind]]) > 1.0e-14 )
@@ -3529,9 +3837,16 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
         // imposing boundary conditions on the righthand side
         if (blk == 0) // in Hcurl
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = essbdrtruedofs_Hcurl;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                int tdof = (*temp)[tdofind];
                 truerhs->GetBlock(0)[tdof] = 0.0;
 #ifdef CHECK_BNDCND
                 if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
@@ -3541,17 +3856,26 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 #endif
                 //truerhs->GetBlock(0)[tdof] = 0.0;
             }
+        }
 #ifdef CHECK_BNDCND
         else
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Funct_copy[blk];
+            else
+                temp = essbdrtruedofs_Funct[blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                int tdof = (*temp)[tdofind];
                 if (fabs(truerhs->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truerhs! blk = " << blk << ", value = "
                               << truerhs->GetBlock(blk)[tdof]
                               << ", index = " << tdof << "\n";
                 //truerhs->GetBlock(blk)[tdof] = 0.0;
             }
+        }
 #endif
     }
 
@@ -3602,9 +3926,16 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
     for (int blk = 0; blk < numblocks; ++blk)
     {
         if (blk == 0) // in Hcurl
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Hcurl.Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Hcurl_copy;
+            else
+                temp = essbdrtruedofs_Hcurl;
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = essbdrtruedofs_Hcurl[tdofind];
+                int tdof = (*temp)[tdofind];
                 truex->GetBlock(blk)[tdof] = 0.0;
 #ifdef CHECK_BNDCND
                 if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
@@ -3613,16 +3944,25 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
                               << ", index = " << tdof << "\n";
 #endif
             }
+        }
 #ifdef CHECK_BNDCND
         else
-            for ( int tdofind = 0; tdofind < essbdrtruedofs_Funct[blk]->Size(); ++tdofind)
+        {
+            const Array<int> *temp;
+            if (own_essbdr)
+                temp = essbdrtruedofs_Funct_copy[blk];
+            else
+                temp = essbdrtruedofs_Funct[blk];
+
+            for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
             {
-                int tdof = (*essbdrtruedofs_Funct[blk])[tdofind];
+                int tdof = (*temp)[tdofind];
                 if (fabs(truex->GetBlock(blk)[tdof]) > 1.0e-14 )
                     std::cout << "bnd cnd is violated for truex! blk = " << blk << ", value = "
                               << truex->GetBlock(blk)[tdof]
                               << ", index = " << tdof << "\n";
             }
+        }
 #endif
     }
     //truex->Print();
@@ -3641,7 +3981,12 @@ void HcurlGSSSmoother::Mult(const Vector & x, Vector & y) const
 
     for ( int blk = 0; blk < numblocks; ++blk)
     {
-        const Array<int> *temp = essbdrtruedofs_Funct[blk];
+        const Array<int> *temp;
+        if (own_essbdr)
+            temp = essbdrtruedofs_Funct_copy[blk];
+        else
+            temp = essbdrtruedofs_Funct[blk];
+
         for ( int tdofind = 0; tdofind < temp->Size(); ++tdofind)
         {
             yblock->GetBlock(blk)[(*temp)[tdofind]] = 0.0;
@@ -3726,15 +4071,40 @@ void HcurlGSSSmoother::Setup() const
 //#ifdef COMPARE_MG
                 const Array<int> *temp_range;
                 const Array<int> *temp_dom;
+
                 if (blk1 == 0)
-                    temp_range = &essbdrtruedofs_Hcurl;
+                {
+                    if (own_essbdr)
+                        temp_range = essbdrtruedofs_Hcurl_copy;
+                    else
+                        temp_range = essbdrtruedofs_Hcurl;
+                    //temp_range = essbdrtruedofs_Hcurl;
+                }
                 else
-                    temp_range = essbdrtruedofs_Funct[blk1];
+                {
+                    if (own_essbdr)
+                        temp_range = essbdrtruedofs_Funct_copy[blk1];
+                    else
+                        temp_range = essbdrtruedofs_Funct[blk1];
+                    //temp_range = essbdrtruedofs_Funct[blk1];
+                }
 
                 if (blk2 == 0)
-                    temp_dom = &essbdrtruedofs_Hcurl;
+                {
+                    if (own_essbdr)
+                        temp_dom = essbdrtruedofs_Hcurl_copy;
+                    else
+                        temp_dom = essbdrtruedofs_Hcurl;
+                    //temp_dom = essbdrtruedofs_Hcurl;
+                }
                 else
-                    temp_dom = essbdrtruedofs_Funct[blk2];
+                {
+                    if (own_essbdr)
+                        temp_dom = essbdrtruedofs_Funct_copy[blk2];
+                    else
+                        temp_dom = essbdrtruedofs_Funct[blk2];
+                    //temp_dom = essbdrtruedofs_Funct[blk2];
+                }
 
                 Eliminate_ib_block(*HcurlFunct_global(blk1, blk2), *temp_dom, *temp_range );
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
@@ -4103,9 +4473,12 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
 
             std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
-            std::vector<Array<int>* > & essbdrtruedofs_Func_new = hierarchy->GetEssBdrTdofsOrDofs
-                    ("tdof", *space_names_funct, essbdr_attribs, 0);
-            essbdrtruedofs_Func.push_front(essbdrtruedofs_Func_new);
+            //std::vector<Array<int>* > & essbdrtruedofs_Func_new = hierarchy->GetEssBdrTdofsOrDofs
+                    //("tdof", *space_names_funct, essbdr_attribs, 0);
+            //essbdrtruedofs_Func.push_front(essbdrtruedofs_Func_new);
+
+            essbdrtruedofs_Func.push_front(hierarchy->GetEssBdrTdofsOrDofs
+                                           ("tdof", *space_names_funct, essbdr_attribs, 0));
 
 
             BlockVector * truesolupdate_new = new BlockVector(TrueP_Func[0]->RowOffsets());

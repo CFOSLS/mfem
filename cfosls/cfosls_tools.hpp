@@ -520,13 +520,12 @@ public:
 
     // gets the essential boundary dofs (or true dofs, depending on the value of tdof_or_dof)
     // for a given space name and essential boundary attributes at the given level
-    // FIXME: Allocated memory which will be never be deleted
     Array<int>* GetEssBdrTdofsOrDofs(const char * tdof_or_dof, SpaceName space_name,
                                            const Array<int>& essbdr_attribs, int level) const;
 
     // block version of GetEssBdrTdofsOrDofs
-    // FIXME: Allocated memory which will be never be deleted
-    std::vector<Array<int>* >* GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
+    // FIXME: Allocated memory which will be never be deleted?
+    std::vector<Array<int>* > GetEssBdrTdofsOrDofs(const char * tdof_or_dof, const Array<SpaceName>& space_names,
                                                     std::vector<Array<int>*>& essbdr_attribs, int level) const;
 
     /*

@@ -108,21 +108,21 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 2;
 
-    const char *space_for_S = "H1";    // "H1" or "L2"
+    const char *space_for_S = "L2";    // "H1" or "L2"
 
+    /*
     // Hdiv-H1 case
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
+    */
 
-    /*
     // Hdiv-L2 case
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2hyp;
-    */
 
     bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
 
@@ -1533,9 +1533,7 @@ int main(int argc, char *argv[])
     CoarsestSolver = new CoarsestProblemHcurlSolver(size_sp,
                                                      *Funct_hpmat_lvls[num_levels - 1],
                                                      *Divfree_hpmat_mod_lvls[num_levels - 1],
-                                                     EssBdrDofs_Funct_lvls[num_levels - 1],
                                                      EssBdrTrueDofs_Funct_lvls[num_levels - 1],
-                                                     *EssBdrDofs_Hcurl[num_levels - 1],
                                                      *EssBdrTrueDofs_Hcurl[num_levels - 1]);
 
     ((CoarsestProblemHcurlSolver*)CoarsestSolver)->SetMaxIter(100);
@@ -1784,13 +1782,13 @@ int main(int argc, char *argv[])
     std::vector< Array<int>* > coarsebnd_indces_divfree_lvls(num_levels);
     for (int l = 0; l < num_levels - 1; ++l)
     {
-        std::vector<Array<int>* > *essbdr_tdofs_hcurlfunct =
+        std::vector<Array<int>* > essbdr_tdofs_hcurlfunct =
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_divfree, essbdr_attribs, l + 1);
 
         int ncoarse_bndtdofs = 0;
         for (int blk = 0; blk < numblocks_funct; ++blk)
         {
-            ncoarse_bndtdofs += (*essbdr_tdofs_hcurlfunct)[blk]->Size();
+            ncoarse_bndtdofs += essbdr_tdofs_hcurlfunct[blk]->Size();
         }
 
         coarsebnd_indces_divfree_lvls[l] = new Array<int>(ncoarse_bndtdofs);
@@ -1799,13 +1797,16 @@ int main(int argc, char *argv[])
         int shift_tdofs_indices = 0;
         for (int blk = 0; blk < numblocks_funct; ++blk)
         {
-            for (int j = 0; j < (*essbdr_tdofs_hcurlfunct)[blk]->Size(); ++j)
+            for (int j = 0; j < essbdr_tdofs_hcurlfunct[blk]->Size(); ++j)
                 (*coarsebnd_indces_divfree_lvls[l])[j + shift_bnd_indices] =
-                    (*(*essbdr_tdofs_hcurlfunct)[blk])[j] + shift_tdofs_indices;
+                    (*essbdr_tdofs_hcurlfunct[blk])[j] + shift_tdofs_indices;
 
-            shift_bnd_indices += (*essbdr_tdofs_hcurlfunct)[blk]->Size();
+            shift_bnd_indices += essbdr_tdofs_hcurlfunct[blk]->Size();
             shift_tdofs_indices += hierarchy->GetSpace(space_names_divfree[blk], l + 1)->TrueVSize();
         }
+
+        for (unsigned int i = 0; i < essbdr_tdofs_hcurlfunct.size(); ++i)
+            delete essbdr_tdofs_hcurlfunct[i];
 
     }
 
@@ -1878,9 +1879,12 @@ int main(int argc, char *argv[])
             BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd[l - 1],
                     *BlockOps_mg[l - 1], *BlockP_mg_nobnd[l - 1], *offsets[l]);
 
-            std::vector<Array<int>* > *essbdr_tdofs_hcurlfunct =
+            std::vector<Array<int>* > essbdr_tdofs_hcurlfunct =
                     hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_divfree, essbdr_attribs, l);
-            EliminateBoundaryBlocks(*BlockOps_mg[l], *essbdr_tdofs_hcurlfunct);
+            EliminateBoundaryBlocks(*BlockOps_mg[l], essbdr_tdofs_hcurlfunct);
+
+            for (unsigned int i = 0; i < essbdr_tdofs_hcurlfunct.size(); ++i)
+                delete essbdr_tdofs_hcurlfunct[i];
         }
 
         Ops_mg[l] = BlockOps_mg[l];
@@ -3272,14 +3276,14 @@ int main(int argc, char *argv[])
 
     for (int l = 0; l < num_levels - 1; ++l)
     {
-        std::vector<Array<int>* > *essbdr_tdofs_funct =
+        std::vector<Array<int>* > essbdr_tdofs_funct =
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, l + 1);
 
         int ncoarse_bndtdofs = 0;
         for (int blk = 0; blk < numblocks; ++blk)
         {
 
-            ncoarse_bndtdofs += (*essbdr_tdofs_funct)[blk]->Size();
+            ncoarse_bndtdofs += essbdr_tdofs_funct[blk]->Size();
         }
 
         coarsebnd_indces_funct_lvls[l] = new Array<int>(ncoarse_bndtdofs);
@@ -3289,14 +3293,16 @@ int main(int argc, char *argv[])
 
         for (int blk = 0; blk < numblocks; ++blk)
         {
-            for (int j = 0; j < (*essbdr_tdofs_funct)[blk]->Size(); ++j)
+            for (int j = 0; j < essbdr_tdofs_funct[blk]->Size(); ++j)
                 (*coarsebnd_indces_funct_lvls[l])[j + shift_bnd_indices] =
-                    (*(*essbdr_tdofs_funct)[blk])[j] + shift_tdofs_indices;
+                    (*essbdr_tdofs_funct[blk])[j] + shift_tdofs_indices;
 
-            shift_bnd_indices += (*essbdr_tdofs_funct)[blk]->Size();
+            shift_bnd_indices += essbdr_tdofs_funct[blk]->Size();
             shift_tdofs_indices += hierarchy->GetSpace(space_names_funct[blk], l + 1)->TrueVSize();
         }
 
+        for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
+            delete essbdr_tdofs_funct[i];
     }
 
     std::vector<Array<int>* > dtd_row_offsets(num_levels);
@@ -3333,8 +3339,11 @@ int main(int argc, char *argv[])
             BlockOps_mg_plus[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd_plus[l - 1],
                     *BlockOps_mg_plus[l - 1], *BlockP_mg_nobnd_plus[l - 1], *offsets_hdivh1[l]);
 
-            std::vector<Array<int>* > *essbdr_tdofs_funct = hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, l);
-            EliminateBoundaryBlocks(*BlockOps_mg_plus[l], *essbdr_tdofs_funct);
+            std::vector<Array<int>* > essbdr_tdofs_funct = hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, l);
+            EliminateBoundaryBlocks(*BlockOps_mg_plus[l], essbdr_tdofs_funct);
+
+            for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
+                delete essbdr_tdofs_funct[i];
         }
 
         Ops_mg_plus[l] = BlockOps_mg_plus[l];
@@ -3384,7 +3393,7 @@ int main(int argc, char *argv[])
                                                      *hierarchy->GetDivfreeDop(l),
                                                      *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                essbdr_attribs_Hcurl, l),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof",
                                                                                space_names_funct,
                                                                                essbdr_attribs, l),
                                                      &SweepsNum, *offsets_hdivh1[l]);
@@ -3409,9 +3418,9 @@ int main(int argc, char *argv[])
                                                                                      el2dofs_row_offsets[l],
                                                                                      el2dofs_col_offsets[l]),
                                                          *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                         *hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
+                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                   fullbdr_attribs, l),
-                                                         *hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
+                                                         hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                   essbdr_attribs, l),
                                                          optimized_localsolve);
             }
@@ -3425,9 +3434,9 @@ int main(int argc, char *argv[])
                                                                                               el2dofs_row_offsets[l],
                                                                                               el2dofs_col_offsets[l]),
                                                                   *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                                                                  *hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
+                                                                  hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                            fullbdr_attribs, l),
-                                                                  *hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
+                                                                  hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
                                                                                            essbdr_attribs, l),
                                                                   optimized_localsolve);
             }
@@ -3453,13 +3462,9 @@ int main(int argc, char *argv[])
     CoarseSolver_mg_plus = new CoarsestProblemHcurlSolver(Ops_mg_plus[num_levels - 1]->Height(),
                                                      *BlockOps_mg_plus[num_levels - 1],
                                                      *hierarchy->GetDivfreeDop(num_levels - 1),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct,
-                                                                                     fullbdr_attribs, num_levels - 1),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof",
                                                                                      space_names_funct,
                                                                                      essbdr_attribs, num_levels - 1),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("dof", SpaceName::HCURL,
-                                                                                     essbdr_attribs_Hcurl, num_levels - 1),
                                                      *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                      essbdr_attribs_Hcurl, num_levels - 1));
 
@@ -3591,10 +3596,10 @@ int main(int argc, char *argv[])
 
     Array<int> row_offsets_coarse, col_offsets_coarse;
 
-    std::vector<Array<int>* > *essbdr_tdofs_funct_coarse =
+    std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
 
-    std::vector<Array<int>* > *essbdr_dofs_funct_coarse =
+    std::vector<Array<int>* > essbdr_dofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
 
 
@@ -3604,8 +3609,8 @@ int main(int argc, char *argv[])
             *Constraint_mat_lvls_mg[num_levels - 1],
             hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
             *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
-            *essbdr_dofs_funct_coarse,
-            *essbdr_tdofs_funct_coarse);
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse);
 
     CoarsestSolver_partfinder_new->SetMaxIter(70000);
     CoarsestSolver_partfinder_new->SetAbsTol(1.0e-18);
