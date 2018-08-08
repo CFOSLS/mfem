@@ -544,7 +544,7 @@ public:
                                   Array<int>* row_offsets, Array<int>* col_offsets) const;
 
     HypreParMatrix *GetDofTrueDof(SpaceName space_name, int level) const;
-    std::vector<HypreParMatrix*> & GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
+    std::vector<HypreParMatrix*> GetDofTrueDof(const Array<SpaceName>& space_names, int level) const;
     BlockOperator* GetDofTrueDof(const Array<SpaceName> &space_names, int level,
                                  Array<int>& row_offsets, Array<int>& col_offsets) const;
 
@@ -3166,6 +3166,12 @@ protected:
     Array<SparseMatrix*> Mass_mat_lvls;
     Array<BlockMatrix*> Funct_mat_lvls;
     Array<SparseMatrix*> Constraint_mat_lvls;
+
+    // HypreParMatrix objects are actually owned
+    std::deque<std::vector<HypreParMatrix*> > d_td_Funct_lvls;
+    BlockOperator * d_td_Funct_coarsest;
+    Array<int> d_td_coarsest_row_offsets;
+    Array<int> d_td_coarsest_col_offsets;
 
     std::deque<Array<int>* > el2dofs_row_offsets;
     std::deque<Array<int>* > el2dofs_col_offsets;

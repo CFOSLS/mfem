@@ -959,7 +959,6 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         (*fullbdr_attribs[i]) = 1;
     }
 
-
     offsets_funct.resize(nlevels);
     offsets_funct[0] = hierarchy.ConstructTrueOffsetsforFormul(0, *space_names_funct);
     offsets_sp_funct.resize(nlevels);
@@ -978,6 +977,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     Ops_lvls.SetSize(nlevels);
     Ops_lvls[0] = FunctOps_lvls[0];
+
+    d_td_Funct_lvls.resize(nlevels - 1);
 
     if (descr.with_Schwarz || descr.with_coarsest_partfinder)
     {
@@ -1009,6 +1010,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     for (int l = 0; l < nlevels - 1; ++l)
     {
+        d_td_Funct_lvls[l] = hierarchy.GetDofTrueDof(*space_names_funct, l);
+
         std::vector<Array<int>* > essbdr_tdofs_funct =
                 hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
 
@@ -1144,7 +1147,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
                         (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                         hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                         //hierarchy.GetDofTrueDof(*space_names_funct, l),
+                         d_td_Funct_lvls[l],
+                         *AE_e_lvls[l],
                          *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
                                                      el2dofs_col_offsets[l]),
                          *hierarchy.GetElementToDofs(SpaceName::L2, l),
@@ -1158,7 +1163,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolver
                         (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                         hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                         //hierarchy.GetDofTrueDof(*space_names_funct, l),
+                         d_td_Funct_lvls[l],
+                         *AE_e_lvls[l],
                          *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
                                                      el2dofs_col_offsets[l]),
                          *hierarchy.GetElementToDofs(SpaceName::L2, l),
@@ -1212,11 +1219,16 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     if (descr.with_coarsest_partfinder)
     {
+        d_td_Funct_coarsest = hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1,
+                                                      d_td_coarsest_row_offsets, d_td_coarsest_col_offsets);
+
+
         CoarsestSolver_partfinder = new CoarsestProblemSolver(coarse_size,
                                       *Funct_mat_lvls[nlevels - 1],
             *Constraint_mat_lvls[nlevels - 1],
             // FIXME: each GetDofTrueDof for an array of SpaceNames is a memory leak!
-            hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse, col_offsets_coarse),
+            //hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse, col_offsets_coarse),
+            d_td_Funct_coarsest,
             *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
             essbdr_dofs_funct_coarse,
             essbdr_tdofs_funct_coarse, true);
@@ -1317,6 +1329,8 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         }
 
         coarsebnd_indces_funct_lvls.push_front(coarsebnd_indces_funct_new);
+
+        d_td_Funct_lvls.push_front(hierarchy.GetDofTrueDof(*space_names_funct, 0));
 
         if (recoarsen)
         {
@@ -1457,7 +1471,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             {
                 SchwarzSmoother_new = new LocalProblemSolverWithS
                         (size, *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
-                         hierarchy.GetDofTrueDof(*space_names_funct, 0), *AE_e_lvls[0],
+                          d_td_Funct_lvls[0],
+                          //hierarchy.GetDofTrueDof(*space_names_funct, 0),
+                         *AE_e_lvls[0],
                          *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
                                                      el2dofs_col_offsets_new),
                          *hierarchy.GetElementToDofs(SpaceName::L2, 0),
@@ -1471,7 +1487,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             {
                 SchwarzSmoothers_lvls = new LocalProblemSolver
                         (size, *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
-                         hierarchy.GetDofTrueDof(*space_names_funct, 0), *AE_e_lvls[0],
+                         d_td_Funct_lvls[0],
+                         //hierarchy.GetDofTrueDof(*space_names_funct, 0),
+                         *AE_e_lvls[0],
                          *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
                                                      el2dofs_col_offsets_new),
                          *hierarchy.GetElementToDofs(SpaceName::L2, 0),
@@ -1575,7 +1593,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                         {
                             SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
                                     (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                                     hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                     //hierarchy.GetDofTrueDof(*space_names_funct, l),
+                                     d_td_Funct_lvls[l],
+                                     *AE_e_lvls[l],
                                      *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
                                                                  *el2dofs_col_offsets[l]),
                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
@@ -1589,7 +1609,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                         {
                             SchwarzSmoothers_lvls[l] = new LocalProblemSolver
                                     (size, *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                                     hierarchy.GetDofTrueDof(*space_names_funct, l), *AE_e_lvls[l],
+                                     //hierarchy.GetDofTrueDof(*space_names_funct, l),
+                                     d_td_Funct_lvls[l],
+                                     *AE_e_lvls[l],
                                      *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
                                                                  *el2dofs_col_offsets[l]),
                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
@@ -1660,7 +1682,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             for (int i = 0; i < space_names_problem->Size(); ++i)
                 coarse_size += hierarchy.GetSpace((*space_names_problem)[i], nlevels - 1)->TrueVSize();
 
-            Array<int> row_offsets_coarse, col_offsets_coarse;
+            //Array<int> row_offsets_coarse, col_offsets_coarse;
 
             std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
                     hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, nlevels - 1);
@@ -1691,8 +1713,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
                 CoarsestSolver_partfinder = new CoarsestProblemSolver
                         (coarse_size, *Funct_mat_lvls[nlevels - 1], *Constraint_mat_lvls[nlevels - 1],
-                        hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse,
-                                                col_offsets_coarse),
+                        //hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse,
+                                                //col_offsets_coarse),
+                        d_td_Funct_coarsest,
                         *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
                         essbdr_dofs_funct_coarse,
                         essbdr_tdofs_funct_coarse);
@@ -6145,24 +6168,20 @@ HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
     return NULL;
 }
 
-// FIXME: Remove & from the output
-std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names,
+std::vector<HypreParMatrix*> GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names,
                                                                int level) const
 {
-    std::vector<HypreParMatrix*> * res = new std::vector<HypreParMatrix*>;
-    res->resize(space_names.Size());
+    std::vector<HypreParMatrix*> res(space_names.Size());
     for (int i = 0; i < space_names.Size(); ++i)
-    {
-        (*res)[i] = GetDofTrueDof(space_names[i], level);
-    }
+        res[i] = GetDofTrueDof(space_names[i], level);
 
-    return *res;
+    return res;
 }
 
 BlockOperator* GeneralHierarchy::GetDofTrueDof(const Array<SpaceName>& space_names, int level,
                                                Array<int>& row_offsets, Array<int>& col_offsets) const
 {
-    std::vector<HypreParMatrix*> & temp = GetDofTrueDof(space_names, level);
+    std::vector<HypreParMatrix*> temp = GetDofTrueDof(space_names, level);
 
     row_offsets.SetSize(space_names.Size() + 1);
     row_offsets[0] = 0;
