@@ -10,7 +10,7 @@
 #include <list>
 #include <unistd.h>
 
-//#define WITH_DIVCONSTRAINT_SOLVER
+#define WITH_DIVCONSTRAINT_SOLVER
 
 // switches on/off usage of smoother in the new minimization solver
 // in parallel GS smoother works a little bit different from serial
@@ -18,7 +18,7 @@
 
 // activates using the new interface to local problem solvers
 // via a separated class called LocalProblemSolver
-//#define SOLVE_WITH_LOCALSOLVERS
+#define SOLVE_WITH_LOCALSOLVERS
 
 using namespace std;
 using namespace mfem;
@@ -1117,7 +1117,7 @@ int main(int argc, char *argv[])
                 delete fullbdr_dofs_funct[i];
 
             for (unsigned int i = 0; i < essbdr_dofs_funct.size(); ++i)
-                delete essbdr_tdofs_funct[i];
+                delete essbdr_dofs_funct[i];
 
 #ifdef SOLVE_WITH_LOCALSOLVERS
             Smoo_mg_plus[l] = new SmootherSum(*SchwarzSmoothers_lvls[l], *HcurlSmoothers_lvls[l], *Ops_mg_plus[l]);
@@ -1193,10 +1193,10 @@ int main(int argc, char *argv[])
 
     Array<int> row_offsets_coarse, col_offsets_coarse;
 
-    std::vector<Array<int>* > *essbdr_tdofs_funct_coarse =
+    std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
 
-    std::vector<Array<int>* > *essbdr_dofs_funct_coarse =
+    std::vector<Array<int>* > essbdr_dofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
 
 
@@ -1206,13 +1206,19 @@ int main(int argc, char *argv[])
             *Constraint_mat_lvls_mg[num_levels - 1],
             hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
             *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
-            *essbdr_dofs_funct_coarse,
-            *essbdr_tdofs_funct_coarse);
+            essbdr_dofs_funct_coarse,
+            essbdr_tdofs_funct_coarse, true);
 
     CoarsestSolver_partfinder_new->SetMaxIter(70000);
     CoarsestSolver_partfinder_new->SetAbsTol(1.0e-18);
     CoarsestSolver_partfinder_new->SetRelTol(1.0e-18);
     CoarsestSolver_partfinder_new->ResetSolverParams();
+
+    for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
+        delete essbdr_dofs_funct_coarse[i];
+
+    for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
+        delete essbdr_tdofs_funct_coarse[i];
 
     // newer constructor
     bool opt_localsolvers = true;
@@ -1422,9 +1428,6 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < BlockOps_mg_plus.Size(); ++i)
         delete BlockOps_mg_plus[i];
-
-    for (int i = 0; i < Smoo_mg_plus.Size(); ++i)
-        delete Smoo_mg_plus[i];
 
     for (int i = 0; i < Funct_mat_lvls_mg.Size(); ++i)
         delete Funct_mat_lvls_mg[i];
