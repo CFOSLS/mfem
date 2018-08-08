@@ -928,6 +928,8 @@ MultigridToolsHierarchy::~MultigridToolsHierarchy()
     if (descr.with_coarsest_hcurl)
         delete CoarsestSolver_hcurl;
 
+    if (d_td_Funct_coarsest)
+        delete d_td_Funct_coarsest;
     //MFEM_ABORT("Not implemented \n");
 }
 
@@ -958,6 +960,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
         (*fullbdr_attribs[i]) = 1;
     }
+
+    d_td_Funct_coarsest = NULL;
 
     offsets_funct.resize(nlevels);
     offsets_funct[0] = hierarchy.ConstructTrueOffsetsforFormul(0, *space_names_funct);
