@@ -1114,14 +1114,18 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         std::vector<Array<int>* > fullbdr_dofs_funct =
                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l);
 
+        Array<int>* essbdr_hcurl =
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l);
+
         if (descr.with_Hcurl)
         {
             Array<int> SweepsNum(numblocks_funct);
             SweepsNum = ipow(1, l);
 
+
             HcurlSmoothers_lvls[l] = new HcurlGSSSmoother
                     (*FunctOps_lvls[l], *hierarchy.GetDivfreeDop(l),
-                     *hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l),
+                     *essbdr_hcurl,
                      essbdr_tdofs_funct,
                      &SweepsNum, *offsets_funct[l], true);
         }
@@ -1178,6 +1182,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
         for (unsigned int i = 0; i < fullbdr_dofs_funct.size(); ++i)
             delete fullbdr_dofs_funct[i];
+
+        delete essbdr_hcurl;
     }
 
     if (descr.with_monolithic_GS)
@@ -1209,6 +1215,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         CoarsestSolver_partfinder = new CoarsestProblemSolver(coarse_size,
                                       *Funct_mat_lvls[nlevels - 1],
             *Constraint_mat_lvls[nlevels - 1],
+            // FIXME: each GetDofTrueDof for an array of SpaceNames is a memory leak!
             hierarchy.GetDofTrueDof(*space_names_funct, nlevels - 1, row_offsets_coarse, col_offsets_coarse),
             *hierarchy.GetDofTrueDof(SpaceName::L2, nlevels - 1),
             essbdr_dofs_funct_coarse,
@@ -1225,13 +1232,17 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     if (descr.with_coarsest_hcurl)
     {
+        Array<int> * essbdr_hcurl_coarse =
+                hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1);
         CoarsestSolver_hcurl = new CoarsestProblemHcurlSolver
                 (FunctOps_lvls[nlevels - 1]->Height(), *FunctOps_lvls[nlevels - 1],
                 *hierarchy.GetDivfreeDop(nlevels - 1),
                 essbdr_tdofs_funct_coarse,
                 //hierarchy.GetEssBdrTdofsOrDofs("tdof",*space_names_funct, essbdr_attribs, nlevels - 1),
-                *hierarchy.GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, nlevels - 1),
+                *essbdr_hcurl_coarse,
                 true);
+
+        delete essbdr_hcurl_coarse;
 
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetMaxIter(100);
         ((CoarsestProblemHcurlSolver*)CoarsestSolver_hcurl)->SetAbsTol(sqrt(1.0e-32));
@@ -1247,6 +1258,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
         delete essbdr_dofs_funct_coarse[i];
 
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+        delete fullbdr_attribs[i];
 }
 
 void MultigridToolsHierarchy::Update(bool recoarsen)
@@ -4581,7 +4594,8 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(GeneralHierarchy& Hierarchy, BdrConditi
 
 FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_conditions,
                 FOSLSFEFormulation& fe_formulation, bool verbose_)
-    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false)
+    : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false),
+      own_hdiv(true)
 {
     int dim = Pmesh.Dimension();
     int feorder = fe_formulation.Feorder();
@@ -4602,7 +4616,8 @@ FOSLSDivfreeProblem::FOSLSDivfreeProblem(ParMesh& Pmesh, BdrConditions& bdr_cond
                 FOSLSFEFormulation& fe_formulation, FiniteElementCollection& Hdiv_coll,
                                          ParFiniteElementSpace &Hdiv_space, bool verbose_)
     : FOSLSProblem(Pmesh, bdr_conditions, fe_formulation, verbose_, false),
-      hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space)
+      hdiv_fecoll(&Hdiv_coll), hdiv_pfespace(&Hdiv_space),
+      own_hdiv(false)
 {
     int dim = Pmesh.Dimension();
     MFEM_ASSERT(dim == 3 || dim == 4, "Divfree problem is implemented only for 3D and 4D");
@@ -4771,7 +4786,7 @@ void FOSLSDivfreeProblem::CreatePrec(BlockOperator & op, int prec_option, bool v
 
 GeneralMultigrid::GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_,
                                    const Array<Operator*> &Op_lvls_,
-                                   const Operator& CoarseOp_,\
+                                   const Operator& CoarseOp_,
                                    const Array<Operator*> &PreSmoothers_lvls_,
                                    const Array<Operator*> &PostSmoothers_lvls_)
     : Solver(Op_lvls_[0]->Height()), nlevels(Nlevels), P_lvls(P_lvls_),
@@ -4806,6 +4821,16 @@ GeneralMultigrid::GeneralMultigrid(int Nlevels, const Array<Operator*> &P_lvls_,
         }
     }
 
+}
+
+GeneralMultigrid::~GeneralMultigrid()
+{
+    for (int l = 0; l < nlevels; l++)
+    {
+        // FIXME: do we need to delete correction[0] which is actually always borrowing its data?
+        delete correction[l];
+        delete residual[l];
+    }
 }
 
 void GeneralMultigrid::Mult(const Vector & x, Vector & y) const
@@ -4940,6 +4965,7 @@ RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &
             SetBlock(i,j, op_block);
         }
 
+    owns_blocks = true;
 }
 
 void BlkInterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y) const
@@ -6036,6 +6062,7 @@ HypreParMatrix* GeneralHierarchy::GetDofTrueDof(SpaceName space_name, int level)
     return NULL;
 }
 
+// FIXME: Remove & from the output
 std::vector<HypreParMatrix*> & GeneralHierarchy::GetDofTrueDof(const Array<SpaceName> &space_names,
                                                                int level) const
 {
@@ -7094,6 +7121,7 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
 
             BlockOp.SetBlock(i,j, op_blk);
 
+            BlockOp.owns_blocks = true;
         }
 }
 
