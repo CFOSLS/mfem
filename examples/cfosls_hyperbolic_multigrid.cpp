@@ -1222,6 +1222,8 @@ int main(int argc, char *argv[])
         coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
 
     Array<int> row_offsets_coarse, col_offsets_coarse;
+    BlockOperator * d_td_Funct_coarsest =
+            hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse);
 
     std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
@@ -1230,11 +1232,13 @@ int main(int argc, char *argv[])
             hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
 
 
+
     CoarsestProblemSolver* CoarsestSolver_partfinder_new =
             new CoarsestProblemSolver(coarse_size,
                                       *Funct_mat_lvls_mg[num_levels - 1],
             *Constraint_mat_lvls_mg[num_levels - 1],
-            hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
+            //hierarchy->GetDofTrueDof(space_names_funct, num_levels - 1, row_offsets_coarse, col_offsets_coarse),
+            d_td_Funct_coarsest,
             *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
             essbdr_dofs_funct_coarse,
             essbdr_tdofs_funct_coarse, true);
@@ -1463,8 +1467,11 @@ int main(int argc, char *argv[])
         delete BlockOps_mg[i];
 
     delete A00;
-    delete A01;
-    delete A10;
+    if (strcmp(space_for_S,"H1") == 0) // S is present
+    {
+        delete A01;
+        delete A10;
+    }
 
     for (int i = 0; i < Smoo_mg.Size(); ++i)
         delete Smoo_mg[i];
@@ -1522,6 +1529,8 @@ int main(int argc, char *argv[])
 
     for (unsigned int i = 0; i < divfree_offsets.size(); ++i)
         delete divfree_offsets[i];
+
+    delete d_td_Funct_coarsest;
 
     delete bdr_conds;
     delete formulat;
