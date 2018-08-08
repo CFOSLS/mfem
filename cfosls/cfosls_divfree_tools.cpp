@@ -365,7 +365,8 @@ void CoarsestProblemHcurlSolver::Setup() const
 
                     if (blk2 == 0)
                     {
-                        HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
+                        HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+                        //HcurlFunct_global(blk1, blk2) = RAP(&Divfreeop, Funct_blk, &Divfreeop);
 
                         //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
 
@@ -4048,9 +4049,9 @@ void HcurlGSSSmoother::Setup() const
 
                     if (blk2 == 0)
                     {
-                        HcurlFunct_global(blk1, blk2) = RAP(Divfree_hpmat_nobnd, Funct_blk, Divfree_hpmat_nobnd);
+                        //HcurlFunct_global(blk1, blk2) = RAP(Divfree_hpmat_nobnd, Funct_blk, Divfree_hpmat_nobnd);
 
-                        //HcurlFunct_global(blk1, blk2) = ParMult(temp1, &Divfreeop);
+                        HcurlFunct_global(blk1, blk2) = ParMult(temp1, Divfree_hpmat_nobnd);
 
                         HcurlFunct_global(blk1, blk2)->CopyRowStarts();
                         HcurlFunct_global(blk1, blk2)->CopyColStarts();
