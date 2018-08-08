@@ -477,6 +477,7 @@ int main(int argc, char *argv[])
 
         delete coarse_essbdr_dofs_Hdiv;
 
+        delete B_local;
     }
     else
     {
@@ -793,6 +794,8 @@ int main(int argc, char *argv[])
     BlockVector trueRhs_divfree(divfree_funct_op->ColOffsets());
     trueRhs_divfree = 0.0;
     DivfreeT_dop->Mult(truetemp1.GetBlock(0), trueRhs_divfree.GetBlock(0));
+
+    delete DivfreeT_dop;
 
     if (strcmp(space_for_S,"H1") == 0)
         trueRhs_divfree.GetBlock(1) = truetemp1.GetBlock(1);
@@ -1139,6 +1142,9 @@ int main(int argc, char *argv[])
     std::vector<Array<int> * > fullbdr_tdofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
 
+    Array<int> * essbdr_hcurl_coarse = hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                       essbdr_attribs_Hcurl, num_levels - 1);
+
     CoarseSolver_mg_plus = new CoarsestProblemHcurlSolver(Ops_mg_plus[num_levels - 1]->Height(),
                                                      *BlockOps_mg_plus[num_levels - 1],
                                                      *hierarchy->GetDivfreeDop(num_levels - 1),
@@ -1146,8 +1152,11 @@ int main(int argc, char *argv[])
                                                                                      //space_names_funct,
                                                                                      //essbdr_attribs, num_levels - 1),
                                                      fullbdr_tdofs_funct_coarse,
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                                     essbdr_attribs_Hcurl, num_levels - 1));
+                                                     *essbdr_hcurl_coarse);
+
+    for (unsigned int i = 0; i < fullbdr_tdofs_funct_coarse.size(); ++i)
+        delete fullbdr_tdofs_funct_coarse[i];
+    delete essbdr_hcurl_coarse;
 
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->SetMaxIter(100);
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->SetAbsTol(sqrt(1.0e-32));
@@ -1403,6 +1412,10 @@ int main(int argc, char *argv[])
         std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
 
     // Deallocating memory
+
+    delete Xinit_truedofs;
+    delete divfree_dop_mod;
+
     delete hierarchy;
     delete problem;
 

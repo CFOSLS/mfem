@@ -777,7 +777,7 @@ protected:
 #endif
 
 public:
-    ~HcurlGSSSmoother();
+    virtual ~HcurlGSSSmoother();
     HcurlGSSSmoother (Array2D<HypreParMatrix*> & Funct_HpMat,
                                         const HypreParMatrix& Divfree_HpMat_nobnd,
                                         const Array<int>& EssBdrtruedofs_Hcurl,
@@ -1206,6 +1206,8 @@ public:
         Vector total_sig(P_R[0]->Height());
         total_sig = .0;
 
+        SparseMatrix * B_finer = B_fine;
+        SparseMatrix * B_lvl;
 //        chrono.Clear();
 //        chrono.Start();
 
@@ -1287,7 +1289,7 @@ public:
                         "Average of rhs at each level is not zero: " << rhs_l.Sum());
 
 
-            if (l> 0) {
+            if (l > 0) {
 
                 // 4. Creating matrices for the coarse problem:
                 SparseMatrix *P_WT2 = Transpose(*P_W[l-1]);
@@ -1295,8 +1297,8 @@ public:
                 if (M_fine)
                     P_RT2 = Transpose(*P_R[l-1]);
 
-                SparseMatrix *B_PR = Mult(*B_fine, *P_R[l-1]);
-                B_fine = Mult(*P_WT2, *B_PR);
+                SparseMatrix *B_PR = Mult(*B_finer, *P_R[l-1]);
+                B_lvl = Mult(*P_WT2, *B_PR);
 
                 if (M_fine)
                 {
@@ -1311,6 +1313,8 @@ public:
                 if (M_fine)
                     delete P_RT2;
             }
+            else
+                B_lvl = B_finer;
 
             //5. Setting for the coarse problem
             DenseMatrix sub_M;
@@ -1344,7 +1348,7 @@ public:
                 // Obtaining submatrices:
                 if (M_fine)
                     M_fine->GetSubMatrix(Rtmp_j,Rtmp_j, sub_M);
-                B_fine->GetSubMatrix(Wtmp_j,Rtmp_j, sub_B);
+                B_lvl->GetSubMatrix(Wtmp_j,Rtmp_j, sub_B);
                 sub_BT.Transpose(sub_B);
 
 //                sub_G  = .0;
@@ -1385,7 +1389,7 @@ public:
 #ifdef MFEM_DEBUG
             Vector fcheck2(u_loc_vec.Size());
             fcheck2 = .0;
-            B_fine->Mult(p_loc_vec, fcheck2);
+            B_lvl->Mult(p_loc_vec, fcheck2);
             fcheck2-=rhs_l;
             MFEM_ASSERT(fcheck2.Norml2()<= 9e-11,
                         "checking global solution at each level " << fcheck2.Norml2());
@@ -1406,6 +1410,10 @@ public:
 
             MFEM_ASSERT(total_sig.Norml2()<= 9e+9,
                         "checking global solution added" << total_sig.Norml2());
+
+            if (l > 1)
+                delete B_finer;
+            B_finer = B_lvl;
         } // end of loop over levels
 
         // The coarse problem::
@@ -1422,7 +1430,7 @@ public:
         if (M_fine)
             P_RT2 = Transpose(*P_R[ref_levels-1]);
 
-        SparseMatrix *B_PR = Mult(*B_fine, *P_R[ref_levels-1]);
+        SparseMatrix *B_PR = Mult(*B_lvl, *P_R[ref_levels-1]);
         B_coarse = Mult(*P_WT2, *B_PR);
 
         B_coarse->EliminateCols(ess_dof_coarsestlvl_list);
@@ -1444,6 +1452,8 @@ public:
         if (M_fine)
             delete P_RT2;
         delete B_PR;
+
+        delete B_lvl;
 
         Vector sig_c(B_coarse->Width());
 
