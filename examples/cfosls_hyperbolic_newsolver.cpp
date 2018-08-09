@@ -10,7 +10,7 @@
 #include <list>
 #include <unistd.h>
 
-//#define NEW_INTERFACE
+#define NEW_INTERFACE
 //#define NEW_INTERFACE2
 #define BRANDNEW_INTERFACE
 
@@ -2058,9 +2058,8 @@ int main(int argc, char *argv[])
         else
             M_local = NULL;
 
-        ParMixedBilinearForm *DivForm(new ParMixedBilinearForm
-                                      (hierarchy->GetSpace(SpaceName::HDIV, 0),
-                                       hierarchy->GetSpace(SpaceName::L2, 0)));
+        ParMixedBilinearForm *DivForm = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
+                                       hierarchy->GetSpace(SpaceName::L2, 0));
         DivForm->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
         DivForm->Assemble();
         DivForm->Finalize();
@@ -2095,7 +2094,7 @@ int main(int argc, char *argv[])
             e_AE_lvls[l] = P_L2_lvls[l];
         }
 
-        const Array<int>& coarse_essbdr_dofs_Hdiv = hierarchy->GetEssBdrTdofsOrDofs
+        Array<int>* coarse_essbdr_dofs_Hdiv = hierarchy->GetEssBdrTdofsOrDofs
                 ("dof", SpaceName::HDIV, *essbdr_attribs[0], num_levels - 1);
 
         divp.div_part(ref_levels,
@@ -2112,9 +2111,16 @@ int main(int argc, char *argv[])
                       //R_space_lvls[num_levels - 1]->GetDofOffsets(),
                       //W_space_lvls[num_levels - 1]->GetDofOffsets(),
                       sigmahat_pau,
-                      coarse_essbdr_dofs_Hdiv);
+                      *coarse_essbdr_dofs_Hdiv);
+
+        delete coarse_essbdr_dofs_Hdiv;
 
         delete DivForm;
+
+        if (useM_in_divpart)
+            delete M_local;
+
+        delete B_local;
 
 #else
         Vector F_fine(P_W[0]->Height());
@@ -3712,7 +3718,7 @@ int main(int argc, char *argv[])
     //Array< SparseMatrix*> el2dofs_W(ref_levels);
     //Array< SparseMatrix*> P_Hdiv_lvls(ref_levels);
     Array< SparseMatrix*> P_L2_lvls(ref_levels);
-    Array< SparseMatrix*> AE_e_lvls(ref_levels);
+    //Array< SparseMatrix*> AE_e_lvls(ref_levels);
 
     for (int l = 0; l < ref_levels; ++l)
     {
@@ -3720,7 +3726,7 @@ int main(int argc, char *argv[])
         //el2dofs_W[l] = hierarchy->GetElementToDofs(SpaceName::L2, l);
         //P_Hdiv_lvls[l] = hierarchy->GetPspace(SpaceName::HDIV, l);
         P_L2_lvls[l] = hierarchy->GetPspace(SpaceName::L2, l);
-        AE_e_lvls[l] = Transpose(*P_L2_lvls[l]);
+        //AE_e_lvls[l] = Transpose(*P_L2_lvls[l]);
     }
 
     std::vector< std::vector<Array<int>* > > essbdr_tdofs_funct_lvls(num_levels);
@@ -3748,7 +3754,7 @@ int main(int argc, char *argv[])
                                       *constrfform_new, //Floc,
                                       HcurlSmoothers_lvls,
                                       &LocalSolver_partfinder_lvls_new,
-                                      CoarsestSolver_partfinder_new);
+                                      CoarsestSolver_partfinder_new, verbose);
 
 #else
     DivConstraintSolver PartsolFinder(comm, num_levels, P_WT,
