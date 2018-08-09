@@ -309,6 +309,7 @@ int main(int argc, char *argv[])
     GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh, 0, verbose);
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
+    hierarchy->ConstructEl2Dofs();
 
     FOSLSProblem* problem = hierarchy->BuildDynamicProblem<ProblemType>
             (*bdr_conds, *fe_formulat, prec_option, verbose);
@@ -469,11 +470,13 @@ int main(int argc, char *argv[])
 
         sigmahat.ParallelProject(Sigmahat_truedofs);
 
+        /*
         for (int l = 0; l < ref_levels; ++l)
         {
             delete el2dofs_R[l];
             delete el2dofs_W[l];
         }
+        */
 
         delete coarse_essbdr_dofs_Hdiv;
 

@@ -422,6 +422,13 @@ protected:
     Array< HypreParMatrix* > DofTrueDof_Hcurl_lvls;
     Array< HypreParMatrix* > DofTrueDof_Hdivskew_lvls;
 
+    // element-to-dofs relations for various f.e. spaces
+    Array<SparseMatrix*> el2dofs_L2_lvls;
+    Array<SparseMatrix*> el2dofs_H1_lvls;
+    Array<SparseMatrix*> el2dofs_Hdiv_lvls;
+    Array<SparseMatrix*> el2dofs_Hcurl_lvls;
+    Array<SparseMatrix*> el2dofs_Hdivskew_lvls;
+
     // defines whether Hcurl f.e. space must be built in the hierarchy
     // one might not want to built it, because of the limitations on Hcurl f.e. spaces
     // e.g., higher-order f.e. Nedelec space doesn't allow to refine the mesh
@@ -430,6 +437,8 @@ protected:
     // flags which define whether divfree discrete operators (doftruedofs) were constructed
     bool divfreedops_constructed;
     bool doftruedofs_constructed;
+
+    bool el2dofs_constructed;
 
     // used to define whether the mesh has changed (when we want to update the hierarchy)
     int pmesh_ne;
@@ -569,6 +578,8 @@ public:
 
     FOSLSProblem* GetProblem(int i) {return problems[i];}
     int Nproblems() const {return problems.Size();}
+
+    void ConstructEl2Dofs();
 
 protected:
     // a wrapper around UniformRefinement which also allows one to refine a ParMeshCyl

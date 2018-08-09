@@ -5123,6 +5123,7 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
                                    bool verbose, bool with_hcurl_)
     : num_lvls(num_levels), pmesh(pmesh_), with_hcurl(with_hcurl_),
       divfreedops_constructed (false), doftruedofs_constructed (true),
+      el2dofs_constructed(false),
       pmesh_ne(0), update_counter(0)
 {
     pmesh_ne = pmesh.GetNE();
@@ -5390,27 +5391,25 @@ GeneralHierarchy::~GeneralHierarchy()
         for (int i = 0; i < DivfreeDops_lvls.Size(); ++i)
             delete DivfreeDops_lvls[i];
 
-    /*
-    if (doftruedofs_constructed)
+    if (el2dofs_constructed)
     {
-        for (int i = 0; i < DofTrueDof_L2_lvls.Size(); ++i)
-            delete DofTrueDof_L2_lvls[i];
+        for (int i = 0; i < el2dofs_L2_lvls.Size(); ++i)
+            delete el2dofs_L2_lvls[i];
 
-        for (int i = 0; i < DofTrueDof_H1_lvls.Size(); ++i)
-            delete DofTrueDof_H1_lvls[i];
+        for (int i = 0; i < el2dofs_H1_lvls.Size(); ++i)
+            delete el2dofs_H1_lvls[i];
 
-        for (int i = 0; i < DofTrueDof_Hdiv_lvls.Size(); ++i)
-            delete DofTrueDof_Hdiv_lvls[i];
+        for (int i = 0; i < el2dofs_Hdiv_lvls.Size(); ++i)
+            delete el2dofs_Hdiv_lvls[i];
 
         if (with_hcurl)
-            for (int i = 0; i < DofTrueDof_Hcurl_lvls.Size(); ++i)
-                delete DofTrueDof_Hcurl_lvls[i];
+            for (int i = 0; i < el2dofs_Hcurl_lvls.Size(); ++i)
+                delete el2dofs_Hcurl_lvls[i];
 
         if (dim == 4)
-            for (int i = 0; i < DofTrueDof_Hdivskew_lvls.Size(); ++i)
-                delete DofTrueDof_Hdivskew_lvls[i];
+            for (int i = 0; i < el2dofs_Hdivskew_lvls.Size(); ++i)
+                delete el2dofs_Hdivskew_lvls[i];
     }
-    */
 
 
     // the problems don't belong to the hierarchy, they are merely attached
@@ -5614,6 +5613,38 @@ void GeneralHierarchy::Update()
                 DofTrueDof_Hcurl_lvls.Prepend(DofTrueDof_Hcurl_new);
             if (dim == 4)
                 DofTrueDof_Hdivskew_lvls.Prepend(DofTrueDof_Hdivskew_new);
+        }
+
+        if (el2dofs_constructed)
+        {
+            ParFiniteElementSpace * pfes;
+
+            pfes = L2_space_lvls[0];
+            SparseMatrix * el2dofs_L2_new = ElementToDofs(*pfes);
+            el2dofs_L2_lvls.Prepend(el2dofs_L2_new);
+
+            pfes = H1_space_lvls[0];
+            SparseMatrix * el2dofs_H1_new = ElementToDofs(*pfes);
+            el2dofs_H1_lvls.Prepend(el2dofs_H1_new);
+
+            pfes = Hdiv_space_lvls[0];
+            SparseMatrix * el2dofs_Hdiv_new = ElementToDofs(*pfes);
+            el2dofs_Hdiv_lvls.Prepend(el2dofs_Hdiv_new);
+
+            if (with_hcurl)
+            {
+                pfes = Hcurl_space_lvls[0];
+                SparseMatrix * el2dofs_Hcurl_new = ElementToDofs(*pfes);
+                el2dofs_Hcurl_lvls.Prepend(el2dofs_Hcurl_new);
+            }
+
+            int dim = pmesh_lvls[0]->Dimension();
+            if (dim == 4)
+            {
+                pfes = Hdivskew_space_lvls[0];
+                SparseMatrix * el2dofs_Hdivskew_new = ElementToDofs(*pfes);
+                el2dofs_Hdivskew_lvls.Prepend(el2dofs_Hdivskew_new);
+            }
         }
 
         for (int i = 0; i < problems.Size(); ++i)
@@ -6012,30 +6043,76 @@ void GeneralHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
     }
 }
 
+void GeneralHierarchy::ConstructEl2Dofs()
+{
+    int dim = pmesh_lvls[0]->Dimension();
+
+    el2dofs_L2_lvls.SetSize(num_lvls);
+    el2dofs_H1_lvls.SetSize(num_lvls);
+    el2dofs_Hdiv_lvls.SetSize(num_lvls);
+    if (with_hcurl)
+        el2dofs_Hcurl_lvls.SetSize(num_lvls);
+    if (dim == 4)
+        el2dofs_Hdivskew_lvls.SetSize(num_lvls);
+
+    for (int l = 0; l < num_lvls; ++l)
+    {
+        ParFiniteElementSpace * pfes;
+
+        pfes = L2_space_lvls[l];
+        el2dofs_L2_lvls[l] = ElementToDofs(*pfes);
+
+        pfes = H1_space_lvls[l];
+        el2dofs_H1_lvls[l] = ElementToDofs(*pfes);
+
+        pfes = Hdiv_space_lvls[l];
+        el2dofs_Hdiv_lvls[l] = ElementToDofs(*pfes);
+
+        if (with_hcurl)
+        {
+            pfes = Hcurl_space_lvls[l];
+            el2dofs_Hcurl_lvls[l] = ElementToDofs(*pfes);
+        }
+
+        if (dim == 4)
+        {
+            pfes = Hdivskew_space_lvls[l];
+            el2dofs_Hdivskew_lvls[l] = ElementToDofs(*pfes);
+        }
+    }
+
+    el2dofs_constructed = true;
+}
+
 SparseMatrix* GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level) const
 {
-    ParFiniteElementSpace * pfes;
+    if (!el2dofs_constructed)
+    {
+        MFEM_ABORT("el2dofs must be constructed before trying to get one \n"
+                   "Look for a missing call to ConstructEl2Dofs()");
+    }
+
     switch(space_name)
     {
     case HDIV:
-        pfes = Hdiv_space_lvls[level];
+        return el2dofs_Hdiv_lvls[level];
         break;
     case H1:
-        pfes = H1_space_lvls[level];
+        return el2dofs_H1_lvls[level];
         break;
     case L2:
-        pfes = L2_space_lvls[level];
+        return el2dofs_L2_lvls[level];
         break;
     case HCURL:
         if (!with_hcurl)
         {
-            MFEM_ABORT("Cannot construct divfree operators since H(curl)"
+            MFEM_ABORT("Cannot construct element-to-dofs for H(curl) since H(curl)"
                        " was not build in the hierarchy \n");
         }
-        pfes = Hcurl_space_lvls[level];
+        return el2dofs_Hcurl_lvls[level];
         break;
     case HDIVSKEW:
-        pfes = Hdivskew_space_lvls[level];
+        return el2dofs_Hdivskew_lvls[level];
         break;
     default:
         {
@@ -6044,7 +6121,7 @@ SparseMatrix* GeneralHierarchy::GetElementToDofs(SpaceName space_name, int level
         }
     }
 
-    return ElementToDofs(*pfes);
+    return NULL;
 }
 
 BlockMatrix* GeneralHierarchy::GetElementToDofs(const Array<SpaceName>& space_names, int level,
