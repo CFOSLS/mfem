@@ -89,7 +89,7 @@ void FOSLSCylProblem::SetAtBase(const char * top_or_bot, const Vector &base_tdof
 
 }
 
-
+// FIXME: Make this return a pointer to avoid the memory leak
 Vector& FOSLSCylProblem::ExtractAtBase(const char * top_or_bot, const Vector &x) const
 {
     Vector * res = new Vector(tdofs_link.size());

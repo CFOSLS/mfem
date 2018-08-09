@@ -5958,7 +5958,7 @@ int main(int argc, char *argv[])
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))
                     delete (*Funct_hpmat_lvls[l])(blk1,blk2);
-        //delete Funct_hpmat_lvls[l];
+        delete Funct_hpmat_lvls[l];
 
         if (l < num_levels - 1)
         {
@@ -6260,6 +6260,15 @@ int main(int argc, char *argv[])
 
     for (unsigned int i = 0; i < offsets_sp_hdivh1.size(); ++i)
         delete offsets_sp_hdivh1[i];
+
+#ifdef NEW_INTERFACE
+    for (unsigned int i = 0; i < essbdr_tdofs_funct_lvls.size(); ++i)
+        for (unsigned int j = 0; j < essbdr_tdofs_funct_lvls[i].size(); ++j)
+            delete essbdr_tdofs_funct_lvls[i][j];
+
+    delete xinit_new;
+    delete constrfform_new;
+#endif
 
     delete d_td_Funct_coarsest;
 

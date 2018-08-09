@@ -17,6 +17,9 @@ public:
     using FOSLSProblem::Solve;
 protected:
     ParMeshCyl &pmeshcyl;
+
+    // doesn't own this, it's just a ptr to address the underlying cylinder
+    // hierarchy (if any) without dynamic casts
     GeneralCylHierarchy * cyl_hierarchy;
 
     SpaceName init_cond_space;
@@ -35,7 +38,7 @@ protected:
     void ConstructRestrictions();
 
 public:
-    ~FOSLSCylProblem()
+    virtual ~FOSLSCylProblem()
     {
         delete Restrict_bot;
         delete Restrict_top;
@@ -78,13 +81,24 @@ public:
 
     ParMeshCyl * GetParMeshCyl() {return &pmeshcyl;}
 
+    // Solves the problem in the cylinder with trueRhs as rhs, and absorbing
+    // given initial condition at the bottom (bnd_tdofs_bot).
+    // The output values are extracted into the output vector at the top (bnd_tdofs_top)
     void Solve(const Vector& bnd_tdofs_bot, Vector &bnd_tdofs_top, bool compute_error) const;
+
+    // The same as the previous one except it uses the given input rhs instead of internal trueRhs
     void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& bnd_tdofs_top, bool compute_error) const;
+
+    // The same as the previous one except it stores the solution in the entire domain in the
+    // given output parameter sol
     void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top, bool compute_error) const;
 
 protected:
+    // extracts from vector x its values (tdofs) at the top boundary of the cylinder
     void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
+
     void ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) const;
+
 public:
     void CorrectFromInitCnd(const Vector& bnd_tdofs_bot, Vector& vec) const
     { CorrectFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot, vec);}
@@ -92,6 +106,8 @@ public:
     void CorrectFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot, Vector& vec) const;
 
     std::vector<std::pair<int,int> > * GetTdofsLink() {return &tdofs_link;}
+
+    // Returns number of tdofs at the base (which is the same for bottom and top bases)
     int GetInitCondSize() const { return tdofs_link.size();}
 
     // Takes a vector of values corresponding to the initial condition (at bottom boundary)
@@ -105,15 +121,20 @@ public:
     // has 0's for all the rest entries
     void ConvertInitCndToFullVector(const Vector& vec_in, Vector& vec_out);
 
+    // Checks the error for the given vector of values (only at the boundary tdofs)
     void ComputeErrorAtBase(const char * top_or_bot, const Vector& base_vec);
 
+    // Returns a vector at the tom or bottom boundary of the cylinder with the values
+    // of the projection of the exact solution (provided by FOSLStest) onto the mesh
     Vector* GetExactBase(const char * top_or_bot);
 
+    // Extracts from the given input Vector x its values at the base (top or bottom)
     void ExtractAtBase(const char * top_or_bot, const Vector &x, Vector& base_tdofs) const;
     Vector& ExtractAtBase(const char * top_or_bot, const Vector &x) const;
 
+    // modifies the given Vector vec by setting its values on the top or bottom boundary
+    // (depending on the flag top_or_bot) from the given values in base_tdofs
     void SetAtBase(const char * top_or_bot, const Vector &base_tdofs, Vector& vec) const;
-
 };
 
 class FOSLSCylProblem_HdivL2L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
