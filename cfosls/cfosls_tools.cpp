@@ -5085,9 +5085,25 @@ RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &
             HypreParMatrix* Rt_blk_i = dynamic_cast<HypreParMatrix*>(&(Rt_.GetBlock(i,i)));
             HypreParMatrix* P_blk_j = dynamic_cast<HypreParMatrix*>(&(P_.GetBlock(j,j)));
             HypreParMatrix* A_blk_ij = dynamic_cast<HypreParMatrix*>(&(A_.GetBlock(i,j)));
-            HypreParMatrix * op_block = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
 
+            HypreParMatrix * Rt_t = Rt_blk_i->Transpose();
+            Rt_t->CopyColStarts();
+            Rt_t->CopyRowStarts();
+
+            HypreParMatrix * temp = ParMult(A_blk_ij, P_blk_j);
+            temp->CopyColStarts();
+            temp->CopyRowStarts();
+
+            HypreParMatrix * op_block = ParMult(Rt_t, temp);
+            op_block->CopyColStarts();
+            op_block->CopyRowStarts();
+
+            delete Rt_t;
+            delete temp;
+
+            //HypreParMatrix * op_block = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
             SetBlock(i,j, op_block);
+
         }
 
     owns_blocks = true;

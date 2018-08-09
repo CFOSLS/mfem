@@ -1517,6 +1517,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
         delete el2dofs_funct_lvls[i];
 
+    delete CoarseSolver_mg;
     delete CoarsePrec_mg;
     delete CoarseSolver_mg_plus;
 

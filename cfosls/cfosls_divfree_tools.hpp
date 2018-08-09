@@ -1608,6 +1608,8 @@ public:
             delete M_coarse;
         delete B_Global;
 
+        delete M_lvl;
+
         d_td_coarse_R->Mult(Truesig_c,sig_c);
 
         for (int k = ref_levels-1; k>=0; k--){

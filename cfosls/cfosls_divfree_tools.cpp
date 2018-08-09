@@ -1309,8 +1309,6 @@ void LocalProblemSolver::SolveTrueLocalProblems(BlockVector& truerhs_func, Block
                         Op_blks(blk1,blk2)->GetSubMatrix(*Local_inds[blk1], *Local_inds[blk2], *LocalAE_Matrices(blk1,blk2));
 
                     } // end of the block for non-optimized version
-
-
                 }
             } // end of loop over all blocks in the functional
 
