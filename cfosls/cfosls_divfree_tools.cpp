@@ -317,7 +317,8 @@ CoarsestProblemHcurlSolver::~CoarsestProblemHcurlSolver()
     delete coarse_prec;
     for ( int blk1 = 0; blk1 < coarse_matrix->NumRowBlocks(); ++blk1)
         for ( int blk2 = 0; blk2 < coarse_matrix->NumColBlocks(); ++blk2)
-            if ( !(blk1 == 1 && blk2 == 1) && coarse_matrix->IsZeroBlock(blk1, blk2) == false)
+            //if ( !(blk1 == 1 && blk2 == 1) && coarse_matrix->IsZeroBlock(blk1, blk2) == false)
+            if ( coarse_matrix->IsZeroBlock(blk1, blk2) == false)
                 delete &(coarse_matrix->GetBlock(blk1, blk2));
     delete coarse_matrix;
 
@@ -3344,7 +3345,7 @@ HcurlGSSSmoother::~HcurlGSSSmoother()
     //delete CTMC_global;
     for (int blk1 = 0; blk1 < numblocks; ++blk1)
         for (int blk2 = 0; blk2 < numblocks; ++blk2)
-            if (blk1 == 0 || blk2 == 0)
+            if (HcurlFunct_global(blk1,blk2))
                 delete HcurlFunct_global(blk1,blk2);
 
     for (int i = 0; i < Smoothers.Size(); ++i)

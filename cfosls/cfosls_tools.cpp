@@ -2944,11 +2944,13 @@ BlockMatrix* FOSLSProblem::ConstructFunctBlkMat(const Array<int>& offsets)
     int num_unknowns = fe_formul.GetFormulation()->Nunknowns();
 
     Array2D<SparseMatrix*> funct_blocks(num_unknowns, num_unknowns);
+    for (int i = 0; i < num_unknowns; ++i)
+        for (int j = 0; j < num_unknowns; ++j)
+            funct_blocks(i,j) = NULL;
 
     for (int i = 0; i < num_unknowns; ++i)
         for (int j = 0; j < num_unknowns; ++j)
         {
-            funct_blocks(i,j) = NULL;
             if (i == j)
             {
                 if (fe_formul.GetFormulation()->GetBlfi(i,j, false))
