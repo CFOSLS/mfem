@@ -29,13 +29,26 @@ protected:
     HypreParMatrix* Restrict_bot;
     HypreParMatrix* Restrict_top;
 
-    // used in CorrectFromInitCond
+    // used in CorrectFromInitCond()
     Vector* temp_vec1;
     Vector* temp_vec2;
 
 protected:
+    // One of the key functions of the class.
+    // Constructs a tdof link (as a vector of pairs) between tdofs at the top
+    // and bottom bases of the cylinder
+    // Depending on the values of init_cond_space, it's either a link for RT0 or
+    // linear H1 f.e. tdofs
     void ConstructTdofLink();
+
+    // Creates a HypreParMatrix which restricts a vector of tdofs in the entire domain into
+    // the vector of tdofs at the boundary base only (top or bottom)
     void ConstructRestrictions();
+
+    // extracts from vector x its values (tdofs) at the top boundary of the cylinder
+    void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
+
+    void ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) const;
 
 public:
     virtual ~FOSLSCylProblem()
@@ -93,13 +106,6 @@ public:
     // given output parameter sol
     void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top, bool compute_error) const;
 
-protected:
-    // extracts from vector x its values (tdofs) at the top boundary of the cylinder
-    void ExtractTopTdofs(const Vector& x, Vector& bnd_tdofs_top) const;
-
-    void ExtractBotTdofs(const Vector& x, Vector& bnd_tdofs_bot) const;
-
-public:
     void CorrectFromInitCnd(const Vector& bnd_tdofs_bot, Vector& vec) const
     { CorrectFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot, vec);}
 

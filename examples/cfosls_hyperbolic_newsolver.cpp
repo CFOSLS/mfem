@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define NEW_INTERFACE
-//#define NEW_INTERFACE2
+#define NEW_INTERFACE2
 #define BRANDNEW_INTERFACE
 
 // (de)activates solving of the discrete global problem
