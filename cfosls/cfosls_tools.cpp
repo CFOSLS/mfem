@@ -5103,7 +5103,6 @@ RAPBlockHypreOperator::RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &
 
             //HypreParMatrix * op_block = RAP(Rt_blk_i, A_blk_ij, P_blk_j);
             SetBlock(i,j, op_block);
-
         }
 
     owns_blocks = true;
@@ -7318,6 +7317,10 @@ void EliminateBoundaryBlocks(BlockOperator& BlockOp, const std::vector<Array<int
             Eliminate_ib_block(*op_blk, *temp_dom, *temp_range );
 
             HypreParMatrix * temphpmat = op_blk->Transpose();
+            temphpmat->CopyColStarts();
+            temphpmat->CopyRowStarts();
+            delete op_blk;
+
             Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
             op_blk = temphpmat->Transpose();
 
