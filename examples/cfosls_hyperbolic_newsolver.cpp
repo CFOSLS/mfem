@@ -1233,6 +1233,10 @@ int main(int argc, char *argv[])
 
                 Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom, *temp_dom );
                 HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,0)->Transpose();
+                temphpmat->CopyColStarts();
+                temphpmat->CopyRowStarts();
+                delete (*Funct_hpmat_lvls[l])(0,0);
+
                 Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
                 (*Funct_hpmat_lvls[l])(0,0) = temphpmat->Transpose();
                 Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(0,0), *temp_dom);
@@ -2633,6 +2637,9 @@ int main(int argc, char *argv[])
 
     //delete Divfree_dop;
     //delete DivfreeT_dop;
+
+    delete DivfreeT_dop;
+
     delete rhside_Hdiv;
 
     chrono.Stop();
@@ -6124,8 +6131,16 @@ int main(int argc, char *argv[])
     delete hierarchy;
     delete problem;
 
+    delete problem_mgtools;
+
+    delete Constraint_global;
+
     delete descriptor;
     delete mgtools_hierarchy;
+
+    for (unsigned int i = 0; i < Funct_global_lvls.size(); ++i)
+        if (i > 0)
+            delete Funct_global_lvls[i];
 
     for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
         delete fullbdr_attribs[i];

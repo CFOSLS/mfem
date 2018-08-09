@@ -2058,7 +2058,7 @@ public:
 
     virtual void SetOperator(const Operator &op) { }
 
-    ~Multigrid()
+    virtual ~Multigrid()
     {
         for (int l = 0; l < Operators_.Size(); l++)
         {
