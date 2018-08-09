@@ -1876,13 +1876,13 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             offsets[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, space_names_divfree);
-            P_mg[l] = new BlkInterpolationWithBNDforTranspose(
-                        *hierarchy->ConstructTruePforFormul(l, space_names_divfree,
-                                                            *offsets[l], *offsets[l + 1]),
-                        *coarsebnd_indces_divfree_lvls[l],
-                        *offsets[l], *offsets[l + 1]);
+
             BlockP_mg_nobnd[l] = hierarchy->ConstructTruePforFormul(l, space_names_divfree,
                                                                     *offsets[l], *offsets[l + 1]);
+            P_mg[l] = new BlkInterpolationWithBNDforTranspose(
+                        *BlockP_mg_nobnd[l],
+                        *coarsebnd_indces_divfree_lvls[l],
+                        *offsets[l], *offsets[l + 1]);
         }
 
         if (l == 0)
@@ -1940,6 +1940,7 @@ int main(int argc, char *argv[])
         HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
 
         ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(1, precS);
+        ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->owns_blocks = true;
     }
 
     ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
@@ -5967,7 +5968,7 @@ int main(int argc, char *argv[])
         delete C_space_lvls[l];
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             delete H_space_lvls[l];
-        delete pmesh_lvls[l];
+        //delete pmesh_lvls[l];
 
         if (l < num_levels - 1)
         {
@@ -6207,6 +6208,15 @@ int main(int argc, char *argv[])
 
     delete GeneralMGprec;
     delete GeneralMGprec_plus;
+
+#ifdef OLD_CODE
+    for (unsigned int i = 0; i < EssBdrTrueDofs_HcurlFunct_lvls.size(); ++i)
+        for (unsigned int j = 0; j < EssBdrTrueDofs_HcurlFunct_lvls[i].size(); ++j)
+            delete EssBdrTrueDofs_HcurlFunct_lvls[i][j];
+#endif
+
+    for (unsigned int i = 0; i < offsets.size(); ++i)
+        delete offsets[i];
 
     for (unsigned int i = 0; i < dtd_row_offsets.size(); ++i)
         delete dtd_row_offsets[i];

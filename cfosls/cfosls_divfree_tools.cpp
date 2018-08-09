@@ -4202,6 +4202,11 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
     delete time_smoother_lvls;
 #endif
 
+    if (built_on_mgtools)
+        for (unsigned int i = 0; i < essbdrtruedofs_Func.size(); ++i)
+            for (unsigned int j = 0; j < essbdrtruedofs_Func[i].size(); ++j)
+                delete essbdrtruedofs_Func[i][j];
+
     if (own_data)
     {
         //...

@@ -1056,7 +1056,7 @@ protected:
                const BlockVector &previous_sol, BlockVector &next_sol) const;
 
 public:
-    ~GeneralMinConstrSolver();
+    virtual ~GeneralMinConstrSolver();
 
     GeneralMinConstrSolver(int size, MultigridToolsHierarchy& mgtools_hierarchy_, bool with_local_smoothers_,
                            bool optimized_localsolvers_, bool with_hcurl_smoothers_,
