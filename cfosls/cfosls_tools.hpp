@@ -3167,11 +3167,13 @@ protected:
     Array<BlockMatrix*> Funct_mat_lvls;
     Array<SparseMatrix*> Constraint_mat_lvls;
 
-    // HypreParMatrix objects are actually owned
+    // HypreParMatrix objects are actually owned by the hierarchy
     std::deque<std::vector<HypreParMatrix*> > d_td_Funct_lvls;
     BlockOperator * d_td_Funct_coarsest;
     Array<int> d_td_coarsest_row_offsets;
     Array<int> d_td_coarsest_col_offsets;
+
+    Array<BlockMatrix*> el2dofs_funct_lvls;
 
     std::deque<Array<int>* > el2dofs_row_offsets;
     std::deque<Array<int>* > el2dofs_col_offsets;

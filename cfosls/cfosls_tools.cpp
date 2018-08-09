@@ -931,6 +931,9 @@ MultigridToolsHierarchy::~MultigridToolsHierarchy()
     if (d_td_Funct_coarsest)
         delete d_td_Funct_coarsest;
     //MFEM_ABORT("Not implemented \n");
+
+    for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
+        delete el2dofs_funct_lvls[i];
 }
 
 
@@ -986,6 +989,8 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
 
     if (descr.with_Schwarz || descr.with_coarsest_partfinder)
     {
+        el2dofs_funct_lvls.SetSize(nlevels - 1);
+
         Funct_mat_lvls.SetSize(nlevels);
         Funct_mat_lvls[0] = problem->ConstructFunctBlkMat(*offsets_sp_funct[0]);
 
@@ -1146,6 +1151,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
             el2dofs_row_offsets[l] = new Array<int>();
             el2dofs_col_offsets[l] = new Array<int>();
 
+            el2dofs_funct_lvls[l] = hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                               el2dofs_col_offsets[l]);
+
             AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
             if (numblocks_funct > 1) // S is present
             {
@@ -1154,8 +1162,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
                          //hierarchy.GetDofTrueDof(*space_names_funct, l),
                          d_td_Funct_lvls[l],
                          *AE_e_lvls[l],
-                         *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
-                                                     el2dofs_col_offsets[l]),
+                         //*hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                     //el2dofs_col_offsets[l]),
+                         *el2dofs_funct_lvls[l],
                          *hierarchy.GetElementToDofs(SpaceName::L2, l),
                          //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
                          fullbdr_dofs_funct,
@@ -1170,8 +1179,9 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
                          //hierarchy.GetDofTrueDof(*space_names_funct, l),
                          d_td_Funct_lvls[l],
                          *AE_e_lvls[l],
-                         *hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
-                                                     el2dofs_col_offsets[l]),
+                         //*hierarchy.GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                     //el2dofs_col_offsets[l]),
+                         *el2dofs_funct_lvls[l],
                          *hierarchy.GetElementToDofs(SpaceName::L2, l),
                          //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
                          fullbdr_dofs_funct,
@@ -1213,7 +1223,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
     for (int i = 0; i < space_names_problem->Size(); ++i)
         coarse_size += hierarchy.GetSpace((*space_names_problem)[i], nlevels - 1)->TrueVSize();
 
-    Array<int> row_offsets_coarse, col_offsets_coarse;
+    //Array<int> row_offsets_coarse, col_offsets_coarse;
 
     std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
             hierarchy.GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, nlevels - 1);
@@ -1461,6 +1471,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             Array<int> * el2dofs_row_offsets_new = new Array<int>();
             Array<int> * el2dofs_col_offsets_new = new Array<int>();
 
+            el2dofs_funct_lvls.Prepend(hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
+                                                                  el2dofs_col_offsets_new));
+
             SparseMatrix * AE_e_new = Transpose(*hierarchy.GetPspace(SpaceName::L2, 0));
             AE_e_lvls.Prepend(AE_e_new);
 
@@ -1478,8 +1491,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                           d_td_Funct_lvls[0],
                           //hierarchy.GetDofTrueDof(*space_names_funct, 0),
                          *AE_e_lvls[0],
-                         *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
-                                                     el2dofs_col_offsets_new),
+                         //*hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
+                                                     //el2dofs_col_offsets_new),
+                         *el2dofs_funct_lvls[0],
                          *hierarchy.GetElementToDofs(SpaceName::L2, 0),
                          //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
                          fullbdr_dofs_funct_0,
@@ -1494,8 +1508,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                          d_td_Funct_lvls[0],
                          //hierarchy.GetDofTrueDof(*space_names_funct, 0),
                          *AE_e_lvls[0],
-                         *hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
-                                                     el2dofs_col_offsets_new),
+                         //*hierarchy.GetElementToDofs(*space_names_funct, 0, el2dofs_row_offsets_new,
+                                                     //el2dofs_col_offsets_new),
+                         *el2dofs_funct_lvls[0],
                          *hierarchy.GetElementToDofs(SpaceName::L2, 0),
                          //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
                          fullbdr_dofs_funct_0,
@@ -1600,8 +1615,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                                      //hierarchy.GetDofTrueDof(*space_names_funct, l),
                                      d_td_Funct_lvls[l],
                                      *AE_e_lvls[l],
-                                     *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
-                                                                 *el2dofs_col_offsets[l]),
+                                     //*hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                                 //*el2dofs_col_offsets[l]),
+                                     *el2dofs_funct_lvls[l],
                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
                                      //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
                                      fullbdr_dofs_funct,
@@ -1616,8 +1632,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                                      //hierarchy.GetDofTrueDof(*space_names_funct, l),
                                      d_td_Funct_lvls[l],
                                      *AE_e_lvls[l],
-                                     *hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
-                                                                 *el2dofs_col_offsets[l]),
+                                     //*hierarchy.GetElementToDofs(*space_names_funct, l, *el2dofs_row_offsets[l],
+                                                                 //*el2dofs_col_offsets[l]),
+                                     *el2dofs_funct_lvls[l],
                                      *hierarchy.GetElementToDofs(SpaceName::L2, l),
                                      //hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
                                      fullbdr_dofs_funct,
@@ -1755,8 +1772,7 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
 {
     estimators.SetSize(0);
 
-    InitSpacesFromHierarchy(*hierarchy,
-                            *fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitSpacesFromHierarchy(*hierarchy, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
 
@@ -1791,8 +1807,7 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
 {
     estimators.SetSize(0);
 
-    InitSpacesFromHierarchy(*hierarchy, level,
-                            *fe_formulation.GetFormulation()->GetSpacesDescriptor());
+    InitSpacesFromHierarchy(*hierarchy, level, *fe_formulation.GetFormulation()->GetSpacesDescriptor());
     InitForms();
     InitGrFuns();
 
