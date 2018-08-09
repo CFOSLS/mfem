@@ -1949,6 +1949,10 @@ public:
 //#ifdef COMPARE_MG
             Eliminate_ib_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l], *essbdrtdofs_lvls[Operators_.Size() - l] );
             HypreParMatrix * temphpmat = Operators_[l-1]->Transpose();
+            temphpmat->CopyColStarts();
+            temphpmat->CopyRowStarts();
+            delete Operators_[l-1];
+
             Eliminate_ib_block(*temphpmat, *essbdrtdofs_lvls[Operators_.Size() - l], *essbdrtdofs_lvls[Operators_.Size() - l] );
             Operators_[l-1] = temphpmat->Transpose();
             Operators_[l-1]->CopyColStarts();

@@ -1252,7 +1252,8 @@ int main(int argc, char *argv[])
 
             if (strcmp(space_for_S,"H1") == 0)
             {
-                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[num_levels - 2 - (l-1)], (*Funct_hpmat_lvls[l-1])(1,1), TrueP_H[num_levels - 2 - (l-1)]);
+                (*Funct_hpmat_lvls[l])(1,1) = RAP(TrueP_H[num_levels - 2 - (l-1)], (*Funct_hpmat_lvls[l-1])(1,1),
+                        TrueP_H[num_levels - 2 - (l-1)]);
                 //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
                 //(*Funct_hpmat_lvls[l])(1,1)->CopyRowStarts();
 
@@ -1261,6 +1262,10 @@ int main(int argc, char *argv[])
 
                     Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom, *temp_dom );
                     HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(1,1)->Transpose();
+                    temphpmat->CopyColStarts();
+                    temphpmat->CopyRowStarts();
+                    delete (*Funct_hpmat_lvls[l])(1,1);
+
                     Eliminate_ib_block(*temphpmat, *temp_dom, *temp_dom );
                     (*Funct_hpmat_lvls[l])(1,1) = temphpmat->Transpose();
                     Eliminate_bb_block(*(*Funct_hpmat_lvls[l])(1,1), *temp_dom);
@@ -1285,6 +1290,10 @@ int main(int argc, char *argv[])
 
                     Eliminate_ib_block(*(*Funct_hpmat_lvls[l])(0,1), *temp_dom, *temp_range );
                     HypreParMatrix * temphpmat = (*Funct_hpmat_lvls[l])(0,1)->Transpose();
+                    temphpmat->CopyColStarts();
+                    temphpmat->CopyRowStarts();
+                    delete (*Funct_hpmat_lvls[l])(0,1);
+
                     Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                     (*Funct_hpmat_lvls[l])(0,1) = temphpmat->Transpose();
                     (*Funct_hpmat_lvls[l])(0,1)->CopyRowStarts();
