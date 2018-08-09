@@ -235,7 +235,6 @@ void FOSLSCylProblem::ConvertInitCndToFullVector(const Vector& vec_in, Vector& v
     }
 }
 
-// it is assumed that CFOSLSop_nobnd was already created
 // Takes the vector which stores inhomogeneous bdr values and zeros
 // and computes the new vector which has the same boundary values
 // but also a contribution from inhomog. bdr conditions (input) to the other rhs values
@@ -265,25 +264,12 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
 
 void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff)
 {
-    //Vector * initcond_fullvec = new Vector(GlobalTrueProblemSize());
-    //ConvertInitCndToFullVector(init_cond, *initcond_fullvec);
-
-
-    //Vector * rhs_correction = new Vector(GlobalTrueProblemSize());
-    //ConvertBdrCndIntoRhs(*initcond_fullvec, *rhs_correction);
-
-    //*rhs_correction *= coeff;
-    //vec_out += *rhs_correction;
-
     ConvertInitCndToFullVector(init_cond, *temp_vec1);
 
     ConvertBdrCndIntoRhs(*temp_vec1, *temp_vec2);
 
     *temp_vec2 *= coeff;
     vec_out += *temp_vec2;
-
-    //delete initcond_fullvec;
-    //delete rhs_correction;
 }
 
 

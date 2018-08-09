@@ -22,6 +22,11 @@ namespace mfem
 /// 2) bot = bottom ~ bottom base of the cylinder
 /// 3) top ~ top base of the cylinder
 /// 4) tdofs link ~ link ~ see ConstructTdofLink()
+/// Remark: Be careful about the difference between the boundary
+/// where initial condition is defined and the essential boundary.
+/// Initial condition is specified at the bottom base but it might not coincide
+/// with the essential boundary (e.g, for parabolic problem).
+/// The code was not actually tested against that case.
 class FOSLSCylProblem : virtual public FOSLSProblem
 {
 public:
@@ -118,11 +123,20 @@ public:
     // given output parameter sol
     void Solve(const Vector& rhs, const Vector& bnd_tdofs_bot, Vector& sol, Vector& bnd_tdofs_top, bool compute_error) const;
 
+    // Takes a vector defined at the bottom base, and then
+    // modifes the non-boundary entries of vec as
+    // vec -= op * Extend_from_BotBase * bnd_tdofs_bot
+    // and sets the essential boundary entries to
+    // vec = bnd_tdofs_bot
+    void CorrectFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot, Vector& vec) const;
+
+    // The same as the previous except it uses internal CFOSLSop_nobnd as op
     void CorrectFromInitCnd(const Vector& bnd_tdofs_bot, Vector& vec) const
     { CorrectFromInitCnd(*CFOSLSop_nobnd, bnd_tdofs_bot, vec);}
 
-    void CorrectFromInitCnd(const Operator& op, const Vector& bnd_tdofs_bot, Vector& vec) const;
-
+    // Takes a vector of size of initial condition
+    // and computes
+    // vec_out += coeff * Restrict_to_essbdr * CFOSLSop_nobnd * Extend_from_BotBase * init_cond
     void CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff);
 
     // vec_in is considered as a vector defined only at the bottom base,
@@ -130,9 +144,9 @@ public:
     // has 0's for all the rest entries
     void ConvertInitCndToFullVector(const Vector& vec_in, Vector& vec_out);
 
-    // Takes a vector of values corresponding to the essential boundary condition
-    // and computes the corresponding change to the rhs side
-    // vec_out = Restrict_to_boundary * CFOSLSop_nobnd * vec_in
+    // Takes a vector of full problem size and computes the corresponding change
+    // to the rhs side as
+    // vec_out = Restrict_to_essbdr * CFOSLSop_nobnd * vec_in
     void ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out);
 
     // Checks the error for the given vector of values (only at the boundary tdofs)
@@ -161,6 +175,10 @@ public:
     int GetInitCondSize() const { return tdofs_link.size();}
 };
 
+// Specific children of FOSLSCylProblem
+// These classes were created as a solution to a "diamond" inheritance problem
+// when it was required to create objects which are both FOSLSCylProblem and a particular
+// FOSLSProblem's child at the same time
 class FOSLSCylProblem_HdivL2L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
 {
 public:
