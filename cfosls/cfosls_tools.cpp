@@ -6875,6 +6875,7 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in)
 // Eliminates all entries in the Operator acting in a pair of spaces,
 // assembled as a HypreParMatrix, which connect internal dofs to boundary dofs
 // Used to modife the Curl and Divskew operator for the new multigrid solver
+// Works "in place" with the input HypreParMatrix
 void Eliminate_ib_block(HypreParMatrix& Op_hpmat, const Array<int>& EssBdrTrueDofs_dom,
                         const Array<int>& EssBdrTrueDofs_range )
 {

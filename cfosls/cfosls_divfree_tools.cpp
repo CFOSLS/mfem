@@ -4382,15 +4382,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
     truetempblock_lvls[0] = new BlockVector(*offsets_funct[0]);
 
     for (int l = 0; l < num_levels - 1; ++l)
-    {
         LocalSolvers_lvls[l] = mgtools_hierarchy->GetSchwarzSmoothers()[l];
-
-        truesolupdate_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
-        truetempvec_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
-        truetempvec2_lvls[l + 1]  = new BlockVector(*offsets_funct[l + 1]);
-        trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
-        truetempblock_lvls[l + 1] = new BlockVector(*offsets_funct[l + 1]);
-    }
 
     CoarseSolver = mgtools_hierarchy->GetCoarsestSolver_Partfinder();
 #ifdef CHECK_CONSTR

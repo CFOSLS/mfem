@@ -1940,8 +1940,8 @@ int main(int argc, char *argv[])
         HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
 
         ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->SetDiagonalBlock(1, precS);
-        ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->owns_blocks = true;
     }
+    ((BlockDiagonalPreconditioner*)CoarsePrec_mg)->owns_blocks = true;
 
     ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
 
@@ -2317,6 +2317,7 @@ int main(int argc, char *argv[])
             if (verbose)
                 std::cout << "Success \n";
 
+        delete constrfform;
     }
 #endif
 
@@ -3287,6 +3288,8 @@ int main(int argc, char *argv[])
     Array<Operator*> Smoo_mg_plus(nlevels - 1);
     Operator* CoarseSolver_mg_plus;
 
+    Array<SparseMatrix*> AE_e_lvls(nlevels - 1);
+
     Array<BlockMatrix*> el2dofs_funct_lvls(num_levels - 1);
     std::deque<std::vector<HypreParMatrix*> > d_td_Funct_lvls(num_levels - 1);
 
@@ -3445,14 +3448,14 @@ int main(int argc, char *argv[])
 
             d_td_Funct_lvls[l] = hierarchy->GetDofTrueDof(space_names_funct, l);
 
-            SparseMatrix * P_L2_T = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
+            AE_e_lvls[l] = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS(size, *Funct_mat_lvls_mg[l],
                                                          *Constraint_mat_lvls_mg[l],
                                                          //hierarchy->GetDofTrueDof(space_names_funct, l),
                                                          d_td_Funct_lvls[l],
-                                                         *P_L2_T,
+                                                         *AE_e_lvls[l],
                                                          //*hierarchy->GetElementToDofs(space_names_funct, l,
                                                                                      //el2dofs_row_offsets[l],
                                                                                      //el2dofs_col_offsets[l]),
@@ -3472,7 +3475,7 @@ int main(int argc, char *argv[])
                                                                   *Constraint_mat_lvls_mg[l],
                                                                   //hierarchy->GetDofTrueDof(space_names_funct, l),
                                                                   d_td_Funct_lvls[l],
-                                                                  *P_L2_T,
+                                                                  *AE_e_lvls[l],
                                                                   //*hierarchy->GetElementToDofs(space_names_funct, l,
                                                                                               //el2dofs_row_offsets[l],
                                                                                               //el2dofs_col_offsets[l]),
@@ -5934,9 +5937,8 @@ int main(int argc, char *argv[])
             if (Smoothers_lvls[l])
                 delete Smoothers_lvls[l];
 #endif
+        delete Divfree_hpmat_mod_lvls[l];
 
-        if (l < num_levels - 1)
-            delete Divfree_hpmat_mod_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))
@@ -5968,7 +5970,6 @@ int main(int argc, char *argv[])
         delete C_space_lvls[l];
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             delete H_space_lvls[l];
-        //delete pmesh_lvls[l];
 
         if (l < num_levels - 1)
         {
@@ -6198,6 +6199,12 @@ int main(int argc, char *argv[])
     for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
         delete el2dofs_funct_lvls[i];
 
+    for (int i = 0; i < AE_e_lvls.Size(); ++i)
+        delete AE_e_lvls[i];
+
+    for (int i = 0; i < Mass_mat_lvls.Size(); ++i)
+        delete Mass_mat_lvls[i];
+
     delete CoarseSolver_mg;
     delete CoarsePrec_mg;
     delete CoarseSolver_mg_plus;
@@ -6214,6 +6221,9 @@ int main(int argc, char *argv[])
         for (unsigned int j = 0; j < EssBdrTrueDofs_HcurlFunct_lvls[i].size(); ++j)
             delete EssBdrTrueDofs_HcurlFunct_lvls[i][j];
 #endif
+
+    for (int i = 0; i < pmesh_lvls.Size(); ++i)
+         delete pmesh_lvls[i];
 
     for (unsigned int i = 0; i < offsets.size(); ++i)
         delete offsets[i];
