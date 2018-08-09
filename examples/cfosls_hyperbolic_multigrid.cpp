@@ -952,6 +952,7 @@ int main(int argc, char *argv[])
     Array<SparseMatrix*> AE_e_lvls(num_levels - 1);
 
     Array<BlockMatrix*> el2dofs_funct_lvls(num_levels - 1);
+    std::deque<std::vector<HypreParMatrix*> > d_td_Funct_lvls(num_levels - 1);
 
     /*
     // Deallocating memory
@@ -1111,12 +1112,16 @@ int main(int argc, char *argv[])
             el2dofs_funct_lvls[l] = hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
                                                                 el2dofs_col_offsets[l]);
 
+            d_td_Funct_lvls[l] = hierarchy->GetDofTrueDof(space_names_funct, l);
+
             AE_e_lvls[l] = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0) // S is present
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
                         (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
-                         hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
+                         //hierarchy->GetDofTrueDof(space_names_funct, l),
+                         d_td_Funct_lvls[l],
+                         *AE_e_lvls[l],
                          //*hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
                                                       //el2dofs_col_offsets[l]),
                          *el2dofs_funct_lvls[l],
@@ -1131,7 +1136,9 @@ int main(int argc, char *argv[])
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolver
                         (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
-                         hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
+                         //hierarchy->GetDofTrueDof(space_names_funct, l),
+                         d_td_Funct_lvls[l],
+                         *AE_e_lvls[l],
                          //*hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
                                                       //el2dofs_col_offsets[l]),
                          *el2dofs_funct_lvls[l],
@@ -1168,7 +1175,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Creating the new coarsest solver which works in the div-free subspace \n" << std::flush;
 
-    std::vector<Array<int> * > fullbdr_tdofs_funct_coarse =
+    std::vector<Array<int> * > essbdr_tdofs_funct_coarse1 =
             hierarchy->GetEssBdrTdofsOrDofs("tdof", space_names_funct, essbdr_attribs, num_levels - 1);
 
     Array<int> * essbdr_hcurl_coarse = hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
@@ -1180,11 +1187,11 @@ int main(int argc, char *argv[])
                                                      //hierarchy->GetEssBdrTdofsOrDofs("tdof",
                                                                                      //space_names_funct,
                                                                                      //essbdr_attribs, num_levels - 1),
-                                                     fullbdr_tdofs_funct_coarse,
+                                                     essbdr_tdofs_funct_coarse1,
                                                      *essbdr_hcurl_coarse);
 
-    for (unsigned int i = 0; i < fullbdr_tdofs_funct_coarse.size(); ++i)
-        delete fullbdr_tdofs_funct_coarse[i];
+    for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse1.size(); ++i)
+        delete essbdr_tdofs_funct_coarse1[i];
     delete essbdr_hcurl_coarse;
 
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->SetMaxIter(100);
@@ -1241,8 +1248,6 @@ int main(int argc, char *argv[])
 
     std::vector<Array<int>* > essbdr_dofs_funct_coarse =
             hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, essbdr_attribs, num_levels - 1);
-
-
 
     CoarsestProblemSolver* CoarsestSolver_partfinder_new =
             new CoarsestProblemSolver(coarse_size,

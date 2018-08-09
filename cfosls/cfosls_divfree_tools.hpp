@@ -563,6 +563,7 @@ protected:
 
     // Relation tables which represent agglomerated elements-to-elements relation at each level
     // used in ProjectFinerL2ToCoarser (and further in ComputeLocalRhsConstr)
+    // not owned by the object if not built on mgtools
     Array<SparseMatrix*> AE_e;
 
     const MPI_Comm comm;
