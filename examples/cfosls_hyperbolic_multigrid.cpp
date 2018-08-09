@@ -1487,6 +1487,9 @@ int main(int argc, char *argv[])
     for (int i = 0; i < Smoo_mg.Size(); ++i)
         delete Smoo_mg[i];
 
+    for (int i = 0; i < Smoo_mg_plus.Size(); ++i)
+        delete Smoo_mg_plus[i];
+
     for (int i = 0; i < P_mg_plus.Size(); ++i)
         delete P_mg_plus[i];
 
@@ -1521,6 +1524,7 @@ int main(int argc, char *argv[])
     delete CoarsestSolver_partfinder_new;
 #endif
 
+    delete GeneralMGprec;
     delete GeneralMGprec_plus;
 
     for (unsigned int i = 0; i < dtd_row_offsets.size(); ++i)

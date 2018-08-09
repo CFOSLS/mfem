@@ -2963,7 +2963,7 @@ protected:
    int nblocks;
    const Array<int>& offsets;
 public:
-   virtual ~RAPBlockHypreOperator() = default;
+   virtual ~RAPBlockHypreOperator() {}
    /// Construct the RAP operator given R^T, A and P as a block operators
    /// with each block being a HypreParMatrix
    RAPBlockHypreOperator(BlockOperator &Rt_, BlockOperator &A_, BlockOperator &P_, const Array<int>& Offsets);
