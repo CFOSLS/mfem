@@ -948,6 +948,8 @@ int main(int argc, char *argv[])
     Array<BlockMatrix*> Funct_mat_lvls_mg(num_levels);
     Array<SparseMatrix*> AE_e_lvls(num_levels - 1);
 
+    Array<BlockMatrix*> el2dofs_funct_lvls(num_levels - 1);
+
     /*
     // Deallocating memory
     delete hierarchy;
@@ -1065,6 +1067,7 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             Array<int> SweepsNum(numblocks_funct);
+
             SweepsNum = ipow(1, l);
             if (verbose)
             {
@@ -1102,14 +1105,18 @@ int main(int argc, char *argv[])
             el2dofs_row_offsets[l] = new Array<int>();
             el2dofs_col_offsets[l] = new Array<int>();
 
+            el2dofs_funct_lvls[l] = hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
+                                                                el2dofs_col_offsets[l]);
+
             AE_e_lvls[l] = Transpose(*hierarchy->GetPspace(SpaceName::L2, l));
             if (strcmp(space_for_S,"H1") == 0) // S is present
             {
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
                         (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
                          hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
-                         *hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
-                                                      el2dofs_col_offsets[l]),
+                         //*hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
+                                                      //el2dofs_col_offsets[l]),
+                         *el2dofs_funct_lvls[l],
                          *hierarchy->GetElementToDofs(SpaceName::L2, l),
                          //hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, fullbdr_attribs, l),
                          fullbdr_dofs_funct,
@@ -1122,8 +1129,9 @@ int main(int argc, char *argv[])
                 SchwarzSmoothers_lvls[l] = new LocalProblemSolver
                         (size, *Funct_mat_lvls_mg[l], *Constraint_mat_lvls_mg[l],
                          hierarchy->GetDofTrueDof(space_names_funct, l), *AE_e_lvls[l],
-                         *hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
-                                                      el2dofs_col_offsets[l]),
+                         //*hierarchy->GetElementToDofs(space_names_funct, l, el2dofs_row_offsets[l],
+                                                      //el2dofs_col_offsets[l]),
+                         *el2dofs_funct_lvls[l],
                          *hierarchy->GetElementToDofs(SpaceName::L2, l),
                          //hierarchy->GetEssBdrTdofsOrDofs("dof", space_names_funct, fullbdr_attribs, l),
                          fullbdr_dofs_funct,
@@ -1499,6 +1507,9 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < AE_e_lvls.Size(); ++i)
         delete AE_e_lvls[i];
+
+    for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
+        delete el2dofs_funct_lvls[i];
 
     delete CoarsePrec_mg;
     delete CoarseSolver_mg_plus;

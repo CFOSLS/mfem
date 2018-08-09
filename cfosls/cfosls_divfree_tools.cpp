@@ -388,7 +388,7 @@ void CoarsestProblemHcurlSolver::Setup() const
                 }
                 else
                 {
-                    HcurlFunct_global(blk1, blk2)  = Funct_blk;
+                    HcurlFunct_global(blk1, blk2) = Funct_blk;
                 }
 
 //#ifdef COMPARE_MG
@@ -434,8 +434,8 @@ void CoarsestProblemHcurlSolver::Setup() const
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
                 temphpmat->CopyColStarts();
                 temphpmat->CopyRowStarts();
-                //if (blk1 == 0 || blk2 == 0)
-                    //delete HcurlFunct_global(blk1, blk2);
+                if (blk1 == 0 || blk2 == 0)
+                    delete HcurlFunct_global(blk1, blk2);
 
                 Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                 HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
@@ -4116,8 +4116,8 @@ void HcurlGSSSmoother::Setup() const
                 HypreParMatrix * temphpmat = HcurlFunct_global(blk1, blk2)->Transpose();
                 temphpmat->CopyColStarts();
                 temphpmat->CopyRowStarts();
-                //if (blk1 == 0 || blk2 == 0)
-                    //delete HcurlFunct_global(blk1, blk2);
+                if (blk1 == 0 || blk2 == 0)
+                    delete HcurlFunct_global(blk1, blk2);
 
                 Eliminate_ib_block(*temphpmat, *temp_range, *temp_dom );
                 HcurlFunct_global(blk1, blk2) = temphpmat->Transpose();
