@@ -187,21 +187,21 @@ public:
 // These classes were created as a solution to a "diamond" inheritance problem
 // when it was required to create objects which are both FOSLSCylProblem and a particular
 // FOSLSProblem's child at the same time
-class FOSLSCylProblem_HdivL2L2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
+class FOSLSCylProblem_HdivL2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
 {
 public:
-    FOSLSCylProblem_HdivL2L2hyp(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivL2hyp(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           FOSLSProblem_HdivL2L2hyp(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 
-    FOSLSCylProblem_HdivL2L2hyp(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
+    FOSLSCylProblem_HdivL2hyp(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
                    FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Hierarchy, level, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_HdivL2L2hyp(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivL2hyp(Hierarchy, level, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 };
 
@@ -224,18 +224,46 @@ public:
 };
 
 /// Generic class-wrapper for doing time-stepping (~ time-slabbing) in CFOSLS
-/// Problem is assumed to be at least of type FOSLSProblem (or it's children)
+/// Contained problems is assumed to be at least of type FOSLSProblem (or it's children)
+/// The general setup is that we are solving a problem in a time cylinder which
+/// is split into multiple time slabs (each being a cylinder itself)
+/// Terms:
+/// 1) entire domain = entire time cylinder domain (to distinguish from a time slab)
+/// 2) slab ~ time slab, one of the time cylinders which is a part of the entire domain
+/// 3) global vector ~ vector defined in the entire domain as a set of time slabs.
+/// (!) This means that this vector actually have two values at each interface between time slabs,
+/// one from the first time slab (as top base values) and one from the second (as bottom base
+/// values)
 template <class Problem> class TimeStepping
 {
 protected:
+    // stores the offsets w.r.t to the time slabs,
+    // e.g. global_offsets[1] - global_offsets[0] = size of the problem
+    // related to the first time slab
     Array<int> global_offsets;
+
+    // object doesn't own the problems, it merely copies them via a call to
+    // SetProblems()
     Array<Problem*> timeslabs_problems;
+
+    // to each time-like boundary t = const, i.e. bottom and top bases
+    // of the entire domain and interfaces between time slabs
+    // two vectors are assigned, called base_inputs[i] and
+    // base outputs[i], i = 0, .. N(time slabs)
+    // These are used to transfer information between time slabs
     Array<Vector*>  base_inputs;
+
+    // See above
     Array<Vector*>  base_outputs;
+
     bool verbose;
+
     bool problems_initialized;
+
+    // number of time slabs
     int nslabs;
 
+    // temporary vector used in UpdateInterfaceFromPrev()
     Vector * vecbase_temp;
 
 protected:
@@ -267,17 +295,39 @@ public:
         vecbase_temp = new Vector(timeslabs_problems[0]->GetInitCondSize());
     }
 
-
+    // Performs a sequential solve (sequential-in-time) with a given init_vector
+    // at the bottom base of the entire domain (and the bottom base of the first time slab)
     void SequentialSolve(const Vector &init_vector, bool compute_error);
+
+    // The same as previous but also takes in the given global rhs vector
     void SequentialSolve(const Vector& rhs, const Vector &init_vector, bool compute_error);
-    void SequentialSolve(const Vector& rhs, const Vector &init_vector, Vector& sol, bool compute_error);
 
+    // The same as previous but also copies the computed solutions within time slabs into
+    // the output Vector sol
+    void SequentialSolve(const Vector& rhs, const Vector &init_vector, Vector& sol,
+                         bool compute_error);
+
+    // Takes a bunch of initial vectors at bottom bases for the time slabs
+    // and performs a solve within each time slab
+    // It's called parallel because it is parallel-in-time,
+    // each time slab problem depends only on the corresponding init_vector
+    // and doesn't depend on other time slabs
     void ParallelSolve(const Array<Vector*> &init_vectors, bool compute_error) const;
+
+    // The same as previous, but also takes the global rhs vector as an input
     void ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, bool compute_error) const;
-    void ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, Vector& sol, bool compute_error) const;
 
-    Array<Vector*>& GetSolutions();
+    // The same as previous, but computes the solution into the global output Vector sol
+    // (actually, it copies the internal solutions within each time slab into the output)
+    void ParallelSolve(const Vector& rhs, const Array<Vector*> &init_vectors, Vector& sol,
+                       bool compute_error) const;
 
+    // decides whether it is required to change the sign when transferring
+    // interface values between time slabs
+    // e.g., if we transfer values of Hdiv function, then since the normal vector
+    // flips its sign after corssing the interface between slabs, we should change the sign
+    // if we want to take values from a grid function from Hdiv at the top base of the
+    // previous time slab and use them as initial data for the next one.
     bool NeedSignSwitch(SpaceName space_name) const
     {
         switch (space_name)
@@ -295,34 +345,65 @@ public:
         return false;
     }
 
+    // Takes a vector of the entire time cylinder's problem size and
+    // converts it into an array of Vectors, which of those corresponds
+    // to a time slab
+    // FIXME: Is there a memory leak here?
+    Array<Vector*> & ConvertFullvecIntoArray(const Vector& x);
+
+    // Opposite to ConvertFullvecIntoArray()
+    // output vector must be allocated in advance
+    void ConvertArrayIntoFullvec(const Array<Vector*>& vec_inputs, Vector& out);
+
+    // Applies a sequential (in a time-stepping fashion) solution of the entire problem
+    // x is treated as the global righthand side
+    // init_bot are the initial values, at the bottom base of the very first time slab
+    void SeqOp(const Vector& x, const Vector* init_bot, Vector& y) const;
+
+    // See above, this one takes zero initial values
+    // This is useful for certain multigrid-in-time algorithms
+    // e.g, through the class TimeSteppingSeqOp
+    void SeqOp(const Vector& x, Vector& y) const { SeqOp(x, NULL, y);}
+
+    // Computes a global analytical (from the FOSLStest) rhs vector,
+    // for the entire problem, by computing analytical righthand side
+    // in each time slab
+    void ComputeGlobalRhs(Vector& rhs);
+
+    // takes a vector, and in each time slab sets the boundary values to zero
+    // (at the essential part of the boundary)
+    void ZeroBndValues(Vector& vec);
+
+    // Takes a global vector (for the entire problem) and extracts within each time slab
+    // it's values on top or bottom base.
+    // FIXME: A memory leak here?
+    Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const;
+
+    // Takes a global vector, and for each time slab except the first one,
+    // sets it's values on the bottom base from the previous time slab's top values
+    // (*) doesn't do any sign switch
+    void UpdateInterfaceFromPrev(Vector& vec) const;
+
+    // various getters
+
+    // getting solutions from all time slabs
+    Array<Vector*>& GetSolutions();
+
     const Array<int>& GetGlobalOffsets() const {return global_offsets;}
 
     Problem * GetProblem(int i) {return timeslabs_problems[i];}
-
-    Array<Vector*> & ConvertFullvecIntoArray(const Vector& x);
-    void ConvertArrayIntoFullvec(const Array<Vector*>& vec_inputs, Vector& out);
 
     int GetGlobalProblemSize() const { return global_offsets[nslabs]; }
 
     int GetInitCondSize() const
     { return timeslabs_problems[0]->GetInitCondSize();}
 
-    void SeqOp(const Vector& x, Vector& y) const { SeqOp(x, NULL, y);}
-    void SeqOp(const Vector& x, const Vector* init_bot, Vector& y) const;
-
     int Nslabs() const {return nslabs;}
 
-    void ComputeGlobalRhs(Vector& rhs);
-
-    void ZeroBndValues(Vector& vec);
-
+    // routines for computing errors for a global vector
     void ComputeError(const Vector& vec) const;
 
     void ComputeBndError(const Vector& vec) const;
-
-    Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const;
-
-    void UpdateInterfaceFromPrev(Vector& vec) const;
 };
 
 template <class Problem>
@@ -619,77 +700,6 @@ Array<Vector*>& TimeStepping<Problem>::GetSolutions()
     return *res;
 }
 
-/*
-template <class Problem>
-Array<int>& TimeStepping<Problem>::GetGlobalOffsets() const
-{
-    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
-
-    Array<int> * res = new Array<int>(nslabs + 1);
-    (*res)[0] = 0;
-    for (int tslab = 0; tslab < nslabs; ++tslab)
-    {
-        Problem * tslab_problem = timeslabs_problems[tslab];
-        (*res)[tslab + 1] = (*res)[tslab] + tslab_problem->GlobalTrueProblemSize();
-    }
-
-    return *res;
-}
-*/
-
-/*
-// FIXME: Why not converting into a BlockVector?
-template <class Problem>
-Array<Vector*> & TimeStepping<Problem>::ConvertFullVecIntoInitConds(const Vector& x)
-{
-    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
-    MFEM_ASSERT(x.Size() == GetGlobalProblemSize(), "Input vector size mismatch the global problem size!");
-
-    Array<Vector*> * res = new Array<Vector*>(nslabs);
-
-    BlockVector x_viewer(x.GetData(), GetGlobalOffsets());
-
-    for (int tslab = 0; tslab < nslabs; ++tslab)
-    {
-        Problem * tslab_problem = timeslabs_problems[tslab];
-
-        res[tslab] = tslab_problem->ExtractAtBase("bot")
-
-        res[tslab] = new Vector(tslab_problem->GlobalTrueProblemSize());
-
-        *(*res)[tslab] = x_viewer.GetBlock(tslab);
-    }
-
-    return *res;
-}
-*/
-
-/*
-template <class Problem>
-void TimeStepping<Problem>::ConvertFullVecIntoInitConds(const Vector& x)
-{
-    MFEM_ASSERT(problems_initialized, "Cannot solve if the problems are not set");
-    MFEM_ASSERT(x.Size() == GetGlobalProblemSize(), "Input vector size mismatch the global problem size!");
-
-    BlockVector x_viewer(x.GetData(), GetGlobalOffsets());
-
-    for (int tslab = 0; tslab < nslabs; ++tslab)
-    {
-        Problem * tslab_problem = timeslabs_problems[tslab];
-
-        *base_inputs[tslab] =
-
-
-        res[tslab] = tslab_problem->ExtractAtBase("bot")
-
-        res[tslab] = new Vector(tslab_problem->GlobalTrueProblemSize());
-
-        *(*res)[tslab] = x_viewer.GetBlock(tslab);
-    }
-
-}
-*/
-
 
 // FIXME: Do we really need that?
 template <class Problem>
@@ -707,6 +717,7 @@ void TimeStepping<Problem>::ConvertArrayIntoFullvec(const Array<Vector*>& vec_in
 }
 
 // FIXME: Why not converting into a BlockVector?
+// FIXME: It's a memory leak?
 template <class Problem>
 Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
 {
@@ -776,44 +787,59 @@ void TimeStepping<Problem>::SeqOp(const Vector& x, const Vector *init_bot, Vecto
 
 }
 
-// classes for time-stepping related operators used as components for constructing GeneralMultigrid instance
+// classes for time-stepping related operators used as components for
+// constructing GeneralMultigrid instance to be used for parallel-in-time algorothms
 
+/// Generic class for two-grid time-stepping schemes
+/// aka parallel-in-time
+/// This class is merely a wrapper around two time-stepping objects
+/// which correspond to the fine and coarse meshes, plus interpolation between them
+/// Terms:
+/// See terms for TimeStepping class
 template <class Problem> class TwoGridTimeStepping
 {
 protected:
     int nslabs;
+
+    // not owned by the object
     Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies;
 
     // fine problems are owned by cyl_probhierarchies
     Array<Problem*> fine_problems;
     Array<int> fine_global_offsets;
+
+    // fine-grid time-stepping, built from finest levels in cyl_probhierarchies
     TimeStepping<Problem> * fine_timestepping;
 
     // coarse problems are owned by cyl_probhierarchies
     Array<Problem*> coarse_problems;
     Array<int> coarse_global_offsets;
+
+    // coarse-grid time-stepping, built from coarsest (second) levels in cyl_probhierarchies
     TimeStepping<Problem> * coarse_timestepping;
 
+    // a "global" operator which interpolates global vectors from the coarse mesh
+    // (actually, coarse meshES in time slabs) to fine mesh
     BlockOperator * interpolation_op;
     BlockOperator * interpolation_op_withbnd;
+
     bool verbose;
 
 protected:
+
     void ConstructFineTimeStp();
+
     void ConstructCoarseTimeStp();
+
     void ConstructGlobalInterpolation();
+
     void ConstructGlobalInterpolationWithBnd();
 
 public:
     virtual ~TwoGridTimeStepping()
     {
-        //for (int i = 0; i < fine_problems.Size(); ++i)
-            //delete fine_problems[i];
         delete fine_timestepping;
-
         delete coarse_timestepping;
-        //for (int i = 0; i < coarse_problems.Size(); ++i)
-            //delete coarse_problems[i];
 
         delete interpolation_op;
         delete interpolation_op_withbnd;
@@ -827,23 +853,31 @@ public:
         fine_global_offsets.SetSize(nslabs + 1);
         fine_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
-            fine_global_offsets[tslab + 1] = fine_global_offsets[tslab] + fine_problems[tslab]->GlobalTrueProblemSize();
+            fine_global_offsets[tslab + 1] = fine_global_offsets[tslab] +
+                    fine_problems[tslab]->GlobalTrueProblemSize();
 
         ConstructCoarseTimeStp();
         coarse_global_offsets.SetSize(nslabs + 1);
         coarse_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
-            coarse_global_offsets[tslab + 1] = coarse_global_offsets[tslab] + coarse_problems[tslab]->GlobalTrueProblemSize();
+            coarse_global_offsets[tslab + 1] = coarse_global_offsets[tslab] +
+                    coarse_problems[tslab]->GlobalTrueProblemSize();
 
         ConstructGlobalInterpolation();
         ConstructGlobalInterpolationWithBnd();
     }
 
+    // getters
     TimeStepping<Problem> * GetFineTimeStp() { return fine_timestepping;}
+
     TimeStepping<Problem> * GetCoarseTimeStp() { return coarse_timestepping;}
+
     BlockOperator * GetGlobalInterpolationOp() { return interpolation_op;}
+
     BlockOperator * GetGlobalInterpolationOpWithBnd() { return interpolation_op_withbnd;}
+
     Array<int>& GetFineOffsets() {return fine_global_offsets;}
+
     Array<int>& GetCoarseOffsets() {return coarse_global_offsets;}
 };
 
@@ -921,14 +955,26 @@ void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolationWithBnd()
     }
 }
 
-
+/// Generic class for a smoother built on a parallel-in-time algorithm
+/// Used as component for parallel-in-time GeneralMultigrid objects
+/// Terms: See terms of TimeStepping class
 template <class Problem> class TimeSteppingSmoother : public Operator
 {
     int nslabs;
+    // doesn't own this
     TimeStepping<Problem> &time_stepping;
+
+    // Temporary zero vectors used in Mult()
+    // One might get rid of them, these seem to be redundant
     Array<Vector*> initvec_inputs; // always 0's
     bool verbose;
 public:
+    virtual ~TimeSteppingSmoother()
+    {
+        for (int i = 0; i < initvec_inputs.Size(); ++i)
+            delete initvec_inputs[i];
+    }
+
     TimeSteppingSmoother(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : Operator(time_stepping_.GetGlobalProblemSize()),
           nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_), verbose(verbose_)
@@ -941,10 +987,16 @@ public:
         }
     }
 
+    // Performs a parallel solve, using x as global rhs vector,
+    // and initvec_inputs (which are always zero) as initial values for each time slab
     void Mult(const Vector &x, Vector &y) const override;
 
+    // FIXME: Is anyone using it?
     Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const
     { return time_stepping.ExtractAtBases(top_or_bot, fullvec); }
+
+    // Getter (unused)
+    // TimeStepping<Problem> & GetTimeStepping() { return time_stepping;}
 };
 
 template <class Problem>
@@ -962,15 +1014,29 @@ void TimeSteppingSmoother<Problem>::Mult(const Vector &x, Vector &y) const
     time_stepping.ParallelSolve(x, initvec_inputs, y, compute_error);
 }
 
+/// Generic class for a solve operator built on a sequential time-stepping soving algorithm
+/// Used as component for parallel-in-time GeneralMultigrid objects
+/// Actually, it's an Operator wrapper around sequential time-stepping algorithm
+/// with zero starting guess
+/// Terms: See terms of TimeStepping class
 template <class Problem> class TimeSteppingSolveOp : public BlockOperator
 {
 protected:
     int nslabs;
+    // doesn't own this
     TimeStepping<Problem> &time_stepping;
+
+    // doesn't own this
     const Array<int>& global_offsets;
+
     bool verbose;
+
+    // Temporary zero vector (used as zero starting guess in Mult())
+    // One might get rid of this, it's redundant
     Vector init_vec;
+
 public:
+    virtual ~TimeSteppingSolveOp() {}
     TimeSteppingSolveOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : BlockOperator(time_stepping_.GetGlobalOffsets()),
           nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
@@ -980,6 +1046,8 @@ public:
         init_vec = 0.0;
     }
 
+    // Peforms a sequential solve with x as a global rhs vector, and init_vec (always zero)
+    // as starting values at the botom base of the entire domain
     void Mult(const Vector &x, Vector &y) const override;
 
     Array<Vector*>& ExtractAtBases(const char * top_or_bot, const Vector& fullvec) const
@@ -1040,19 +1108,33 @@ void TimeSteppingSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
     */
 }
 
+/// Generic class for an operator action built on a sequential time-stepping algorithm
+/// operator. Unlike TimeSteppingSolveOp, this one corresponds to an action of the
+/// sequential time-stepping operator rather than corresponding solution operator
+/// Used as component for parallel-in-time GeneralMultigrid objects
+/// Actually, it's an Operator wrapper around sequential time-stepping operator action
+/// SeqOp()
+/// Terms: See terms of TimeStepping class
 template <class Problem> class TimeSteppingSeqOp : public BlockOperator
 {
     int nslabs;
+    // doesn't own this
     TimeStepping<Problem> &time_stepping;
+
+    // doesn't own this
     const Array<int>& global_offsets;
+
     bool verbose;
 public:
+    virtual ~TimeSteppingSeqOp() {}
+
     TimeSteppingSeqOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : BlockOperator(time_stepping_.GetGlobalOffsets()),
           nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
           global_offsets(time_stepping_.GetGlobalOffsets()),
           verbose(verbose_) {}
 
+    // Simply calls SeqOp() for the underlying time-stepping instance
     void Mult(const Vector &x, Vector &y) const override
     {
         /*
@@ -1101,16 +1183,27 @@ public:
 
 };
 
+/// Generic class for ...
+/// Terms: See terms of TimeStepping class
 template <class Problem> class TSTSpecialSolveOp : public BlockOperator
 {
 protected:
     int nslabs;
+
+    // doesn't own this
     TimeStepping<Problem> &time_stepping;
+
+    // doesn't own this
     const Array<int>& global_offsets;
+
     bool verbose;
+
+    // Temporary vectors used in Mult()
     Vector * init_vec;
     Vector * init_vec2;
 public:
+    virtual ~TSTSpecialSolveOp() { delete init_vec; delete init_vec2; }
+
     TSTSpecialSolveOp(TimeStepping<Problem> &time_stepping_, bool verbose_)
         : BlockOperator(time_stepping_.GetGlobalOffsets()),
           nslabs(time_stepping_.Nslabs()), time_stepping(time_stepping_),
@@ -1198,81 +1291,10 @@ void TSTSpecialSolveOp<Problem>::Mult(const Vector &x, Vector &y) const
     *init_vec = 0.0;
 }
 
-
-
-/*
-template <class Problem> class TwoGridTimeST
-{
-protected:
-    int nslabs;
-    Array<FOSLSCylProblHierarchy<Problem> *>& cylproblems_hierarchies;
-    Array<Problem*> timeslabs_fineproblems;
-    TimeStepping<Problem> * fine_timestepping;
-    std::vector<Vector*> timeslabs_fineresiduals;
-    Array<Problem*> timeslabs_coarseproblems;
-    TimeStepping<Problem> * coarse_timestepping;
-    std::vector<Vector*> timeslabs_coarseresiduals;
-    bool verbose;
-public:
-    TwoGridTimeST(Array<FOSLSCylProblHierarchy<Problem> *>& tslabs_probl_hierarchy, bool verbose_)
-        : nslabs(tslabs_probl_hierarchy.Size()), cylproblems_hierarchies(tslabs_probl_hierarchy), verbose(verbose_)
-    {
-        timeslabs_fineproblems.SetSize(nslabs);
-        timeslabs_coarseproblems.SetSize(nslabs);
-        timeslabs_fineresiduals.resize(nslabs);
-        timeslabs_coarseresiduals.resize(nslabs);
-        for (int tslab = 0; tslab < nslabs; ++tslab)
-        {
-            MFEM_ASSERT(cylproblems_hierarchies[tslab]->Nlevels() >= 2, "Each problem hierarchy must have at least two levels");
-            timeslabs_fineproblems[tslab] = cylproblems_hierarchies[tslab]->GetProblem(0);
-            timeslabs_coarseproblems[tslab] = cylproblems_hierarchies[tslab]->GetProblem(1);
-
-            timeslabs_fineresiduals[tslab] = new Vector(timeslabs_fineproblems[tslab]->GlobalTrueProblemSize());
-            timeslabs_coarseresiduals[tslab] = new Vector(timeslabs_coarseproblems[tslab]->GlobalTrueProblemSize());
-        }
-
-        fine_timestepping = new TimeStepping<Problem>(timeslabs_fineproblems, verbose);
-        coarse_timestepping = new TimeStepping<Problem>(timeslabs_coarseproblems, verbose);
-    }
-
-    void Iterate();
-    void SmootherAction();
-    void Restrict();
-    void Interpolate();
-    void CoarseSolve(const Vector &vec_in, std::vector<Vector *> &corrections);
-};
-
-template <class Problem> void TwoGridTimeST<Problem>::Restrict()
-{
-
-}
-
-template <class Problem> void TwoGridTimeST<Problem>::Interpolate()
-{
-
-}
-
-template <class Problem> void TwoGridTimeST<Problem>::CoarseSolve(const Vector& vec_in, std::vector<Vector*> & corrections)
-{
-    MFEM_ASSERT((int)(corrections.size()) == nslabs, "Incorrect number of Vectors for the output argument!");
-
-    coarse_timestepping->SequentialSolve(vec_in, verbose);
-    for (int tslab = 0; tslab < nslabs; ++tslab)
-    {
-        *correction[tslab] = timeslabs_coarseproblems[tslab]->GetSol();
-    }
-}
-
-template <class Problem> void TwoGridTimeST<Problem>::Iterate()
-{
-
-}
-
-*/
-
-
-
 //#####################################################################################################
+/// Some legacy code, which was the first attempt to implement timm-slabbing
+/// Then it was used for checks and debugging of the newer version (which uses above declared classes)
+/// And now it's probably not used anymore (except some archive examples)
 
 // abstract base class for a problem in a time cylinder
 class TimeCyl

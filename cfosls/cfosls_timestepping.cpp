@@ -341,7 +341,10 @@ void FOSLSCylProblem::ComputeErrorAtBase(const char * top_or_bot, const Vector& 
     delete Xout_exact;
 }
 
-//#######################################################################################################################
+//#####################################################################################################
+/// Some legacy code, which was the first attempt to implement timm-slabbing
+/// Then it was used for checks and debugging of the newer version (which uses above declared classes)
+/// And now it's probably not used anymore (except some archive examples)
 
 TimeCyl::~TimeCyl()
 {
