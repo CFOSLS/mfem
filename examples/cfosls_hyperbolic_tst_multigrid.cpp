@@ -610,9 +610,8 @@ int main(int argc, char *argv[])
    BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
    fine_timestepping->ZeroBndValues(mg_rhs);
 
-   Vector input_tslab0(fine_timestepping->GetInitCondSize());
-   input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
-   //fine_timestepping->GetProblem(0)->SetAtBase("bot", input_tslab0, mg_rhs_viewer.GetBlock(0));
+   Vector * input_tslab0 = fine_timestepping->GetProblem(0)->GetExactBase("bot");
+   //fine_timestepping->GetProblem(0)->SetAtBase("bot", *input_tslab0, mg_rhs_viewer.GetBlock(0));
 
    // first, to check, we solve with seq. solve on the finest level and compute the error
 
@@ -621,16 +620,16 @@ int main(int argc, char *argv[])
 
 
    //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
-   //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(input_tslab0, temp_vec);
+   //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(*input_tslab0, temp_vec);
 
    Vector checksol(spacetime_mg->Width());
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol, true);
+   fine_timestepping->SequentialSolve(mg_rhs, *input_tslab0, checksol, true);
 
    Vector checkres(spacetime_mg->Width());
    BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
 
-   fine_timestepping->SeqOp(checksol, &input_tslab0, checkres);
+   fine_timestepping->SeqOp(checksol, input_tslab0, checkres);
    checkres -= mg_rhs;
    checkres *= -1;
 
@@ -665,7 +664,7 @@ int main(int argc, char *argv[])
    //return 0;
 
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
-   fine_timestepping->GetProblem(0)->CorrectFromInitCnd(input_tslab0, mg_rhs_viewer.GetBlock(0));
+   fine_timestepping->GetProblem(0)->CorrectFromInitCnd(*input_tslab0, mg_rhs_viewer.GetBlock(0));
    fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
 
 #if 0
@@ -677,11 +676,11 @@ int main(int argc, char *argv[])
 
 
    //Operator * FineOp_tstp = new TimeSteppingSolveOp<ProblemType>(*fine_timestepping, verbose);
-   input_tslab0 = 0.0;
+   *input_tslab0 = 0.0;
 
    Vector checksol2(spacetime_mg->Width());
    BlockVector checksol2_viewer(checksol2.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->SequentialSolve(mg_rhs, input_tslab0, checksol2, false);
+   fine_timestepping->SequentialSolve(mg_rhs, *input_tslab0, checksol2, false);
    checksol2 += mg_x0;
 
    fine_timestepping->ComputeBndError(checksol2);
@@ -930,13 +929,17 @@ int main(int argc, char *argv[])
 
    delete CoarseOp_tstp;
 
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+       delete timeslabs_pmeshcyls[tslab];
+
+   delete input_tslab0;
+
    delete pmeshbase;
    delete pmesh;
 
    delete bdr_conds;
    delete formulat;
    delete fe_formulat;
-
 
    MPI_Finalize();
    return 0;

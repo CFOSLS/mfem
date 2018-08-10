@@ -6595,6 +6595,8 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
     res->CopyRowStarts();
     res->CopyColStarts();
 
+    delete resT;
+
     //std::cout << "Got after resT creation \n";
 
     return res;
@@ -6671,7 +6673,7 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
                 res->push_back(std::pair<int,int>(bel_dofs_first[0], bel_dofs_second[0]));
             }
 
-        }
+        } // end of if (strcmp(eltype, "RT0") == 0)
 
         if (strcmp(eltype, "linearH1") == 0)
         {
@@ -6823,9 +6825,13 @@ std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, Fi
                           << bel_dofs_second[dofno_second] << "> \n";
             }
 
+            delete [] verts_permutation_first;
+            delete [] verts_permutation_second;
+            delete [] verts_perm_first_inverse;
+
             if (verbose)
                std::cout << "\n";
-        }
+        } // end of if (strcmp(eltype, "linearH1") == 0)
 
     } // end of loop over all pairs of boundary elements
 

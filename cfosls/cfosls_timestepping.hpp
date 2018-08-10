@@ -264,7 +264,7 @@ protected:
     int nslabs;
 
     // temporary vector used in UpdateInterfaceFromPrev()
-    Vector * vecbase_temp;
+    mutable Vector vecbase_temp;
 
 protected:
     void SetProblems(Array<Problem*>& timeslabs_problems_);
@@ -276,8 +276,6 @@ public:
             delete base_inputs[i];
         for (int i = 0; i < base_outputs.Size(); ++i)
             delete base_outputs[i];
-
-        delete vecbase_temp;
     }
 
     TimeStepping(Array<Problem*>& timeslabs_problems_, bool verbose_)
@@ -292,7 +290,7 @@ public:
             global_offsets[tslab + 1] = timeslabs_problems[tslab]->GlobalTrueProblemSize();
         global_offsets.PartialSum();
 
-        vecbase_temp = new Vector(timeslabs_problems[0]->GetInitCondSize());
+        vecbase_temp.SetSize(timeslabs_problems[0]->GetInitCondSize());
     }
 
     // Performs a sequential solve (sequential-in-time) with a given init_vector
@@ -433,9 +431,9 @@ void TimeStepping<Problem>::UpdateInterfaceFromPrev(Vector& vec) const
         Problem * prev_problem = timeslabs_problems[tslab - 1];
         Problem * problem = timeslabs_problems[tslab];
 
-        *vecbase_temp = prev_problem->ExtractAtBase("top", vec_viewer.GetBlock(tslab - 1));
+        prev_problem->ExtractAtBase("top", vec_viewer.GetBlock(tslab - 1), vecbase_temp);
 
-        problem->SetAtBase("bot", *vecbase_temp, vec_viewer.GetBlock(tslab));
+        problem->SetAtBase("bot", vecbase_temp, vec_viewer.GetBlock(tslab));
     }
 
 }
@@ -950,6 +948,10 @@ void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolationWithBnd()
         Array<int>* coarser_bnd_indices = cyl_probhierarchy->ConstructBndIndices(coarse_level);
         Operator * InterpolationOpWithBnd = new InterpolationWithBNDforTranspose(
                     *cyl_probhierarchy->GetTrueP(fine_level), coarser_bnd_indices);
+
+        // the constructor of InterpolationWithBNDforTranspose above actually copies the bnd indices
+        // inside itself so we can delete memory here
+        delete coarser_bnd_indices;
 
         interpolation_op_withbnd->SetDiagonalBlock(tslab, InterpolationOpWithBnd);
     }

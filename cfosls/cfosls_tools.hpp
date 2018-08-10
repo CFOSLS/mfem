@@ -585,7 +585,7 @@ protected:
     // a wrapper around UniformRefinement which also allows one to refine a ParMeshCyl
     // with its modified Refine() routine
     // used in constructing the hierarchy of meshes
-    void RefineAndCopy(int lvl, ParMesh* pmesh);
+    virtual void RefineAndCopy(int lvl, ParMesh* pmesh);
 
 };
 
@@ -3045,14 +3045,23 @@ class InterpolationWithBNDforTranspose : public Operator
 {
 protected:
     Operator& P;
-    // doesn't own them
+    // owns them or not, depending on which constructor was called
     Array<int> * bnd_indices;
+    bool own_bnd_indices;
 public:
+    virtual ~InterpolationWithBNDforTranspose()
+    {
+        if (own_bnd_indices)
+            delete bnd_indices;
+    }
+
     InterpolationWithBNDforTranspose(Operator& P_, Array<int>& BndIndices_)
-        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(&BndIndices_) {}
+        : Operator(P_.Height(), P_.Width()), P(P_), bnd_indices(&BndIndices_),
+          own_bnd_indices(false)
+    {}
 
     InterpolationWithBNDforTranspose(Operator& P_, Array<int>* BndIndices_)
-        : Operator(P_.Height(), P_.Width()), P(P_)
+        : Operator(P_.Height(), P_.Width()), P(P_), own_bnd_indices(true)
     {
         MFEM_ASSERT(BndIndices_, "Bnd indices must not be NULL as an input argument");
         bnd_indices = new Array<int>(BndIndices_->Size());
