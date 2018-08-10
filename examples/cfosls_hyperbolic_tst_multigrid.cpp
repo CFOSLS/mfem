@@ -1,6 +1,7 @@
 ///                       CFOSLS formulation for transport equation in 3D/4D
-///                         solved with a parallel-in-time multigrid
-///                             (similar to parareal and XBraid)
+///                         solved with a two-grid parallel-in-time multigrid
+///                             (similar to the idea of parareal)
+/// TODO: Add algorithm description
 
 #include "mfem.hpp"
 #include <fstream>
@@ -13,9 +14,10 @@
 #define MYZEROTOL (1.0e-13)
 #define ZEROTOL (1.0e-13)
 
+// makes use of a test with nonhomogeneous initial condition
 #define NONHOMO_TEST
 
-// must be active
+// must be active (activates construction of the mesh from the base (lower-dimensional mesh)
 #define USE_TSL
 
 using namespace std;
@@ -41,8 +43,10 @@ int main(int argc, char *argv[])
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
+   // filename for the input mesh, is used only if USE_TSL is not defined
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
+   // filename for the input base mesh
    const char *meshbase_file = "../data/star.mesh";
    int Nt = 4;
    double tau = 0.25;
@@ -55,7 +59,6 @@ int main(int argc, char *argv[])
 
    // solver options
    int prec_option = 1; //defines whether to use preconditioner or not, and which one
-   bool use_ADS;
 
    int feorder = 0;
    bool visualization = 0;
@@ -134,31 +137,15 @@ int main(int argc, char *argv[])
        }
    }
 
-   switch (prec_option)
-   {
-   case 1: // smth simple like AMS
-       use_ADS = false;
-       break;
-   case 2: // MG
-       use_ADS = true;
-       break;
-   default: // no preconditioner
-       break;
-   }
+   MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
+               "Formulation must be cfosls or fosls!\n");
+   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
+               "Space for S must be H1 or L2!\n");
+   MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
+               "Space for sigma must be Hdiv or H1!\n");
 
-   if (verbose)
-   {
-       std::cout << "use_ADS = " << use_ADS << "\n";
-   }
-
-   MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
-   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
-   MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
-
-   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
-   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && use_ADS == false), "ADS cannot be used when sigma is from H1vec!\n");
-
-   StopWatch chrono;
+   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0),
+               "Sigma from H1vec must be coupled with S from H1!\n");
 
 #ifdef NONHOMO_TEST
    if (nDimensions == 3)
@@ -172,6 +159,8 @@ int main(int argc, char *argv[])
        numsol = -4;
 #endif
 
+   // 3. Createing a cylinder mesh from the given base mesh
+   // and do necessary number of serial and parallel refinements
 #ifdef USE_TSL
    if (verbose)
        std::cout << "USE_TSL is active (mesh is constructed using mesh generator) \n";
@@ -220,18 +209,7 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   /*
-   int nslabs = 3;
-   Array<int> slabs_widths(nslabs);
-   slabs_widths[0] = Nt / 2;
-   slabs_widths[1] = Nt / 2 - 1;
-   slabs_widths[2] = 1;
-   ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt, nslabs, &slabs_widths);
-   */
-
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
-
-   //pmesh->PrintSlabsStruct();
 
    /*
    if (num_procs == 1)
@@ -321,9 +299,7 @@ int main(int argc, char *argv[])
    std::cout << std::flush;
    MPI_Barrier(comm);
 
-   if (verbose)
-      std::cout << "Checking a single solve from a one TimeCylHyper instance "
-                    "created for the entire domain \n";
+   // 4. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g., here)
 
    // Hdiv-H1 case
    using FormulType = CFOSLSFormulation_HdivH1Hyper;
@@ -343,11 +319,16 @@ int main(int argc, char *argv[])
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
-   //ProblemType * problem = new ProblemType
+   // if we wanted to solve the problem in the entire domain, we could have used this
+   /*
+   ProblemType * problem = new ProblemType
            //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   //problem->Solve(verbose);
+   problem->Solve(verbose);
+   */
 
+   // if we wanted to solve the problem in the entire domain via a hierarchy of meshes,
+   // we could have used this
    /*
    int nlevels = 2;
    GeneralCylHierarchy * hierarchy = new GeneralCylHierarchy(nlevels, *pmesh, 0, verbose);
@@ -375,11 +356,12 @@ int main(int argc, char *argv[])
        problems[l]->Solve(verbose);
    */
 
+   // 5. Define the time slabs structure (how many, how many time steps within each
+   // the time slab width in time steps
    int nslabs = 2;//4;//2;
    double slab_tau = 0.125;//1.0/16;//0.125;
    int slab_width = 4; // in time steps (as time intervals) withing a single time slab
    Array<ParMeshCyl*> timeslabs_pmeshcyls(nslabs);
-   //Array<ProblemType*> timeslabs_problems(nslabs);
 
    if (verbose)
    {
@@ -389,21 +371,32 @@ int main(int argc, char *argv[])
        std::cout << "time step within a time slab: " << slab_tau << "\n";
    }
 
+   // 6. Creating time cylinder meshes for each time slab
    double tinit_tslab = 0.0;
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
 
-       //timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
-       //timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
-
        tinit_tslab += slab_tau * slab_width;
    }
 
-   MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
-                                                 "[0,1] but the upper bound doesn't match \n");
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+       delete timeslabs_pmeshcyls[tslab];
 
-   // creating a set of problems hierarchies (a hierarchy per time slab)
+   delete pmeshbase;
+   delete pmesh;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
+
+   MPI_Finalize();
+   return 0;
+
+   MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
+                                                  "[0,1] but the upper bound doesn't match \n");
+
+   // 7. Creating a set of problems hierarchies (a hierarchy per time slab)
    int two_grid = 2;
    Array<GeneralCylHierarchy*> cyl_hierarchies(nslabs);
    Array<FOSLSCylProblHierarchy<ProblemType, GeneralCylHierarchy>* > cyl_probhierarchies(nslabs);
@@ -416,12 +409,15 @@ int main(int argc, char *argv[])
                (*cyl_hierarchies[tslab], 2, *bdr_conds, *fe_formulat, prec_option, verbose);
    }
 
+   // 8. Creating a two-grid time-stepping object which creates and gives access to
+   // fine- and coarse- time-stepping over time slabs
    TwoGridTimeStepping<ProblemType> * twogrid_tstp =
            new TwoGridTimeStepping<ProblemType>(cyl_probhierarchies, verbose);
 
-   // creating fine and coarse time-stepping and interpolation operator between them
    TimeStepping<ProblemType> * fine_timestepping = twogrid_tstp->GetFineTimeStp();
+   TimeStepping<ProblemType> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
 
+   // some debugging part which survived, maybe even doesn't compile
 #if 0
    /*
    // testing parallel solve vs separate subdomain solves
@@ -473,21 +469,41 @@ int main(int argc, char *argv[])
    */
 #endif
 
-   TimeStepping<ProblemType> * coarse_timestepping = twogrid_tstp->GetCoarseTimeStp();
+   // 9. Creating components of the parallel-in-time two grid algorithm
+   // which will eventually be used in the form of a specific instance of
+   // GeneralMultigrid
 
+   // interpolation
    Array<Operator*> P_tstp(1);
    P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOp();
    //P_tstp[0] = twogrid_tstp->GetGlobalInterpolationOpWithBnd();
 
    // creating fine-level operator, smoother and coarse-level operator
+
+   // operator action, sequential time-stepping with zero initial value
    Array<Operator*> Ops_tstp(1);
+
+   // smoother, parallel time-stepping with zero initial values
    Array<Operator*> Smoo_tstp(1);
    Array<Operator*> NullSmoo_tstp(1);
+
+   // coarse operator
+   // TODO: Describe this
    Operator* CoarseOp_tstp;
 
    Ops_tstp[0] =
            new TimeSteppingSeqOp<ProblemType>(*fine_timestepping, verbose);
 
+   Smoo_tstp[0] =
+           new TimeSteppingSmoother<ProblemType> (*fine_timestepping, verbose);
+
+   CoarseOp_tstp =
+           new TimeSteppingSolveOp<ProblemType>(*coarse_timestepping, verbose);
+   //CoarseOp_tstp =
+           //new TSTSpecialSolveOp<ProblemType>(*coarse_timestepping, verbose);
+   NullSmoo_tstp[0] = NULL;
+
+   // some debugging part which survived, maybe even doesn't compile
 #if 0
    // checking SeqOp
    if (verbose)
@@ -527,6 +543,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+   // some debugging part which survived, maybe even doesn't compile
 #if 0
    // checking SolveOp for the finest level (no coarsening)
    Operator * FineOp_tstp = new TimeSteppingSolveOp<ProblemType>(*fine_timestepping, verbose);
@@ -583,16 +600,8 @@ int main(int argc, char *argv[])
 
 #endif
 
-   Smoo_tstp[0] =
-           new TimeSteppingSmoother<ProblemType> (*fine_timestepping, verbose);
-
-   CoarseOp_tstp =
-           new TimeSteppingSolveOp<ProblemType>(*coarse_timestepping, verbose);
-   //CoarseOp_tstp =
-           //new TSTSpecialSolveOp<ProblemType>(*coarse_timestepping, verbose);
-   NullSmoo_tstp[0] = NULL;
-
-   // finally, creating general multigrid instance
+   // 10. Finally, creating GeneralMultigrid instance which implement the algorithm described
+   // in the beginning of this file
    GeneralMultigrid * spacetime_mg =
            new GeneralMultigrid(two_grid, P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
@@ -667,6 +676,7 @@ int main(int argc, char *argv[])
    fine_timestepping->GetProblem(0)->CorrectFromInitCnd(*input_tslab0, mg_rhs_viewer.GetBlock(0));
    fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
 
+   // some debugging part which survived, maybe even doesn't compile
 #if 0
    // second, to check, we solve with seq. solve on the finest level for the correction
    // and compute the error
@@ -698,6 +708,7 @@ int main(int argc, char *argv[])
    return 0;
 #endif
 
+   // some debugging part which survived, maybe even doesn't compile
 #if 0
    if (verbose)
        std::cout << "Solving for a correction with 1 MG cycle \n";

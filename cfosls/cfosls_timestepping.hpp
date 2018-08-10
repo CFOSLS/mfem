@@ -954,6 +954,7 @@ void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolationWithBnd()
         delete coarser_bnd_indices;
 
         interpolation_op_withbnd->SetDiagonalBlock(tslab, InterpolationOpWithBnd);
+        interpolation_op_withbnd->owns_blocks = true;
     }
 }
 
