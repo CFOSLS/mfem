@@ -211,6 +211,12 @@ int main(int argc, char *argv[])
 
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
 
+   delete pmeshbase;
+   delete pmesh;
+
+   MPI_Finalize();
+   return 0;
+
    /*
    if (num_procs == 1)
    {
@@ -605,6 +611,7 @@ int main(int argc, char *argv[])
    GeneralMultigrid * spacetime_mg =
            new GeneralMultigrid(two_grid, P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
+   // 11. Preparing righthand side for the multigrid solve
    // creating initial guess which satisfies given initial condition for the starting time slab
    Vector mg_x0(spacetime_mg->Width());
    mg_x0 = 0.0;

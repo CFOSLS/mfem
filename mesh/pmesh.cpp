@@ -5165,6 +5165,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         //MarkForRefinement(); -- was working in mfem 3.2
     }
 
+    /*
     if (dim > 1)
     {
        el_to_edge = new Table;
@@ -5174,6 +5175,9 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     {
        NumOfEdges = 0;
     }
+    */
+
+    NumOfEdges = 0;
 
     STable3D *faces_tbl_3d = NULL;
     if ( dim == 3 )
