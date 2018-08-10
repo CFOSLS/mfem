@@ -933,6 +933,7 @@ int main(int argc, char *argv[])
        delete timeslabs_pmeshcyls[tslab];
 
    delete input_tslab0;
+   delete exact_initcond0;
 
    delete pmeshbase;
    delete pmesh;

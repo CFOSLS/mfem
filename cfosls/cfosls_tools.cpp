@@ -6597,6 +6597,12 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 
     delete resT;
 
+    delete local_row_offsets;
+    delete local_col_offsets;
+
+    delete row_starts;
+    delete col_starts;
+
     //std::cout << "Got after resT creation \n";
 
     return res;
