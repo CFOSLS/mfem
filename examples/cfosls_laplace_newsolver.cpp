@@ -3835,9 +3835,7 @@ int main(int argc, char *argv[])
             if (Smoothers_lvls[l])
                 delete Smoothers_lvls[l];
 #endif
-
-        if (l < num_levels - 1)
-            delete Divfree_hpmat_mod_lvls[l];
+        delete Divfree_hpmat_mod_lvls[l];
         for (int blk1 = 0; blk1 < Funct_hpmat_lvls[l]->NumRows(); ++blk1)
             for (int blk2 = 0; blk2 < Funct_hpmat_lvls[l]->NumCols(); ++blk2)
                 if ((*Funct_hpmat_lvls[l])(blk1,blk2))

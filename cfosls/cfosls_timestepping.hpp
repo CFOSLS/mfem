@@ -215,6 +215,8 @@ public:
 
 };
 
+/// Generic class-wrapper for doing time-stepping (~ time-slabbing) in CFOSLS
+/// Problem is assumed to be at least of type FOSLSProblem (or it's children)
 template <class Problem> class TimeStepping
 {
 protected:

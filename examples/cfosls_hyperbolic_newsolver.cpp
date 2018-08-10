@@ -12,7 +12,7 @@
 
 //#define NEW_INTERFACE
 //#define NEW_INTERFACE2
-//#define BRANDNEW_INTERFACE
+#define BRANDNEW_INTERFACE
 
 // (de)activates solving of the discrete global problem
 #define OLD_CODE

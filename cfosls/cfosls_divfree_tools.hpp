@@ -1063,8 +1063,7 @@ public:
                            int stopcriteria_type_, bool verbose_);
 
     // constructor
-    GeneralMinConstrSolver(
-                           MPI_Comm Comm,
+    GeneralMinConstrSolver(MPI_Comm Comm,
                            int NumLevels,
                            Array< BlockOperator*>& TrueProj_Func,
                            std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,

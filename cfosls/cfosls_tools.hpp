@@ -2337,7 +2337,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     for (int l = 0; l < nlevels; ++l )
         CoarsenedOps_nobnd_lvls[l] = NULL;
 
-    //ConstructCoarsenedOps();
+    ConstructCoarsenedOps();
     ConstructCoarsenedOps_nobnd();
 }
 

@@ -2230,11 +2230,12 @@ DivConstraintSolver::~DivConstraintSolver()
     for (int i = 0; i < truesolupdate_lvls.Size(); ++i)
         delete truesolupdate_lvls[i];
 
-    if (own_data)
-    {
+    if (own_data || built_on_mgtools)
         for (int i = 0; i < AE_e.Size(); ++i)
             delete AE_e[i];
 
+    if (own_data)
+    {
         for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
             delete essbdr_tdofs_funct_coarse[i];
 
