@@ -8151,8 +8151,8 @@ void ParMeshCyl::Find_be_ordering(SparseMatrix& BE_AE_be, int BE_index, std::vec
         verts_newverts_link.push_back(std::pair<int,int>(verts_pushed[i],inv_permutation[i]));
     }
 
-    delete permutation;
-    delete inv_permutation;
+    delete [] permutation;
+    delete [] inv_permutation;
 
     if (verbose)
     {
