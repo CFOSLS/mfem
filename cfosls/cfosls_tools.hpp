@@ -2868,12 +2868,11 @@ void FOSLSProblHierarchy<Problem, Hierarchy>::ConstructCoarsenedOps_nobnd()
 /// A hierarchy of problems in the cylinders on a hierarchy of cylinder meshes
 template <class Problem, class Hierarchy> class FOSLSCylProblHierarchy : public FOSLSProblHierarchy<Problem, Hierarchy>
 {
-    // additional routines and data members related to the cylinder structure go here
 public:
+    virtual ~FOSLSCylProblHierarchy() {}
     FOSLSCylProblHierarchy(Hierarchy& hierarchy_, int nlevels_, BdrConditions& bdr_conditions_,
                           FOSLSFEFormulation& fe_formulation_, int precond_option, bool verbose_);
 
-public:
     // Interpolates initial condition between levels at the cylinder bases (top or bottom)
     void InterpolateAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out);
     void RestrictAtBase(const char * top_or_bot, int lvl, const Vector& vec_in, Vector& vec_out)

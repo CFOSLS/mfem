@@ -50,6 +50,7 @@ protected:
     std::vector<std::pair<int,int> > tdofs_link;
 
     // Restriction operators, see ConstructRestrictions()
+    // FIXME: Not used?
     HypreParMatrix* Restrict_bot;
     HypreParMatrix* Restrict_top;
 
@@ -67,6 +68,7 @@ protected:
 
     // Creates a HypreParMatrix which restricts a vector of tdofs in the entire domain into
     // the vector of tdofs at the boundary base only (top or bottom)
+    // FIXME: Not used?
     void ConstructRestrictions();
 
     // extracts from vector x its values (tdofs) at the top boundary of the cylinder
@@ -77,8 +79,8 @@ protected:
 public:
     virtual ~FOSLSCylProblem()
     {
-        delete Restrict_bot;
-        delete Restrict_top;
+        //delete Restrict_bot;
+        //delete Restrict_top;
         delete temp_vec1;
         delete temp_vec2;
     }
@@ -776,10 +778,12 @@ protected:
     int nslabs;
     Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies;
 
+    // fine problems are owned by cyl_probhierarchies
     Array<Problem*> fine_problems;
     Array<int> fine_global_offsets;
     TimeStepping<Problem> * fine_timestepping;
 
+    // coarse problems are owned by cyl_probhierarchies
     Array<Problem*> coarse_problems;
     Array<int> coarse_global_offsets;
     TimeStepping<Problem> * coarse_timestepping;
@@ -787,12 +791,28 @@ protected:
     BlockOperator * interpolation_op;
     BlockOperator * interpolation_op_withbnd;
     bool verbose;
+
 protected:
     void ConstructFineTimeStp();
     void ConstructCoarseTimeStp();
     void ConstructGlobalInterpolation();
     void ConstructGlobalInterpolationWithBnd();
+
 public:
+    virtual ~TwoGridTimeStepping()
+    {
+        //for (int i = 0; i < fine_problems.Size(); ++i)
+            //delete fine_problems[i];
+        delete fine_timestepping;
+
+        delete coarse_timestepping;
+        //for (int i = 0; i < coarse_problems.Size(); ++i)
+            //delete coarse_problems[i];
+
+        delete interpolation_op;
+        delete interpolation_op_withbnd;
+    }
+
     TwoGridTimeStepping(Array<FOSLSCylProblHierarchy<Problem, GeneralCylHierarchy>* >& cyl_probhierarchies_, bool verbose_)
         : nslabs(cyl_probhierarchies_.Size()), cyl_probhierarchies(cyl_probhierarchies_),
           verbose(verbose_)

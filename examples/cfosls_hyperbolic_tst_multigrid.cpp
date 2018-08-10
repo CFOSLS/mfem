@@ -316,7 +316,6 @@ int main(int argc, char *argv[])
 #endif
 
    int dim = nDimensions;
-   Transport_test Mytest(dim, numsol);
 
    MPI_Barrier(comm);
    std::cout << std::flush;
@@ -910,6 +909,35 @@ int main(int argc, char *argv[])
    }
 
    MPI_Barrier(comm);
+
+   // Deallocating memory
+
+   for (int i = 0; i < cyl_hierarchies.Size(); ++i)
+       delete cyl_hierarchies[i];
+
+   for (int i = 0; i < cyl_probhierarchies.Size(); ++i)
+       delete cyl_probhierarchies[i];
+
+   delete twogrid_tstp;
+
+   delete spacetime_mg;
+
+   for (int i = 0; i < Ops_tstp.Size(); ++i)
+       delete Ops_tstp[i];
+
+   for (int i = 0; i < Smoo_tstp.Size(); ++i)
+       delete Smoo_tstp[i];
+
+   delete CoarseOp_tstp;
+
+   delete pmeshbase;
+   delete pmesh;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
+
+
    MPI_Finalize();
    return 0;
 

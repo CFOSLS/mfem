@@ -12,6 +12,7 @@
 
 //#define NEW_INTERFACE
 //#define NEW_INTERFACE2
+// If you comment this, Coeus cluster cannot compile the example unlike my workstation
 #define BRANDNEW_INTERFACE
 
 // (de)activates solving of the discrete global problem
