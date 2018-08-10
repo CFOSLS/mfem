@@ -5876,8 +5876,13 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
     else //Dim == 3
         for ( int row = 0; row < group_proc.Size(); ++row )
         {
-            group_sface_I[row + 1] = group_sface_I[row] + Nsteps * face2Dto3D_coeff *
-                    meshbase.group_sedge.RowSize(row);
+            // without this if, valgrind reports "Invalid read"
+            // because meshbase.group_sedge has size 0 (for serial case)
+            if (meshbase.group_sedge.Size() == 0)
+                group_sface_I[row + 1] = group_sface_I[row];
+            else
+                group_sface_I[row + 1] = group_sface_I[row] + Nsteps * face2Dto3D_coeff *
+                        meshbase.group_sedge.RowSize(row);
         }
 
     group_sface_J = new int[group_sface_I[group_proc.Size() - 1]];
@@ -6319,7 +6324,13 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
     group_sedge_I[0] = 0;
     for ( int row = 0; row < group_proc.Size(); ++row )
     {
-        group_sedge_I[row + 1] = group_sedge_I[row] +
+        // without this if, valgrind reports "Invalid read"
+        // because meshbase.group_svert and meshbase.group_sedg
+        // has size 0 (for serial case)
+        if (meshbase.group_svert.Size() == 0 || meshbase.group_sedge.Size() == 0)
+            group_sedge_I[row + 1] = group_sedge_I[row];
+        else
+            group_sedge_I[row + 1] = group_sedge_I[row] +
                 ((Nsteps + 1) + Nsteps)*meshbase.group_sedge.RowSize(row) +
                 Nsteps*meshbase.group_svert.RowSize(row);
     }
@@ -6530,7 +6541,12 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
     group_svert_I[0] = 0;
     for ( int row = 0; row < group_proc.Size(); ++row )
     {
-        group_svert_I[row + 1] = group_svert_I[row] +
+        // without this if, valgrind reports "Invalid read"
+        // because meshbase.group_svert has size 0 (for serial case)
+        if (meshbase.group_svert.Size() == 0)
+            group_svert_I[row + 1] = group_svert_I[row];
+        else
+            group_svert_I[row + 1] = group_svert_I[row] +
                 (Nsteps + 1)*meshbase.group_svert.RowSize(row);
     }
     group_svert_J = new int[group_svert_I[group_proc.Size() - 1]];
