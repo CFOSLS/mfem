@@ -187,14 +187,14 @@ public:
 // These classes were created as a solution to a "diamond" inheritance problem
 // when it was required to create objects which are both FOSLSCylProblem and a particular
 // FOSLSProblem's child at the same time
-class FOSLSCylProblem_HdivL2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2L2hyp
+class FOSLSCylProblem_HdivL2hyp : public FOSLSCylProblem, public FOSLSProblem_HdivL2hyp
 {
 public:
     FOSLSCylProblem_HdivL2hyp(ParMeshCyl& Pmeshcyl, BdrConditions& bdr_conditions,
                     FOSLSFEFormulation& fe_formulation, int precond_option, bool verbose_)
         : FOSLSProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
           FOSLSCylProblem(Pmeshcyl, bdr_conditions, fe_formulation, verbose_),
-          FOSLSProblem_HdivL2L2hyp(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
+          FOSLSProblem_HdivL2hyp(Pmeshcyl, bdr_conditions, fe_formulation, precond_option, verbose_)
     {}
 
     FOSLSCylProblem_HdivL2hyp(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
