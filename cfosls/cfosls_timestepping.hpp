@@ -97,6 +97,9 @@ public:
 
         temp_vec1 = new Vector(GlobalTrueProblemSize());
         temp_vec2 = new Vector(GlobalTrueProblemSize());
+
+        Restrict_bot = NULL;
+        Restrict_top = NULL;
     }
 
     FOSLSCylProblem(GeneralCylHierarchy& Hierarchy, int level, BdrConditions& bdr_conditions,
@@ -111,6 +114,9 @@ public:
 
         temp_vec1 = new Vector(GlobalTrueProblemSize());
         temp_vec2 = new Vector(GlobalTrueProblemSize());
+
+        Restrict_bot = NULL;
+        Restrict_top = NULL;
     }
 
     // Solves the problem in the cylinder with trueRhs as rhs, and absorbing
@@ -875,9 +881,9 @@ void TwoGridTimeStepping<Problem>::ConstructCoarseTimeStp()
 
         // replacing the native coarse problem operators by the coarsened versions
         BlockOperator * coarsened_solveop = cyl_probhierarchy->GetCoarsenedOp(coarse_level);
-        coarse_problems[tslab]->ResetOp(*coarsened_solveop);
+        coarse_problems[tslab]->ResetOp(*coarsened_solveop, false);
         BlockOperator * coarsened_solveop_nobnd = cyl_probhierarchy->GetCoarsenedOp_nobnd(coarse_level);
-        coarse_problems[tslab]->ResetOp_nobnd(*coarsened_solveop_nobnd);
+        coarse_problems[tslab]->ResetOp_nobnd(*coarsened_solveop_nobnd, false);
 
     }
     coarse_timestepping = new TimeStepping<Problem>(coarse_problems, verbose);

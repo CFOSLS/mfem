@@ -1489,8 +1489,11 @@ protected:
     // for the operator blocks (probably, redundant)
     Array2D<HypreParMatrix*> hpmats;
     BlockOperator *CFOSLSop;
+    bool own_cfoslsop;
+
     Array2D<HypreParMatrix*> hpmats_nobnd;
     BlockOperator *CFOSLSop_nobnd;
+    bool own_cfoslsop_nobnd;
 
     // block vectors for rhs and solution of the problem
     BlockVector * trueRhs;
@@ -1665,34 +1668,28 @@ public:
         return estimators.Size();
     }
 
-    /*
-    virtual void CreateEstimator(int option)
-    {
-        // TODO: Implement a default error estimator here, FOSLS block + constraints
-        MFEM_ABORT("CreateEstimator is not implemented in the base class FOSLSProblem");
-    }
-    */
-
     void ComputeAnalyticalRhs() const {ComputeAnalyticalRhs(*trueRhs);}
     void ComputeAnalyticalRhs(Vector& rhs) const;
 
     void ComputeRhsBlock(Vector& rhs, int blk) const;
 
-    //void ResetSolverOp(Operator& op) {solver->SetOperator(op);}
-
-    void ResetOp(BlockOperator& op)
+    void ResetOp(BlockOperator& op, bool capture)
     {
         MFEM_ASSERT(op.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
                     && op.Width() == op.Height(), "Replacing operator sizes mismatch"
                                                   " the existing's");
         CFOSLSop = &op;
+
+        own_cfoslsop = capture;
     }
-    void ResetOp_nobnd(BlockOperator& op_nobnd)
+    void ResetOp_nobnd(BlockOperator& op_nobnd, bool capture)
     {
         MFEM_ASSERT(op_nobnd.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
                     && op_nobnd.Width() == op_nobnd.Height(), "Replacing operator sizes"
                                                               " mismatch the existing's");
         CFOSLSop_nobnd = &op_nobnd;
+
+        own_cfoslsop_nobnd = capture;
     }
 
     void ZeroBndValues(Vector& vec) const;

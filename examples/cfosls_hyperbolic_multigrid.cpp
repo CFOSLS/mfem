@@ -739,7 +739,7 @@ int main(int argc, char *argv[])
     divfree_problem->ConstructDivfreeHpMats();
     divfree_problem->CreateOffsetsRhsSol();
     BlockOperator * divfree_problem_op = ConstructDivfreeProblemOp(*divfree_problem, *problem);
-    divfree_problem->ResetOp(*divfree_problem_op);
+    divfree_problem->ResetOp(*divfree_problem_op, true);
 
     divfree_problem->InitSolver(verbose);
     // creating a preconditioner for the divfree problem

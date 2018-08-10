@@ -1783,7 +1783,9 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
     CreateOffsetsRhsSol();
 
     CFOSLSop = NULL;
+    own_cfoslsop = false;
     CFOSLSop_nobnd = NULL;
+    own_cfoslsop_nobnd = false;
 
     solver = NULL;
     prec = NULL;
@@ -1818,7 +1820,9 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     CreateOffsetsRhsSol();
 
     CFOSLSop = NULL;
+    own_cfoslsop = false;
     CFOSLSop_nobnd = NULL;
+    own_cfoslsop_nobnd = false;
 
     solver = NULL;
     prec = NULL;
@@ -1851,7 +1855,9 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
     CreateOffsetsRhsSol();
 
     CFOSLSop = NULL;
+    own_cfoslsop = false;
     CFOSLSop_nobnd = NULL;
+    own_cfoslsop_nobnd = false;
 
     solver = NULL;
     prec = NULL;
@@ -1908,10 +1914,10 @@ FOSLSProblem::~FOSLSProblem()
                 if (hpmats_nobnd(i,j))
                     delete hpmats_nobnd(i,j);
 
-    if  (CFOSLSop)
+    if  (CFOSLSop && own_cfoslsop)
         delete CFOSLSop;
 
-    if (CFOSLSop_nobnd)
+    if (CFOSLSop_nobnd && own_cfoslsop)
         delete CFOSLSop_nobnd;
 }
 
@@ -1976,11 +1982,11 @@ void FOSLSProblem::Update()
                 if (hpmats_nobnd(i,j))
                     delete hpmats_nobnd(i,j);
 
-    if  (CFOSLSop)
+    if  (CFOSLSop && own_cfoslsop)
         delete CFOSLSop;
     CFOSLSop = NULL;
 
-    if (CFOSLSop_nobnd)
+    if (CFOSLSop_nobnd && own_cfoslsop)
         delete CFOSLSop_nobnd;
     CFOSLSop_nobnd = NULL;
 
@@ -2521,12 +2527,14 @@ void FOSLSProblem::AssembleSystem(bool verbose)
        for (int j = 0; j < numblocks; ++j)
            if (hpmats(i,j))
                CFOSLSop->SetBlock(i,j, hpmats(i,j));
+   own_cfoslsop = true;
 
    CFOSLSop_nobnd = new BlockOperator(blkoffsets_true);
    for (int i = 0; i < numblocks; ++i)
        for (int j = 0; j < numblocks; ++j)
            if (hpmats_nobnd(i,j))
                CFOSLSop_nobnd->SetBlock(i,j, hpmats_nobnd(i,j));
+   own_cfoslsop_nobnd = true;
 
    // assembling rhs forms without boundary conditions
    for (int i = 0; i < numblocks; ++i)

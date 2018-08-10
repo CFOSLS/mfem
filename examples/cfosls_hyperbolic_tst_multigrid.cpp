@@ -912,11 +912,11 @@ int main(int argc, char *argv[])
 
    // Deallocating memory
 
-   for (int i = 0; i < cyl_hierarchies.Size(); ++i)
-       delete cyl_hierarchies[i];
-
    for (int i = 0; i < cyl_probhierarchies.Size(); ++i)
        delete cyl_probhierarchies[i];
+
+   for (int i = 0; i < cyl_hierarchies.Size(); ++i)
+       delete cyl_hierarchies[i];
 
    delete twogrid_tstp;
 
