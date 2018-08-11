@@ -5256,7 +5256,10 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     if (Dim > 1 && generate_edges == 1)
     {
        // el_to_edge may already be allocated (P2 VTK meshes)
-       if (!el_to_edge) { el_to_edge = new Table; }
+       if (!el_to_edge)
+       {
+           el_to_edge = new Table;
+       }
        NumOfEdges = GetElementToEdgeTable(*el_to_edge, be_to_edge);
        if (Dim == 2)
        {
@@ -6671,6 +6674,10 @@ void ParMeshCyl::CreateInternalMeshStructure (int refine)
     last_operation = Mesh::NONE;
     sequence = 0;
 
+    // FIXME: DestroyTables() was added here to get rid of memory leaks
+    // might not be optimal since some of the tables will be already initialized before the call to
+    // CreateInternalMeshStructure, but here just the safest way is chosen
+    DestroyTables();
     InitTables();
 
     //for a 4d mesh sort the element and boundary element indices by the node numbers
@@ -6796,7 +6803,10 @@ void ParMeshCyl::CreateInternalMeshStructure (int refine)
     if (Dim > 1 && generate_edges == 1)
     {
        // el_to_edge may already be allocated (P2 VTK meshes)
-       if (!el_to_edge) { el_to_edge = new Table; }
+       if (!el_to_edge)
+       {
+           el_to_edge = new Table;
+       }
        NumOfEdges = GetElementToEdgeTable(*el_to_edge, be_to_edge);
        if (Dim == 2)
        {
