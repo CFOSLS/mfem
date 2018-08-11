@@ -255,8 +255,8 @@ public:
     ParMesh & meshbase;
     std::vector<std::pair<int,int> > bot_to_top_bels;
 
-    // TODO: Get rid of this, it doesn't belong to this class
-    // TODO: But only after the new interface is completed and tested
+    // FIXME: Get rid of this, it doesn't belong to this class
+    // FIXME: But only after the new interface is completed and tested
     // additional structures created in the constructor which is used for time slab extraction if needed
     struct Slabs_Structure
     {
