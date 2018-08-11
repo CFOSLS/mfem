@@ -7879,7 +7879,10 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                 if (Dim == 4)
                     NewEl = new Pentatope(simplexes + simplex_ind*(Dim+1));
                 NewEl->SetAttribute(1);
-                AddElement(NewEl);
+                if (Dim == 3)
+                    AddTet(simplexes + simplex_ind*(Dim+1));
+                if (Dim == 4)
+                    AddElement(NewEl);
 
                 if (slabs_struct)
                 {
