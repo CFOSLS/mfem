@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
    int numsol          = 0;
 
-   int ser_ref_levels  = 2;
+   int ser_ref_levels  = 0;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -48,8 +48,8 @@ int main(int argc, char *argv[])
 #ifdef USE_TSL
    // filename for the input base mesh
    const char *meshbase_file = "../data/star.mesh";
-   int Nt = 4;
-   double tau = 0.25;
+   int Nt = 1;
+   double tau = 1.0;
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
