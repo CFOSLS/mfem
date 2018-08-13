@@ -5286,7 +5286,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     // step 3 of 4: set parmesh fields for shared entities for mesh4d
     // ****************************************************************************
 
-    ParMeshSpaceTime_createShared( comm, Nsteps );
+    //ParMeshSpaceTime_createShared( comm, Nsteps );
 
     // some clean up for unneeded tables
 
@@ -5303,7 +5303,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     // parmesh classes
     // ****************************************************************************
 
-    int refine = 1;
+    int refine = 0;
     CreateInternalMeshStructure(refine);
 
     return;
