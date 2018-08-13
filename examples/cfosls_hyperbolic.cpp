@@ -587,13 +587,13 @@ int main(int argc, char *argv[])
     trueX = 0.0;
     trueRhs = 0.0;
 
-    Transport_test Mytest(nDimensions,numsol);
+    Hyper_test Mytest(nDimensions,numsol);
 
     ParGridFunction *S_exact = new ParGridFunction(S_space);
-    S_exact->ProjectCoefficient(*(Mytest.scalarS));
+    S_exact->ProjectCoefficient(*Mytest.GetU());
 
     ParGridFunction * sigma_exact = new ParGridFunction(Sigma_space);
-    sigma_exact->ProjectCoefficient(*(Mytest.sigma));
+    sigma_exact->ProjectCoefficient(*Mytest.GetSigma());
 
     x.GetBlock(0) = *sigma_exact;
     x.GetBlock(1) = *S_exact;
@@ -653,7 +653,7 @@ int main(int argc, char *argv[])
 
    ParLinearForm *fform = new ParLinearForm(Sigma_space);
    if (strcmp(space_for_S,"L2") == 0 && keep_divdiv) // if L2 for S and we keep div-div term
-       fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(*Mytest.scalardivsigma));
+       fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(*Mytest.GetRhs()));
 
    fform->Assemble();
 
@@ -667,7 +667,7 @@ int main(int argc, char *argv[])
    if (strcmp(space_for_S,"H1") == 0)
    {
        //if (strcmp(space_for_sigma,"Hdiv") == 0 )
-           qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+           qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.GetBf()));
        qform->Assemble();//qform->Print();
    }
    else // "L2"
@@ -683,7 +683,7 @@ int main(int argc, char *argv[])
    if (strcmp(formulation,"cfosls") == 0)
    {
        gform = new ParLinearForm(W_space);
-       gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+       gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
        gform->Assemble();
    }
 
@@ -702,7 +702,7 @@ int main(int argc, char *argv[])
    else // "L2"
    {
        if (eliminateS) // S is eliminated
-           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+           Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
        else // S is present
            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
        if (keep_divdiv)
@@ -810,13 +810,13 @@ int main(int argc, char *argv[])
        Cblock = new ParBilinearForm(S_space);
        if (strcmp(space_for_S,"H1") == 0)
        {
-           Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+           Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
            if (strcmp(space_for_sigma,"Hdiv") == 0)
-                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.GetBBt()));
        }
        else // "L2" & !eliminateS
        {
-           Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+           Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
        }
        Cblock->Assemble();
        Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
@@ -839,10 +839,10 @@ int main(int argc, char *argv[])
        if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
        {
            //Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
-           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+           Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetMinB()));
        }
        else // sigma is from H1
-           Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.minb));
+           Bblock->AddDomainIntegrator(new MixedVectorScalarIntegrator(*Mytest.GetMinB()));
        Bblock->Assemble();
        Bblock->EliminateTrialDofs(ess_bdrSigma, x.GetBlock(0), *qform);
        Bblock->EliminateTestDofs(ess_bdrS);
@@ -1181,13 +1181,13 @@ int main(int argc, char *argv[])
    else // no S in the formulation
    {
        ParBilinearForm *Cblock(new ParBilinearForm(S_space));
-       Cblock->AddDomainIntegrator(new MassIntegrator(*(Mytest.bTb)));
+       Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
        Cblock->Assemble();
        Cblock->Finalize();
        HypreParMatrix * C = Cblock->ParallelAssemble();
 
        ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(Sigma_space, S_space));
-       Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*(Mytest.b)));
+       Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetB()));
        Bblock->Assemble();
        Bblock->Finalize();
        HypreParMatrix * B = Bblock->ParallelAssemble();
@@ -1226,8 +1226,8 @@ int main(int argc, char *argv[])
    }
 
 
-   double err_sigma = sigma->ComputeL2Error(*(Mytest.sigma), irs);
-   double norm_sigma = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
+   double err_sigma = sigma->ComputeL2Error(*Mytest.GetSigma(), irs);
+   double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.GetSigma(), *pmesh, irs);
    if (verbose)
        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
 
@@ -1237,8 +1237,8 @@ int main(int argc, char *argv[])
    Div.Assemble();
    Div.Mult(*sigma, DivSigma);
 
-   double err_div = DivSigma.ComputeL2Error(*(Mytest.scalardivsigma),irs);
-   double norm_div = ComputeGlobalLpNorm(2, *(Mytest.scalardivsigma), *pmesh, irs);
+   double err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
+   double norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
 
    if (verbose)
    {
@@ -1259,8 +1259,8 @@ int main(int argc, char *argv[])
 
    // Computing error for S
 
-   double err_S = S->ComputeL2Error((*Mytest.scalarS), irs);
-   double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+   double err_S = S->ComputeL2Error(*Mytest.GetU(), irs);
+   double norm_S = ComputeGlobalLpNorm(2, *Mytest.GetU(), *pmesh, irs);
    if (verbose)
    {
        std::cout << "|| S_h - S_ex || / || S_ex || = " <<
@@ -1331,7 +1331,7 @@ int main(int argc, char *argv[])
        }
 
        ParLinearForm massform(W_space);
-       massform.AddDomainIntegrator(new DomainLFIntegrator(*(Mytest.scalardivsigma)));
+       massform.AddDomainIntegrator(new DomainLFIntegrator(*(Mytest.GetRhs())));
        massform.Assemble();
 
        double mass_loc = massform.Norml1();
@@ -1353,7 +1353,7 @@ int main(int argc, char *argv[])
    if (verbose)
        cout << "Computing projection errors \n";
 
-   double projection_error_sigma = sigma_exact->ComputeL2Error(*(Mytest.sigma), irs);
+   double projection_error_sigma = sigma_exact->ComputeL2Error(*Mytest.GetSigma(), irs);
 
    if(verbose)
    {
@@ -1361,7 +1361,7 @@ int main(int argc, char *argv[])
                        << projection_error_sigma / norm_sigma << endl;
    }
 
-   double projection_error_S = S_exact->ComputeL2Error(*(Mytest.scalarS), irs);
+   double projection_error_S = S_exact->ComputeL2Error(*Mytest.GetU(), irs);
 
    if(verbose)
        cout << "|| S_ex - Pi_h S_ex || / || S_ex || = "
