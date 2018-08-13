@@ -700,7 +700,6 @@ int main(int argc, char *argv[])
     Div.AddDomainInterpolator(new DivergenceInterpolator());
     Div.Assemble();
     Div.Finalize();
-    Div.ParallelAssemble();
 
     ParGridFunction DivSigma(W_space);
     Div.Mult(*sigma, DivSigma);
@@ -923,6 +922,9 @@ int main(int argc, char *argv[])
 
     delete x;
     delete rhs;
+
+    delete trueX;
+    delete trueRhs;
 
     delete H_space;
     delete R_space;
