@@ -5065,8 +5065,6 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     if (Slabs_widths)
         have_slabs_structure = true;
 
-    //bot_to_top_bels.resize(meshbase.GetNBE());
-
     // ****************************************************************************
     // step 1 of 4: creating local space-time part of the mesh from local part of base mesh
     // ****************************************************************************
@@ -5111,11 +5109,11 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
 
     ncmesh = pncmesh = NULL;
 
-    swappedElements.SetSize(GetNE());
-
-    DenseMatrix J(4,4);
     if( dim == 4)
     {
+        swappedElements.SetSize(GetNE());
+        DenseMatrix J(4,4);
+
         for ( i = 0; i < GetNE(); ++i )
         {
             if (elements[i]->GetType() == Element::PENTATOPE)
@@ -5137,10 +5135,10 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         }
     }
 
-    meshgen = meshbase.MeshGenerator(); // FIX IT: Not sure at all what it is
+    //meshgen = meshbase.MeshGenerator(); // FIX IT: Not sure at all what it is
 
-    attributes.Copy(meshbase.attributes);
-    bdr_attributes.Copy(meshbase.bdr_attributes);
+    //attributes.Copy(meshbase.attributes);
+    //bdr_attributes.Copy(meshbase.bdr_attributes);
 
     /*
     CheckElementOrientation(true);
@@ -6672,8 +6670,8 @@ void ParMeshCyl::CreateInternalMeshStructure (int refine)
     //DestroyTables();
     //InitTables();
 
-    //for a 4d mesh sort the element and boundary element indices by the node numbers
-    if(spaceDim==4)
+    // for a 4d mesh sort the element and boundary element indices by the node numbers
+    if (spaceDim == 4)
     {
         swappedElements.SetSize(NumOfElements);
         DenseMatrix J(4,4);
