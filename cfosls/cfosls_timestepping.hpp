@@ -914,6 +914,7 @@ void TwoGridTimeStepping<Problem>::ConstructCoarseTimeStp()
         // replacing the native coarse problem operators by the coarsened versions
         BlockOperator * coarsened_solveop = cyl_probhierarchy->GetCoarsenedOp(coarse_level);
         coarse_problems[tslab]->ResetOp(*coarsened_solveop, false);
+        coarse_problems[tslab]->UpdateSolverMat(*coarse_problems[tslab]->GetOp());
         BlockOperator * coarsened_solveop_nobnd = cyl_probhierarchy->GetCoarsenedOp_nobnd(coarse_level);
         coarse_problems[tslab]->ResetOp_nobnd(*coarsened_solveop_nobnd, false);
 

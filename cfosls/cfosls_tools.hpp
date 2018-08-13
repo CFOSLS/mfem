@@ -1528,7 +1528,6 @@ protected:
     void InitForms();
     void AssembleSystem(bool verbose);
     virtual void CreatePrec(BlockOperator & op, int prec_option, bool verbose) {}
-    void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
     void SetPrecOption(int option) { prec_option = option; }
 
     void InitGrFuns();
@@ -1673,11 +1672,16 @@ public:
 
     void ComputeRhsBlock(Vector& rhs, int blk) const;
 
+    void UpdateSolverMat(Operator& op) { solver->SetOperator(op); }
+
     void ResetOp(BlockOperator& op, bool capture)
     {
         MFEM_ASSERT(op.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
                     && op.Width() == op.Height(), "Replacing operator sizes mismatch"
                                                   " the existing's");
+        if (CFOSLSop)
+            delete CFOSLSop;
+
         CFOSLSop = &op;
 
         own_cfoslsop = capture;
@@ -1687,6 +1691,9 @@ public:
         MFEM_ASSERT(op_nobnd.Height() == blkoffsets_true[blkoffsets_true.Size() - 1]
                     && op_nobnd.Width() == op_nobnd.Height(), "Replacing operator sizes"
                                                               " mismatch the existing's");
+        if (CFOSLSop_nobnd)
+            delete CFOSLSop_nobnd;
+
         CFOSLSop_nobnd = &op_nobnd;
 
         own_cfoslsop_nobnd = capture;

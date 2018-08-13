@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
    int numsol          = 0;
 
-   int ser_ref_levels  = 0;
+   int ser_ref_levels  = 1;
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
@@ -48,8 +48,8 @@ int main(int argc, char *argv[])
 #ifdef USE_TSL
    // filename for the input base mesh
    const char *meshbase_file = "../data/star.mesh";
-   int Nt = 1;
-   double tau = 1.0;
+   int Nt = 4;
+   double tau = 0.25;
 #endif
 
    const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -211,11 +211,10 @@ int main(int argc, char *argv[])
 
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
 
-   delete pmeshbase;
-   delete pmesh;
-
-   MPI_Finalize();
-   return 0;
+   //delete pmeshbase;
+   //delete pmesh;
+   //MPI_Finalize();
+   //return 0;
 
    /*
    if (num_procs == 1)
@@ -386,6 +385,7 @@ int main(int argc, char *argv[])
        tinit_tslab += slab_tau * slab_width;
    }
 
+   /*
    for (int tslab = 0; tslab < nslabs; ++tslab )
        delete timeslabs_pmeshcyls[tslab];
 
@@ -398,6 +398,7 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
+   */
 
    MFEM_ASSERT(fabs(tinit_tslab - 1.0) < 1.0e-14, "The slabs should cover the time interval "
                                                   "[0,1] but the upper bound doesn't match \n");

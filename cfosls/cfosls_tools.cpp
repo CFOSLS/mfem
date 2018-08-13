@@ -6447,7 +6447,10 @@ void GeneralCylHierarchy::ConstructTdofsLinks()
                 //std::cout << "Ignored a dofs pair which are not own tdofs \n";
             }
         }
-    }
+
+        delete dofs_link_H1;
+        delete dofs_link_RT0;
+    } // end of loop over levels
 }
 
 /// Takes a ParFiniteElementSpace and a tdofs link between top and bottom bases
@@ -6590,12 +6593,12 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 
     //std::cout << "resT created \n";
 
-
     HypreParMatrix * res = resT->Transpose();
     res->CopyRowStarts();
     res->CopyColStarts();
 
     delete resT;
+    delete diag;
 
     delete [] local_row_offsets;
     delete [] local_col_offsets;
