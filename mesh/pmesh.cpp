@@ -5274,7 +5274,6 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
 
     ParMeshSpaceTime_createShared( comm, Nsteps );
 
-    /*
     // some clean up for unneeded tables
 
     if (dim == 4)
@@ -5284,7 +5283,6 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     }
     else //dim == 3
         delete faces_tbl_3d;
-    */
 
     // ****************************************************************************
     // step 4 of 4: set internal mesh structure (present in both mesh and
