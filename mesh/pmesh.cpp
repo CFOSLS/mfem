@@ -5077,6 +5077,8 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         have_slabs_structure = true;
     }
 
+    InitTables();
+
     // creating local parts of space-time mesh
     MeshSpaceTimeCylinder_onlyArrays(Tinit, Tau, Nsteps, bnd_method, local_method);
 
@@ -5140,8 +5142,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     attributes.Copy(meshbase.attributes);
     bdr_attributes.Copy(meshbase.bdr_attributes);
 
-    InitTables();
-
+    /*
     CheckElementOrientation(true);
     if ( dim == 3)
     {
@@ -5164,18 +5165,6 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         }
         //MarkForRefinement(); -- was working in mfem 3.2
     }
-
-    /*
-    if (dim > 1)
-    {
-       el_to_edge = new Table;
-       NumOfEdges = GetElementToEdgeTable(*(el_to_edge), be_to_edge);
-    }
-    else
-    {
-       NumOfEdges = 0;
-    }
-    */
 
     NumOfEdges = 0;
 
@@ -5279,6 +5268,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     {
        NumOfEdges = 0;
     }
+    */
 
     have_face_nbr_data = false;
 
@@ -5286,8 +5276,9 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     // step 3 of 4: set parmesh fields for shared entities for mesh4d
     // ****************************************************************************
 
-    //ParMeshSpaceTime_createShared( comm, Nsteps );
+    ParMeshSpaceTime_createShared( comm, Nsteps );
 
+    /*
     // some clean up for unneeded tables
 
     if (dim == 4)
@@ -5297,13 +5288,14 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     }
     else //dim == 3
         delete faces_tbl_3d;
+    */
 
     // ****************************************************************************
     // step 4 of 4: set internal mesh structure (present in both mesh and
     // parmesh classes
     // ****************************************************************************
 
-    int refine = 0;
+    int refine = 1;
     CreateInternalMeshStructure(refine);
 
     return;
@@ -6677,8 +6669,8 @@ void ParMeshCyl::CreateInternalMeshStructure (int refine)
     // FIXME: DestroyTables() was added here to get rid of memory leaks
     // might not be optimal since some of the tables will be already initialized before the call to
     // CreateInternalMeshStructure, but here just the safest way is chosen
-    DestroyTables();
-    InitTables();
+    //DestroyTables();
+    //InitTables();
 
     //for a 4d mesh sort the element and boundary element indices by the node numbers
     if(spaceDim==4)
