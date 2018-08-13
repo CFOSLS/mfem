@@ -671,14 +671,16 @@ int main(int argc, char *argv[])
    }
 
    fine_timestepping->ComputeError(checksol);
+
    fine_timestepping->ComputeBndError(checksol);
 
    //double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
    //if (verbose)
        //std::cout << "checkres norm = " << checkres_norm << "\n";
 
-   //MPI_Finalize();
-   //return 0;
+   //MPI_Barrier(MPI_COMM_WORLD);
+   //std::cout << "Got here \n" << std::flush;
+   //MPI_Barrier(MPI_COMM_WORLD);
 
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
    fine_timestepping->GetProblem(0)->CorrectFromInitCnd(*input_tslab0, mg_rhs_viewer.GetBlock(0));

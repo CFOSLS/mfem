@@ -95,8 +95,8 @@ public:
         init_cond_space = (*spacenames)[init_cond_block];
         ConstructTdofLink();
 
-        temp_vec1 = new Vector(GlobalTrueProblemSize());
-        temp_vec2 = new Vector(GlobalTrueProblemSize());
+        temp_vec1 = new Vector(TrueProblemSize());
+        temp_vec2 = new Vector(TrueProblemSize());
 
         Restrict_bot = NULL;
         Restrict_top = NULL;
@@ -112,8 +112,8 @@ public:
         init_cond_space = (*spacenames)[init_cond_block];
         tdofs_link = *cyl_hierarchy->GetTdofsLink(level, init_cond_space);
 
-        temp_vec1 = new Vector(GlobalTrueProblemSize());
-        temp_vec2 = new Vector(GlobalTrueProblemSize());
+        temp_vec1 = new Vector(TrueProblemSize());
+        temp_vec2 = new Vector(TrueProblemSize());
 
         Restrict_bot = NULL;
         Restrict_top = NULL;
@@ -287,7 +287,7 @@ public:
 
         global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
-            global_offsets[tslab + 1] = timeslabs_problems[tslab]->GlobalTrueProblemSize();
+            global_offsets[tslab + 1] = timeslabs_problems[tslab]->TrueProblemSize();
         global_offsets.PartialSum();
 
         vecbase_temp.SetSize(timeslabs_problems[0]->GetInitCondSize());
@@ -730,7 +730,7 @@ Array<Vector*> & TimeStepping<Problem>::ConvertFullvecIntoArray(const Vector& x)
     {
         Problem * tslab_problem = timeslabs_problems[tslab];
 
-        res[tslab] = new Vector(tslab_problem->GlobalTrueProblemSize());
+        res[tslab] = new Vector(tslab_problem->TrueProblemSize());
 
         *(*res)[tslab] = x_viewer.GetBlock(tslab);
     }
@@ -852,14 +852,14 @@ public:
         fine_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
             fine_global_offsets[tslab + 1] = fine_global_offsets[tslab] +
-                    fine_problems[tslab]->GlobalTrueProblemSize();
+                    fine_problems[tslab]->TrueProblemSize();
 
         ConstructCoarseTimeStp();
         coarse_global_offsets.SetSize(nslabs + 1);
         coarse_global_offsets[0] = 0;
         for (int tslab = 0; tslab < nslabs; ++tslab)
             coarse_global_offsets[tslab + 1] = coarse_global_offsets[tslab] +
-                    coarse_problems[tslab]->GlobalTrueProblemSize();
+                    coarse_problems[tslab]->TrueProblemSize();
 
         ConstructGlobalInterpolation();
         ConstructGlobalInterpolationWithBnd();
@@ -927,6 +927,13 @@ template <class Problem>
 void TwoGridTimeStepping<Problem>::ConstructGlobalInterpolation()
 {
     int fine_level = 0;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    fine_global_offsets.Print();
+    coarse_global_offsets.Print();
+    std::cout << std::flush;
+    MPI_Barrier(MPI_COMM_WORLD);
+
     interpolation_op = new BlockOperator(fine_global_offsets, coarse_global_offsets);
     for (int tslab = 0; tslab < nslabs; ++tslab)
     {
