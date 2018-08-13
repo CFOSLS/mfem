@@ -6899,10 +6899,13 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
     {
         simplexes = new int[Dim * (Dim + 1)]; // array for storing vertex indices for constructed simplices
     }
-    else // local_method = 0
+    else // local_method = 0 (deprecated)
     {
-        int nsliver = 5; //why 5? how many slivers can b created by qhull? maybe 0 if we don't joggle inside qhull but perturb the coordinates before?
-        simplexes = new int[(Dim + nsliver) * (Dim + 1)]; // array for storing vertex indices for constructed simplices + probably sliver pentatopes
+        // why 5? how many slivers can b created by qhull?
+        // maybe 0 if we don't joggle inside qhull but perturb the coordinates before?
+        int nsliver = 5;
+        // array for storing vertex indices for constructed simplices + probably sliver pentatopes
+        simplexes = new int[(Dim + nsliver) * (Dim + 1)];
     }
 
     // stores indices of space-time element face vertices produced by qhull for all lateral faces
@@ -6916,7 +6919,7 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
 
     // temporary array for vertex indices of a pentatope face (used in local_method = 0 and 2)
     int * tempface = new int[Dim];
-    int * temp = new int[Dim+1]; //temp array for simplex vertices in local_method = 1;
+    int * temp = new int[Dim + 1]; //temp array for simplex vertices in local_method = 1;
 
     // three arrays below are used only in local_method = 1
     Array2D<int> vert_to_vert_prism; // for a 4D prism
@@ -7275,6 +7278,7 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                 bot_to_top_bels[elind].second = NumOfBdrElements - 1;
             }
 
+#if 0
             if (local_method == 0 || local_method == 1)
             {
                 // 3.4 setting vertex coordinates for space-time prism, lower base
@@ -7726,6 +7730,7 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
 
             } //end of if local_method = 0 or 1
             else // local_method == 2
+#endif
             {
                 // The simplest way to generate space-time simplices.
                 // But requires to reorder the vertices at first, as done before.
@@ -7864,13 +7869,15 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
             // 3.11 adding the constructed space-time simplices to the output mesh
             for ( int simplex_ind = 0; simplex_ind < Dim; ++simplex_ind)
             {
-                if (Dim == 3)
-                    NewEl = new Tetrahedron(simplexes + simplex_ind*(Dim+1));
+                //if (Dim == 3)
+                    //NewEl = new Tetrahedron(simplexes + simplex_ind*(Dim+1));
                 if (Dim == 4)
+                {
                     NewEl = new Pentatope(simplexes + simplex_ind*(Dim+1));
-                NewEl->SetAttribute(1);
+                    NewEl->SetAttribute(1);
+                }
                 if (Dim == 3)
-                    AddTet(simplexes + simplex_ind*(Dim+1));
+                    AddTet(simplexes + simplex_ind*(Dim+1), 1);
                 if (Dim == 4)
                     AddElement(NewEl);
 
