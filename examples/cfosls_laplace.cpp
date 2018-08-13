@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
     int numsol          = 4;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
 
@@ -439,6 +439,7 @@ int main(int argc, char *argv[])
     Mblock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact, *Sigmarhsform);
     Mblock->Finalize();
     HypreParMatrix *M = Mblock->ParallelAssemble();
+    delete Mblock;
 
     HypreParMatrix *C, *B, *BT;
     // diagonal block for H^1
@@ -448,6 +449,7 @@ int main(int argc, char *argv[])
     Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*Srhsform);
     Cblock->Finalize();
     C = Cblock->ParallelAssemble();
+    delete Cblock;
 
     // off-diagonal block for (H(div), Space_for_S) block
     ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(S_space, R_space));
@@ -458,6 +460,7 @@ int main(int argc, char *argv[])
     Bblock->Finalize();
     B = Bblock->ParallelAssemble();
     BT = B->Transpose();
+    delete Bblock;
 
     HypreParMatrix * Constr, * ConstrT;
     {
@@ -468,6 +471,7 @@ int main(int argc, char *argv[])
         Dblock->Finalize();
         Constr = Dblock->ParallelAssemble();
         ConstrT = Constr->Transpose();
+        delete Dblock;
     }
 
     Sigmarhsform->ParallelAssemble(trueRhs.GetBlock(0));
@@ -486,6 +490,7 @@ int main(int argc, char *argv[])
     }
     MainOp->SetBlock(0,2, ConstrT);
     MainOp->SetBlock(2,0, Constr);
+    MainOp->owns_blocks = true;
 
     // testing
     Array<int> blockfunct_trueOffsets(numblocks + 1);
@@ -501,6 +506,7 @@ int main(int argc, char *argv[])
     MainOpFunct->SetBlock(0,1, B);
     MainOpFunct->SetBlock(1,0, BT);
     MainOpFunct->SetBlock(1,1, C);
+    MainOpFunct->owns_blocks = false;
 
     BlockVector truesol(blockfunct_trueOffsets);
     truesol.GetBlock(0) = sigma_exact_truedofs;
@@ -894,9 +900,6 @@ int main(int argc, char *argv[])
         MPI_Barrier(pmesh->GetComm());
     }
 
-    MPI_Finalize();
-    return 0;
-
     chrono.Clear();
     chrono.Start();
 
@@ -960,6 +963,37 @@ int main(int argc, char *argv[])
     chrono_total.Stop();
     if (verbose)
         std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
+
+    delete Constrrhsform;
+    delete Sigmarhsform;
+    delete Srhsform;
+
+    delete MainOp;
+    delete MainOpFunct;
+    delete Schur;
+    delete prec;
+
+    delete S_exact;
+    delete sigma_exact;
+
+    delete sigma_exact_finest;
+    delete S_exact_finest;
+
+    delete S;
+    delete sigma;
+
+    delete H_space;
+    delete R_space;
+    delete W_space;
+    delete hdiv_coll;
+    delete h1_coll;
+    delete l2_coll;
+
+    delete formulat;
+    delete fe_formulat;
+    delete bdr_conds;
+
+    delete problem;
 
     MPI_Finalize();
     return 0;
