@@ -450,6 +450,8 @@ int main(int argc, char *argv[])
     Ablock->Finalize();
     A = Ablock->ParallelAssemble();
 
+    delete Ablock;
+
     //---------------
     //  C Block:
     //---------------
@@ -461,6 +463,8 @@ int main(int argc, char *argv[])
     Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), rhs.GetBlock(1));
     Cblock->Finalize();
     C = Cblock->ParallelAssemble();
+
+    delete Cblock;
 
     //---------------
     //  B Block:
@@ -474,6 +478,8 @@ int main(int argc, char *argv[])
     Bblock->Finalize();
     B = Bblock->ParallelAssemble();
     HypreParMatrix *BT = B->Transpose();
+
+    delete Bblock;
 
     //----------------
     //  D Block:
@@ -490,6 +496,8 @@ int main(int argc, char *argv[])
         Dblock->Finalize();
         D = Dblock->ParallelAssemble();
         DT = D->Transpose();
+
+        delete Dblock;
     }
 
     //=======================================================
@@ -511,6 +519,7 @@ int main(int argc, char *argv[])
         CFOSLSop->SetBlock(0,2, DT);
         CFOSLSop->SetBlock(2,0, D);
     }
+    CFOSLSop->owns_blocks = true;
 
     if (verbose)
         std::cout << "System built in " << chrono.RealTime() << "s. \n";
@@ -545,6 +554,10 @@ int main(int argc, char *argv[])
             A->GetDiag(*Ad);
             AinvDt->InvScaleRows(*Ad);
             DAinvDt = ParMult(D, AinvDt);
+            DAinvDt->CopyColStarts();
+            DAinvDt->CopyRowStarts();
+            delete Ad;
+            delete AinvDt;
         }
 
         invA = new HypreDiagScale(*A);
@@ -578,11 +591,12 @@ int main(int argc, char *argv[])
     invA->iterative_mode = false;
     invC->iterative_mode = false;
 
-    BlockDiagonalPreconditioner prec(block_trueOffsets);
-    prec.SetDiagonalBlock(0, invA);
-    prec.SetDiagonalBlock(1, invC);
+    BlockDiagonalPreconditioner * prec = new BlockDiagonalPreconditioner(block_trueOffsets);
+    prec->SetDiagonalBlock(0, invA);
+    prec->SetDiagonalBlock(1, invC);
     if (strcmp(formulation,"cfosls") == 0)
-        prec.SetDiagonalBlock(2, invL);
+        prec->SetDiagonalBlock(2, invL);
+    prec->owns_blocks = true;
 
     if (verbose)
         std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
@@ -597,7 +611,7 @@ int main(int argc, char *argv[])
     solver.SetRelTol(rtol);
     solver.SetMaxIter(maxIter);
     solver.SetOperator(*CFOSLSop);
-    solver.SetPreconditioner(prec);
+    solver.SetPreconditioner(*prec);
     solver.SetPrintLevel(0);
     trueX = 0.0;
 
@@ -781,6 +795,7 @@ int main(int argc, char *argv[])
             cout << "Sum of local mass loss = " << mass_loss<< "\n";
 
         delete M;
+        delete Mblock;
     }
 
     if (verbose)
@@ -852,21 +867,21 @@ int main(int argc, char *argv[])
 
     // 17. Free the used memory.
     delete fform;
-    delete gform;
-    delete CFOSLSop;
+    delete qform;
     if (strcmp(formulation,"cfosls") == 0)
-    {
-        delete DT;
-        delete D;
-    }
-    delete C;
-    delete BT;
-    delete B;
-    delete A;
+        delete gform;
 
-    delete Ablock;
-    delete Bblock;
-    delete Cblock;
+    delete CFOSLSop;
+    if (use_ADS == false && strcmp(formulation,"cfosls") == 0 )
+        delete DAinvDt;
+    delete prec;
+
+    delete S_exact;
+    delete sigma_exact;
+
+    delete S;
+    delete sigma;
+
     delete H_space;
     delete R_space;
     delete W_space;
@@ -875,6 +890,12 @@ int main(int argc, char *argv[])
     delete l2_coll;
     delete hcurl_coll;
     delete GradSpace;
+
+    delete formulat;
+    delete fe_formulat;
+    delete bdr_conds;
+
+    delete problem;
 
     MPI_Finalize();
 

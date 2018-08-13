@@ -57,6 +57,7 @@ private:
     double beta;
     double gamma;
 public:
+    virtual ~MyAXPYOperator() {}
     MyAXPYOperator(Operator& Op, double Beta = 0.0, double Gamma = 1.0)
         : Operator(Op.Height(),Op.Width()), op(Op), beta(Beta), gamma(Gamma) {}
 
@@ -84,6 +85,7 @@ private:
     Operator& op;
     double scale;
 public:
+    virtual ~MyScaledOperator() {}
     MyScaledOperator(Operator& Op, double Scale = 1.0)
         : Operator(Op.Height(),Op.Width()), op(Op), scale(Scale) {}
 
@@ -107,6 +109,7 @@ private:
     Operator & middleop;
     //int inner_niter;
 public:
+    virtual ~MyOperator() {}
     // Constructor
     MyOperator(HypreParMatrix& LeftMatrix, Operator& MiddleOp, HypreParMatrix& RightMatrix/*, int Inner_NIter = 1*/)
         : Operator(LeftMatrix.Height(),RightMatrix.Width()),
@@ -156,7 +159,7 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 8;
+    int numsol          = -3;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
@@ -164,12 +167,12 @@ int main(int argc, char *argv[])
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-    bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
+    bool eliminateS = false;            // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
-    bool use_ADS;
+    bool use_ADS = false;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
@@ -1067,7 +1070,7 @@ int main(int argc, char *argv[])
    chrono.Start();
 
    HypreParMatrix *Schur;
-   if (strcmp(formulation,"cfosls") == 0 )
+   if (strcmp(formulation,"cfosls") == 0 && prec_option > 0 )
    {
       HypreParMatrix *AinvDt = D->Transpose();
       HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A->GetGlobalNumRows(),
@@ -1083,15 +1086,18 @@ int main(int argc, char *argv[])
    }
 
    Solver * invA;
-   if (use_ADS)
-       invA = new HypreADS(*A, Sigma_space);
-   else // using Diag(A);
-       invA = new HypreDiagScale(*A);
+   if (prec_option > 0)
+   {
+       if (use_ADS)
+           invA = new HypreADS(*A, Sigma_space);
+       else // using Diag(A);
+           invA = new HypreDiagScale(*A);
+   }
 
    invA->iterative_mode = false;
 
    Solver * invC;
-   if (strcmp(space_for_S,"H1") == 0) // S is from H1
+   if (strcmp(space_for_S,"H1") == 0 && prec_option > 0) // S is from H1
    {
        invC = new HypreBoomerAMG(*C);
        ((HypreBoomerAMG*)invC)->SetPrintLevel(0);
@@ -1099,7 +1105,7 @@ int main(int argc, char *argv[])
    }
    else // S from L2
    {
-       if (!eliminateS) // S is from L2 and not eliminated
+       if (!eliminateS && prec_option > 0) // S is from L2 and not eliminated
        {
            invC = new HypreDiagScale(*C);
            ((HypreDiagScale*)invC)->iterative_mode = false;
@@ -1107,7 +1113,7 @@ int main(int argc, char *argv[])
    }
 
    Solver * invS;
-   if (strcmp(formulation,"cfosls") == 0 )
+   if (strcmp(formulation,"cfosls") == 0 && prec_option > 0 )
    {
         invS = new HypreBoomerAMG(*Schur);
         ((HypreBoomerAMG *)invS)->SetPrintLevel(0);
@@ -1443,8 +1449,9 @@ int main(int argc, char *argv[])
    delete h1_coll;
    delete hdiv_coll;
 
-   delete Schur;
    delete CFOSLSop;
+   if (prec_option > 0)
+       delete Schur;
    delete prec;
 
    MPI_Finalize();
