@@ -1212,6 +1212,8 @@ int main(int argc, char *argv[])
 
        delete Cblock;
        delete Bblock;
+       delete B;
+       delete C;
    }
 
    // 13. Extract the parallel grid function corresponding to the finite element
@@ -1432,8 +1434,7 @@ int main(int argc, char *argv[])
        delete qform;
    delete gform;
 
-   if (strcmp(space_for_S,"H1") == 0) // S was from H1
-        delete H_space;
+   delete H_space;
    delete W_space;
    delete R_space;
    if (strcmp(space_for_sigma,"H1") == 0) // S was from H1
@@ -1442,6 +1443,7 @@ int main(int argc, char *argv[])
    delete h1_coll;
    delete hdiv_coll;
 
+   delete Schur;
    delete CFOSLSop;
    delete prec;
 
