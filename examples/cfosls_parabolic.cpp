@@ -796,6 +796,8 @@ int main(int argc, char *argv[])
 
         delete M;
         delete Mblock;
+
+        delete trueRhs_part;
     }
 
     if (verbose)
@@ -898,6 +900,5 @@ int main(int argc, char *argv[])
     delete problem;
 
     MPI_Finalize();
-
     return 0;
 }
