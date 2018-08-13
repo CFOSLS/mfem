@@ -582,6 +582,10 @@ int main(int argc, char *argv[])
     M->GetDiag(*Md);
     MinvDt->InvScaleRows(*Md);
     Schur = ParMult(Constr, MinvDt);
+    Schur->CopyColStarts();
+    Schur->CopyRowStarts();
+    delete Md;
+    delete MinvDt;
 
     HypreBoomerAMG * precSchur = new HypreBoomerAMG(*Schur);
     precSchur->SetPrintLevel(0);
@@ -594,10 +598,10 @@ int main(int argc, char *argv[])
     precS->SetPrintLevel(0);
     precS->iterative_mode = false;
 
-
     ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precSigma);
     ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
     ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(2, precSchur);
+    ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
 
     chrono.Stop();
     if (verbose)
@@ -985,9 +989,12 @@ int main(int argc, char *argv[])
     delete H_space;
     delete R_space;
     delete W_space;
+    delete C_space;
+
     delete hdiv_coll;
     delete h1_coll;
     delete l2_coll;
+    delete hdivfree_coll;
 
     delete formulat;
     delete fe_formulat;
