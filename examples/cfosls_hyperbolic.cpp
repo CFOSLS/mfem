@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
     int nDimensions     = 3;
     int numsol          = 8;
 
-    int ser_ref_levels  = 3;
+    int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
@@ -383,9 +383,7 @@ int main(int argc, char *argv[])
     }
 
     for (int l = 0; l < par_ref_levels; l++)
-    {
        pmesh->UniformRefinement();
-    }
 
     if (numsol == 8)
     {
@@ -731,13 +729,7 @@ int main(int argc, char *argv[])
    Ablock->Finalize();
    A = Ablock->ParallelAssemble();
 
-   /*
-   if (verbose)
-       std::cout << "Checking the A matrix \n";
-
-   MPI_Finalize();
-   return 0;
-   */
+   delete Ablock;
 
 #ifdef EIGENVALUE_STUDY
    if (verbose)
@@ -798,7 +790,12 @@ int main(int argc, char *argv[])
                 eigenvalues.Print();
        }
 
-}
+    }
+    delete revA_op;
+    delete lobpcg;
+
+    MPI_Finalize();
+    return 0;
 
 #endif
 
@@ -825,6 +822,8 @@ int main(int argc, char *argv[])
        Cblock->EliminateEssentialBC(ess_bdrS, x.GetBlock(1), *qform);
        Cblock->Finalize();
        C = Cblock->ParallelAssemble();
+
+       delete Cblock;
    }
 
    //---------------
@@ -852,6 +851,8 @@ int main(int argc, char *argv[])
        B = Bblock->ParallelAssemble();
        //*B *= -1.;
        BT = B->Transpose();
+
+       delete Bblock;
    }
 
 #ifdef TESTING
@@ -906,6 +907,9 @@ int main(int argc, char *argv[])
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
 
+    delete TestOp;
+    delete testsolver;
+
     MPI_Finalize();
     return 0;
 #endif
@@ -930,6 +934,8 @@ int main(int argc, char *argv[])
       Dblock->Finalize();
       D = Dblock->ParallelAssemble();
       DT = D->Transpose();
+
+      delete Dblock;
    }
 
 #ifdef TESTING2
@@ -1026,6 +1032,8 @@ int main(int argc, char *argv[])
         CFOSLSop->SetBlock(1,0, D);
       }
 
+  CFOSLSop->owns_blocks = true;
+
    if (verbose)
        cout << "Final saddle point matrix assembled \n";
    MPI_Barrier(MPI_COMM_WORLD);
@@ -1067,13 +1075,18 @@ int main(int argc, char *argv[])
       A->GetDiag(*Ad);
       AinvDt->InvScaleRows(*Ad);
       Schur = ParMult(D, AinvDt);
+      Schur->CopyColStarts();
+      Schur->CopyRowStarts();
+
+      delete AinvDt;
+      delete Ad;
    }
 
    Solver * invA;
    if (use_ADS)
        invA = new HypreADS(*A, Sigma_space);
    else // using Diag(A);
-        invA = new HypreDiagScale(*A);
+       invA = new HypreDiagScale(*A);
 
    invA->iterative_mode = false;
 
@@ -1101,22 +1114,24 @@ int main(int argc, char *argv[])
         ((HypreBoomerAMG *)invS)->iterative_mode = false;
    }
 
-   BlockDiagonalPreconditioner prec(block_trueOffsets);
+   BlockDiagonalPreconditioner * prec = new BlockDiagonalPreconditioner(block_trueOffsets);
    if (prec_option > 0)
    {
        tempblknum = 0;
-       prec.SetDiagonalBlock(tempblknum, invA);
+       prec->SetDiagonalBlock(tempblknum, invA);
        tempblknum++;
        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
        {
-           prec.SetDiagonalBlock(tempblknum, invC);
+           prec->SetDiagonalBlock(tempblknum, invC);
            tempblknum++;
        }
        if (strcmp(formulation,"cfosls") == 0)
-            prec.SetDiagonalBlock(tempblknum, invS);
+            prec->SetDiagonalBlock(tempblknum, invS);
 
        if (verbose)
            std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
+
+       prec->owns_blocks = true;
    }
    else
        if (verbose)
@@ -1137,7 +1152,7 @@ int main(int argc, char *argv[])
    solver.SetOperator(*CFOSLSop);
    solver.iterative_mode = false;
    if (prec_option > 0)
-        solver.SetPreconditioner(prec);
+        solver.SetPreconditioner(*prec);
    solver.SetPrintLevel(1);
    trueX = 0.0;
 
@@ -1193,8 +1208,10 @@ int main(int argc, char *argv[])
 
        cg.Mult(bTsigma, trueS);
 
-
        S->Distribute(trueS);
+
+       delete Cblock;
+       delete Bblock;
    }
 
    // 13. Extract the parallel grid function corresponding to the finite element
@@ -1253,7 +1270,7 @@ int main(int argc, char *argv[])
    if (strcmp(space_for_S,"H1") == 0) // S is from H1
    {
        FiniteElementCollection * hcurl_coll;
-       if(dim==4)
+       if (dim == 4)
            hcurl_coll = new ND1_4DFECollection;
        else
            hcurl_coll = new ND_FECollection(feorder+1, dim);
@@ -1404,11 +1421,17 @@ int main(int argc, char *argv[])
    }
 
    // 17. Free the used memory.
-   //delete fform;
-   //delete CFOSLSop;
-   //delete A;
+   delete S_exact;
+   delete sigma_exact;
 
-   //delete Ablock;
+   delete S;
+   delete sigma;
+
+   delete fform;
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
+       delete qform;
+   delete gform;
+
    if (strcmp(space_for_S,"H1") == 0) // S was from H1
         delete H_space;
    delete W_space;
@@ -1419,10 +1442,10 @@ int main(int argc, char *argv[])
    delete h1_coll;
    delete hdiv_coll;
 
-   //delete pmesh;
+   delete CFOSLSop;
+   delete prec;
 
    MPI_Finalize();
-
    return 0;
 }
 
