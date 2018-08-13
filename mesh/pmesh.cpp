@@ -5135,12 +5135,11 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         }
     }
 
-    //meshgen = meshbase.MeshGenerator(); // FIX IT: Not sure at all what it is
+    meshgen = meshbase.MeshGenerator(); // FIX IT: Not sure at all what it is
 
     //attributes.Copy(meshbase.attributes);
     //bdr_attributes.Copy(meshbase.bdr_attributes);
 
-    /*
     CheckElementOrientation(true);
     if ( dim == 3)
     {
@@ -5266,7 +5265,6 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     {
        NumOfEdges = 0;
     }
-    */
 
     have_face_nbr_data = false;
 
@@ -5274,7 +5272,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     // step 3 of 4: set parmesh fields for shared entities for mesh4d
     // ****************************************************************************
 
-    //ParMeshSpaceTime_createShared( comm, Nsteps );
+    ParMeshSpaceTime_createShared( comm, Nsteps );
 
     /*
     // some clean up for unneeded tables
@@ -5293,8 +5291,8 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     // parmesh classes
     // ****************************************************************************
 
-    //int refine = 1;
-    //CreateInternalMeshStructure(refine);
+    int refine = 1;
+    CreateInternalMeshStructure(refine);
 
     return;
 }
@@ -6667,8 +6665,8 @@ void ParMeshCyl::CreateInternalMeshStructure (int refine)
     // FIXME: DestroyTables() was added here to get rid of memory leaks
     // might not be optimal since some of the tables will be already initialized before the call to
     // CreateInternalMeshStructure, but here just the safest way is chosen
-    //DestroyTables();
-    //InitTables();
+    DestroyTables();
+    InitTables();
 
     // for a 4d mesh sort the element and boundary element indices by the node numbers
     if (spaceDim == 4)
@@ -7278,7 +7276,6 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
                 bot_to_top_bels[elind].second = NumOfBdrElements - 1;
             }
 
-#if 0
             if (local_method == 0 || local_method == 1)
             {
                 // 3.4 setting vertex coordinates for space-time prism, lower base
@@ -7730,7 +7727,6 @@ void ParMeshCyl::MeshSpaceTimeCylinder_onlyArrays ( double tinit, double tau, in
 
             } //end of if local_method = 0 or 1
             else // local_method == 2
-#endif
             {
                 // The simplest way to generate space-time simplices.
                 // But requires to reorder the vertices at first, as done before.
