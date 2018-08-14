@@ -1,10 +1,74 @@
 ///                       CFOSLS formulation for transport equation in 3D/4D
 ///                         solved with a two-grid parallel-in-time multigrid
 ///                             (similar to the idea of parareal)
-/// TODO: Add algorithm description
+/// The problem considered in this example is
+///                             du/dt + b * u = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+/// 1) either in Hdiv-L2 case:
+///                             (K sigma, sigma) -> min
+/// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
+/// and K = (I - bbT / || b ||)
+/// 2) or in Hdiv-H1-L2 case
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1
+/// minimizing in both cases under the constraint
+///                             div sigma = f.
+///
+/// The problem is discretized using RT, Lagrange and discontinuous constants in 3D/4D.
+///
+/// The problem is then solved using a parallel-in-time two-grid method.
+/// First, the entire domain is divided into non-overlapping time slabs.
+/// In each time slab there are two space-time meshes, a fine and a coarse one.
+///
+/// The method can be considered as a multigrid (two-grid) with the following components:
+///
+/// 1) Smoother = parallel fine-level solve in each time slab.
+/// It takes a vector in the entire domain, extracts the values at the interfaces between
+/// time slabs and solves the problem within each time slab, using the interface value as initial
+/// condition.
+
+/// 2) Coarse solver = sequential time-stepping (time slab, after time slab, taking the initial condition
+/// in each time slab from the previous one) at the coarse level.
+
+/// 3) Standard interpolation (defined as a standard conforming interpolation within each time slab)
+
+/// 4) Operator of the problem is a sequential fine-grid time-stepping.
+///
+/// Another point of view on the algorithm:
+/// The fine-grid time-stepping can be written in the block two-diagonal matrix form:
+///     ( L_0   & 0     &  0  & ... )
+///     ( J_0,1 & L_1   &  0  & ... )
+/// A = (   0   & J_1,2 & L_2 &  0  )
+///     (                 ... & ... )
+///
+///                                     A * x = f,
+///
+/// where x and f are defined in the entire domain as an array of vector for each time slab
+/// (which store values for the interfaces between time slabs twice).
+///
+/// Here L_i is the operator within i-th time slab, which doesn't touch initial condition
+/// J_i,i+1 is the operator which accounts for the nonzero initial condition.
+///
+/// Then one can consider this matrix operator at two levels, a fine and a coarse one.
+/// The coarse one is defined as P^T A P, where the interpolation operator is constructed as
+/// P = diag (P_0, P_1, ... ) where P_i is the standrad interpolation operator for the problem
+/// in the i-th time slab.
+/// The smoother is then simply the diag(A) and we run a "geometric" multigrid with these
+/// components.
+///
+/// AFAIK, I don't know results which justifies this method theoretically, especially for the
+/// underlying transposrt equation. If you do, please let me know.
+///
+/// This example demonstrates usage of time-slabbing related classes from mfem/cfosls/, such as
+/// ParMeshCyl, TimeStepping<T>, GeneralCylHierarchy, FOSLSCylProblHierarchy,
+/// TwoGridTimeStepping<T>, etc.
+///
 /// (*) MG cycle in this code means in fact a two-grid method. It's not a regular multigrid and
 /// the current implementation is developed strictly for the two-grid case.
 /// The extension would be straight-forward though.
+///
+/// (**) Mostly, the code was tested in serial, although in the end it was checked in parallel.
+/// (***) The example was tested for memory leaks with valgrind, in Hdiv-L2 formulation, 3D/4D.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -14,13 +78,11 @@
 #include <list>
 #include <unistd.h>
 
-#define MYZEROTOL (1.0e-13)
-#define ZEROTOL (1.0e-13)
-
-// makes use of a test with nonhomogeneous initial condition
+// (if active) using a test with nonhomogeneous initial condition
 #define NONHOMO_TEST
 
-// must be active (activates construction of the mesh from the base (lower-dimensional mesh)
+// must be active (activates construction of the mesh from the base (lower-dimensional mesh),
+// making it a cylinder
 #define USE_TSL
 
 using namespace std;
@@ -28,7 +90,6 @@ using namespace mfem;
 
 int main(int argc, char *argv[])
 {
-   // 1. Initialize MPI.
    int num_procs, myid;
 
    // 1. Initialize MPI
@@ -46,24 +107,25 @@ int main(int argc, char *argv[])
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
+
    // filename for the input mesh, is used only if USE_TSL is not defined
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
    // filename for the input base mesh
    const char *meshbase_file = "../data/star.mesh";
+   // number of time steps (which define the time slabs)
    int Nt = 4;
    double tau = 0.25;
 #endif
 
-   const char *formulation = "cfosls"; // "cfosls" or "fosls"
    const char *space_for_S = "H1";     // "H1" or "L2"
-   const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-   bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
+   const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1" (H1 not tested a while)
 
-   // solver options
-   int prec_option = 1; //defines whether to use preconditioner or not, and which one
+   // defines whether to use preconditioner or not, and which one
+   int prec_option = 1;
 
    int feorder = 0;
+
    bool visualization = 0;
 
    OptionsParser args(argc, argv);
@@ -85,16 +147,10 @@ int main(int argc, char *argv[])
                   "Dimension of the space-time problem.");
    args.AddOption(&prec_option, "-precopt", "--prec-option",
                   "Preconditioner choice (0, 1 or 2 for now).");
-   args.AddOption(&formulation, "-form", "--formul",
-                  "Formulation to use (cfosls or fosls).");
    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                   "Space for S (H1 or L2).");
    args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
                   "Space for sigma (Hdiv or H1).");
-   args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
-                  "--no-eliminateS",
-                  "Turn on/off elimination of S in L2 formulation.");
-
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -116,11 +172,6 @@ int main(int argc, char *argv[])
 
    if (verbose)
    {
-       if (strcmp(formulation,"cfosls") == 0)
-           std::cout << "formulation: CFOSLS \n";
-       else
-           std::cout << "formulation: FOSLS \n";
-
        if (strcmp(space_for_sigma,"Hdiv") == 0)
            std::cout << "Space for sigma: Hdiv \n";
        else
@@ -130,18 +181,8 @@ int main(int argc, char *argv[])
            std::cout << "Space for S: H1 \n";
        else
            std::cout << "Space for S: L2 \n";
-
-       if (strcmp(space_for_S,"L2") == 0)
-       {
-           std::cout << "S: is ";
-           if (!eliminateS)
-               std::cout << "not ";
-           std::cout << "eliminated from the system \n";
-       }
    }
 
-   MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
-               "Formulation must be cfosls or fosls!\n");
    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
                "Space for S must be H1 or L2!\n");
    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
@@ -163,10 +204,11 @@ int main(int argc, char *argv[])
 #endif
 
    // 3. Createing a cylinder mesh from the given base mesh
-   // and do necessary number of serial and parallel refinements
+   // and perform a prescribed number of serial and parallel refinements
 #ifdef USE_TSL
    if (verbose)
-       std::cout << "USE_TSL is active (mesh is constructed using mesh generator) \n";
+       std::cout << "USE_TSL is active (the cylinder mesh is constructed using mesh generator) \n";
+
    if (nDimensions == 3)
    {
        meshbase_file = "../data/square_2d_moderate.mesh";
@@ -193,8 +235,6 @@ int main(int argc, char *argv[])
        imesh.close();
    }
 
-   meshbase->CheckElementOrientation(true);
-
    for (int l = 0; l < ser_ref_levels; l++)
        meshbase->UniformRefinement();
 
@@ -212,23 +252,9 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
+   // Actually, pmesh is not used in the time-stepping code
+   // What is used, it is timeslabs_pmeshcyls, see 5.
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
-
-   //delete pmeshbase;
-   //delete pmesh;
-   //MPI_Finalize();
-   //return 0;
-
-   /*
-   if (num_procs == 1)
-   {
-       std::stringstream fname;
-       fname << "pmesh_check.mesh";
-       std::ofstream ofid(fname.str().c_str());
-       ofid.precision(8);
-       pmesh->Print(ofid);
-   }
-   */
 
    //if (verbose)
        //std::cout << "pmesh shared structure \n";
@@ -333,6 +359,8 @@ int main(int argc, char *argv[])
            //(*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    problem->Solve(verbose);
+
+   delete problem;
    */
 
    // if we wanted to solve the problem in the entire domain via a hierarchy of meshes,
@@ -769,17 +797,6 @@ int main(int argc, char *argv[])
    {
        ++iter;
 
-       /*
-        * // debugging print
-       Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", mg_res);
-       std::cout << "botbases of input residual for MG Mult \n";
-       for (int tslab = 0; tslab < nslabs; ++tslab)
-       {
-           std::cout << "tslab = " << tslab << "\n";
-           debug_botbases[tslab]->Print();
-       }
-       */
-
        if (iter > 1)
        {
            for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -792,9 +809,7 @@ int main(int argc, char *argv[])
                std::cout << "mg_res full tslab = " << tslab << "\n";
                std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
                             sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
-               //mg_res_viewer.GetBlock(tslab).Print();
            }
-
        }
 
        // solve for a correction with a current residual
@@ -810,7 +825,7 @@ int main(int argc, char *argv[])
        // removing discrepancy at the interfaces between time slabs (taking values from below)
        fine_timestepping->UpdateInterfaceFromPrev(mg_corr);
 
-       // update the solution
+       // update the solution by adding the correction to it
        mg_finalsol += mg_corr;
 
        /*
@@ -852,7 +867,7 @@ int main(int argc, char *argv[])
        if (global_res_norm < eps * global_res0_norm)
            converged = true;
 
-       // output convergence status
+       // reporting convergence status
        if (verbose)
            std::cout << "Iteration " << iter << ": res_norm = " << global_res_norm << "\n";
 
@@ -870,6 +885,9 @@ int main(int argc, char *argv[])
 
    fine_timestepping->ComputeError(mg_finalsol);
    fine_timestepping->ComputeBndError(mg_finalsol);
+
+   // 13. Studying the difference between ref. solution and MG solution,
+   // for each time slab, for each variable
 
    // difference between reference solution and final solution of the parallel-in-time algorithm
    Vector diff(spacetime_mg->Width());
@@ -910,7 +928,7 @@ int main(int argc, char *argv[])
 
    MPI_Barrier(comm);
 
-   // Deallocating memory
+   // 14. Deallocating memory
 
    for (int i = 0; i < cyl_probhierarchies.Size(); ++i)
        delete cyl_probhierarchies[i];
