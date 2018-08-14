@@ -485,13 +485,13 @@ int main(int argc, char *argv[])
        std::cout << "\n\nSolving via sequential time-stepping and checking the error \n";
 
    Vector checksol(global_size);
-   fine_timestepping->SequentialSolve(rhs, input_tslab0, checksol, true);
+   fine_timestepping->SequentialSolve(rhs, *input_tslab0, checksol, true);
 
    // 9. Checking the residual after the solve in each time slab
    Vector checkres(global_size);
    BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
 
-   fine_timestepping->SeqOp(checksol, &input_tslab0, checkres);
+   fine_timestepping->SeqOp(checksol, input_tslab0, checkres);
    checkres -= rhs;
    checkres *= -1;
 
