@@ -60,7 +60,7 @@
 /// underlying transposrt equation. If you do, please let me know.
 ///
 /// This example demonstrates usage of time-slabbing related classes from mfem/cfosls/, such as
-/// ParMeshCyl, TimeStepping<T>, GeneralCylHierarchy, FOSLSCylProblHierarchy,
+/// ParMeshCyl, FOSLSCylProblem, TimeStepping<T>, GeneralCylHierarchy, FOSLSCylProblHierarchy,
 /// TwoGridTimeStepping<T>, etc.
 ///
 /// (*) MG cycle in this code means in fact a two-grid method. It's not a regular multigrid and
@@ -73,6 +73,9 @@
 /// Typical run of this example: ./cfosls_hyperbolic_tst_multigrid --whichD 3 --spaceS "L2" -no-vis
 /// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
+///
+/// Another example on time-slabbing technique, with a standard time-stepping is
+/// cfosls_hyperbolic_timestepping.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -344,6 +347,7 @@ int main(int argc, char *argv[])
    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
    using ProblemType = FOSLSCylProblem_HdivH1L2hyp;
+   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
 
    /*
    // Hdiv-L2 case
@@ -351,6 +355,7 @@ int main(int argc, char *argv[])
    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
    using ProblemType = FOSLSCylProblem_HdivL2hyp;
+   MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
    */
 
    FormulType * formulat = new FormulType (dim, numsol, verbose);

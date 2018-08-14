@@ -16,9 +16,22 @@
 ///
 /// The problem is discretized using RT, Lagrange and discontinuous constants in 3D/4D.
 ///
+/// The problem is then solved using a standard time-stepping (time-slabbing).
+/// The entire domain is divided into non-overlapping time slabs, then we solve problem in
+/// each of the time slab, time slab after time slab,
+/// transmitting initial condition for the next time slab.
+///
+/// This example demonstrates usage of time-slabbing related classes from mfem/cfosls/, such as
+/// ParMeshCyl, FOSLSCylProblem, TimeStepping etc.
+///
+///
+/// (**) Mostly, the code was tested in serial, although in the end it was checked in parallel.
+/// (***) The example was tested for memory leaks with valgrind, in Hdiv-L2 formulation, 3D/4D.
+///
 /// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 --spaceS "L2" -no-vis
 /// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
+///
 /// Another example on time-slabbing technique, with a more complicated two-grid method is
 /// cfosls_hyperbolic_tst_multigrid.cpp.
 
@@ -295,6 +308,7 @@ int main(int argc, char *argv[])
    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
    using ProblemType = FOSLSCylProblem_HdivH1L2hyp;
+   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
 
    /*
    // Hdiv-L2 case
@@ -302,6 +316,7 @@ int main(int argc, char *argv[])
    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
    using ProblemType = FOSLSCylProblem_HdivL2hyp;
+   MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
    */
 
    FormulType * formulat = new FormulType (dim, numsol, verbose);
@@ -345,7 +360,8 @@ int main(int argc, char *argv[])
        // just for fun, refining each mesh once after creating (could be more, of course)
        timeslabs_pmeshcyls[tslab]->Refine(1);
 
-       timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
+       timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab],
+                                                   *bdr_conds, *fe_formulat, prec_option, verbose);
 
        tinit_tslab += slab_tau * slab_width;
    }
@@ -461,8 +477,7 @@ int main(int argc, char *argv[])
    fine_timestepping->ZeroBndValues(rhs);
 
    // computing initial data
-   Vector input_tslab0(fine_timestepping->GetInitCondSize());
-   input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
+   Vector * input_tslab0 = fine_timestepping->GetProblem(0)->GetExactBase("bot");
 
    // 8. Solving with a sequential time-stepping
 
@@ -499,8 +514,12 @@ int main(int argc, char *argv[])
 
    // 17. Free the used memory.
    for (int tslab = 0; tslab < nslabs; ++tslab )
+       delete timeslabs_problems[tslab];
+
+   for (int tslab = 0; tslab < nslabs; ++tslab )
        delete timeslabs_pmeshcyls[tslab];
 
+   delete input_tslab0;
    delete exact_initcond0;
 
    delete pmeshbase;
