@@ -1,4 +1,26 @@
-//                       CFOSLS formulation for transport equation in 3D/4D with time-slabbing technique
+///                       CFOSLS formulation for transport equation in 3D/4D solved via
+///                                      standard time-slabbing technique
+///
+/// The problem considered in this example is
+///                             du/dt + b * u = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+/// 1) either in Hdiv-L2 case:
+///                             (K sigma, sigma) -> min
+/// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
+/// and K = (I - bbT / || b ||)
+/// 2) or in Hdiv-H1-L2 case
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1
+/// minimizing in both cases under the constraint
+///                             div sigma = f.
+///
+/// The problem is discretized using RT, Lagrange and discontinuous constants in 3D/4D.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 --spaceS "L2" -no-vis
+/// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code, around 4.
+/// Another example on time-slabbing technique, with a more complicated two-grid method is
+/// cfosls_hyperbolic_tst_multigrid.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -8,12 +30,11 @@
 #include <list>
 #include <unistd.h>
 
-#define MYZEROTOL (1.0e-13)
-#define ZEROTOL (1.0e-13)
-
+// (if active) using a test with nonhomogeneous initial condition
 #define NONHOMO_TEST
 
-// must be active
+// must be active (activates construction of the mesh from the base (lower-dimensional mesh),
+// making it a cylinder
 #define USE_TSL
 
 using namespace std;
@@ -24,7 +45,6 @@ int main(int argc, char *argv[])
    // 1. Initialize MPI.
    int num_procs, myid;
 
-   // 1. Initialize MPI
    MPI_Init(&argc, &argv);
    MPI_Comm comm = MPI_COMM_WORLD;
    MPI_Comm_size(comm, &num_procs);
@@ -39,22 +59,25 @@ int main(int argc, char *argv[])
    int par_ref_levels  = 0;
 
    // 2. Parse command-line options.
+
+   // filename for the input mesh, is used only if USE_TSL is not defined
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
+   // filename for the input base mesh
    const char *meshbase_file = "../data/star.mesh";
+   // number of time steps (which define the time slabs)
    int Nt = 4;
    double tau = 0.25;
 #endif
 
-   const char *formulation = "cfosls"; // "cfosls" or "fosls"
    const char *space_for_S = "H1";     // "H1" or "L2"
-   const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-   bool eliminateS = true;            // in case space_for_S = "L2" defines whether we eliminate S from the system
+   const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1" (H1 not tested a while)
 
-   // solver options
-   int prec_option = 1; //defines whether to use preconditioner or not, and which one
+   // defines whether to use preconditioner or not, and which one
+   int prec_option = 1;
 
    int feorder = 0;
+
    bool visualization = 0;
 
    OptionsParser args(argc, argv);
@@ -76,16 +99,10 @@ int main(int argc, char *argv[])
                   "Dimension of the space-time problem.");
    args.AddOption(&prec_option, "-precopt", "--prec-option",
                   "Preconditioner choice (0, 1 or 2 for now).");
-   args.AddOption(&formulation, "-form", "--formul",
-                  "Formulation to use (cfosls or fosls).");
    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                   "Space for S (H1 or L2).");
    args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
                   "Space for sigma (Hdiv or H1).");
-   args.AddOption(&eliminateS, "-elims", "--eliminateS", "-no-elims",
-                  "--no-eliminateS",
-                  "Turn on/off elimination of S in L2 formulation.");
-
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -107,11 +124,6 @@ int main(int argc, char *argv[])
 
    if (verbose)
    {
-       if (strcmp(formulation,"cfosls") == 0)
-           std::cout << "formulation: CFOSLS \n";
-       else
-           std::cout << "formulation: FOSLS \n";
-
        if (strcmp(space_for_sigma,"Hdiv") == 0)
            std::cout << "Space for sigma: Hdiv \n";
        else
@@ -122,22 +134,15 @@ int main(int argc, char *argv[])
        else
            std::cout << "Space for S: L2 \n";
 
-       if (strcmp(space_for_S,"L2") == 0)
-       {
-           std::cout << "S: is ";
-           if (!eliminateS)
-               std::cout << "not ";
-           std::cout << "eliminated from the system \n";
-       }
    }
 
-   MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
-   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
-   MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
-
-   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
-
-   StopWatch chrono;
+   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
+               "Space for S must be H1 or L2!\n");
+   MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
+               "Space for sigma must be Hdiv or H1!\n");
+   MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0
+                                                      && strcmp(space_for_S,"H1") == 0),
+               "Sigma from H1vec must be coupled with S from H1!\n");
 
 #ifdef NONHOMO_TEST
    if (nDimensions == 3)
@@ -151,9 +156,12 @@ int main(int argc, char *argv[])
        numsol = -4;
 #endif
 
+   // 3. Createing a cylinder mesh from the given base mesh
+   // and perform a prescribed number of serial and parallel refinements
+
 #ifdef USE_TSL
    if (verbose)
-       std::cout << "USE_TSL is active (mesh is constructed using mesh generator) \n";
+       std::cout << "USE_TSL is active (the cylinder mesh is constructed using mesh generator) \n";
    if (nDimensions == 3)
    {
        meshbase_file = "../data/square_2d_moderate.mesh";
@@ -199,30 +207,9 @@ int main(int argc, char *argv[])
 
    delete meshbase;
 
-   /*
-   int nslabs = 3;
-   Array<int> slabs_widths(nslabs);
-   slabs_widths[0] = Nt / 2;
-   slabs_widths[1] = Nt / 2 - 1;
-   slabs_widths[2] = 1;
-   ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt, nslabs, &slabs_widths);
-   */
-
+   // Actually, pmesh is not used in the time-stepping code
+   // What is used, it is timeslabs_pmeshcyls, see 5.
    ParMeshCyl * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
-   //pmesh->Refine(1);
-
-   //pmesh->PrintSlabsStruct();
-
-   /*
-   if (num_procs == 1)
-   {
-       std::stringstream fname;
-       fname << "pmesh_check.mesh";
-       std::ofstream ofid(fname.str().c_str());
-       ofid.precision(8);
-       pmesh->Print(ofid);
-   }
-   */
 
    //if (verbose)
        //std::cout << "pmesh shared structure \n";
@@ -301,9 +288,7 @@ int main(int argc, char *argv[])
    std::cout << std::flush;
    MPI_Barrier(comm);
 
-   if (verbose)
-      std::cout << "Checking a single solve from a one TimeCylHyper instance "
-                    "created for the entire domain \n";
+   // 4. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g., here)
 
    // Hdiv-H1 case
    using FormulType = CFOSLSFormulation_HdivH1Hyper;
@@ -323,13 +308,20 @@ int main(int argc, char *argv[])
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrCondsType * bdr_conds = new BdrCondsType(*pmesh);
 
-   //ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+   // if we wanted to solve the problem in the entire domain, we could have used this
+   /*
+   ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   //problem->Solve(verbose);
+   problem->Solve(verbose);
 
-   //MPI_Finalize();
-   //return 0;
+   delete problem;
 
+   MPI_Finalize();
+   return 0;
+   */
+
+   // 5. Define the time slabs structure (how many, how many time steps within each
+   // the time slab width in time steps
    int nslabs = 2;//1;//2;//4;//2;
    double slab_tau = 0.125;//0.125;//1.0/16;//0.125;
        int slab_width = 4; // in time steps (as time intervals) withing a single time slab
@@ -343,13 +335,14 @@ int main(int argc, char *argv[])
        std::cout << "time step within a time slab: " << slab_tau << "\n";
    }
 
-   // creating fine-level time-stepping from a bunch of problems in the cylinders
-//#if 0
+   // 6. Creating a fine-level time-stepping instance from a series of problems
+   // in the cylinders (time slabs)
    double tinit_tslab = 0.0;
    Array<ProblemType*> timeslabs_problems(nslabs);
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
        timeslabs_pmeshcyls[tslab] = new ParMeshCyl(comm, *pmeshbase, tinit_tslab, slab_tau, slab_width);
+       // just for fun, refining each mesh once after creating (could be more, of course)
        timeslabs_pmeshcyls[tslab]->Refine(1);
 
        timeslabs_problems[tslab] = new ProblemType(*timeslabs_pmeshcyls[tslab], *bdr_conds, *fe_formulat, prec_option, verbose);
@@ -362,10 +355,10 @@ int main(int argc, char *argv[])
 
    TimeStepping<ProblemType> * fine_timestepping = new TimeStepping<ProblemType>(timeslabs_problems, verbose);
 
-//#endif // for creating fine-level time-stepping from a bunch of problems in the cylinders
-
    // creating fine-level time-stepping from a TwoGridTimeStepping instance
 #if 0
+   // if this doesn't work, look in cfosls_hyperbolic_tst_multigrid,
+   // where a newer version is used
    double tinit_tslab = 0.0;
    for (int tslab = 0; tslab < nslabs; ++tslab )
    {
@@ -397,6 +390,7 @@ int main(int argc, char *argv[])
 
 #endif // for creating fine-level time-stepping from a TwoGridTimeStepping instance
 
+   // some older code which survived, maybe even doesn't compile
 #if 0
    /*
    // testing parallel solve vs separate subdomain solves
@@ -449,7 +443,11 @@ int main(int argc, char *argv[])
 #endif
 
    int global_size = fine_timestepping->GetGlobalProblemSize();
-   // creating initial guess which satisfies given initial condition for the starting time slab
+
+   // 7. Creating an initial guess which satisfies given initial condition
+   // for the starting time slab (since the current time-stepping implementation
+   // is designed to work with zero initial guess at certain places, like computing residual)
+
    Vector xinit(global_size);
    xinit = 0.0;
    FOSLSCylProblem * problem0 = fine_timestepping->GetProblem(0);
@@ -466,14 +464,15 @@ int main(int argc, char *argv[])
    Vector input_tslab0(fine_timestepping->GetInitCondSize());
    input_tslab0 = *fine_timestepping->GetProblem(0)->GetExactBase("bot");
 
-   // now we solve with seq. solve on the finest level and compute the error
+   // 8. Solving with a sequential time-stepping
 
    if (verbose)
-       std::cout << "\n\nSolving with sequential solve and checking the error \n";
+       std::cout << "\n\nSolving via sequential time-stepping and checking the error \n";
 
    Vector checksol(global_size);
    fine_timestepping->SequentialSolve(rhs, input_tslab0, checksol, true);
 
+   // 9. Checking the residual after the solve in each time slab
    Vector checkres(global_size);
    BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
 
@@ -483,29 +482,33 @@ int main(int argc, char *argv[])
 
    for (int tslab = 0; tslab < nslabs; ++tslab)
    {
+       double tslabnorm = ComputeMPIVecNorm(comm, checkres_viewer.GetBlock(tslab),"", false);
+
        if (verbose)
-       {
-           std::cout << "checkres, tslab = " << tslab << "\n";
-       }
-
-       // FIXME: This is correct only in serial
-       std::cout << "norm = " << checkres_viewer.GetBlock(tslab).Norml2() /
-                    sqrt (checkres_viewer.GetBlock(tslab).Size()) << "\n";
-
-       //std::cout << "values of res at bottom interface: \n";
-       //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", checkres_viewer.GetBlock(tslab));
-       //vec.Print();
+           std::cout << "checkres, tslab = " << tslab << ", res norm = " <<
+                        tslabnorm << "\n";
    }
 
+   double global_res_norm = ComputeMPIVecNorm(comm, checkres, "", false);
+   if (verbose)
+       std::cout << "res norm = " << global_res_norm << "\n";
+
+   // 9. Checking the error for the final solution
    fine_timestepping->ComputeError(checksol);
    fine_timestepping->ComputeBndError(checksol);
 
-   double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
-   if (verbose)
-       std::cout << "checkres norm = " << checkres_norm << "\n";
-
    // 17. Free the used memory.
-   MPI_Barrier(comm);
+   for (int tslab = 0; tslab < nslabs; ++tslab )
+       delete timeslabs_pmeshcyls[tslab];
+
+   delete exact_initcond0;
+
+   delete pmeshbase;
+   delete pmesh;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
 
    MPI_Finalize();
    return 0;

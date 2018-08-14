@@ -69,6 +69,10 @@
 ///
 /// (**) Mostly, the code was tested in serial, although in the end it was checked in parallel.
 /// (***) The example was tested for memory leaks with valgrind, in Hdiv-L2 formulation, 3D/4D.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_tst_multigrid --whichD 3 --spaceS "L2" -no-vis
+/// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code, around 4.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -90,9 +94,9 @@ using namespace mfem;
 
 int main(int argc, char *argv[])
 {
+   // 1. Initialize MPI
    int num_procs, myid;
 
-   // 1. Initialize MPI
    MPI_Init(&argc, &argv);
    MPI_Comm comm = MPI_COMM_WORLD;
    MPI_Comm_size(comm, &num_procs);
