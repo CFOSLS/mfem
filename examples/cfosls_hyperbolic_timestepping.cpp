@@ -296,7 +296,6 @@ int main(int argc, char *argv[])
 #endif
 
    int dim = nDimensions;
-   Transport_test Mytest(dim, numsol);
 
    MPI_Barrier(comm);
    std::cout << std::flush;

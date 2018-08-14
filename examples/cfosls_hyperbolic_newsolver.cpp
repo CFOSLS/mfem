@@ -350,7 +350,7 @@ int main(int argc, char *argv[])
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
 
-    Transport_test_divfree Mytest(nDimensions, numsol, numcurl);
+    Hyper_test Mytest(nDimensions, numsol);
 
     if (verbose)
         cout << "Number of mpi processes: " << num_procs << endl << flush;
@@ -826,7 +826,7 @@ int main(int argc, char *argv[])
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
             Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
         else
-            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+            Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
         Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -856,8 +856,8 @@ int main(int argc, char *argv[])
 
                 // diagonal block for H^1
                 Cblock = new ParBilinearForm(H_space_lvls[l]);
-                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.GetBBt()));
                 Cblock->Assemble();
                 // FIXME: What about boundary conditons here?
                 //Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
@@ -866,7 +866,7 @@ int main(int argc, char *argv[])
                 // off-diagonal block for (H(div), Space_for_S) block
                 // you need to create a new integrator here to swap the spaces
                 BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
-                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetMinB()));
                 BTblock->Assemble();
                 // FIXME: What about boundary conditons here?
                 //BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
@@ -912,7 +912,7 @@ int main(int argc, char *argv[])
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
             {
                 secondeqn_rhs = new ParLinearForm(H_space_lvls[l]);
-                secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+                secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.GetBf()));
                 secondeqn_rhs->Assemble();
 
                 secondeqn_rhs->ParallelAssemble(Functrhs_global->GetBlock(1));
@@ -1165,7 +1165,7 @@ int main(int argc, char *argv[])
             if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
                 Ablock->AddDomainIntegrator(new VectorFEMassIntegrator);
             else
-                Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+                Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
             Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -1186,8 +1186,8 @@ int main(int argc, char *argv[])
 
                 // diagonal block for H^1
                 Cblock = new ParBilinearForm(H_space_lvls[l]);
-                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+                Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
+                Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.GetBBt()));
                 Cblock->Assemble();
                 {
                     Vector temp1(Cblock->Width());
@@ -1201,7 +1201,7 @@ int main(int argc, char *argv[])
                 // off-diagonal block for (H(div), Space_for_S) block
                 // you need to create a new integrator here to swap the spaces
                 BTblock = new ParMixedBilinearForm(R_space_lvls[l], H_space_lvls[l]);
-                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+                BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetMinB()));
                 BTblock->Assemble();
                 {
                     Vector temp1(BTblock->Width());
@@ -2008,7 +2008,7 @@ int main(int argc, char *argv[])
 
     ParGridFunction * sigma_exact_finest;
     sigma_exact_finest = new ParGridFunction(R_space_lvls[0]);
-    sigma_exact_finest->ProjectCoefficient(*Mytest.sigma);
+    sigma_exact_finest->ProjectCoefficient(*Mytest.GetSigma());
     Vector sigma_exact_truedofs(R_space_lvls[0]->GetTrueVSize());
     sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
 
@@ -2017,7 +2017,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
     {
         S_exact_finest = new ParGridFunction(H_space_lvls[0]);
-        S_exact_finest->ProjectCoefficient(*Mytest.scalarS);
+        S_exact_finest->ProjectCoefficient(*Mytest.GetU());
         S_exact_truedofs.SetSize(H_space_lvls[0]->GetTrueVSize());
         S_exact_finest->ParallelProject(S_exact_truedofs);
     }
@@ -2156,7 +2156,7 @@ int main(int argc, char *argv[])
         //Right hand size
 
         gform = new ParLinearForm(W_space);
-        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
         gform->Assemble();
 
         F_fine = *gform;
@@ -2206,12 +2206,12 @@ int main(int argc, char *argv[])
         sigma_exact = new ParGridFunction(hierarchy->GetSpace(SpaceName::HDIV, 0));
         sigma_exact->ProjectCoefficient(*problem->GetFEformulation().
                                         GetFormulation()->GetTest()->GetSigma());
-        //sigma_exact->ProjectCoefficient(*Mytest.sigma);
+        //sigma_exact->ProjectCoefficient(*Mytest.GetSigma());
 
         gform = new ParLinearForm(hierarchy->GetSpace(SpaceName::L2, 0));
         gform->AddDomainIntegrator(new DomainLFIntegrator(*problem->GetFEformulation().
                                                           GetFormulation()->GetTest()->GetRhs()));
-        //gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        //gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
         gform->Assemble();
 
         Bblock = new ParMixedBilinearForm(hierarchy->GetSpace(SpaceName::HDIV, 0),
@@ -2256,10 +2256,10 @@ int main(int argc, char *argv[])
         delete Temp;
 #else
         sigma_exact = new ParGridFunction(R_space);
-        sigma_exact->ProjectCoefficient(*Mytest.sigma);
+        sigma_exact->ProjectCoefficient(*Mytest.GetSigma());
 
         gform = new ParLinearForm(W_space);
-        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        gform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
         gform->Assemble();
 
         Bblock = new ParMixedBilinearForm(R_space, W_space);
@@ -2316,7 +2316,7 @@ int main(int argc, char *argv[])
 
     {
         ParLinearForm * constrfform = new ParLinearForm(W_space);
-        constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+        constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
         constrfform->Assemble();
 
         Vector Floc(P_W[0]->Height());
@@ -2418,14 +2418,11 @@ int main(int argc, char *argv[])
     chrono.Start();
 
     // the div-free part
-    ParGridFunction *u_exact = new ParGridFunction(C_space);
-    u_exact->ProjectCoefficient(*Mytest.divfreepart);
-
     ParGridFunction *S_exact = new ParGridFunction(S_space);
-    S_exact->ProjectCoefficient(*Mytest.scalarS);
+    S_exact->ProjectCoefficient(*Mytest.GetU());
 
     ParGridFunction * sigma_exact = new ParGridFunction(R_space);
-    sigma_exact->ProjectCoefficient(*Mytest.sigma);
+    sigma_exact->ProjectCoefficient(*Mytest.GetSigma());
 
     {
         Vector Sigmahat_truedofs(R_space->TrueVSize());
@@ -2468,7 +2465,7 @@ int main(int argc, char *argv[])
     {
         qform = new ParLinearForm(S_space);
         if (strcmp(space_for_S,"H1") == 0) // S is from H1
-            qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+            qform->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.GetBf()));
         else // S is from L2 but is not eliminated
             qform->AddDomainIntegrator(new DomainLFIntegrator(zero));
         qform->Assemble();
@@ -2500,7 +2497,7 @@ int main(int argc, char *argv[])
         //Mblock->AddDomainIntegrator(new DivDivIntegrator); //only for debugging, delete this
     }
     else // no S, hence we need the matrix weight
-        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
     Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -2542,7 +2539,7 @@ int main(int argc, char *argv[])
     /*
     ParBilinearForm *Checkblock(new ParBilinearForm(C_space_lvls[0]));
     //Checkblock->AddDomainIntegrator(new CurlCurlIntegrator);
-    Checkblock->AddDomainIntegrator(new CurlCurlIntegrator(*Mytest.Ktilda));
+    Checkblock->AddDomainIntegrator(new CurlCurlIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
     Checkblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -2564,12 +2561,12 @@ int main(int argc, char *argv[])
         ParBilinearForm *Cblock = new ParBilinearForm(S_space);
         if (strcmp(space_for_S,"H1") == 0) // S is from H1
         {
-            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-            Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
+            Cblock->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.GetBBt()));
         }
         else // S is from L2
         {
-            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+            Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
         }
         Cblock->Assemble();
         Cblock->EliminateEssentialBC(ess_bdrS, xblks.GetBlock(1),*qform);
@@ -2579,7 +2576,7 @@ int main(int argc, char *argv[])
         // off-diagonal block for (H(div), Space_for_S) block
         // you need to create a new integrator here to swap the spaces
         ParMixedBilinearForm *BTblock(new ParMixedBilinearForm(R_space, S_space));
-        BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+        BTblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetMinB()));
         BTblock->Assemble();
         BTblock->EliminateTrialDofs(ess_bdrSigma, *sigma_exact, *qform);
         BTblock->EliminateTestDofs(ess_bdrS);
@@ -2875,7 +2872,7 @@ int main(int argc, char *argv[])
 
         /*
         ParBilinearForm *Mblock = new ParBilinearForm(R_space_lvls[num_levels - 1]);
-        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
         Mblock->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -2910,7 +2907,7 @@ int main(int argc, char *argv[])
 
         Vector checkvec(Divfree_hpmat_mod_lvls[num_levels - 1]->Height());
         ParGridFunction * sigma_exact_tdofs_coarsest = new ParGridFunction(R_space_lvls[num_levels - 1]);
-        sigma_exact_tdofs_coarsest->ProjectCoefficient(*Mytest.sigma);
+        sigma_exact_tdofs_coarsest->ProjectCoefficient(*Mytest.GetSigma());
         sigma_exact_tdofs_coarsest->ParallelProject(checkvec);
 
         Vector checkRhs(A->Height());
@@ -3023,18 +3020,18 @@ int main(int argc, char *argv[])
     else // no S, then we compute S from sigma
     {
         // temporary for checking the computation of S below
-        //sigma->ProjectCoefficient(*Mytest.sigma);
+        //sigma->ProjectCoefficient(*Mytest.GetSigma());
 
         S = new ParGridFunction(S_space);
 
         ParBilinearForm *Cblock(new ParBilinearForm(S_space));
-        Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
+        Cblock->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
         Cblock->Assemble();
         Cblock->Finalize();
         HypreParMatrix * C = Cblock->ParallelAssemble();
 
         ParMixedBilinearForm *Bblock(new ParMixedBilinearForm(R_space, S_space));
-        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.b));
+        Bblock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetB()));
         Bblock->Assemble();
         Bblock->Finalize();
         HypreParMatrix * B = Bblock->ParallelAssemble();
@@ -3064,8 +3061,8 @@ int main(int argc, char *argv[])
         delete Cblock;
     }
 
-    double err_sigma = sigma->ComputeL2Error(*Mytest.sigma, irs);
-    double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
+    double err_sigma = sigma->ComputeL2Error(*Mytest.GetSigma(), irs);
+    double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.GetSigma(), *pmesh, irs);
 
     if (verbose)
         cout << "sigma_h = sigma_hat + div-free part, div-free part = curl u_h \n";
@@ -3080,7 +3077,7 @@ int main(int argc, char *argv[])
     }
 
     /*
-    double err_sigmahat = Sigmahat->ComputeL2Error(*Mytest.sigma, irs);
+    double err_sigmahat = Sigmahat->ComputeL2Error(*Mytest.GetSigma(), irs);
     if (verbose && !withDiv)
         if ( norm_sigma > MYZEROTOL )
             cout << "|| sigma_hat - sigma_ex || / || sigma_ex || = " << err_sigmahat / norm_sigma << endl;
@@ -3094,8 +3091,8 @@ int main(int argc, char *argv[])
     Div.Assemble();
     Div.Mult(*sigma, DivSigma);
 
-    double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-    double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
+    double err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
+    double norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
 
     if (verbose)
     {
@@ -3114,10 +3111,10 @@ int main(int argc, char *argv[])
     //if (withS)
     {
         ParGridFunction * S_exact = new ParGridFunction(S_space);
-        S_exact->ProjectCoefficient(*Mytest.scalarS);
+        S_exact->ProjectCoefficient(*Mytest.GetU());
 
-        double err_S = S->ComputeL2Error(*Mytest.scalarS, irs);
-        norm_S = ComputeGlobalLpNorm(2, *Mytest.scalarS, *pmesh, irs);
+        double err_S = S->ComputeL2Error(*Mytest.GetU(), irs);
+        norm_S = ComputeGlobalLpNorm(2, *Mytest.GetU(), *pmesh, irs);
         if (verbose)
         {
             if ( norm_S > MYZEROTOL )
@@ -3228,7 +3225,7 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Computing projection errors \n";
 
-    double projection_error_sigma = sigma_exact->ComputeL2Error(*Mytest.sigma, irs);
+    double projection_error_sigma = sigma_exact->ComputeL2Error(*Mytest.GetSigma(), irs);
 
     if(verbose)
     {
@@ -3242,7 +3239,7 @@ int main(int argc, char *argv[])
 
     //if (withS)
     {
-        double projection_error_S = S_exact->ComputeL2Error(*Mytest.scalarS, irs);
+        double projection_error_S = S_exact->ComputeL2Error(*Mytest.GetU(), irs);
 
         if(verbose)
         {
@@ -3577,7 +3574,7 @@ int main(int argc, char *argv[])
     //ParLinearForm *fform = new ParLinearForm(R_space);
 
     ParLinearForm * constrfform = new ParLinearForm(W_space_lvls[0]);
-    constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+    constrfform->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
     constrfform->Assemble();
 
     /*
@@ -4119,7 +4116,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
     {
         qformtest = new ParLinearForm(H_space_lvls[0]);
-        qformtest->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+        qformtest->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.GetBf()));
         qformtest->Assemble();
     }
 
@@ -4128,7 +4125,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0)
         Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator);
     else
-        Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+        Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
 #ifdef WITH_PENALTY
     Ablocktest->AddDomainIntegrator(new VectorFEMassIntegrator(reg_coeff));
 #endif
@@ -4145,8 +4142,8 @@ int main(int argc, char *argv[])
         ParBilinearForm * Cblocktest = new ParBilinearForm(H_space_lvls[0]);
         if (strcmp(space_for_S,"H1") == 0)
         {
-            Cblocktest->AddDomainIntegrator(new MassIntegrator(*Mytest.bTb));
-            Cblocktest->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.bbT));
+            Cblocktest->AddDomainIntegrator(new MassIntegrator(*Mytest.GetBtB()));
+            Cblocktest->AddDomainIntegrator(new DiffusionIntegrator(*Mytest.GetBBt()));
         }
         Cblocktest->Assemble();
         Cblocktest->EliminateEssentialBC(ess_bdrS, *S_exact_finest, *qformtest);
@@ -4162,7 +4159,7 @@ int main(int argc, char *argv[])
     if (strcmp(space_for_S,"H1") == 0)
     {
         ParMixedBilinearForm *Bblocktest = new ParMixedBilinearForm(R_space_lvls[0], H_space_lvls[0]);
-        Bblocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.minb));
+        Bblocktest->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetMinB()));
         Bblocktest->Assemble();
         Bblocktest->EliminateTrialDofs(ess_bdrSigma, *sigma_exact_finest, *qformtest);
         Bblocktest->EliminateTestDofs(ess_bdrS);
@@ -5365,12 +5362,12 @@ int main(int argc, char *argv[])
 
     ParLinearForm *gformtest;
     gformtest = new ParLinearForm(W_space_lvls[0]);
-    gformtest->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.scalardivsigma));
+    gformtest->AddDomainIntegrator(new DomainLFIntegrator(*Mytest.GetRhs()));
     gformtest->Assemble();
 
     ParBilinearForm *Ablock(new ParBilinearForm(R_space));
     HypreParMatrix *Atest;
-    Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.Ktilda));
+    Ablock->AddDomainIntegrator(new VectorFEMassIntegrator(*Mytest.GetKtilda()));
     Ablock->Assemble();
     Ablock->EliminateEssentialBC(ess_bdrSigma, *sigma_exact_finest, *fform);
     Ablock->Finalize();
@@ -5469,8 +5466,8 @@ int main(int argc, char *argv[])
             irs[i] = &(IntRules.Get(i, order_quad));
         }
 
-        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
-        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.GetSigma(), *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.GetSigma(), irs);
         if (verbose)
         {
             if ( norm_sigma > MYZEROTOL )
@@ -5485,8 +5482,8 @@ int main(int argc, char *argv[])
         Div.Assemble();
         Div.Mult(*NewSigmahat, DivSigma);
 
-        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
+        double err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
 
         if (verbose)
         {
@@ -5526,8 +5523,8 @@ int main(int argc, char *argv[])
 
             // Computing error for S
 
-            double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
-            double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+            double err_S = NewS->ComputeL2Error((*Mytest.GetU()), irs);
+            double norm_S = ComputeGlobalLpNorm(2, (*Mytest.GetU()), *pmesh, irs);
             if (verbose)
             {
                 std::cout << "|| S_h - S_ex || / || S_ex || = " <<
@@ -5589,7 +5586,7 @@ int main(int argc, char *argv[])
         if (strcmp(space_for_S,"H1") == 0 || !eliminateS)
         {
             secondeqn_rhs = new ParLinearForm(H_space_lvls[0]);
-            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.bf));
+            secondeqn_rhs->AddDomainIntegrator(new GradDomainLFIntegrator(*Mytest.GetBf()));
             secondeqn_rhs->Assemble();
             secondeqn_rhs->ParallelAssemble(NewRhs.GetBlock(1));
 
@@ -5778,8 +5775,8 @@ int main(int argc, char *argv[])
             irs[i] = &(IntRules.Get(i, order_quad));
         }
 
-        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.sigma, *pmesh, irs);
-        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.sigma, irs);
+        double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.GetSigma(), *pmesh, irs);
+        double err_newsigmahat = NewSigmahat->ComputeL2Error(*Mytest.GetSigma(), irs);
         if (verbose)
         {
             if ( norm_sigma > MYZEROTOL )
@@ -5794,8 +5791,8 @@ int main(int argc, char *argv[])
         Div.Assemble();
         Div.Mult(*NewSigmahat, DivSigma);
 
-        double err_div = DivSigma.ComputeL2Error(*Mytest.scalardivsigma,irs);
-        double norm_div = ComputeGlobalLpNorm(2, *Mytest.scalardivsigma, *pmesh, irs);
+        double err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
+        double norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
 
         if (verbose)
         {
@@ -5838,8 +5835,8 @@ int main(int argc, char *argv[])
 
         // Computing error for S
 
-        double err_S = NewS->ComputeL2Error((*Mytest.scalarS), irs);
-        double norm_S = ComputeGlobalLpNorm(2, (*Mytest.scalarS), *pmesh, irs);
+        double err_S = NewS->ComputeL2Error((*Mytest.GetU()), irs);
+        double norm_S = ComputeGlobalLpNorm(2, (*Mytest.GetU()), *pmesh, irs);
         if (verbose)
         {
             std::cout << "|| S_h - S_ex || / || S_ex || = " <<
@@ -6066,7 +6063,6 @@ int main(int argc, char *argv[])
     delete gform;
     delete Bdiv;
 
-    delete u_exact;
     delete S_exact;
     delete sigma_exact;
     delete opdivfreepart;
