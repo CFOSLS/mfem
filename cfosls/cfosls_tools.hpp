@@ -32,8 +32,8 @@ SparseMatrix * RemoveZeroEntries(const SparseMatrix& in);
 /// Takes a ParFiniteElementSpace and a tdofs link between top and bottom bases
 /// and creates a HypreParMatrix which restricts given tdofs in the entire domain
 /// onto tdofs at the top (if top_or_bot = "top") or bottom(top_or_bot = "bot") bases
-HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
-                                   std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
+HypreParMatrix * CreateRestriction(const char * top_or_bot, const ParFiniteElementSpace& pfespace,
+                                   const std::vector<std::pair<int,int> >& bot_to_top_tdofs_link);
 
 /// This routine takes type of the elements (eltype), corresponding fespace,
 /// link between bot and top boundary elements
@@ -41,8 +41,8 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 /// The output link is in the form of a vector of pairs (int,int) where each pair matches dofs
 /// of fespace which correspond to the matching top to bottom boundary elements
 std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype,
-                                                         FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels,
+                                                         const FiniteElementSpace& fespace,
+                                                         const std::vector<std::pair<int,int> > & bot_to_top_bels,
                                                          bool verbose = false);
 
 /// Takes a HypreParMatrix and a list of boundary tdofs for rows and columns and

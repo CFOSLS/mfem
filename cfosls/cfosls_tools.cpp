@@ -6456,8 +6456,8 @@ void GeneralCylHierarchy::ConstructTdofsLinks()
 /// Takes a ParFiniteElementSpace and a tdofs link between top and bottom bases
 /// and creates a HypreParMatrix which restricts given tdofs in the entire domain
 /// onto tdofs at the top (if top_or_bot = "top") or bottom(top_or_bot = "bot") bases
-HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpace& pfespace,
-                                   std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
+HypreParMatrix * CreateRestriction(const char * top_or_bot, const ParFiniteElementSpace& pfespace,
+                                   const std::vector<std::pair<int,int> >& bot_to_top_tdofs_link)
 {
     if (strcmp(top_or_bot, "top") != 0 && strcmp(top_or_bot, "bot") != 0)
     {
@@ -6621,8 +6621,8 @@ HypreParMatrix * CreateRestriction(const char * top_or_bot, ParFiniteElementSpac
 /// the fespace must match the provided eltype
 /// bot_to_top_bels is the link between boundary elements (at the bottom and at the top)
 /// which can be taken out of ParMeshCyl
-std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, FiniteElementSpace& fespace,
-                                                         std::vector<std::pair<int,int> > & bot_to_top_bels,
+std::vector<std::pair<int,int> >* CreateBotToTopDofsLink(const char * eltype, const FiniteElementSpace& fespace,
+                                                         const std::vector<std::pair<int,int> > & bot_to_top_bels,
                                                          bool verbose)
 {
     if (strcmp(eltype, "linearH1") != 0 && strcmp(eltype, "RT0") != 0)

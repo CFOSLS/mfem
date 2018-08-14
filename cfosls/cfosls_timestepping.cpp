@@ -6,10 +6,12 @@ using namespace std;
 namespace mfem
 {
 
-void FOSLSCylProblem::ConstructRestrictions()
+HypreParMatrix * FOSLSCylProblem::ConstructRestriction(const char * top_or_bot) const
 {
-    Restrict_bot = CreateRestriction("bot", *pfes[init_cond_block], tdofs_link);
-    Restrict_top = CreateRestriction("top", *pfes[init_cond_block], tdofs_link);
+    MFEM_ASSERT(strcmp(top_or_bot,"bot") == 0 || strcmp(top_or_bot,"top") == 0,
+                "In ConstructRestriction() top_or_bot must equal 'top' or 'bot'! \n");
+
+    return CreateRestriction(top_or_bot, *pfes[init_cond_block], tdofs_link);
 }
 
 void FOSLSCylProblem::ConstructTdofLink()
@@ -264,12 +266,12 @@ void FOSLSCylProblem::ConvertBdrCndIntoRhs(const Vector& vec_in, Vector& vec_out
 
 void FOSLSCylProblem::CorrectFromInitCond(const Vector& init_cond, Vector& vec_out, double coeff)
 {
-    ConvertInitCndToFullVector(init_cond, *temp_vec1);
+    ConvertInitCndToFullVector(init_cond, temp_vec1);
 
-    ConvertBdrCndIntoRhs(*temp_vec1, *temp_vec2);
+    ConvertBdrCndIntoRhs(temp_vec1, temp_vec2);
 
-    *temp_vec2 *= coeff;
-    vec_out += *temp_vec2;
+    temp_vec2 *= coeff;
+    vec_out += temp_vec2;
 }
 
 
