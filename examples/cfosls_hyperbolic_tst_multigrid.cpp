@@ -2,6 +2,9 @@
 ///                         solved with a two-grid parallel-in-time multigrid
 ///                             (similar to the idea of parareal)
 /// TODO: Add algorithm description
+/// (*) MG cycle in this code means in fact a two-grid method. It's not a regular multigrid and
+/// the current implementation is developed strictly for the two-grid case.
+/// The extension would be straight-forward though.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -607,42 +610,36 @@ int main(int argc, char *argv[])
 
 #endif
 
-   // 10. Finally, creating GeneralMultigrid instance which implement the algorithm described
+   // 10. Finally, creating GeneralMultigrid instance which implements the algorithm described
    // in the beginning of this file
    GeneralMultigrid * spacetime_mg =
            new GeneralMultigrid(two_grid, P_tstp, Ops_tstp, *CoarseOp_tstp, Smoo_tstp, NullSmoo_tstp);
 
-   // 11. Preparing righthand side for the multigrid solve
-   // creating initial guess which satisfies given initial condition for the starting time slab
-   Vector mg_x0(spacetime_mg->Width());
-   mg_x0 = 0.0;
    ProblemType * problem0 = fine_timestepping->GetProblem(0);
-   BlockVector mg_x0_viewer(mg_x0.GetData(), fine_timestepping->GetGlobalOffsets());
-   BlockVector * exact_initcond0 = problem0->GetTrueInitialCondition();
-   mg_x0_viewer.GetBlock(0) = *exact_initcond0;
 
-   // creating rhs and computing the residual for the mg_x0
+   // creating rhs
    Vector mg_rhs(spacetime_mg->Width());
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
    BlockVector mg_rhs_viewer(mg_rhs.GetData(), fine_timestepping->GetGlobalOffsets());
-   fine_timestepping->ZeroBndValues(mg_rhs);
+   //fine_timestepping->ZeroBndValues(mg_rhs);
 
-   Vector * input_tslab0 = fine_timestepping->GetProblem(0)->GetExactBase("bot");
-   //fine_timestepping->GetProblem(0)->SetAtBase("bot", *input_tslab0, mg_rhs_viewer.GetBlock(0));
+   // input_tslab0 is the initial condition at the bottom of the entire domain cylinder
+   Vector * input_tslab0 = problem0->GetExactBase("bot");
 
-   // first, to check, we solve with seq. solve on the finest level and compute the error
+   // 10.5. First, to check, we solve with seq. solve on the finest level and compute the error
 
    if (verbose)
-       std::cout << "\n\nSolving with sequential solve and checking the error \n";
+       std::cout << "\n\nSolving with a sequential time-stepping and checking the error \n";
 
-
-   //Vector tempvec(fine_timestepping->GetProblem(0)->GlobalTrueProblemSize());
-   //fine_timestepping->GetProblem(0)->ConvertInitCndToFullVector(*input_tslab0, temp_vec);
-
+   // checksol is the reference solution, the solution from the sequential
+   // time-stepping at the fine level
    Vector checksol(spacetime_mg->Width());
    BlockVector checksol_viewer(checksol.GetData(), fine_timestepping->GetGlobalOffsets());
+
+   // computing checksol
    fine_timestepping->SequentialSolve(mg_rhs, *input_tslab0, checksol, true);
 
+   // checkres is the residual for the reference solution, computed within each time slab
    Vector checkres(spacetime_mg->Width());
    BlockVector checkres_viewer(checkres.GetData(), fine_timestepping->GetGlobalOffsets());
 
@@ -652,41 +649,32 @@ int main(int argc, char *argv[])
 
    for (int tslab = 0; tslab < nslabs; ++tslab)
    {
+       double tslabnorm = ComputeMPIVecNorm(comm, checkres_viewer.GetBlock(tslab),"", false);
+
        if (verbose)
-       {
-           std::cout << "checkres, tslab = " << tslab << "\n";
-       }
-
-       // FIXME: This is correct only in serial
-       std::cout << "norm = " << checkres_viewer.GetBlock(tslab).Norml2() /
-                    sqrt (checkres_viewer.GetBlock(tslab).Size()) << "\n";
-
-       //for (int i = 0; i < checkres_viewer.GetBlock(tslab).Size(); ++i)
-           //if (fabs(checkres_viewer.GetBlock(tslab)[i]) > 1.0e-10)
-               //std::cout << "entry " << i << ": res value = " << checkres_viewer.GetBlock(tslab)[i] << "\n";
-
-       //std::cout << "values of res at bottom interface: \n";
-       //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", checkres_viewer.GetBlock(tslab));
-       //vec.Print();
+           std::cout << "checkres, tslab = " << tslab << ", res norm = " <<
+                        tslabnorm << "\n";
    }
 
+   // checking the error for the reference solution
    fine_timestepping->ComputeError(checksol);
-
    fine_timestepping->ComputeBndError(checksol);
 
-   //double checkres_norm = checkres.Norml2() / sqrt (checkres.Size());
-   //if (verbose)
-       //std::cout << "checkres norm = " << checkres_norm << "\n";
-
-   //MPI_Barrier(MPI_COMM_WORLD);
-   //std::cout << "Got here \n" << std::flush;
-   //MPI_Barrier(MPI_COMM_WORLD);
+   // 11. Preparing righthand side for the multigrid solve
+   // creating initial guess which satisfies given initial condition for the starting time slab
+   Vector mg_x0(spacetime_mg->Width());
+   mg_x0 = 0.0;
+   BlockVector mg_x0_viewer(mg_x0.GetData(), fine_timestepping->GetGlobalOffsets());
+   // unlike input_tslab0, exact_initcond0 will be Vector defined in the entire first
+   // time slab, i.e., not only at the bottom base
+   BlockVector * exact_initcond0 = problem0->GetTrueInitialCondition();
+   mg_x0_viewer.GetBlock(0) = *exact_initcond0;
 
    fine_timestepping->ComputeGlobalRhs(mg_rhs);
    fine_timestepping->GetProblem(0)->CorrectFromInitCnd(*input_tslab0, mg_rhs_viewer.GetBlock(0));
    fine_timestepping->GetProblem(0)->ZeroBndValues(mg_rhs_viewer.GetBlock(0));
 
-   // some debugging part which survived, maybe even doesn't compile
+   // some debugging part which survived, maybe doesn't even compile
 #if 0
    // second, to check, we solve with seq. solve on the finest level for the correction
    // and compute the error
@@ -724,14 +712,14 @@ int main(int argc, char *argv[])
        std::cout << "Solving for a correction with 1 MG cycle \n";
 
    // solving for the correction, only one MG cycle
-   Vector mg_sol(spacetime_mg->Width());
-   mg_sol = 0.0;
+   Vector mg_corr(spacetime_mg->Width());
+   mg_corr = 0.0;
 
-   spacetime_mg->Mult(mg_rhs, mg_sol);
+   spacetime_mg->Mult(mg_rhs, mg_corr);
 
    Vector mg_finalsol(spacetime_mg->Width());
    mg_finalsol = mg_x0;
-   mg_finalsol += mg_sol;
+   mg_finalsol += mg_corr;
 
    fine_timestepping->ComputeError(mg_finalsol);
 
@@ -739,47 +727,50 @@ int main(int argc, char *argv[])
    return 0;
 #endif
 
+   // 12. Running multiple MG cycles in a loop, to imitate
+   // a parallel-in-time (though run in serial) algorithm
    if (verbose)
        std::cout << "Solving for a correction with multiple MG cycles \n";
 
+   // tolerance used for stopping criteria below
    double eps = 1.0e-6;
 
+   // residual in the MG algorithm
    Vector mg_res(spacetime_mg->Width());
    BlockVector mg_res_viewer(mg_res.GetData(), fine_timestepping->GetGlobalOffsets());
    mg_res = mg_rhs;
 
-   int local_size = mg_res.Size();
-   int global_size = 0;
-   MPI_Allreduce(&local_size, &global_size, 1, MPI_INT, MPI_SUM, comm);
-
-   double local_res0_norm_sq = mg_res.Norml2() * mg_res.Norml2();
-   double global_res0_norm = 0.0;
-   MPI_Allreduce(&local_res0_norm_sq, &global_res0_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-   global_res0_norm = sqrt (global_res0_norm / global_size);
-
+   double global_res0_norm = ComputeMPIVecNorm(comm, mg_res, "", false);
    if (verbose)
        std::cout << "res0 norm = " << global_res0_norm << "\n";
 
+   // final MG solution
    Vector mg_finalsol(spacetime_mg->Width());
    BlockVector mg_finalsol_viewer(mg_finalsol.GetData(), fine_timestepping->GetGlobalOffsets());
 
+   // Set final solution to the initial vector (will add the correction in the end, after MG cycles)
    mg_finalsol = mg_x0;
 
    // solving for the correction, only one MG cycle
-   Vector mg_sol(spacetime_mg->Width());
-   mg_sol = 0.0;
+   Vector mg_corr(spacetime_mg->Width());
+   mg_corr = 0.0;
 
    Vector mg_temp(spacetime_mg->Width());
 
    bool converged = false;
 
    int iter = 0;
+   // The method must not peform more than #timeslabs of MG cycles
+   // Maximum number of iterations.
    int mg_max_iter = 10;
+
+   // main loop, at each iteration a two-grid method is called
    while (!converged && iter < mg_max_iter)
    {
        ++iter;
 
        /*
+        * // debugging print
        Array<Vector*> & debug_botbases = fine_timestepping->ExtractAtBases("bot", mg_res);
        std::cout << "botbases of input residual for MG Mult \n";
        for (int tslab = 0; tslab < nslabs; ++tslab)
@@ -790,36 +781,37 @@ int main(int argc, char *argv[])
        */
 
        if (iter > 1)
+       {
            for (int tslab = 0; tslab < nslabs; ++tslab)
            {
+               double global_res_norm = ComputeMPIVecNorm(comm, mg_res_viewer.GetBlock(tslab), "", false);
+               if (verbose)
+                   std::cout << "mg_res full tslab = " << tslab << ", norm = "
+                             << global_res_norm << "\n";
+
                std::cout << "mg_res full tslab = " << tslab << "\n";
                std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
                             sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
                //mg_res_viewer.GetBlock(tslab).Print();
            }
 
+       }
 
        // solve for a correction with a current residual
-       mg_sol = 0.0;
-       spacetime_mg->Mult(mg_res, mg_sol);
+       mg_corr = 0.0;
+       spacetime_mg->Mult(mg_res, mg_corr);
 
-
-       double local_corr_norm_sq = mg_sol.Norml2() * mg_sol.Norml2();
-       double global_corr_norm = 0;
-
-       MPI_Allreduce(&local_corr_norm_sq, &global_corr_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-
-       global_corr_norm = sqrt (global_corr_norm / global_size);
+       double global_corr_norm = ComputeMPIVecNorm(comm, mg_corr, "", false);
 
        if (verbose)
            std::cout << "Iteration " << iter << ": correction norm = " <<
                         global_corr_norm << "\n";
 
        // removing discrepancy at the interfaces between time slabs (taking values from below)
-       fine_timestepping->UpdateInterfaceFromPrev(mg_sol);
+       fine_timestepping->UpdateInterfaceFromPrev(mg_corr);
 
        // update the solution
-       mg_finalsol += mg_sol;
+       mg_finalsol += mg_corr;
 
        /*
        std::cout << "Checking jump on the interface between time slabs \n";
@@ -835,7 +827,7 @@ int main(int argc, char *argv[])
        */
 
        // update the residual
-       fine_timestepping->SeqOp(mg_sol, mg_temp);
+       fine_timestepping->SeqOp(mg_corr, mg_temp);
        mg_temp -= mg_res;
        mg_temp *= -1;
        // FIXME: This zeroing is too much on paper, but without it error at the boundary is reported
@@ -846,36 +838,23 @@ int main(int argc, char *argv[])
 
        for (int tslab = 0; tslab < nslabs; ++tslab)
        {
+           double tslab_res_norm = ComputeMPIVecNorm(comm, mg_res_viewer.GetBlock(tslab), "", false);
            if (verbose)
-                std::cout << "mg_res after iterate, tslab = " << tslab << "\n";
-           // FIXME: Works only in serial correctly, but it's only a debuggint print
-           std::cout << "norm = " << mg_res_viewer.GetBlock(tslab).Norml2() /
-                        sqrt (mg_res_viewer.GetBlock(tslab).Size()) << "\n";
-
-           //for (int i = 0; i < mg_res_viewer.GetBlock(tslab).Size(); ++i)
-               //if (fabs(mg_res_viewer.GetBlock(tslab)[i]) > 1.0e-10)
-                   //std::cout << "entry " << i << ": res value = " << mg_res_viewer.GetBlock(tslab)[i] << "\n";
-
-           //std::cout << "values of res at bottom interface: \n";
-           //Vector& vec = fine_timestepping->GetProblem(tslab)->ExtractAtBase("bot", mg_res_viewer.GetBlock(tslab));
-           //vec.Print();
+                std::cout << "mg_res after iterate, tslab = " << tslab <<
+                             ", norm = " << tslab_res_norm << "\n";
        }
 
-       double local_res_norm_sq = mg_res.Norml2() * mg_res.Norml2();
-       double global_res_norm = 0.0;
-
-       MPI_Allreduce(&local_res_norm_sq, &global_res_norm, 1, MPI_DOUBLE, MPI_SUM, comm);
-       global_res_norm = sqrt (global_res_norm / global_size);
+       double global_res_norm = ComputeMPIVecNorm(comm, mg_res, "", false);
 
        // check convergence
+       // stopping criteria: stop, if res_norm (current residual norm)
+       //                               < eps * res0_norm (initial residual norm)
        if (global_res_norm < eps * global_res0_norm)
            converged = true;
 
        // output convergence status
        if (verbose)
-       {
            std::cout << "Iteration " << iter << ": res_norm = " << global_res_norm << "\n";
-       }
 
        //fine_timestepping->ComputeError(mg_finalsol);
        //fine_timestepping->ComputeBndError(mg_finalsol);
@@ -892,6 +871,7 @@ int main(int argc, char *argv[])
    fine_timestepping->ComputeError(mg_finalsol);
    fine_timestepping->ComputeBndError(mg_finalsol);
 
+   // difference between reference solution and final solution of the parallel-in-time algorithm
    Vector diff(spacetime_mg->Width());
    diff = mg_finalsol;
    diff -= checksol;
