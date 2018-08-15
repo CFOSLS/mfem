@@ -1768,7 +1768,10 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
       hierarchy(&Hierarchy), attached_index(-1), is_dynamic(true),
       spaces_initialized(false), forms_initialized(false), system_assembled(false),
       solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
-      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
+      pbforms(fe_formul.Nblocks()),
+      CFOSLSop(NULL), own_cfoslsop(false), CFOSLSop_nobnd(NULL), own_cfoslsop_nobnd(false),
+      trueRhs(NULL), trueX(NULL), trueBnd(NULL), x(NULL),
+      prec_option(0), prec(NULL), solver(NULL), verbose(verbose_)
 {
     estimators.SetSize(0);
 
@@ -1776,19 +1779,19 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_condi
     InitForms();
     InitGrFuns();
 
-    x = NULL;
-    trueX = NULL;
-    trueRhs = NULL;
-    trueBnd = NULL;
+    //x = NULL;
+    //trueX = NULL;
+    //trueRhs = NULL;
+    //trueBnd = NULL;
     CreateOffsetsRhsSol();
 
-    CFOSLSop = NULL;
-    own_cfoslsop = false;
-    CFOSLSop_nobnd = NULL;
-    own_cfoslsop_nobnd = false;
+    //CFOSLSop = NULL;
+    //own_cfoslsop = false;
+    //CFOSLSop_nobnd = NULL;
+    //own_cfoslsop_nobnd = false;
 
-    solver = NULL;
-    prec = NULL;
+    //solver = NULL;
+    //prec = NULL;
 
     if (assemble_system)
     {
@@ -1805,7 +1808,10 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
       hierarchy(&Hierarchy), attached_index(-1), is_dynamic(false),
       spaces_initialized(false), forms_initialized(false), system_assembled(false),
       solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
-      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
+      pbforms(fe_formul.Nblocks()),
+      CFOSLSop(NULL), own_cfoslsop(false), CFOSLSop_nobnd(NULL), own_cfoslsop_nobnd(false),
+      trueRhs(NULL), trueX(NULL), trueBnd(NULL), x(NULL),
+      prec_option(0), prec(NULL), solver(NULL), verbose(verbose_)
 {
     estimators.SetSize(0);
 
@@ -1813,19 +1819,19 @@ FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, int level, BdrConditions
     InitForms();
     InitGrFuns();
 
-    x = NULL;
-    trueX = NULL;
-    trueRhs = NULL;
-    trueBnd = NULL;
+    //x = NULL;
+    //trueX = NULL;
+    //trueRhs = NULL;
+    //trueBnd = NULL;
     CreateOffsetsRhsSol();
 
-    CFOSLSop = NULL;
-    own_cfoslsop = false;
-    CFOSLSop_nobnd = NULL;
-    own_cfoslsop_nobnd = false;
+    //CFOSLSop = NULL;
+    //own_cfoslsop = false;
+    //CFOSLSop_nobnd = NULL;
+    //own_cfoslsop_nobnd = false;
 
-    solver = NULL;
-    prec = NULL;
+    //solver = NULL;
+    //prec = NULL;
 
     if (assemble_system)
     {
@@ -1840,7 +1846,10 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
       hierarchy(NULL), attached_index(-1), is_dynamic(true),
       spaces_initialized(false), forms_initialized(false), system_assembled(false),
       solver_initialized(false), hierarchy_initialized(true), hpmats_initialized(false),
-      pbforms(fe_formul.Nblocks()), prec_option(0), verbose(verbose_)
+      pbforms(fe_formul.Nblocks()),
+      CFOSLSop(NULL), own_cfoslsop(false), CFOSLSop_nobnd(NULL), own_cfoslsop_nobnd(false),
+      trueRhs(NULL), trueX(NULL), trueBnd(NULL), x(NULL),
+      prec_option(0), prec(NULL), solver(NULL), verbose(verbose_)
 {
     estimators.SetSize(0);
 
@@ -1848,19 +1857,19 @@ FOSLSProblem::FOSLSProblem(ParMesh& pmesh_, BdrConditions& bdr_conditions,
     InitForms();
     InitGrFuns();
 
-    x = NULL;
-    trueX = NULL;
-    trueRhs = NULL;
-    trueBnd = NULL;
+    //x = NULL;
+    //trueX = NULL;
+    //trueRhs = NULL;
+    //trueBnd = NULL;
     CreateOffsetsRhsSol();
 
-    CFOSLSop = NULL;
-    own_cfoslsop = false;
-    CFOSLSop_nobnd = NULL;
-    own_cfoslsop_nobnd = false;
+    //CFOSLSop = NULL;
+    //own_cfoslsop = false;
+    //CFOSLSop_nobnd = NULL;
+    //own_cfoslsop_nobnd = false;
 
-    solver = NULL;
-    prec = NULL;
+    //solver = NULL;
+    //prec = NULL;
 
     if (assemble_system)
     {
@@ -2752,8 +2761,14 @@ void FOSLSProblem::ComputeError(const Vector& vec, bool verbose, bool checkbnd) 
         //double err = grfuns[blk]->ComputeL2Error(*(Mytest.sigma), irs);
         //double norm_exsol = ComputeGlobalLpNorm(2, *(Mytest.sigma), *pmesh, irs);
         if (verbose)
-            cout << "component No. " << blk << ": || error || / || exact_sol || = "
+        {
+            if (norm_exsol > 1.0e-10)
+                cout << "component No. " << blk << ": || error || / || exact_sol || = "
                  << err / norm_exsol << endl;
+            else
+                cout << "component No. " << blk << ": || error || (exact_sol = 0) = "
+                 << err  << endl;
+        }
 
         double projection_error = -1.0;
 

@@ -143,12 +143,6 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                         Vector localAv1(localv2.Size());
                         elmat.Mult(localv1, localAv1);
 
-                        //std::cout << "sigma linf norm = " << sigma.Normlinf() << "\n";
-                        //sigma.Print();
-                        //eldofs.Print();
-                        //localv.Print();
-                        //localAv.Print();
-
                         // factor 2.0 comes from the fact that we look only on one of the symmetrically placed
                         // bilinear forms in the functional
                         err += 2.0 * (localAv1 * localv2);
@@ -255,10 +249,6 @@ void FOSLSEstimator::ComputeEstimates()
         std::cout << "global_total_error = " << global_total_error << "\n";
 
     //error_estimates.Print();
-
-    // FIXME: Probably should be moved out of the ComputeEstimates
-    // FIXME: in view of the inheriting classes which might not use current_sequence at all
-    //current_sequence = grfuns[0]->FESpace()->GetMesh()->GetSequence();
 }
 
 struct compare_Refinements
@@ -290,7 +280,6 @@ int ThresholdSmooRefiner::ApplyImpl(Mesh &mesh)
    {
        int elind1, elind2;
        mesh.GetFaceElements(faceind, &elind1, &elind2);
-       //std::cout << "elind1 = " << elind1 << ", elind2 = " << elind2 << ", ne = " << mesh.GetNE() << "\n";
        if (elind2 > 0) // not a boundary edge
            face_err[faceind] = (1.0/beta) * (local_err[elind1] - local_err[elind2]) *
                                                 (local_err[elind1] - local_err[elind2])

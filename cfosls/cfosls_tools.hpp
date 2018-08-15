@@ -2079,12 +2079,6 @@ protected:
     HypreParMatrix * Schur;
 
     virtual void CreatePrec(BlockOperator &op, int prec_option, bool verbose) override;
-    virtual void ResetPrec (int new_prec_option)
-    {
-        delete Schur;
-        FOSLSProblem::ResetPrec(new_prec_option);
-    }
-
 public:
     virtual ~FOSLSProblem_MixedLaplace()
     {
@@ -2117,6 +2111,12 @@ public:
         SetPrecOption(precond_option);
         CreatePrec(*CFOSLSop, prec_option, verbose);
         UpdateSolverPrec();
+    }
+
+    virtual void ResetPrec (int new_prec_option)
+    {
+        delete Schur;
+        FOSLSProblem::ResetPrec(new_prec_option);
     }
 
     void ComputeExtraError(const Vector& vec) const override;

@@ -24,6 +24,11 @@ double FOSLSErrorEstimator(Array2D<BilinearFormIntegrator*> &blfis,
                            Array<ParGridFunction*> & grfuns, Vector &error_estimates);
 
 /// not used currently
+/// but could be used as an additional argument to the FOSLSEstimator constructor
+/// to implement Doerfler strategy of marking elements (i.e., based on
+/// finding a subset whiuch satisfies the main inequality, with sum of local errors in the
+/// rhs, instead of a single element, comparing its local error to the maximum of local
+/// errros over all elements
 enum FOSLSMarkingStrategy {DEFAULT = 0, DOERFLER = 1};
 
 /// Basic class for error estimator in FOSLS context
@@ -101,6 +106,7 @@ protected:
     // overrides the ThresholdRefiner main function
     virtual int ApplyImpl(Mesh &mesh) override;
 public:
+    virtual ~ThresholdSmooRefiner() {}
     ThresholdSmooRefiner(ErrorEstimator &est)
         : ThresholdRefiner(est), beta(1.0e+18), gamma(1.0) {}
     ThresholdSmooRefiner(ErrorEstimator &est, double beta_)
@@ -135,9 +141,11 @@ protected:
     // unlike FOSLSEstimator, we have to store this because
     // the user has to delete and reconstruct extra grfuns
     // outside of this (and hierarchy) class(es)
+    // the object doesn't own these
     Array<ParGridFunction *> *extra_grfuns;
     int update_counter;
 public:
+    virtual ~FOSLSEstimatorOnHier() {}
     FOSLSEstimatorOnHier(FOSLSProblHierarchy<Problem, Hierarchy> & prob_hierarchy_, int level_,
                          std::vector<std::pair<int,int> > & grfuns_descriptor_,
                          Array<ParGridFunction *> *extra_grfuns_,

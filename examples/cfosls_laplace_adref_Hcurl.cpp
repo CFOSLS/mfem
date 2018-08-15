@@ -83,8 +83,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
-    const char *formulation = "cfosls"; // "cfosls" or "fosls"
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
 #ifdef H1FEMLAPLACE
     if (strcmp(space_for_S,"L2") == 0)
     {
@@ -132,8 +131,6 @@ int main(int argc, char *argv[])
                    "Enable or disable GLVis visualization.");
     args.AddOption(&prec_option, "-precopt", "--prec-option",
                    "Preconditioner choice (0, 1 or 2 for now).");
-    args.AddOption(&formulation, "-form", "--formul",
-                   "Formulation to use (cfosls or fosls).");
     args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                    "Space for S (H1 or L2).");
     args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
@@ -159,11 +156,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
     {
-        if (strcmp(formulation,"cfosls") == 0)
-            std::cout << "formulation: CFOSLS \n";
-        else
-            std::cout << "formulation: FOSLS \n";
-
         if (strcmp(space_for_sigma,"Hdiv") == 0)
             std::cout << "Space for sigma: Hdiv \n";
         else
@@ -216,8 +208,6 @@ int main(int argc, char *argv[])
         std::cout << "USE_GS_PREC passive \n";
 #endif
 
-    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
-                "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
                 "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
@@ -284,16 +274,6 @@ int main(int argc, char *argv[])
 
     // 6. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
-
-    int numblocks = 1;
-
-    if (strcmp(space_for_S,"H1") == 0)
-        numblocks++;
-    if (strcmp(formulation,"cfosls") == 0)
-        numblocks++;
-
-    if (verbose)
-        std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
    FormulType * formulat = new FormulType (dim, numsol, verbose);
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
