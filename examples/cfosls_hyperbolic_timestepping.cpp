@@ -28,7 +28,7 @@
 /// (**) Mostly, the code was tested in serial, although in the end it was checked in parallel.
 /// (***) The example was tested for memory leaks with valgrind, in Hdiv-L2 formulation, 3D/4D.
 ///
-/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 --spaceS "L2" -no-vis
+/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 -no-vis
 /// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
 ///
@@ -513,6 +513,8 @@ int main(int argc, char *argv[])
    fine_timestepping->ComputeBndError(checksol);
 
    // 17. Free the used memory.
+   delete fine_timestepping;
+
    for (int tslab = 0; tslab < nslabs; ++tslab )
        delete timeslabs_problems[tslab];
 

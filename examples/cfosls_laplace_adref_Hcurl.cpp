@@ -1,6 +1,35 @@
-//                                MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
-//                                  with adaptive refinement involving a div-free formulation
-//
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
+///                                      with standard adaptive refinement,
+///                           solved by preconditioned MINRES.
+///
+/// The problem considered in this example is
+///                             laplace(u) = f
+/// (either 3D or 4D, calling one of the variables time in space-time)
+///
+/// casted in the CFOSLS formulation in Hdiv-H1-L2:
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1
+/// minimizing the functional under the constraint
+///                             div sigma = f.
+///
+/// The current 3D test is a regular solution in a cube.
+///
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+///
+/// The problem is then solved with adaptive mesh refinement (AMR).
+///
+/// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
+/// FOSLSEstimatorOnHier, FOSLSEstimator, etc.
+///
+/// (**) This code was tested only in serial.
+/// (***) The example was tested for memory leaks with valgrind, in 3D.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 -no-vis
+/// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code, around 4.
+///
+/// Another examples on adaptive mesh refinement, with a more complicated solver is
+/// cfosls_laplace_adref_Hcurl_new.cpp and cfosls_hyperbolic_adref_Hcurl_new.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -12,15 +41,19 @@
 // if passive, the mesh is simply uniformly refined at each iteration
 #define AMR
 
-// activates using the solution at the previous mesh as a starting guess for the next problem
+// activates using the solution at the previous mesh (its interpolant) as a starting
+// guess for the next problem
 #define CLEVER_STARTING_GUESS
 
 // activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
-#define USE_GS_PREC
+// turned out that it doesn't bring any benefit
+//#define USE_GS_PREC
 
-#define DEBUGGING_CASE
+// activates several debugging checks
+//#define DEBUGGING_CASE
 
-#define FOSLS
+// if active, standard conforming H1 formulation for Laplace is used
+//#define H1FEMLAPLACE
 
 // doesn't work as designed, || f_H - P^T f_h || is still nonzero
 //#define USEALWAYS_COARSE_RHS
@@ -45,36 +78,32 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -9;
+    int numsol          = -3;
 
-    int ser_ref_levels  = 3;
+    int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
     if (strcmp(space_for_S,"L2") == 0)
     {
-        MFEM_ABORT("FOSLS formulation of Laplace equation requires S from H^1");
+        MFEM_ABORT("H1FEMLAPLACE formulation of Laplace equation requires S from H^1");
     }
 #endif
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
     using FormulType = FOSLSFormulation_Laplace;
     using FEFormulType = FOSLSFEFormulation_Laplace;
     using BdrCondsType = BdrConditions_Laplace;
     using ProblemType = FOSLSProblem_Laplace;
 #else
-
-#endif
-
-    /*
     using FormulType = CFOSLSFormulation_MixedLaplace;
     using FEFormulType = CFOSLSFEFormulation_MixedLaplace;
     using BdrCondsType = BdrConditions_MixedLaplace;
     using ProblemType = FOSLSProblem_MixedLaplace;
-    */
+#endif
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -82,8 +111,8 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
 
     int feorder         = 0;
-#ifdef FOSLS
-    ++feorder;
+#ifdef H1FEMLAPLACE
+    feorder = (feorder > 0 ? feorder : 1);
 #endif
 
     if (verbose)
@@ -201,8 +230,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
 
-    StopWatch chrono;
-
     Mesh *mesh = NULL;
 
     shared_ptr<ParMesh> pmesh;
@@ -268,9 +295,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
-   if (verbose)
-       std::cout << "Running AMR ... \n";
-
    FormulType * formulat = new FormulType (dim, numsol, verbose);
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
@@ -302,9 +326,6 @@ int main(int argc, char *argv[])
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   //ComponentsDescriptor descriptor(true, true, true, true, true, false);
-   //MultigridToolsHierarchy * mgtools_hierarchy = new MultigridToolsHierarchy(*hierarchy, 0, descriptor);
-
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
    Laplace_test* Mytest = dynamic_cast<Laplace_test*>
@@ -319,7 +340,7 @@ int main(int argc, char *argv[])
 
    if (fosls_func_version == 1)
    {
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
        numfoslsfuns = 1;
 #else
        numfoslsfuns = 1;
@@ -328,7 +349,7 @@ int main(int argc, char *argv[])
 #endif
    }
 
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
    int numblocks_funct = 1;
 #else
    int numblocks_funct = 1;
@@ -358,7 +379,7 @@ int main(int argc, char *argv[])
    // version 1, only || sigma + grad S ||^2, or || sigma ||^2
    if (fosls_func_version == 1)
    {
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
        // this works
        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
        integs(0,0) = new DiffusionIntegrator;
@@ -420,8 +441,12 @@ int main(int argc, char *argv[])
    HYPRE_Int global_dofs = problem->GlobalTrueProblemSize();
    std::cout << "starting n_el = " << prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE() << "\n";
 
+   if (verbose)
+       std::cout << "Running AMR ... \n";
+
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   for (int it = 0; ; it++)
+   int max_iter_amr = 2; // 21;
+   for (int it = 0; it < max_iter_amr ; it++)
    {
        if (verbose)
        {
@@ -440,7 +465,7 @@ int main(int argc, char *argv[])
            *rhs = problem->GetRhs().GetBlock(0);
        }
 #else
-       rhs = &problem->GetRhs().GetBlock(0);
+       rhs = &problem->GetRhs();//.GetBlock(0);
 #endif
 
        if (verbose && it == 0)
@@ -456,47 +481,7 @@ int main(int argc, char *argv[])
            coarse_rhs = new Vector(rhs->Size());
            *coarse_rhs = *rhs;
        }
-
-       if (it > 0)
-       {
-           Vector temp(hierarchy->GetTruePspace(SpaceName::H1,0)->Width());
-           hierarchy->GetTruePspace(SpaceName::H1,0)->MultTranspose(*rhs, temp);
-           *checkdiff -= temp;
-
-           //checkdiff->Print();
-
-           if (verbose)
-               std::cout << "|| f_H - P^T f_h || = " <<
-                            checkdiff->Norml2() / sqrt (checkdiff->Size()) << "\n";
-
-           delete checkdiff;
-           checkdiff = new Vector(rhs->Size());
-           *checkdiff = *rhs;
-
-           /*
-           *checkdiff += temp;
-           Vector temp2;
-           Vector finer_buff;
-           // temp2 = Qh_1 f_h, living on the fine level
-           partsol_finder->NewProjectFinerL2ToCoarser(0, div_rhs, temp2, finer_buff);
-
-           // temp = P^T  * temp2
-           hierarchy->GetTruePspace(SpaceName::L2,0)->MultTranspose(temp2, temp);
-           *checkdiff -= temp;
-
-           if (verbose)
-               std::cout << "|| f_H - P^T Qh_1 f_h || " <<
-                            checkdiff->Norml2() / sqrt (checkdiff->Size()) << "\n";
-           */
-       }
-
-       //if (it == 2)
-       //{
-           //MPI_Finalize();
-           //return 0;
-       //}
 #endif
-
 
 #ifdef CLEVER_STARTING_GUESS
        // if it's not the first iteration we reuse the previous solution as a starting guess
@@ -506,7 +491,7 @@ int main(int argc, char *argv[])
        // checking the residual
        BlockVector res(problem->GetTrueOffsets());
        problem->GetOp()->Mult(problem->GetSol(), res);
-       res -= *rhs;
+       res -= problem->GetRhs();//*rhs;
 
        double res_norm = ComputeMPIVecNorm(comm, res, "", false);
        if (it == 0)
@@ -705,17 +690,17 @@ int main(int argc, char *argv[])
        }
 #endif
 
-       //std::cout << "checking rhs norm for the first solve: " <<
-                    //problem->GetRhs().Norml2() /  sqrt (problem->GetRhs().Size()) << "\n";
-
+#ifdef H1FEMLAPLACE
+       // chaning the solver from MINRES to CG for standard FEM for Laplace in H^1
        problem->ChangeSolver(initial_rtol, adjusted_atol);
-       problem->SolveProblem(*rhs, problem->GetSol(), verbose, false);
+#endif
+       problem->SolveProblem(problem->GetRhs(), problem->GetSol(), verbose, false);
 
        // checking the residual afterwards
        {
            BlockVector res(problem->GetTrueOffsets());
            problem->GetOp()->Mult(problem->GetSol(), res);
-           res -= *rhs;
+           res -= problem->GetRhs();//*rhs;
 
            double res_norm = ComputeMPIVecNorm(comm, res, "", false);
            if (verbose)
@@ -740,8 +725,9 @@ int main(int argc, char *argv[])
           problem->ComputeBndError(problem_sol);
       }
 
+      // some older code which survived, maybe even doesn't compile
+#if 0
       // (special) testing cheaper preconditioners!
-      /*
       if (verbose)
           std::cout << "Performing a special check for the preconditioners iteration counts! \n";
 
@@ -867,7 +853,7 @@ int main(int argc, char *argv[])
 
       MPI_Finalize();
       return 0;
-      */
+#endif
 
 #ifdef CLEVER_STARTING_GUESS
        if (it > 0)
@@ -888,6 +874,18 @@ int main(int argc, char *argv[])
            sigma_sock << "parallel " << num_procs << " " << myid << "\n";
            sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
                   << it <<"'" << flush;
+
+           ParGridFunction * sigma_ex = new ParGridFunction(problem->GetPfes(0));
+           BlockVector * exactsol_proj = problem->GetExactSolProj();
+           sigma_ex->SetFromTrueDofs(exactsol_proj->GetBlock(0));
+
+           socketstream sigmaex_sock(vishost, visport);
+           sigmaex_sock << "parallel " << num_procs << " " << myid << "\n";
+           sigmaex_sock << "solution\n" << *pmesh << *sigma_ex << "window_title 'sigma exact, AMR iter No."
+                  << it <<"'" << flush;
+
+           delete exactsol_proj;
+           delete sigma_ex;
        }
 
        // 18. Call the refiner to modify the mesh. The refiner calls the error
@@ -920,18 +918,11 @@ int main(int argc, char *argv[])
        if (visualization)
        {
            const Vector& local_errors = estimator->GetLocalErrors();
-           if (feorder == 0)
-               MFEM_ASSERT(local_errors.Size() == problem->GetPfes(numblocks_funct)->TrueVSize(), "");
 
-           FiniteElementCollection * l2_coll;
-           if (feorder > 0)
-               l2_coll = new L2_FECollection(0, dim);
+           FiniteElementCollection * l2_coll = new L2_FECollection(0, dim);
 
-           ParFiniteElementSpace * L2_space;
-           if (feorder == 0)
-               L2_space = problem->GetPfes(numblocks_funct);
-           else
-               L2_space = new ParFiniteElementSpace(problem->GetParMesh(), l2_coll);
+           ParFiniteElementSpace * L2_space = new ParFiniteElementSpace
+                   (problem->GetParMesh(), l2_coll);
            ParGridFunction * local_errors_pgfun = new ParGridFunction(L2_space);
            local_errors_pgfun->SetFromTrueDofs(local_errors);
            char vishost[] = "localhost";
@@ -942,11 +933,8 @@ int main(int argc, char *argv[])
            amr_sock << "solution\n" << *pmesh << *local_errors_pgfun <<
                          "window_title 'local errors, AMR iter No." << it <<"'" << flush;
 
-           if (feorder > 0)
-           {
-               delete l2_coll;
-               delete L2_space;
-           }
+           delete l2_coll;
+           delete L2_space;
        }
 
 #else
@@ -998,7 +986,6 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
-
        // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();
 
@@ -1010,6 +997,31 @@ int main(int argc, char *argv[])
        }
 
    }
+
+   delete coarse_guess;
+
+#ifdef DEBUGGING_CASE
+#ifdef      USEALWAYS_COARSE_RHS
+   delete rhs;
+#endif
+   delete checkdiff;
+   delete coarse_rhs;
+#endif
+
+   delete hierarchy;
+   delete prob_hierarchy;
+
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           if (integs(i,j))
+               delete integs(i,j);
+
+   delete estimator;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
+
 
    MPI_Finalize();
    return 0;

@@ -9,7 +9,7 @@
 #include <iomanip>
 #include <list>
 
-// if passive, the mesh is simply uniformly refined at each iteration
+// if not active, the mesh is simply uniformly refined at each iteration
 #define AMR
 
 //#define RECOARSENING_AMR
