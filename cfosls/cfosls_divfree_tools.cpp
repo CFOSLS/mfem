@@ -2955,6 +2955,8 @@ void DivConstraintSolver::Update(bool recoarsen)
                 Constraint_mat_lvls[l + 1] = RAP(*hierarchy->GetPspace(SpaceName::L2, l),
                                                 *Constraint_mat_lvls[l], *hierarchy->GetPspace(SpaceName::HDIV, l));
 
+                delete Funct_mat_lvls[l + 1];
+
                 BlockMatrix * P_Funct = hierarchy->ConstructPforFormul
                         (l, *space_names_funct, *offsets_sp_funct[l], *offsets_sp_funct[l + 1]);
                 Funct_mat_lvls[l + 1] = RAP(*P_Funct, *Funct_mat_lvls[l], *P_Funct);

@@ -99,7 +99,7 @@
 // NOT MORE THAN ONE OF THE APPROACH_K, K > 0, BELOW SHOULD BE #DEFINED
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
-//#define APPROACH_1
+#define APPROACH_1
 
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
 // as the initial guess interpolant from the previous level
@@ -115,7 +115,7 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-#define APPROACH_3
+//#define APPROACH_3
 
 #ifdef APPROACH_0
 //#define     DIVFREE_MINSOLVER
@@ -685,7 +685,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 3; // 21;
+   int max_iter_amr = 2; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
