@@ -1377,8 +1377,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         FunctOps_lvls.Prepend(FunctOp_new);
 
         Ops_lvls.SetSize(FunctOps_lvls.Size());
-        for (int i = 0; i < Ops_lvls.Size(); ++i)
-            Ops_lvls[i] = FunctOps_lvls[i];
+        Ops_lvls.Prepend(FunctOp_new);
+        //for (int i = 0; i < Ops_lvls.Size(); ++i)
+            //Ops_lvls[i] = FunctOps_lvls[i];
 
         if (descr.with_nobnd_op)
         {

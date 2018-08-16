@@ -684,6 +684,27 @@ int main(int argc, char *argv[])
 
    bool compute_error = true;
 
+   Array<int> els_to_refine(1);
+   els_to_refine = hierarchy->GetFinestParMesh()->GetNE() / 2;
+   hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
+
+   //////////////
+   bool recoarsen = true;
+   prob_hierarchy->Update(recoarsen);
+
+   problem_mgtools->BuildSystem(verbose);
+#ifdef DIVFREE_MINSOLVER
+   mgtools_hierarchy->Update(recoarsen);
+   NewSolver->UpdateProblem(*problem_mgtools);
+   NewSolver->Update(recoarsen);
+#endif
+
+#ifdef PARTSOL_SETUP
+   partsol_finder->UpdateProblem(*problem_mgtools);
+   partsol_finder->Update(recoarsen);
+#endif
+
+   /////////////////////////
 #ifdef DIVFREE_MINSOLVER
    delete NewSolver;
    delete mgtools_hierarchy;
