@@ -15,20 +15,16 @@ namespace mfem
 
 #define MEMORY_OPTIMIZED
 
-#define CHECK_CONSTR
-
 // activates a check for the correctness of local problem solve for the blocked case (with S)
 //#define CHECK_LOCALSOLVE
 
 #ifdef TIMING
 #undef CHECK_LOCALSOLVE
-#undef CHECK_CONSTR
 #undef CHECK_BNDCND
 #endif
 
 #ifndef MFEM_DEBUG
 #undef CHECK_LOCALSOLVE
-#undef CHECK_CONSTR
 #undef CHECK_BNDCND
 #endif
 
@@ -962,11 +958,8 @@ protected:
     std::deque<Operator*> Func_global_lvls;
     std::deque<Operator*> Func_global_nobnd_lvls;
 
-
-#ifdef CHECK_CONSTR
     mutable HypreParMatrix * Constr_global;
     mutable Vector * Constr_rhs_global;
-#endif
 
 #ifdef TIMING
 private:
@@ -1051,11 +1044,7 @@ protected:
     void Solve(const BlockVector &righthand_side,
                const BlockVector &previous_sol, BlockVector &next_sol) const
     {
-#ifdef CHECK_CONSTR
         Solve(0, Constr_global, righthand_side, previous_sol, next_sol);
-#else
-        Solve(0, NULL, righthand_side, previous_sol, next_sol);
-#endif
     }
 
     void Solve(int start_level, const HypreParMatrix* Constr_start_lvl, const BlockVector &righthand_side,
@@ -1068,7 +1057,7 @@ public:
                            bool optimized_localsolvers_, bool with_hcurl_smoothers_,
                            int stopcriteria_type_, bool verbose_);
 
-    // constructor
+    // constructors
     GeneralMinConstrSolver(MPI_Comm Comm,
                            int NumLevels,
                            Array< BlockOperator*>& TrueProj_Func,
@@ -1076,11 +1065,48 @@ public:
                            BlockVector& Functrhs_Global,
                            Array<Operator*>& Smoothers_Lvls,
                            std::vector<Operator*> & Func_Global_lvls,
-#ifdef CHECK_CONSTR
-                           HypreParMatrix & Constr_Global,
-                           Vector & Constr_Rhs_global,
+#ifdef TIMING
+                            std::list<double>* Times_mult,
+                            std::list<double>* Times_solve,
+                            std::list<double>* Times_localsolve,
+                            std::list<double>* Times_localsolve_lvls,
+                            std::list<double>* Times_smoother,
+                            std::list<double>* Times_smoother_lvls,
+                            std::list<double>* Times_coarsestproblem,
+                            std::list<double>* Times_resupdate,
+                            std::list<double>* Times_fw,
+                            std::list<double>* Times_up,
 #endif
+                           Array<Operator*>* LocalSolvers = NULL,
+                           Operator* CoarseSolver = NULL,
+                           int StopCriteria_Type = 1)
+        : GeneralMinConstrSolver(Comm, NumLevels, TrueProj_Func, EssBdrTrueDofs_Func,
+                                 Functrhs_Global, Smoothers_Lvls, Func_Global_lvls,
+                                 NULL, NULL,
+#ifdef TIMING
+                                 Times_mult,
+                                 Times_solve,
+                                 Times_localsolve,
+                                 Times_localsolve_lvls,
+                                 Times_smoother,
+                                 Times_smoother_lvls,
+                                 Times_coarsestproblem,
+                                 Times_resupdate,
+                                 Times_fw,
+                                 Times_up,
+#endif
+                                 LocalSolvers, CoarseSolver, StopCriteria_Type)
+    {}
 
+    GeneralMinConstrSolver(MPI_Comm Comm,
+                           int NumLevels,
+                           Array< BlockOperator*>& TrueProj_Func,
+                           std::vector<std::vector<Array<int>* > > &EssBdrTrueDofs_Func,
+                           BlockVector& Functrhs_Global,
+                           Array<Operator*>& Smoothers_Lvls,
+                           std::vector<Operator*> & Func_Global_lvls,
+                           HypreParMatrix * Constr_Global,
+                           Vector * Constr_Rhs_global,
 #ifdef TIMING
                             std::list<double>* Times_mult,
                             std::list<double>* Times_solve,
@@ -1127,11 +1153,7 @@ public:
     // external calling routine (as in any IterativeSolver) which takes care of convergence
     virtual void Mult(const Vector & x, Vector & y) const override
     {
-#ifdef CHECK_CONSTR
         Mult(0, Constr_global, x, y);
-#else
-        Mult(0, NULL, x, y);
-#endif
     }
 
     // existence of this method is required by the (abstract) base class Solver
@@ -1157,9 +1179,7 @@ public:
 
     void SetInitialGuess(int level, Vector& InitGuess) const;
 
-#ifdef CHECK_CONSTR
     void SetConstrRhs(Vector& ConstrRhs) const;
-#endif
 
     // have to define these to mimic useful routines from IterativeSolver class
     void SetRelTol(double RelTol) const {rel_tol = RelTol;}

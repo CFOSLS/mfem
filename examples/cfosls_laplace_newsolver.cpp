@@ -2753,7 +2753,7 @@ int main(int argc, char *argv[])
                      *Functrhs_global, Smoothers_lvls,
                      Funct_global_lvls,
 #ifdef CHECK_CONSTR
-                     *Constraint_global, Floc,
+                     Constraint_global, &Floc,
 #endif
 #ifdef TIMING
                      Times_mult, Times_solve, Times_localsolve, Times_localsolve_lvls, Times_smoother, Times_smoother_lvls, Times_coarsestproblem, Times_resupdate, Times_fw, Times_up,

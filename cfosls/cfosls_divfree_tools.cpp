@@ -3184,10 +3184,8 @@ void DivConstraintSolver::UpdateParticularSolution(int level, HypreParMatrix& Co
     if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[level], Functrhs_global, partsol, "for final partsol: ", true);
 
-#ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), Constr_lvl,
                     &constrRhs, "for the particular solution inside in the end");
-#endif
 }
 
 void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix& Constr_start_lvl,
@@ -3345,10 +3343,8 @@ void DivConstraintSolver::FindParticularSolution(int start_level, HypreParMatrix
     if (report_funct)
         CheckFunctValue(comm, *Func_global_lvls[start_level], Functrhs_global, partsol, "for final partsol: ", true);
 
-#ifdef CHECK_CONSTR
     CheckConstrRes(partsol_viewer.GetBlock(0), Constr_start_lvl,
                     &constrRhs, "for the particular solution inside in the end");
-#endif
 }
 
 // rhs_l = coeff * Funct_l * x_l
@@ -4383,12 +4379,10 @@ void GeneralMinConstrSolver::SetInitialGuess(int level, Vector& InitGuess) const
         init_guess->Update(InitGuess.GetData(), TrueP_Func[level]->RowOffsets());
 }
 
-#ifdef CHECK_CONSTR
 void GeneralMinConstrSolver::SetConstrRhs(Vector& ConstrRhs) const
 {
     Constr_rhs_global = &ConstrRhs;
 }
-#endif
 
 bool GeneralMinConstrSolver::StoppingCriteria(int type, double value_curr, double value_prev,
                                                   double value_scalefactor, double stop_tol,
@@ -4529,9 +4523,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
         LocalSolvers_lvls[l] = mgtools_hierarchy->GetSchwarzSmoothers()[l];
 
     CoarseSolver = mgtools_hierarchy->GetCoarsestSolver_Partfinder();
-#ifdef CHECK_CONSTR
+
     Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-#endif
 
     init_guess = new BlockVector(*offsets_funct[0]);
     *init_guess = 0.0;
@@ -4659,9 +4652,8 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
             Func_global_lvls.push_front(mgtools_hierarchy->GetOps()[0]);
             Func_global_nobnd_lvls.push_front(mgtools_hierarchy->GetBlockOps_nobnd()[0]);
 
-#ifdef CHECK_CONSTR
             Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
-#endif
+
             num_levels = hierarchy->Nlevels();
 
             // recoarsening local and global matrices
@@ -4709,10 +4701,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
                        BlockVector& Functrhs_Global,
                        Array<Operator*>& Smoothers_Lvls,
                        std::vector<Operator*> & Func_Global_lvls,
-#ifdef CHECK_CONSTR
-                       HypreParMatrix & Constr_Global,
-                       Vector & Constr_Rhs_global,
-#endif
+                       HypreParMatrix * Constr_Global,
+                       Vector * Constr_Rhs_global,
 #ifdef TIMING
                         std::list<double>* Times_mult,
                         std::list<double>* Times_solve,
@@ -4736,15 +4726,9 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        built_on_mgtools(false),
        current_iteration(0),
        comm(Comm),
-       //TrueP_Func(TrueProj_Func),
-       //essbdrtruedofs_Func(EssBdrTrueDofs_Func),
-       numblocks(TrueProj_Func[0]->NumRowBlocks())
-       //Smoothers_lvls(Smoothers_Lvls),
-       //Func_global_lvls(Func_Global_lvls),
-#ifdef CHECK_CONSTR
-       , Constr_global(&Constr_Global),
-       Constr_rhs_global(&Constr_Rhs_global)
-#endif
+       numblocks(TrueProj_Func[0]->NumRowBlocks()),
+       Constr_global(Constr_Global),
+       Constr_rhs_global(Constr_Rhs_global)
 #ifdef TIMING
        , times_mult(Times_mult),
        times_solve(Times_solve),
@@ -4755,9 +4739,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(
        times_coarsestproblem(Times_coarsestproblem),
        times_resupdate(Times_resupdate),
        times_fw(Times_fw),
-       times_up(Times_up),
+       times_up(Times_up)
 #endif
-       //Functrhs_global(Functrhs_Global)
 {
 
     TrueP_Func.SetSize(TrueProj_Func.Size());
@@ -4951,9 +4934,9 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
     // tempblock is the initial guess (on true dofs)
     BlockVector * tempblock_truedofs = truetempblock_lvls[start_level];
     *tempblock_truedofs = *init_guess;
-#ifdef CHECK_CONSTR
-     if (!preconditioner_mode)
-     {
+
+    if (!preconditioner_mode)
+    {
         if (Constr_start_lvl)
         {
             //tempblock_truedofs->GetBlock(0).Print();
@@ -4962,14 +4945,13 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
             MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, Constr_rhs_global,
                                    "for the initial guess"),"");
         }
-     }
-     else
-     {
-         if (Constr_start_lvl)
-             MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, NULL,
+    }
+    else
+    {
+        if (Constr_start_lvl)
+            MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, NULL,
                                     "for the initial guess"),"");
-     }
-#endif
+    }
 
     int itnum = 0;
     for (int i = 0; i < max_iter; ++i )
@@ -4984,7 +4966,6 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
         }
 #endif
 
-#ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
             if (Constr_start_lvl)
@@ -4995,7 +4976,6 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
             if (Constr_start_lvl)
                 MFEM_ASSERT(CheckConstrRes(tempblock_truedofs->GetBlock(0), *Constr_start_lvl, NULL,
                                        "before the iteration"),"");
-#endif
 
 #ifdef TIMING
         MPI_Barrier(comm);
@@ -5014,7 +4994,6 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
         time_solve  += chrono3.RealTime();
 #endif
 
-#ifdef CHECK_CONSTR
         if (!preconditioner_mode)
         {
             if (Constr_start_lvl)
@@ -5027,7 +5006,7 @@ void GeneralMinConstrSolver::Mult(int start_level, const HypreParMatrix* Constr_
                 MFEM_ASSERT(CheckConstrRes(y_viewer.GetBlock(0), *Constr_start_lvl, NULL,
                                        "after the iteration"),"");
         }
-#endif
+
         // monitoring convergence
         bool monotone_check = (i != 0);
         if (!preconditioner_mode)
@@ -5183,7 +5162,6 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     }
 #endif
 
-#ifdef CHECK_CONSTR
     if (!preconditioner_mode)
     {
         if (Constr_start_lvl)
@@ -5196,7 +5174,6 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
             MFEM_ASSERT(CheckConstrRes(previous_sol.GetBlock(0), *Constr_start_lvl, NULL,
                                    "for previous_sol"),"");
     }
-#endif
 
     next_sol = previous_sol;
 
@@ -5430,27 +5407,6 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     chrono2.Start();
 #endif
 
-    /*
-#ifdef CHECK_CONSTR
-    if (num_levels > 1)
-    {
-        TrueP_Func[0]->Mult(*truesolupdate_lvls[1], *truetempvec_lvls[0]);
-        *truesolupdate_lvls[0] += *truetempvec_lvls[0];
-    }
-    else
-        truetempvec_lvls[0] = truesolupdate_lvls[0];
-    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
-                "for interpolated coarsest level update"),"");
-
-    next_sol += *truesolupdate_lvls[0];
-    MFEM_ASSERT(CheckConstrRes(truetempvec_lvls[0]->GetBlock(0), *Constr_global, NULL,
-                "after fw and bottom updates"),"");
-    next_sol -= *truesolupdate_lvls[0];
-    if (num_levels > 1)
-        *truesolupdate_lvls[0] -= *truetempvec_lvls[0];
-#endif
-    */
-
     // UPWARD loop: from coarsest to finest
     if (symmetric) // then also smoothing and solving local problems on the way up
     {
@@ -5560,11 +5516,9 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     time_up  += chrono2.RealTime();
 #endif
 
-#ifdef CHECK_CONSTR
     if (Constr_start_lvl)
         MFEM_ASSERT(CheckConstrRes(truesolupdate_lvls[start_level]->GetBlock(0), *Constr_start_lvl, NULL,
                 "for update after full V-cycle"),"");
-#endif
 
     // 4. update the global iterate by the resulting update at the finest level
     next_sol += *truesolupdate_lvls[start_level];
@@ -5572,7 +5526,6 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
     //truesolupdate_lvls[0]->Print();
     //next_sol.Print();
 
-#ifdef CHECK_CONSTR
     if (!preconditioner_mode)
     {
         if (Constr_start_lvl)
@@ -5583,7 +5536,6 @@ void GeneralMinConstrSolver::Solve(int start_level, const HypreParMatrix *Constr
         if (Constr_start_lvl)
             MFEM_ASSERT(CheckConstrRes(next_sol.GetBlock(0), *Constr_start_lvl, NULL, "for next_sol"),"");
     }
-#endif
 
 #ifdef CHECK_BNDCND
     if (print_level && !preconditioner_mode)
