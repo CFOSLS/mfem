@@ -1521,6 +1521,8 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                          optimized_localsolve);
             }
 
+            std::cout << "SchwarzSmoother_new height = " << SchwarzSmoother_new->Height() << "\n";
+
             SchwarzSmoothers_lvls.Prepend(SchwarzSmoother_new);
 
             el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
