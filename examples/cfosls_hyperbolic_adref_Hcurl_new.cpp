@@ -685,7 +685,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   int max_iter_amr = 3; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -1322,7 +1322,14 @@ int main(int argc, char *argv[])
    } // end of the main AMR loop
 
    // Deallocating memory
+#ifdef DIVFREE_MINSOLVER
+   delete mgtools_hierarchy;
+   delete NewSolver;
+#endif
 
+#if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
+   delete partsol_finder;
+#endif
 
 #ifdef PARTSOL_SETUP
    for (int i = 0; i < div_rhs_lvls.Size(); ++i)
@@ -1476,34 +1483,34 @@ void PrintDefinedMacrosStats(bool verbose)
 
 #ifdef APPROACH_0
     if (verbose)
-        std::cout << "APPROACH_0 \n";
+        std::cout << "APPROACH_0 active \n";
 #else
     if (verbose)
-        std::cout << "APPROACH_0 \n";
+        std::cout << "APPROACH_0 passive \n";
 #endif
 
 #ifdef APPROACH_1
     if (verbose)
-        std::cout << "APPROACH_1 \n";
+        std::cout << "APPROACH_1 active \n";
 #else
     if (verbose)
-        std::cout << "APPROACH_1 \n";
+        std::cout << "APPROACH_1 passive \n";
 #endif
 
 #ifdef APPROACH_2
     if (verbose)
-        std::cout << "APPROACH_2 \n";
+        std::cout << "APPROACH_2 active \n";
 #else
     if (verbose)
-        std::cout << "APPROACH_20 \n";
+        std::cout << "APPROACH_2 passive \n";
 #endif
 
 #ifdef APPROACH_3
     if (verbose)
-        std::cout << "APPROACH_3 \n";
+        std::cout << "APPROACH_3 active \n";
 #else
     if (verbose)
-        std::cout << "APPROACH_3 \n";
+        std::cout << "APPROACH_3 passive \n";
 #endif
 
 #ifdef PARTSOL_SETUP

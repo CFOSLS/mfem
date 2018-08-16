@@ -2930,6 +2930,22 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         if (recoarsen)
         {
+            for (int l = 1; l < num_levels; ++l)
+            {
+                delete BlockOps_lvls[l];
+                delete Constraint_mat_lvls[l];
+                delete Funct_mat_lvls[l];
+
+                if (l < num_levels - 1)
+                {
+                    delete LocalSolvers_lvls[l];
+                    delete Smoothers_lvls[l];
+                }
+                //delete Mass_mat_lvls[l];
+            }
+
+            delete CoarseSolver;
+
             // recoarsening operators, constraint matrices, Schwarz and (optionally) Hcurl smoothers
             for (int l = 0; l < num_levels - 1; ++l)
             {
@@ -2955,8 +2971,6 @@ void DivConstraintSolver::Update(bool recoarsen)
                 Constraint_mat_lvls[l + 1] = RAP(*hierarchy->GetPspace(SpaceName::L2, l),
                                                 *Constraint_mat_lvls[l], *hierarchy->GetPspace(SpaceName::HDIV, l));
 
-                delete Funct_mat_lvls[l + 1];
-
                 BlockMatrix * P_Funct = hierarchy->ConstructPforFormul
                         (l, *space_names_funct, *offsets_sp_funct[l], *offsets_sp_funct[l + 1]);
                 Funct_mat_lvls[l + 1] = RAP(*P_Funct, *Funct_mat_lvls[l], *P_Funct);
@@ -2965,10 +2979,6 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                 if (l + 1 < num_levels - 1)
                 {
-                    // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
-                    // TODO: The concern is that the Functional matrix is recoarsened and thus changes
-                    delete LocalSolvers_lvls[l + 1];
-
                     if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
                     {
                         LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS
@@ -3006,7 +3016,6 @@ void DivConstraintSolver::Update(bool recoarsen)
 
                     if (with_hcurl_smoothers)
                     {
-                        delete Smoothers_lvls[l + 1];
                         SweepsNum = ipow(1, l); // = 1
                         Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
                                                                  *hierarchy->GetDivfreeDop(l + 1),
@@ -3021,13 +3030,8 @@ void DivConstraintSolver::Update(bool recoarsen)
                 } // end of if (l+1) is not the coarsest level
             } // end of loop over levels from finest+1 to the coarsest-1
 
-        } // end of if recoarsen case
-
-        if (recoarsen)
-        {
             if (verbose)
-                std::cout << "Recoarsening the coarse solver in the divconstraint Update() \n";
-            delete CoarseSolver;
+                std::cout << "Recoarsening the coarse solver in the DivConstraintSolver::Update() \n";
 
             const Array<SpaceName>* space_names_problem =
                     problem->GetFEformulation().GetFormulation()->GetSpacesDescriptor();
@@ -3041,7 +3045,7 @@ void DivConstraintSolver::Update(bool recoarsen)
             std::vector<Array<int>* > essbdr_dofs_funct_coarse =
                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, num_levels - 1);
 
-            CoarseSolver =  new CoarsestProblemSolver(coarse_size,
+            CoarseSolver = new CoarsestProblemSolver(coarse_size,
                                                       *Funct_mat_lvls[num_levels - 1],
                     *Constraint_mat_lvls[num_levels - 1],
                     //hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
@@ -3061,7 +3065,8 @@ void DivConstraintSolver::Update(bool recoarsen)
 
             for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
                 delete essbdr_dofs_funct_coarse[i];
-        }
+
+        } // end of if recoarsen case
 
         for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
             delete fullbdr_attribs[i];
