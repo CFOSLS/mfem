@@ -468,7 +468,7 @@ class LocalProblemSolverWithS : public LocalProblemSolver
     // classes in order to speed up iterations
     virtual void SaveLocalLUFactors() const override;
 public:
-    // ~LocalProblemSolverWithS() : ~LocalProblemSolver() {} will call LocalProblemSolver destructor as I understand
+    virtual ~LocalProblemSolverWithS() {}
 
     // main constructor
     LocalProblemSolverWithS(int size, const BlockMatrix& Op_Blksmat,

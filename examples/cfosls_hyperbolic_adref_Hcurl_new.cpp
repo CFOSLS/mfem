@@ -685,7 +685,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   int max_iter_amr = 1; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
