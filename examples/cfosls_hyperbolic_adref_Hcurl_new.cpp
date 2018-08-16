@@ -194,7 +194,7 @@ int main(int argc, char *argv[])
     bool visualization = 1;
     bool output_solution = true;
 
-    int ser_ref_levels  = 2;
+    int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
     const char *space_for_S = "L2";     // "H1" or "L2"
@@ -685,7 +685,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 3; // 21;
+   int max_iter_amr = 2; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
