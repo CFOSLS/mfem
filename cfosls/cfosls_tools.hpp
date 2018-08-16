@@ -2995,7 +2995,7 @@ public:
 
 };
 
-/// Construct a smoother which is a combination of a given pair of smoothers
+/// Constructs a smoother which is a combination of a given pair of smoothers
 /// SmootherSum   * x = (Smoo1 + Smoo2 - Smoo2 * A * Smoo1) * x
 /// SmootherSum^T * x = (Smoo2^T + Smoo1^T - Smoo1^T * A * Smoo2^T) * x
 class SmootherSum : public Operator
@@ -3011,7 +3011,8 @@ protected:
 public:
     virtual ~SmootherSum() {delete tmp1; delete tmp2;}
 
-    SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) : smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
+    SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) :
+        smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
     {
         tmp1 = new Vector(smoo_fst.Height());
         tmp2 = new Vector(smoo_snd.Height());

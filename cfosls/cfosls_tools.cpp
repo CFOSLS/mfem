@@ -1535,6 +1535,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         if (descr.with_Schwarz && descr.with_Hcurl)
         {
+            std::cout << "SchwarzSmoothers_lvls[0] height = " << SchwarzSmoothers_lvls[0]->Height() << "\n";
             SmootherSum * CombinedSmoother_new = new SmootherSum(*SchwarzSmoothers_lvls[0],
                                                                  *HcurlSmoothers_lvls[0], *FunctOps_lvls[0]);
             CombinedSmoothers_lvls.Prepend(CombinedSmoother_new);
