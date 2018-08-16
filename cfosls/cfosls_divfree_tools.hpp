@@ -436,6 +436,8 @@ public:
         }
 
         Setup();
+
+        std::cout << "my height in the end = " << height << "\n";
     }
 
     // Operator application: `y=A(x)`.
