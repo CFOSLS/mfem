@@ -3013,7 +3013,8 @@ public:
 
     SmootherSum(const Operator & smoo1, const Operator& smoo2, const Operator& Aop) : smoo_fst(smoo1), smoo_snd(smoo2), op(Aop)
     {
-        tmp1 = new Vector(smoo_fst.Height()); tmp2 = new Vector(smoo_snd.Height());
+        tmp1 = new Vector(smoo_fst.Height());
+        tmp2 = new Vector(smoo_snd.Height());
     }
 
     void Mult(const Vector & x, Vector & y) const override
