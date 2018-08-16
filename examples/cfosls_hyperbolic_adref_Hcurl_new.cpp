@@ -97,12 +97,12 @@
 
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
-#define APPROACH_1
+//#define APPROACH_1
 
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
 // as the initial guess interpolant from the previous level
 // FIXME: What's the difference from APPROACH_3_2? Fix the description!
-//#define APPROACH_2
+#define APPROACH_2
 
 // Here the problem is solved by the minimization solver,but uses one previous level
 // so we go back only for one level, i.e. we use the solution from the previous level
@@ -962,11 +962,6 @@ int main(int argc, char *argv[])
            // setting correct bdr values
            problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
 
-           // functional value for the initial guess
-           double starting_funct_value = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
-                                                         *partsol_funct_lvls[l], "for the initial guess ", verbose);
-
-
            // computing funct rhside which absorbs the contribution of the non-homogeneous boundary conditions
            BlockVector padded_initguess(problem_l->GetTrueOffsets());
            padded_initguess = 0.0;
@@ -1022,9 +1017,10 @@ int main(int argc, char *argv[])
                MFEM_ASSERT (res_constr_norm < 1.0e-10, "");
            }
 
-           // functional value for the initial guess
-           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
-                           "for the particular solution ", verbose);
+           // functional value for the particular solution
+           double starting_funct_value =
+                   CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
+                                      "for the particular solution ", verbose);
 
            //BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
            zero_vec = 0.0;
