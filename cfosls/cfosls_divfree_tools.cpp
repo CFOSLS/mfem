@@ -2271,6 +2271,8 @@ DivConstraintSolver::~DivConstraintSolver()
 
         for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
             delete el2dofs_funct_lvls[i];
+
+        delete CoarseSolver;
     }
 }
 

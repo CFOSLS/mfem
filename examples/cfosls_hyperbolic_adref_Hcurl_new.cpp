@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
 #endif
 
     bool visualization = 1;
-    bool output_solution = true;
+    bool output_solution = false;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
@@ -683,6 +683,59 @@ int main(int argc, char *argv[])
    double initial_res_norm = -1.0;
 
    bool compute_error = true;
+
+#ifdef DIVFREE_MINSOLVER
+   delete NewSolver;
+   delete mgtools_hierarchy;
+   delete descriptor;
+#endif
+
+#if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
+   delete partsol_finder;
+#endif
+
+#ifdef PARTSOL_SETUP
+   for (int i = 0; i < div_rhs_lvls.Size(); ++i)
+       delete div_rhs_lvls[i];
+   for (int i = 0; i < partsol_lvls.Size(); ++i)
+       delete partsol_lvls[i];
+   for (int i = 0; i < partsol_funct_lvls.Size(); ++i)
+       delete partsol_funct_lvls[i];
+   for (int i = 0; i < initguesses_funct_lvls.Size(); ++i)
+       delete initguesses_funct_lvls[i];
+#endif
+
+#ifdef APPROACH_0
+   for (int i = 0; i < problem_refsols_lvls.Size(); ++i)
+       delete problem_refsols_lvls[i];
+#endif
+
+//#endif // for #if 0
+
+   for (int i = 0; i < problem_sols_lvls.Size(); ++i)
+       delete problem_sols_lvls[i];
+   for (int i = 0; i < formulat->Nblocks(); ++i)
+       delete bdr_attribs_data[i];
+   delete hierarchy;
+   delete prob_hierarchy;
+
+   for (int i = 0; i < extra_grfuns.Size(); ++i)
+       if (extra_grfuns[i])
+           delete extra_grfuns[i];
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           if (integs(i,j))
+               delete integs(i,j);
+
+   delete problem_mgtools;
+   delete estimator;
+
+   delete bdr_conds;
+   delete formulat;
+   delete fe_formulat;
+
+   MPI_Finalize();
+   return 0;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
    int max_iter_amr = 1; // 21;
@@ -1323,8 +1376,9 @@ int main(int argc, char *argv[])
 
    // Deallocating memory
 #ifdef DIVFREE_MINSOLVER
-   delete mgtools_hierarchy;
    delete NewSolver;
+   delete mgtools_hierarchy;
+   delete descriptor;
 #endif
 
 #if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
