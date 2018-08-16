@@ -93,8 +93,10 @@
 
 // Here the problem is solved by a preconditioned MINRES
 // used as a reference solution
+// This flag can be activated independently from other APPROACH_k, k > 0.
 #define APPROACH_0
 
+// NOT MORE THAN ONE OF THE APPROACH_K, K > 0, BELOW SHOULD BE #DEFINED
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
 //#define APPROACH_1
@@ -102,7 +104,7 @@
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
 // as the initial guess interpolant from the previous level
 // FIXME: What's the difference from APPROACH_3_2? Fix the description!
-#define APPROACH_2
+//#define APPROACH_2
 
 // Here the problem is solved by the minimization solver,but uses one previous level
 // so we go back only for one level, i.e. we use the solution from the previous level
@@ -113,7 +115,7 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-//#define APPROACH_3
+#define APPROACH_3
 
 #ifdef APPROACH_0
 //#define     DIVFREE_MINSOLVER
@@ -683,7 +685,7 @@ int main(int argc, char *argv[])
    bool compute_error = true;
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   int max_iter_amr = 3; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -713,18 +715,6 @@ int main(int argc, char *argv[])
        CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
 #endif
-       // alternative check for studying the functional behavior
-       /*
-       BlockVector temp(problem->GetTrueOffsetsFunc());
-       NewSolver->GetFunctOp_nobnd(0)->Mult(problem_refsols_lvls[0]->GetBlock(0), temp.GetBlock(0));
-       //problem->GetOp_nobnd()->GetBlock(0,0).Mult(problem_refsols_lvls[0]->GetBlock(0), temp.GetBlock(0));
-       if (verbose)
-           std::cout << "temp euclidean norm = " << temp.GetBlock(0).Norml2() << "\n";
-       double func_value_alt = sqrt( temp.GetBlock(0) * problem_refsols_lvls[0]->GetBlock(0)
-               / temp.GetBlock(0).Size());
-       if (verbose)
-           std::cout << "func value alt = " << func_value_alt << "\n";
-       */
 
        if (compute_error)
            problem_mgtools->ComputeError(saved_sol, verbose, true);
