@@ -106,8 +106,8 @@ int main(int argc, char *argv[])
     int numsol          = 4;
     int numcurl         = 0;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int ser_ref_levels  = 0;
+    int par_ref_levels  = 1;
 
     const char *space_for_S = "L2";    // "H1" or "L2"
 
@@ -2718,6 +2718,7 @@ int main(int argc, char *argv[])
 #endif
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
+                        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
                     }
                 }
                 else // only equation in div-free subspace
@@ -2742,6 +2743,7 @@ int main(int argc, char *argv[])
                         //precU = new IdentityOperator(A->Height());
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
+                        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
                     }
 
                 }
@@ -2760,6 +2762,7 @@ int main(int argc, char *argv[])
 
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(0, precU);
                         ((BlockDiagonalPreconditioner*)prec)->SetDiagonalBlock(1, precS);
+                        ((BlockDiagonalPreconditioner*)prec)->owns_blocks = true;
                     }
                     else // no S, i.e. only an equation in div-free subspace
                     {
@@ -6087,43 +6090,20 @@ int main(int argc, char *argv[])
         delete BT;
     }
 
-    if(dim<=4)
+    if( dim<= 4)
     {
-        if (prec_is_MG)
+        delete prec;
+        if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
         {
-            if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-            {
-                if (monolithicMG)
+            if (monolithicMG)
+                for (int l = 0; l < num_levels; ++l)
                 {
-                    for (int l = 0; l < num_levels; ++l)
-                    {
-                        delete offsets_f[l];
-                        delete offsets_c[l];
-                    }
+                    delete offsets_f[l];
+                    delete offsets_c[l];
                 }
-                else
-                {
-                    for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                        delete ((Multigrid*)(&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk))));
-                            //if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                                //delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
-                }
-            }
-            else
-                for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                    delete ((Multigrid*)(&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk))));
-                        //if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                            //delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
-        }
-        else
-        {
-            for ( int blk = 0; blk < ((BlockDiagonalPreconditioner*)prec)->NumBlocks(); ++blk)
-                    if (&(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk)))
-                        delete &(((BlockDiagonalPreconditioner*)prec)->GetDiagonalBlock(blk));
         }
     }
 
-    delete prec;
     for (int i = 0; i < P.Size(); ++i)
         delete P[i];
 

@@ -543,16 +543,22 @@ protected:
     mutable std::deque<const Array<int> *> offsets_sp_funct;
     Array<BlockMatrix*> Funct_mat_lvls;
     Array<SparseMatrix*> Constraint_mat_lvls;
-    Array<int> row_offsets_coarse, col_offsets_coarse;
-    std::vector<Array<int>* > essbdr_tdofs_funct_coarse;
-    std::vector<Array<int>* > essbdr_dofs_funct_coarse;
     std::deque<Array<int>* > el2dofs_row_offsets;
     std::deque<Array<int>* > el2dofs_col_offsets;
-    std::vector<Array<int>* > fullbdr_attribs;
     Array<SparseMatrix*> Mass_mat_lvls;
     mutable bool optimized_localsolvers;
     mutable bool with_hcurl_smoothers;
     mutable int update_counter;
+
+    // HypreParMatrix objects are actually owned by the hierarchy
+    std::deque<std::vector<HypreParMatrix*> > d_td_Funct_lvls;
+    // This one is created and owned if the instance is built upon a problem,
+    // but not on a multigrid tools hierarchy
+    BlockOperator * d_td_Funct_coarsest;
+    Array<int> d_td_coarsest_row_offsets;
+    Array<int> d_td_coarsest_col_offsets;
+
+    Array<BlockMatrix*> el2dofs_funct_lvls;
 
     const bool own_data;
 
@@ -615,7 +621,7 @@ protected:
                             BlockVector& out_l) const;
 
 public:
-    ~DivConstraintSolver();
+    virtual ~DivConstraintSolver();
 
     DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarchy& hierarchy_,
                         bool optimized_localsolvers_, bool with_hcurl_smoothers_, bool verbose_);
@@ -1466,7 +1472,8 @@ public:
             delete P_RT2;
         delete B_PR;
 
-        delete B_lvl;
+        if (ref_levels > 1)
+            delete B_lvl;
 
         Vector sig_c(B_coarse->Width());
 
@@ -1608,7 +1615,8 @@ public:
             delete M_coarse;
         delete B_Global;
 
-        delete M_lvl;
+        if (ref_levels > 1)
+            delete M_lvl;
 
         d_td_coarse_R->Mult(Truesig_c,sig_c);
 

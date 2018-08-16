@@ -1,6 +1,43 @@
 //                                MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
 //                                  with adaptive refinement involving a div-free formulation
 //
+///
+/// EXAMPLE NEEDS TO BE FIXED
+/// DESCRIPTION SHOULD BE UPDATED
+/// FOR NOW IT'S NOT A VALID EXAMPLE
+///
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
+///                                      with standard adaptive refinement,
+///                           solved by preconditioned MINRES.
+///
+/// The problem considered in this example is
+///                             laplace(u) = f
+/// (either 3D or 4D, calling one of the variables time in space-time)
+///
+/// casted in the CFOSLS formulation in Hdiv-H1-L2:
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1
+/// minimizing the functional under the constraint
+///                             div sigma = f.
+///
+/// The current 3D test is a regular solution in a cube.
+///
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+///
+/// The problem is then solved with adaptive mesh refinement (AMR).
+///
+/// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
+/// FOSLSEstimatorOnHier, FOSLSEstimator, etc.
+///
+/// (**) This code was tested only in serial.
+/// (***) The example was tested for memory leaks with valgrind, in 3D.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 -no-vis
+/// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code, around 4.
+///
+/// Another examples on adaptive mesh refinement, with more complicated solvers, are
+/// cfosls_laplace_adref_Hcurl_new.cpp and cfosls_hyperbolic_adref_Hcurl_new.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -18,7 +55,7 @@
 // combined with RECOARSENING_AMR this leads to a variant of cascadic MG
 #define CLEVER_STARTING_GUESS
 
-//#define FOSLS
+//#define H1FEMLAPLACE
 
 #define REFERENCE_SOLUTION
 
@@ -42,22 +79,20 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 11;
+    int numsol          = -3;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "H1";     // "H1" or "L2"
-#ifdef FOSLS
-    if (strcmp(space_for_S,"L2") == 0)
-    {
-        MFEM_ABORT("FOSLS formulation of Laplace equation requires S from H^1");
-    }
-#endif
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
+    if (strcmp(space_for_S,"L2") == 0)
+    {
+        MFEM_ABORT("Standard H1 FEM formulation of Laplace equation requires S from H^1");
+    }
     using FormulType = FOSLSFormulation_Laplace;
     using FEFormulType = FOSLSFEFormulation_Laplace;
     using BdrCondsType = BdrConditions_Laplace;
@@ -68,11 +103,10 @@ int main(int argc, char *argv[])
     using FEFormulType = CFOSLSFEFormulation_HdivH1L2_Laplace;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1Laplace;
     using ProblemType = FOSLSProblem_HdivH1lapl;
-
-
 #endif
 
     /*
+    // for mixed formulation of Laplace equation, Hdiv-L2
     using FormulType = CFOSLSFormulation_MixedLaplace;
     using FEFormulType = CFOSLSFEFormulation_MixedLaplace;
     using BdrCondsType = BdrConditions_MixedLaplace;
@@ -85,7 +119,7 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
 
     int feorder         = 0;
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
     ++feorder;
 #endif
 
@@ -147,9 +181,6 @@ int main(int argc, char *argv[])
             std::cout << "Space for S: H1 \n";
         else
             std::cout << "Space for S: L2 \n";
-
-        if (strcmp(space_for_S,"L2") == 0)
-            std::cout << "S: is eliminated from the system \n";
     }
 
     if (verbose)
@@ -218,8 +249,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
-
-    StopWatch chrono;
 
     Mesh *mesh = NULL;
 
@@ -293,7 +322,6 @@ int main(int argc, char *argv[])
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
-
    bool with_hcurl = true;
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
    hierarchy->ConstructDofTrueDofs();
@@ -305,14 +333,6 @@ int main(int argc, char *argv[])
 
    ///////////////////////////////////////////////////////
    ProblemType * problem = prob_hierarchy->GetProblem(0);
-
-
-   //bool optimized_localsolvers = true;
-   //bool with_hcurl_smoothers = true;
-   //DivConstraintSolver * partsol_finder;
-   //partsol_finder = new DivConstraintSolver
-           //(*problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
-   //bool report_funct = true;
 
    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
            GetFunctSpacesDescriptor();
@@ -377,7 +397,7 @@ int main(int argc, char *argv[])
 
    if (fosls_func_version == 1)
    {
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
        numfoslsfuns = 1;
 #else
        numfoslsfuns = 1;
@@ -386,7 +406,7 @@ int main(int argc, char *argv[])
 #endif
    }
 
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
    int numblocks_funct = 1;
 #else
    int numblocks_funct = 1;
@@ -416,7 +436,7 @@ int main(int argc, char *argv[])
    // version 1, only || sigma + grad S ||^2, or || sigma ||^2
    if (fosls_func_version == 1)
    {
-#ifdef FOSLS
+#ifdef H1FEMLAPLACE
        // this works
        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
        integs(0,0) = new DiffusionIntegrator;
@@ -833,9 +853,6 @@ int main(int argc, char *argv[])
        mgtools_hierarchy->Update(recoarsen);
        NewSolver->UpdateProblem(*problem_mgtools);
        NewSolver->Update(recoarsen);
-
-       //partsol_finder->UpdateProblem(*problem);
-       //partsol_finder->Update(recoarsen);
 
        // checking #dofs after the refinement
        global_dofs = problem_mgtools->GlobalTrueProblemSize();

@@ -19,6 +19,47 @@
 //					  discontinuous polynomials (mu) for the lagrange multiplier.
 //
 
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D transport equation
+///                                      with adaptive mesh refinement,
+///                                     solved by a minimization solver.
+///
+/// The problem considered in this example is
+///                             du/dt + b * u = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+/// 1) either in Hdiv-L2 case:
+///                             (K sigma, sigma) -> min
+/// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
+/// and K = (I - bbT / || b ||);
+/// 2) or in Hdiv-L2-L2 case (recently added, not fully tested, if HDIVL2L2 is #defined)
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from L^2 *but not eliminated from the system as in 1));
+/// 3) or in Hdiv-H1-L2 case
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1;
+/// minimizing in all cases under the constraint
+///                             div sigma = f.
+///
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+/// The current 3D tests are either in cube (preferred) or in a cylinder, with a rotational velocity field b.
+///
+/// The problem is then solved with adaptive mesh refinement (AMR).
+/// Different approaches can be used depending on the #defined macros, see their description around their
+/// declaration.
+///
+/// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
+/// GeneralHierarchy, FOSLSProblem, FOSLSProblHierarchy, FOSLSEstimator, MultigridToolsHierarchy,
+/// GeneralMinConstrSolver, DivConstraintSolver, ThresholdSmooRefiner, etc.
+///
+/// (**) This code was tested in serial and in parallel.
+/// (***) The example was tested for memory leaks with valgrind, in 3D.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_adref_Hcurl_new --whichD 3 --spaceS L2 -no-vis
+/// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code, around 4.
+///
+/// Another examples on adaptive mesh refinement, are cfosls_laplace_adref_Hcurl_new.cpp,
+/// cfosls_laplace_adref_Hcurl.cpp and cfosls_hyperbolic_adref_Hcurl.cpp.
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
@@ -33,12 +74,13 @@
 //#define HDIVL2L2
 
 // A test with a rotating Gaussian hill in the cubic domain.
+#define CYLINDER_CUBE_TEST
+
+// Defines whether boundary conditions for CYLINDER_CUBE_TEST are overconstraining (see below)
 // The actual inflow for a rotation when the space domain is [-1,1]^2 is actually two corners
 // and one has to split bdr attributes for the faces, which is quite a pain
 // Instead, we prescribe homogeneous bdr conditions at the entire boundary except for the top,
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
-#define CYLINDER_CUBE_TEST
-// defines whether boundary conditions for CYLINDER_CUBE_TEST are overconstraining (see above)
 #define OVERCONSTRAINED
 
 // if passive, the mesh is simply uniformly refined at each iteration
@@ -47,26 +89,28 @@
 // activates using the solution at the previous mesh as a starting guess for the next problem
 //#define CLEVER_STARTING_GUESS
 
-// activates using a (simpler & cheaper) preconditioner for the problems, simple Gauss-Seidel
-// never used now
-//#define USE_GS_PREC
-
 #define MULTILEVEL_PARTSOL
 
+// Here the problem is solved by a preconditioned MINRES
 // used as a reference solution
 #define APPROACH_0
 
-// only the finest level consideration, 0 starting guess, solved by minimization solver
-// (i.e., partsol finder is also used)
-//#define APPROACH_1
+// Here the problem is solved by the minimization solver, but uses only the finest level,
+// with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
+#define APPROACH_1
 
+// Here the problem is solved by the minimization solver, but uses only the finest level, and takes
+// as the initial guess interpolant from the previous level
+// FIXME: What's the difference from APPROACH_3_2? Fix the description!
 //#define APPROACH_2
 
-// the approach when we go back only for one level, i.e. we use the solution from the previous level
+// Here the problem is solved by the minimization solver,but uses one previous level
+// so we go back only for one level, i.e. we use the solution from the previous level
 // to create a starting guess for the finest level
 //#define APPROACH_3_2
 
-// the full-recursive approach when we go back up to the coarsest level,
+// Here the problem is solved by the minimization solver and exploits all the available levels,
+// i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
 //#define APPROACH_3
@@ -107,25 +151,30 @@
 
 using namespace std;
 using namespace mfem;
-using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
+// Defines required estimator components, such as integrators, grid function structure
+// for a given problem and given version of the functional
 void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version,
                                std::vector<std::pair<int,int> >& grfuns_descriptor,
                                Array<ParGridFunction*>& extra_grfuns,
                                Array2D<BilinearFormIntegrator *> & integs, bool verbose);
 
+// Outputs which macros were #defined
 void PrintDefinedMacrosStats(bool verbose);
+
+// Rearranges boundary attributes for a rotational test in a cube so that essential boundary is
+// exactly the inflow boundary, not all the bottom and lateral boundary (which would be overconstraining
+// but work since the solution is localized  strictly inside the domain)
+// Used when CYLINDER_CUBE_TEST is defined, but OVERCONSTRAINED is not
 void ReArrangeBdrAttributes(Mesh* mesh4cube);
 
 int main(int argc, char *argv[])
 {
-    int num_procs, myid;
-    bool visualization = 1;
-    bool output_solution = true;
-
     // 1. Initialize MPI
+    int num_procs, myid;
+
     MPI_Init(&argc, &argv);
     MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_size(comm, &num_procs);
@@ -140,33 +189,14 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
+    bool visualization = 1;
+    bool output_solution = true;
+
     int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
-    const char *formulation = "cfosls"; // "cfosls" or "fosls"
     const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-
-    /*
-    // Hdiv-H1 case
-    using FormulType = CFOSLSFormulation_HdivH1Hyper;
-    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
-    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
-    using ProblemType = FOSLSProblem_HdivH1L2hyp;
-    */
-
-    // Hdiv-L2 case
-#ifdef HDIVL2L2
-    using FormulType = CFOSLSFormulation_HdivL2L2Hyper;
-    using FEFormulType = CFOSLSFEFormulation_HdivL2L2Hyper;
-    using BdrCondsType = BdrConditions_CFOSLS_HdivL2L2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2L2hyp;
-#else // then we eliminate the scalar unknown
-    using FormulType = CFOSLSFormulation_HdivL2Hyper;
-    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
-    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
-    using ProblemType = FOSLSProblem_HdivL2hyp;
-#endif
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -175,26 +205,10 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
 
     //const char *mesh_file = "../data/cube4d_low.MFEM";
-
     //const char *mesh_file = "../data/cube4d.MFEM";
-    //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
-    //const char * mesh_file = "../data/orthotope3D_fine.mesh";
-
-    //const char * meshbase_file = "../data/sphere3D_0.1to0.2.mesh";
-    //const char * meshbase_file = "../data/sphere3D_0.05to0.1.mesh";
-    //const char * meshbase_file = "../data/sphere3D_veryfine.mesh";
-    //const char * meshbase_file = "../data/beam-tet.mesh";
-    //const char * meshbase_file = "../data/escher-p3.mesh";
-    //const char * meshbase_file = "../data/orthotope3D_moderate.mesh";
-    //const char * meshbase_file = "../data/orthotope3D_fine.mesh";
-    //const char * meshbase_file = "../data/square_2d_moderate.mesh";
-    //const char * meshbase_file = "../data/square_2d_fine.mesh";
-    //const char * meshbase_file = "../data/square-disc.mesh";
-    //const char *meshbase_file = "dsadsad";
-    //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
-    //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
+    //const char *mesh_file = "../data/orthotope3D_fine.mesh";
 
     int feorder         = 0;
 
@@ -217,8 +231,6 @@ int main(int argc, char *argv[])
                    "Enable or disable GLVis visualization.");
     args.AddOption(&prec_option, "-precopt", "--prec-option",
                    "Preconditioner choice (0, 1 or 2 for now).");
-    args.AddOption(&formulation, "-form", "--formul",
-                   "Formulation to use (cfosls or fosls).");
     args.AddOption(&space_for_S, "-spaceS", "--spaceS",
                    "Space for S (H1 or L2).");
     args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
@@ -244,11 +256,6 @@ int main(int argc, char *argv[])
 
     if (verbose)
     {
-        if (strcmp(formulation,"cfosls") == 0)
-            std::cout << "formulation: CFOSLS \n";
-        else
-            std::cout << "formulation: FOSLS \n";
-
         if (strcmp(space_for_sigma,"Hdiv") == 0)
             std::cout << "Space for sigma: Hdiv \n";
         else
@@ -263,12 +270,33 @@ int main(int argc, char *argv[])
         std::cout << "S: is not eliminated from the system \n";
 #else
         if (strcmp(space_for_S,"L2") == 0)
-            std::cout << "S: is eliminated from the system \n";
+            std::cout << "S is eliminated from the system \n";
 #endif
     }
 
-    if (verbose)
-        std::cout << "Running tests for the paper: \n";
+    /*
+    // Hdiv-H1 case
+    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Hdiv-H1-L2 formulation must have space_for_S = `H1` \n");
+    using FormulType = CFOSLSFormulation_HdivH1Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+    using ProblemType = FOSLSProblem_HdivH1L2hyp;
+    */
+
+    // Hdiv-L2 case
+#ifdef HDIVL2L2
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Hdiv-L2-L2 formulation must have space_for_S = `L2` \n");
+    using FormulType = CFOSLSFormulation_HdivL2L2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2L2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2L2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2L2hyp;
+#else // then we eliminate the scalar unknown
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Hdiv-L2-L2 formulation must have space_for_S = `L2` \n");
+    using FormulType = CFOSLSFormulation_HdivL2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
+#endif
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
@@ -293,16 +321,14 @@ int main(int argc, char *argv[])
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
 #endif
 
-    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
     MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
 
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0),
+                "Sigma from H1vec must be coupled with S from H1!\n");
 
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
-
-    StopWatch chrono;
 
     Mesh *mesh = NULL;
 
@@ -334,8 +360,6 @@ int main(int argc, char *argv[])
         return -1;
 
     }
-    //mesh = new Mesh(2, 2, 2, Element::HEXAHEDRON, 1);
-
     int dim = nDimensions;
 
 //#if 0
@@ -416,8 +440,7 @@ int main(int argc, char *argv[])
 
     if (strcmp(space_for_S,"H1") == 0)
         numblocks++;
-    if (strcmp(formulation,"cfosls") == 0)
-        numblocks++;
+    numblocks++;
 
 #ifdef HDIVL2L2
     numblocks = 3;
@@ -513,6 +536,7 @@ int main(int argc, char *argv[])
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
    hierarchy->ConstructDofTrueDofs();
+   hierarchy->ConstructEl2Dofs();
 
 #ifdef DIVFREE_MINSOLVER
    hierarchy->ConstructDivfreeDops();
@@ -542,9 +566,11 @@ int main(int argc, char *argv[])
        bool with_coarsest_partfinder = true;
        bool with_coarsest_hcurl = false;
        bool with_monolithic_GS = false;
+       bool with_nobnd_op = true;
        descriptor = new ComponentsDescriptor(with_Schwarz, optimized_Schwarz,
-                                                     with_Hcurl, with_coarsest_partfinder,
-                                                     with_coarsest_hcurl, with_monolithic_GS);
+                                             with_Hcurl, with_coarsest_partfinder,
+                                             with_coarsest_hcurl, with_monolithic_GS,
+                                             with_nobnd_op);
    }
    MultigridToolsHierarchy * mgtools_hierarchy =
            new MultigridToolsHierarchy(*hierarchy, problem_mgtools->GetAttachedIndex(), *descriptor);
@@ -1357,6 +1383,7 @@ int main(int argc, char *argv[])
 //#endif
 }
 
+// See it's declaration
 void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version, std::vector<std::pair<int,int> >& grfuns_descriptor,
                           Array<ParGridFunction*>& extra_grfuns, Array2D<BilinearFormIntegrator *> & integs, bool verbose)
 {
@@ -1442,6 +1469,7 @@ void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version, s
     }
 }
 
+// See it's declaration
 void PrintDefinedMacrosStats(bool verbose)
 {
 #ifdef HDIVL2L2
@@ -1536,14 +1564,6 @@ void PrintDefinedMacrosStats(bool verbose)
         std::cout << "CLEVER_STARTING_PARTSOL passive \n";
 #endif
 
-#ifdef USE_GS_PREC
-    if (verbose)
-        std::cout << "USE_GS_PREC active (overwrites the prec_option) \n";
-#else
-    if (verbose)
-        std::cout << "USE_GS_PREC passive \n";
-#endif
-
 #ifdef MULTILEVEL_PARTSOL
     if (verbose)
         std::cout << "MULTILEVEL_PARTSOL active \n";
@@ -1578,7 +1598,7 @@ void PrintDefinedMacrosStats(bool verbose)
 #endif
 }
 
-
+// See it's declaration
 void ReArrangeBdrAttributes(Mesh* mesh4cube)
 {
     Mesh * mesh = mesh4cube;

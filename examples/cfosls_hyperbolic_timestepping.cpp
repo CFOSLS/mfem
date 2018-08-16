@@ -71,8 +71,6 @@ int main(int argc, char *argv[])
    int ser_ref_levels  = 2;
    int par_ref_levels  = 0;
 
-   // 2. Parse command-line options.
-
    // filename for the input mesh, is used only if USE_TSL is not defined
    const char *mesh_file = "../data/star.mesh";
 #ifdef USE_TSL
@@ -92,6 +90,8 @@ int main(int argc, char *argv[])
    int feorder = 0;
 
    bool visualization = 0;
+
+   // 2. Parse command-line options.
 
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
        numsol = -4;
 #endif
 
-   // 3. Createing a cylinder mesh from the given base mesh
+   // 3. Creating a cylinder mesh from the given base mesh
    // and perform a prescribed number of serial and parallel refinements
 
 #ifdef USE_TSL

@@ -1,16 +1,13 @@
-///                           MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
-///                                      with standard adaptive refinement,
-///                           solved by preconditioned MINRES.
+///                           MFEM(with 4D elements) for 3D/4D laplace equation
+///                              in standard adaptive mesh refinement setting,
+///                                    solved by preconditioned MINRES.
 ///
 /// The problem considered in this example is
 ///                             laplace(u) = f
 /// (either 3D or 4D, calling one of the variables time in space-time)
 ///
-/// casted in the CFOSLS formulation in Hdiv-H1-L2:
-///                             || sigma - b * u || ^2 -> min
-/// where sigma is from H(div) and u is from H^1
-/// minimizing the functional under the constraint
-///                             div sigma = f.
+/// approximated either by standard H1 FEM (if H1FEMLAPLACE is #defined)
+/// or by the mixed FEM in Hdiv-L2
 ///
 /// The current 3D test is a regular solution in a cube.
 ///
@@ -20,15 +17,17 @@
 ///
 /// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
 /// FOSLSEstimatorOnHier, FOSLSEstimator, etc.
+/// The estimator is created on FOSLSEstimatorOnHier which is older, not optimal way.
+/// The newer approach is to construct the estimator from a "dynamic" problem built on the
+/// mesh hierarchy (GeneralHierarchy) instead.
 ///
 /// (**) This code was tested only in serial.
-/// (***) The example was tested for memory leaks with valgrind, in 3D.
+/// (***) The example was tested for memory leaks with valgrind, in 3D. A lot of
+/// ""Conditional jump depends on an uninitialized value" was reported but not fixed.
 ///
-/// Typical run of this example: ./cfosls_hyperbolic_timestepping --whichD 3 -no-vis
-/// If you ant Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
-/// change the source code, around 4.
+/// Typical run of this example: ./cfosls_laplace_adref_Hcurl --whichD 3 -no-vis
 ///
-/// Another examples on adaptive mesh refinement, with a more complicated solver is
+/// Another examples on adaptive mesh refinement, with more complicated solvers, are
 /// cfosls_laplace_adref_Hcurl_new.cpp and cfosls_hyperbolic_adref_Hcurl_new.cpp.
 
 #include "mfem.hpp"
@@ -83,14 +82,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 2;
     int par_ref_levels  = 0;
 
-    const char *space_for_S = "L2";     // "H1" or "L2"
-#ifdef H1FEMLAPLACE
-    if (strcmp(space_for_S,"L2") == 0)
-    {
-        MFEM_ABORT("H1FEMLAPLACE formulation of Laplace equation requires S from H^1");
-    }
-#endif
-    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
+    // 2. Define the problem to be solved (mixed or standard Laplace)
 
 #ifdef H1FEMLAPLACE
     using FormulType = FOSLSFormulation_Laplace;
@@ -117,6 +109,8 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Solving (С)FOSLS laplace equation with MFEM & hypre \n";
 
+    // 3. Parse command-line options.
+
     OptionsParser args(argc, argv);
     args.AddOption(&feorder, "-o", "--feorder",
                    "Finite element order (polynomial degree).");
@@ -131,10 +125,6 @@ int main(int argc, char *argv[])
                    "Enable or disable GLVis visualization.");
     args.AddOption(&prec_option, "-precopt", "--prec-option",
                    "Preconditioner choice (0, 1 or 2 for now).");
-    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
-                   "Space for S (H1 or L2).");
-    args.AddOption(&space_for_sigma, "-spacesigma", "--spacesigma",
-                   "Space for sigma (Hdiv or H1).");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -154,36 +144,7 @@ int main(int argc, char *argv[])
        args.PrintOptions(cout);
     }
 
-    if (verbose)
-    {
-        if (strcmp(space_for_sigma,"Hdiv") == 0)
-            std::cout << "Space for sigma: Hdiv \n";
-        else
-            std::cout << "Space for sigma: H1 \n";
-
-        if (strcmp(space_for_S,"H1") == 0)
-            std::cout << "Space for S: H1 \n";
-        else
-            std::cout << "Space for S: L2 \n";
-
-        if (strcmp(space_for_S,"L2") == 0)
-            std::cout << "S: is eliminated from the system \n";
-    }
-
-    if (verbose)
-        std::cout << "Running tests for the paper: \n";
-
-    //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
-
-    //mesh_file = "../data/pmesh_check.mesh";
-    mesh_file = "../data/cube_3d_moderate.mesh";
-
-    if (verbose)
-        std::cout << "For the records: numsol = " << numsol
-                  << ", mesh_file = " << mesh_file << "\n";
-
+    // Reporting whether certain flags are active (#defined) or not
 #ifdef AMR
     if (verbose)
         std::cout << "AMR active \n";
@@ -208,17 +169,23 @@ int main(int argc, char *argv[])
         std::cout << "USE_GS_PREC passive \n";
 #endif
 
-    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
-                "Space for S must be H1 or L2!\n");
-    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
-                "Space for sigma must be Hdiv or H1!\n");
-
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 &&
-                                                       strcmp(space_for_S,"H1") == 0),
-                "Sigma from H1vec must be coupled with S from H1!\n");
-
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
+
+    // 4. Reading the starting mesh and performing a prescribed number
+    // of serial and parallel refinements
+
+    //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
+
+    //mesh_file = "../data/pmesh_check.mesh";
+    mesh_file = "../data/cube_3d_moderate.mesh";
+
+    if (verbose)
+        std::cout << "For the records: numsol = " << numsol
+                  << ", mesh_file = " << mesh_file << "\n";
+
 
     Mesh *mesh = NULL;
 
@@ -272,36 +239,20 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
-    //    use the Raviart-Thomas finite elements of the specified order.
+    // 5. Creating the problem instance and corresponding hierarchies of meshes and problems.
 
    FormulType * formulat = new FormulType (dim, numsol, verbose);
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
-   /*
-   // Hdiv-L2 case
-   int numfoslsfuns = 1;
-
-   std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
-   // this works
-   grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
-
-   Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
-   for (int i = 0; i < integs.NumRows(); ++i)
-       for (int j = 0; j < integs.NumCols(); ++j)
-           integs(i,j) = NULL;
-
-   integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
-
-   FOSLSEstimator * estimator;
-
-   estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
-   */
-
    bool with_hcurl = false;
 
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
+
+   // Remark: In this example an old way of creating estimator is considered.
+   // The estimator will be built on the problem hierarchy.
+   // An easier way is to use a "dynamic" problem built on the hierarchy of meshes
+   // Look at the newer way in cfosls_hyperbolic_adref_Hcurl_new.cpp
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
@@ -314,28 +265,15 @@ int main(int argc, char *argv[])
 
    int numfoslsfuns = -1;
 
-   int fosls_func_version = 1;
-   if (verbose)
-    std::cout << "fosls_func_version = " << fosls_func_version << "\n";
-
-   if (fosls_func_version == 1)
-   {
 #ifdef H1FEMLAPLACE
        numfoslsfuns = 1;
+       int numblocks_funct = 1;
 #else
-       numfoslsfuns = 1;
-       if (strcmp(space_for_S,"H1") == 0)
-           ++numfoslsfuns;
+       numfoslsfuns = 2;
+       int numblocks_funct = 2;
 #endif
-   }
 
-#ifdef H1FEMLAPLACE
-   int numblocks_funct = 1;
-#else
-   int numblocks_funct = 1;
-   if (strcmp(space_for_S,"H1") == 0)
-       ++numblocks_funct;
-#endif
+   // 6. Creating the FOSLS error estimator, first creating its components
 
    /// The descriptor describes the grid functions used in the error estimator
    /// each pair (which corresponds to a grid function used in the estimator)
@@ -351,14 +289,12 @@ int main(int argc, char *argv[])
 
    std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
 
+   // Integrators for bilinear forms in the integrator
    Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
    for (int i = 0; i < integs.NumRows(); ++i)
        for (int j = 0; j < integs.NumCols(); ++j)
            integs(i,j) = NULL;
 
-   // version 1, only || sigma + grad S ||^2, or || sigma ||^2
-   if (fosls_func_version == 1)
-   {
 #ifdef H1FEMLAPLACE
        // this works
        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
@@ -368,24 +304,19 @@ int main(int argc, char *argv[])
        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
        integs(0,0) = new VectorFEMassIntegrator;
 
-       if (strcmp(space_for_S,"H1") == 0)
-       {
-           grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
-           integs(1,1) = new DiffusionIntegrator;
-           integs(0,1) = new MixedVectorGradientIntegrator;
-       }
+       grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
+       integs(1,1) = new DiffusionIntegrator;
+       integs(0,1) = new MixedVectorGradientIntegrator;
 #endif
-   }
-   else
-   {
-       MFEM_ABORT("Unsupported version of fosls functional \n");
-   }
 
    FOSLSEstimator * estimator;
 
+   // See remark above. This way to define an estimator is not optimal.
    estimator = new FOSLSEstimatorOnHier<ProblemType, GeneralHierarchy>
            (*prob_hierarchy, 0, grfuns_descriptor, NULL, integs, verbose);
 
+   // Adding estimator to the problem so that it get's updated whenever the
+   // problem is updated
    problem->AddEstimator(*estimator);
 
    ThresholdRefiner refiner(*estimator);
@@ -401,14 +332,15 @@ int main(int argc, char *argv[])
    Vector * coarse_rhs;
 #endif
 
-   // 12. The main AMR loop. In each iteration we solve the problem on the
-   //     current mesh, visualize the solution, and refine the mesh.
+   // 7. The main AMR loop. In each iteration we solve the problem on the
+   //     current mesh, visualize the solution, and refine the mesh, then repeat.
 #ifdef AMR
    const int max_dofs = 200000;//1600000;
 #else
    const int max_dofs = 400000;
 #endif
 
+   // Tolerance for the problem solver is being adjusted at each iteration
    const double fixed_rtol = 1.0e-15; // 1.0e-10; 1.0e-12;
    const double fixed_atol = 1.0e-5;
 
@@ -464,7 +396,8 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef CLEVER_STARTING_GUESS
-       // if it's not the first iteration we reuse the previous solution as a starting guess
+       // if it's not the first iteration we reuse the previous solution
+       // by setting the starting guess to be the interpolant of the prev. solution
        if (it > 0)
            prob_hierarchy->GetTrueP(0)->Mult(*coarse_guess, problem->GetSol());
 
@@ -657,10 +590,6 @@ int main(int argc, char *argv[])
                std::cout << "adjusted atol = " << adjusted_atol << "\n";
        }
 
-       //double adjusted_rtol = fixed_rtol * initial_res_norm / res_norm;
-       //if (verbose)
-           //std::cout << "adjusted rtol = " << adjusted_rtol << "\n";
-
 #ifdef USE_GS_PREC
        if (it > 0)
        {
@@ -670,6 +599,7 @@ int main(int argc, char *argv[])
        }
 #endif
 
+       // 12.1 Solving the problem at current iteration
 #ifdef H1FEMLAPLACE
        // chaning the solver from MINRES to CG for standard FEM for Laplace in H^1
        problem->ChangeSolver(initial_rtol, adjusted_atol);
@@ -698,6 +628,7 @@ int main(int argc, char *argv[])
        *coarse_rhs = *rhs;
 #endif
 
+       // Computing the error
       BlockVector& problem_sol = problem->GetSol();
       if (compute_error)
       {
@@ -842,7 +773,7 @@ int main(int argc, char *argv[])
        *coarse_guess = problem_sol;
 #endif
 
-       // 17. Send the solution by socket to a GLVis server.
+       // 12.2 Send the solution by socket to a GLVis server.
        if (visualization)
        {
            ParGridFunction * sigma = problem->GetGrFun(0);
@@ -868,10 +799,10 @@ int main(int argc, char *argv[])
            delete sigma_ex;
        }
 
-       // 18. Call the refiner to modify the mesh. The refiner calls the error
-       //     estimator to obtain element errors, then it selects elements to be
-       //     refined and finally it modifies the mesh. The Stop() method can be
-       //     used to determine if a stopping criterion was met.
+       // 12.3 Call the refiner to modify the mesh. The refiner calls the error
+       // estimator to obtain element errors, then it selects elements to be
+       // refined and finally it modifies the mesh. The Stop() method can be
+       // used to determine if a stopping criterion was met.
 
 #ifdef AMR
        int nel_before = prob_hierarchy->GetHierarchy().GetFinestParMesh()->GetNE();
@@ -895,6 +826,7 @@ int main(int argc, char *argv[])
                         100.0 * (nel_after - nel_before) * 1.0 / nel_before << "% \n\n";
        }
 
+       // visualizing the vector of local errors
        if (visualization)
        {
            const Vector& local_errors = estimator->GetLocalErrors();
@@ -928,6 +860,7 @@ int main(int argc, char *argv[])
           break;
        }
 
+       // 12.4 Updating the problem hierarchy, and its finest level problem
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
@@ -977,6 +910,8 @@ int main(int argc, char *argv[])
        }
 
    }
+
+   // 13. Deallocating the memory
 
    delete coarse_guess;
 

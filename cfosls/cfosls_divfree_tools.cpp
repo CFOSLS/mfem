@@ -2236,20 +2236,11 @@ DivConstraintSolver::~DivConstraintSolver()
 
     if (own_data)
     {
-        for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
-            delete essbdr_tdofs_funct_coarse[i];
-
-        for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
-            delete essbdr_dofs_funct_coarse[i];
-
         for (unsigned int i = 0; i < el2dofs_row_offsets.size(); ++i)
             delete el2dofs_row_offsets[i];
 
         for (unsigned int i = 0; i < el2dofs_col_offsets.size(); ++i)
             delete el2dofs_col_offsets[i];
-
-        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
-            delete fullbdr_attribs[i];
 
         for (unsigned int i = 0; i < offsets_funct.size(); ++i)
             delete offsets_funct[i];
@@ -2274,6 +2265,12 @@ DivConstraintSolver::~DivConstraintSolver()
 
         for (int i = 0; i < LocalSolvers_lvls.Size(); ++i)
             delete LocalSolvers_lvls[i];
+
+        if (d_td_Funct_coarsest)
+            delete d_td_Funct_coarsest;
+
+        for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
+            delete el2dofs_funct_lvls[i];
     }
 }
 
@@ -2284,6 +2281,7 @@ DivConstraintSolver::DivConstraintSolver(MultigridToolsHierarchy& mgtools_hierar
       optimized_localsolvers(optimized_localsolvers_),
       with_hcurl_smoothers(with_hcurl_smoothers_),
       update_counter(hierarchy->GetUpdateCounter()),
+      d_td_Funct_coarsest(NULL),
       own_data(false),
       mgtools_hierarchy(&mgtools_hierarchy_),// why this doesn't work? or does it?
       built_on_mgtools(true),
@@ -2387,6 +2385,7 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
       optimized_localsolvers(optimized_localsolvers_),
       with_hcurl_smoothers(with_hcurl_smoothers_),
       update_counter(hierarchy->GetUpdateCounter()),
+      d_td_Funct_coarsest(NULL),
       own_data(true),
       mgtools_hierarchy(NULL),
       built_on_mgtools(false),
@@ -2452,7 +2451,7 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     el2dofs_row_offsets.resize(num_levels - 1);
     el2dofs_col_offsets.resize(num_levels - 1);
 
-    fullbdr_attribs.resize(numblocks_funct);
+    std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
     for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
     {
         fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
@@ -2469,8 +2468,26 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     truetempvec2_lvls[0]  = new BlockVector(*offsets_funct[0]);
     trueresfunc_lvls[0]   = new BlockVector(*offsets_funct[0]);
 
+    el2dofs_funct_lvls.SetSize(num_levels - 1);
+
+    d_td_Funct_lvls.resize(num_levels - 1);
+
     for (int l = 0; l < num_levels - 1; ++l)
     {
+        d_td_Funct_lvls[l] = hierarchy->GetDofTrueDof(*space_names_funct, l);
+
+        std::vector<Array<int>* > essbdr_tdofs_funct =
+                hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
+
+        std::vector<Array<int>* > essbdr_dofs_funct =
+                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l);
+
+        std::vector<Array<int>* > fullbdr_dofs_funct =
+                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l);
+
+        Array<int>* essbdr_hcurl =
+                hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l);
+
         P_L2[l] = hierarchy->GetPspace(SpaceName::L2, l);
         AE_e[l] = Transpose(*P_L2[l]);
 
@@ -2483,24 +2500,26 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
 
         Func_global_lvls[l + 1] = BlockOps_lvls[l + 1];
 
-
-        std::vector<Array<int>* > essbdr_tdofs_funct =
+        std::vector<Array<int>* > essbdr_tdofs_funct_coarser =
                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
-        EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
+        EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct_coarser);
 
-        for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
-            delete essbdr_tdofs_funct[i];
+        for (unsigned int i = 0; i < essbdr_tdofs_funct_coarser.size(); ++i)
+            delete essbdr_tdofs_funct_coarser[i];
 
         if (with_hcurl_smoothers)
         {
             SweepsNum = ipow(1, l); // = 1
-            Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
+
+            Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l],
                                                      *hierarchy->GetDivfreeDop(l),
-                                                     *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                               essbdr_attribs_Hcurl, l),
-                                                     hierarchy->GetEssBdrTdofsOrDofs("tdof",
-                                                                               *space_names_funct,
-                                                                               essbdr_attribs, l),
+                                                     //*hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                               //essbdr_attribs_Hcurl, l),
+                                                     *essbdr_hcurl,
+                                                     //hierarchy->GetEssBdrTdofsOrDofs("tdof",
+                                                                               //*space_names_funct,
+                                                                               //essbdr_attribs, l),
+                                                     essbdr_tdofs_funct,
                                                      &SweepsNum, *offsets_funct[l]);
         }
 
@@ -2519,28 +2538,41 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         el2dofs_row_offsets[l] = new Array<int>();
         el2dofs_col_offsets[l] = new Array<int>();
 
+        el2dofs_funct_lvls[l] = hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                           el2dofs_col_offsets[l]);
+
         if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
         {
             LocalSolvers_lvls[l] = new LocalProblemSolverWithS
                     (BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                     hierarchy->GetDofTrueDof(*space_names_funct, l), *AE_e[l],
-                     *hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
-                                                  el2dofs_col_offsets[l]),
+                     //hierarchy->GetDofTrueDof(*space_names_funct, l),
+                     d_td_Funct_lvls[l],
+                     *AE_e[l],
+                     //*hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                  //el2dofs_col_offsets[l]),
+                     *el2dofs_funct_lvls[l],
                      *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
-                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                     fullbdr_dofs_funct,
+                     //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     essbdr_dofs_funct,
                      optimized_localsolvers);
         }
         else // no S -> Hdiv-L2 formulation
         {
             LocalSolvers_lvls[l] = new LocalProblemSolver
                     (BlockOps_lvls[l]->Height(), *Funct_mat_lvls[l], *Constraint_mat_lvls[l],
-                     hierarchy->GetDofTrueDof(*space_names_funct, l), *AE_e[l],
-                     *hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
-                                                  el2dofs_col_offsets[l]),
+                     //hierarchy->GetDofTrueDof(*space_names_funct, l),
+                     d_td_Funct_lvls[l],
+                     *AE_e[l],
+                     //*hierarchy->GetElementToDofs(*space_names_funct, l, el2dofs_row_offsets[l],
+                                                  //el2dofs_col_offsets[l]),
+                     *el2dofs_funct_lvls[l],
                      *hierarchy->GetElementToDofs(SpaceName::L2, l),
-                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
-                     hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l),
+                     fullbdr_dofs_funct,
+                     //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l),
+                     essbdr_dofs_funct,
                      optimized_localsolvers);
         }
 
@@ -2548,6 +2580,17 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         truetempvec_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
         truetempvec2_lvls[l + 1]  = new BlockVector(*offsets_funct[l + 1]);
         trueresfunc_lvls[l + 1]   = new BlockVector(*offsets_funct[l + 1]);
+
+        for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
+            delete essbdr_tdofs_funct[i];
+
+        for (unsigned int i = 0; i < essbdr_dofs_funct.size(); ++i)
+            delete essbdr_dofs_funct[i];
+
+        for (unsigned int i = 0; i < fullbdr_dofs_funct.size(); ++i)
+            delete fullbdr_dofs_funct[i];
+
+        delete essbdr_hcurl;
     }
 
     Mass_mat_lvls.SetSize(num_levels);
@@ -2561,20 +2604,25 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         Mass_mat_lvls[l] = mass_form.LoseMat();
     }
 
-    essbdr_tdofs_funct_coarse = hierarchy->GetEssBdrTdofsOrDofs
-            ("tdof", *space_names_funct, essbdr_attribs, num_levels - 1);
-    essbdr_dofs_funct_coarse = hierarchy->GetEssBdrTdofsOrDofs
-            ("dof", *space_names_funct, essbdr_attribs, num_levels - 1);
+    std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, num_levels - 1);
+
+    std::vector<Array<int>* > essbdr_dofs_funct_coarse =
+            hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, num_levels - 1);
 
     int coarse_size = 0;
     for (int i = 0; i < space_names_problem->Size(); ++i)
         coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
 
-    CoarseSolver =  new CoarsestProblemSolver(coarse_size,
+    d_td_Funct_coarsest = hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
+                                                  d_td_coarsest_row_offsets, d_td_coarsest_col_offsets);
+
+    CoarseSolver = new CoarsestProblemSolver(coarse_size,
                                               *Funct_mat_lvls[num_levels - 1],
             *Constraint_mat_lvls[num_levels - 1],
-            hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
-                                     row_offsets_coarse, col_offsets_coarse),
+            //hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
+                                     //row_offsets_coarse, col_offsets_coarse),
+            d_td_Funct_coarsest,
             *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
             essbdr_dofs_funct_coarse,
             essbdr_tdofs_funct_coarse);
@@ -2583,6 +2631,15 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
     CoarseSolver->SetAbsTol(1.0e-18);
     CoarseSolver->SetRelTol(1.0e-18);
     CoarseSolver->ResetSolverParams();
+
+    for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
+        delete essbdr_tdofs_funct_coarse[i];
+
+    for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
+        delete essbdr_dofs_funct_coarse[i];
+
+    for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+        delete fullbdr_attribs[i];
 
     Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 }
@@ -2700,17 +2757,22 @@ void DivConstraintSolver::Update(bool recoarsen)
         MFEM_ASSERT(update_counter == hierarchy_upd_cnt - 1,
                     "Current implementation allows the update counters to differ no more than by one");
 
+        const Array<SpaceName>* space_names_funct =
+                problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
+        int numblocks_funct = space_names_funct->Size();
+        std::vector<Array<int>*> fullbdr_attribs(numblocks_funct);
+        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+        {
+            fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
+            (*fullbdr_attribs[i]) = 1;
+        }
+
         // prepending one more level
         SparseMatrix * P_L2_new = hierarchy->GetPspace(SpaceName::L2, 0);
         P_L2.Prepend(P_L2_new);
 
         SparseMatrix * AE_e_new = Transpose(*P_L2[0]);
         AE_e.Prepend(AE_e_new);
-
-        const Array<SpaceName>* space_names_funct =
-                problem->GetFEformulation().GetFormulation()->GetFunctSpacesDescriptor();
-
-        int numblocks_funct = space_names_funct->Size();
 
         const Array<int> * offsets_funct_new =
                 hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
@@ -2776,10 +2838,23 @@ void DivConstraintSolver::Update(bool recoarsen)
         HcurlGSSSmoother * Smoother_new;
         if (with_hcurl_smoothers)
         {
+            std::vector<Array<int>* > essbdr_tdofs_funct_0 =
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0);
+
+            Array<int> * essbdr_hcurl_0 =
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0);
+
             Smoother_new = new HcurlGSSSmoother(*BlockOps_lvls[0], *hierarchy->GetDivfreeDop(0),
-                    *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
-                    hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
+                    //*hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0),
+                    *essbdr_hcurl_0,
+                    //hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, 0),
+                    essbdr_tdofs_funct_0,
                     &SweepsNum, *offsets_funct[0]);
+
+            for (unsigned int i = 0; i < essbdr_tdofs_funct_0.size(); ++i)
+                delete essbdr_tdofs_funct_0[i];
+
+            delete essbdr_hcurl_0;
         }
         else
             Smoother_new = NULL;
@@ -2788,35 +2863,64 @@ void DivConstraintSolver::Update(bool recoarsen)
         Array<int>* el2dofs_row_offsets_new = new Array<int>();
         Array<int>* el2dofs_col_offsets_new = new Array<int>();
 
+        BlockMatrix * el2dofs_funct_lvls_new = hierarchy->GetElementToDofs
+                (*space_names_funct, 0, el2dofs_row_offsets_new, el2dofs_col_offsets_new);
+
+        el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
+        el2dofs_col_offsets.push_front(el2dofs_col_offsets_new);
+
+        el2dofs_funct_lvls.Prepend(el2dofs_funct_lvls_new);
+
+        d_td_Funct_lvls.push_front(hierarchy->GetDofTrueDof(*space_names_funct, 0));
+
+        std::vector<Array<int>* > essbdr_dofs_funct_0 =
+                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0);
+
+        std::vector<Array<int>* > fullbdr_dofs_funct_0 =
+                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0);
+
         LocalProblemSolver* LocalSolver_new;
         if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
         {
             LocalSolver_new = new LocalProblemSolverWithS(BlockOps_lvls[0]->Height(),
                     *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
-                    hierarchy->GetDofTrueDof(*space_names_funct, 0), *AE_e[0],
-                    *hierarchy->GetElementToDofs(*space_names_funct, 0,
-                                                 el2dofs_row_offsets_new,  el2dofs_col_offsets_new),
+                    //hierarchy->GetDofTrueDof(*space_names_funct, 0),
+                    d_td_Funct_lvls[0],
+                    *AE_e[0],
+                    //*hierarchy->GetElementToDofs(*space_names_funct, 0,
+                                                 //el2dofs_row_offsets_new,  el2dofs_col_offsets_new),
+                    *el2dofs_funct_lvls[0],
                     *hierarchy->GetElementToDofs(SpaceName::L2, 0),
-                    hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
-                    hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                    //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
+                    fullbdr_dofs_funct_0,
+                    //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                    essbdr_dofs_funct_0,
                     optimized_localsolvers);
         }
         else // no S -> Hdiv-L2 formulation
         {
             LocalSolver_new = new LocalProblemSolver(BlockOps_lvls[0]->Height(),
                     *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
-                    hierarchy->GetDofTrueDof(*space_names_funct, 0), *AE_e[0],
-                    *hierarchy->GetElementToDofs(*space_names_funct, 0,
-                                                 el2dofs_row_offsets_new, el2dofs_col_offsets_new),
+                    //hierarchy->GetDofTrueDof(*space_names_funct, 0),
+                    d_td_Funct_lvls[0],
+                    *AE_e[0],
+                    //*hierarchy->GetElementToDofs(*space_names_funct, 0,
+                                                 //el2dofs_row_offsets_new, el2dofs_col_offsets_new),
+                    *el2dofs_funct_lvls[0],
                     *hierarchy->GetElementToDofs(SpaceName::L2, 0),
-                    hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
-                    hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                    //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, 0),
+                    fullbdr_dofs_funct_0,
+                    //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, 0),
+                    essbdr_dofs_funct_0,
                     optimized_localsolvers);
         }
         LocalSolvers_lvls.Prepend(LocalSolver_new);
 
-        el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
-        el2dofs_col_offsets.push_front(el2dofs_col_offsets_new);
+        for (unsigned int i = 0; i < essbdr_dofs_funct_0.size(); ++i)
+            delete essbdr_dofs_funct_0[i];
+
+        for (unsigned int i = 0; i < fullbdr_dofs_funct_0.size(); ++i)
+            delete fullbdr_dofs_funct_0[i];
 
         Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 
@@ -2829,11 +2933,21 @@ void DivConstraintSolver::Update(bool recoarsen)
             // recoarsening operators, constraint matrices, Schwarz and (optionally) Hcurl smoothers
             for (int l = 0; l < num_levels - 1; ++l)
             {
+                std::vector<Array<int>* > essbdr_tdofs_funct =
+                        hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
+
+                std::vector<Array<int>* > essbdr_dofs_funct =
+                        hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1);
+
+                std::vector<Array<int>* > fullbdr_dofs_funct =
+                        hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1);
+
+                Array<int>* essbdr_hcurl =
+                        hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, l + 1);
+
                 BlockOps_lvls[l + 1] = new RAPBlockHypreOperator(*TrueP_Func[l],
                         *BlockOps_lvls[l], *TrueP_Func[l], *offsets_funct[l + 1]);
 
-                std::vector<Array<int>* > essbdr_tdofs_funct =
-                        hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l + 1);
                 EliminateBoundaryBlocks(*BlockOps_lvls[l + 1], essbdr_tdofs_funct);
 
                 Func_global_lvls[l + 1] = BlockOps_lvls[l + 1];
@@ -2852,28 +2966,39 @@ void DivConstraintSolver::Update(bool recoarsen)
                     // TODO: Do we need to recoarsen the LocalSolvers and/or HcurlSmoothers?
                     // TODO: The concern is that the Functional matrix is recoarsened and thus changes
                     delete LocalSolvers_lvls[l + 1];
+
                     if (numblocks_funct == 2) // both sigma and S are present -> Hdiv-H1 formulation
                     {
                         LocalSolvers_lvls[l + 1] = new LocalProblemSolverWithS
                                 (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
-                                hierarchy->GetDofTrueDof(*space_names_funct, l  +1), *AE_e[l + 1],
-                                *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
-                                *el2dofs_col_offsets[l + 1]),
+                                //hierarchy->GetDofTrueDof(*space_names_funct, l  +1),
+                                d_td_Funct_lvls[l + 1],
+                                *AE_e[l + 1],
+                                //*hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                                //*el2dofs_col_offsets[l + 1]),
+                                *el2dofs_funct_lvls[l + 1],
                                 *hierarchy->GetElementToDofs(SpaceName::L2, l + 1),
-                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
-                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                                fullbdr_dofs_funct,
+                                //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                essbdr_dofs_funct,
                                 optimized_localsolvers);
                     }
                     else // no S -> Hdiv-L2 formulation
                     {
                         LocalSolvers_lvls[l + 1] = new LocalProblemSolver
                                 (BlockOps_lvls[l + 1]->Height(), *Funct_mat_lvls[l + 1], *Constraint_mat_lvls[l + 1],
-                                hierarchy->GetDofTrueDof(*space_names_funct, l + 1), *AE_e[l + 1],
-                                *hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
-                                *el2dofs_col_offsets[l + 1]),
+                                //hierarchy->GetDofTrueDof(*space_names_funct, l + 1),
+                                d_td_Funct_lvls[l + 1],
+                                *AE_e[l + 1],
+                                //*hierarchy->GetElementToDofs(*space_names_funct, l + 1, *el2dofs_row_offsets[l + 1],
+                                //*el2dofs_col_offsets[l + 1]),
+                                *el2dofs_funct_lvls[l + 1],
                                 *hierarchy->GetElementToDofs(SpaceName::L2, l  +1),
-                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
-                                hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l + 1),
+                                fullbdr_dofs_funct,
+                                //hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, l + 1),
+                                essbdr_dofs_funct,
                                 optimized_localsolvers);
                     }
 
@@ -2883,10 +3008,12 @@ void DivConstraintSolver::Update(bool recoarsen)
                         SweepsNum = ipow(1, l); // = 1
                         Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l + 1],
                                                                  *hierarchy->GetDivfreeDop(l + 1),
-                                                                 *hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
-                                                                                           essbdr_attribs_Hcurl, l + 1),
-                                                                 hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
-                                                                                           essbdr_attribs, l + 1),
+                                                                 //*hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
+                                                                                           //essbdr_attribs_Hcurl, l + 1),
+                                                                 *essbdr_hcurl,
+                                                                 //hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct,
+                                                                                           //essbdr_attribs, l + 1),
+                                                                 essbdr_tdofs_funct,
                                                                  &SweepsNum, *offsets_funct[l + 1]);
                     }
                 } // end of if (l+1) is not the coarsest level
@@ -2906,11 +3033,18 @@ void DivConstraintSolver::Update(bool recoarsen)
             for (int i = 0; i < space_names_problem->Size(); ++i)
                 coarse_size += hierarchy->GetSpace((*space_names_problem)[i], num_levels - 1)->TrueVSize();
 
+            std::vector<Array<int>* > essbdr_tdofs_funct_coarse =
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, num_levels - 1);
+
+            std::vector<Array<int>* > essbdr_dofs_funct_coarse =
+                    hierarchy->GetEssBdrTdofsOrDofs("dof", *space_names_funct, essbdr_attribs, num_levels - 1);
+
             CoarseSolver =  new CoarsestProblemSolver(coarse_size,
                                                       *Funct_mat_lvls[num_levels - 1],
                     *Constraint_mat_lvls[num_levels - 1],
-                    hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
-                                             row_offsets_coarse, col_offsets_coarse),
+                    //hierarchy->GetDofTrueDof(*space_names_funct, num_levels - 1,
+                                             //row_offsets_coarse, col_offsets_coarse),
+                    d_td_Funct_coarsest,
                     *hierarchy->GetDofTrueDof(SpaceName::L2, num_levels - 1),
                     essbdr_dofs_funct_coarse,
                     essbdr_tdofs_funct_coarse);
@@ -2919,7 +3053,16 @@ void DivConstraintSolver::Update(bool recoarsen)
             CoarseSolver->SetAbsTol(1.0e-18);
             CoarseSolver->SetRelTol(1.0e-18);
             CoarseSolver->ResetSolverParams();
+
+            for (unsigned int i = 0; i < essbdr_tdofs_funct_coarse.size(); ++i)
+                delete essbdr_tdofs_funct_coarse[i];
+
+            for (unsigned int i = 0; i < essbdr_dofs_funct_coarse.size(); ++i)
+                delete essbdr_dofs_funct_coarse[i];
         }
+
+        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+            delete fullbdr_attribs[i];
 
         update_counter = hierarchy_upd_cnt;
     }
