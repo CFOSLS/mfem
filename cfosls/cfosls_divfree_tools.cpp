@@ -2814,13 +2814,6 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         size = (*offsets_funct[0])[numblocks_funct];
 
-        fullbdr_attribs.resize(numblocks_funct);
-        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
-        {
-            fullbdr_attribs[i] = new Array<int>(problem->GetParMesh()->bdr_attributes.Max());
-            (*fullbdr_attribs[i]) = 1;
-        }
-
         BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
                                                            *offsets_funct[0], *offsets_funct[1]);
 
@@ -2939,7 +2932,8 @@ void DivConstraintSolver::Update(bool recoarsen)
                 if (l < num_levels - 1)
                 {
                     delete LocalSolvers_lvls[l];
-                    delete Smoothers_lvls[l];
+                    if (with_hcurl_smoothers)
+                        delete Smoothers_lvls[l];
                 }
                 //delete Mass_mat_lvls[l];
             }
@@ -3026,8 +3020,19 @@ void DivConstraintSolver::Update(bool recoarsen)
                                                                                            //essbdr_attribs, l + 1),
                                                                  essbdr_tdofs_funct,
                                                                  &SweepsNum, *offsets_funct[l + 1]);
-                    }
+                     }
                 } // end of if (l+1) is not the coarsest level
+
+                for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
+                    delete essbdr_tdofs_funct[i];
+
+                for (unsigned int i = 0; i < essbdr_dofs_funct.size(); ++i)
+                    delete essbdr_dofs_funct[i];
+
+                for (unsigned int i = 0; i < fullbdr_dofs_funct.size(); ++i)
+                    delete fullbdr_dofs_funct[i];
+
+                delete essbdr_hcurl;
             } // end of loop over levels from finest+1 to the coarsest-1
 
             if (verbose)
