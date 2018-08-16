@@ -1466,6 +1466,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         if (descr.with_Schwarz)
         {
             int size = FunctOps_lvls[0]->Height();
+            std::cout << "size = " << size << "\n";
 
             bool optimized_localsolve = descr.optimized_Schwarz;
 

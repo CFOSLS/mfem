@@ -398,6 +398,7 @@ public:
           essbdrdofs_blocks(EssBdrDofs_blks),
           own_essbdr(copy_essbdr)
     {
+        std::cout << "my height = " << height << "\n";
         finalized = 0;
         optimized_localsolve = Optimized_LocalSolve;
         compute_AEproblem_matrices.SetSize(numblocks + 1, numblocks + 1);
