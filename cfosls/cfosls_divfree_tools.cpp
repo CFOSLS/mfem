@@ -2248,6 +2248,9 @@ DivConstraintSolver::~DivConstraintSolver()
         for (int i = 0; i < BlockOps_lvls.Size(); ++i)
             delete BlockOps_lvls[i];
 
+        for (int i = 0; i < TrueP_Func.Size(); ++i)
+            delete TrueP_Func[i];
+
         for (unsigned int i = 0; i < offsets_sp_funct.size(); ++i)
             delete offsets_sp_funct[i];
 
@@ -2816,10 +2819,14 @@ void DivConstraintSolver::Update(bool recoarsen)
 
         size = (*offsets_funct[0])[numblocks_funct];
 
-        BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
-                                                           *offsets_funct[0], *offsets_funct[1]);
-
-        TrueP_Func.Prepend(TrueP_Func_new);
+        if (built_on_mgtools)
+            TrueP_Func.Prepend(mgtools_hierarchy->GetBlockPs_nobnd()[0]);
+        else // -> owns data
+        {
+            BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
+                                                               *offsets_funct[0], *offsets_funct[1]);
+            TrueP_Func.Prepend(TrueP_Func_new);
+        }
 
         BlockVector * truesolupdate_new = new BlockVector(TrueP_Func[0]->RowOffsets());
         truesolupdate_lvls.Prepend(truesolupdate_new);
@@ -4357,9 +4364,13 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
 #endif
 
     if (built_on_mgtools)
+    {
         for (unsigned int i = 0; i < essbdrtruedofs_Func.size(); ++i)
             for (unsigned int j = 0; j < essbdrtruedofs_Func[i].size(); ++j)
                 delete essbdrtruedofs_Func[i][j];
+        for (unsigned int i = 0; i < offsets_funct.size(); ++i)
+            delete offsets_funct[i];
+    }
 
     if (own_data)
     {
@@ -4623,10 +4634,11 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
 
             size = (*offsets_funct[0])[numblocks_funct];
 
-            BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
-                                                               *offsets_funct[0], *offsets_funct[1]);
+            //BlockOperator * TrueP_Func_new = hierarchy->ConstructTruePforFormul(0, *space_names_funct,
+                                                               //*offsets_funct[0], *offsets_funct[1]);
 
-            TrueP_Func.Prepend(TrueP_Func_new);
+            //TrueP_Func.Prepend(TrueP_Func_new);
+            TrueP_Func.Prepend(mgtools_hierarchy->GetBlockPs_nobnd()[0]);
 
             //delete tempblock_truedofs;
             //tempblock_truedofs = new BlockVector(*offsets_funct[0]);

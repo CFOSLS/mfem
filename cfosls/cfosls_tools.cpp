@@ -1760,6 +1760,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         for (unsigned int i = 0; i < essbdr_tdofs_funct_coarser.size(); ++i)
             delete essbdr_tdofs_funct_coarser[i];
 
+        for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
+            delete fullbdr_attribs[i];
+
     } // end of if "update is needed"
 
 }
