@@ -684,6 +684,7 @@ int main(int argc, char *argv[])
 
    bool compute_error = true;
 
+   /*
    Array<int> els_to_refine(1);
    els_to_refine = hierarchy->GetFinestParMesh()->GetNE() / 2;
    hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
@@ -757,9 +758,10 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
+   */
 
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 1; // 21;
+   int max_iter_amr = 2; // 21;
    int it_print_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
@@ -957,12 +959,15 @@ int main(int argc, char *argv[])
            saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                            "for the finest level solution ", verbose);
 
+           BlockVector * exactsol_proj = problem_l->GetExactSolProj();
            BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
            for (int blk = 0; blk < numblocks_funct; ++blk)
-               tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
+               tmp2.GetBlock(blk) = exactsol_proj->GetBlock(blk);
 
            CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
                            "for the projection of the exact solution ", verbose);
+
+           delete exactsol_proj;
        }
 
        //MPI_Finalize();

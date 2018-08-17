@@ -1609,7 +1609,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                         std::vector<Array<int>* > fullbdr_dofs_funct =
                                 hierarchy.GetEssBdrTdofsOrDofs("dof", *space_names_funct, fullbdr_attribs, l);
 
-                        AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
+                        //AE_e_lvls[l] = Transpose(*hierarchy.GetPspace(SpaceName::L2, l));
                         if (numblocks_funct > 1) // S is present
                         {
                             SchwarzSmoothers_lvls[l] = new LocalProblemSolverWithS
