@@ -1478,7 +1478,7 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
             }
             else // no S
             {
-                SchwarzSmoothers_lvls = new LocalProblemSolver
+                SchwarzSmoothers_new = new LocalProblemSolver
                         (size, *Funct_mat_lvls[0], *Constraint_mat_lvls[0],
                          d_td_Funct_lvls[0],
                          //hierarchy.GetDofTrueDof(*space_names_funct, 0),
