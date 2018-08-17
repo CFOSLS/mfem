@@ -99,7 +99,7 @@
 // NOT MORE THAN ONE OF THE APPROACH_K, K > 0, BELOW SHOULD BE #DEFINED
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
-#define APPROACH_1
+//#define APPROACH_1
 
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
 // as the initial guess interpolant from the previous level
@@ -115,7 +115,7 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-//#define APPROACH_3
+#define APPROACH_3
 
 #ifdef APPROACH_0
 //#define     DIVFREE_MINSOLVER
@@ -1156,12 +1156,15 @@ int main(int argc, char *argv[])
                saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                                "for the finest level solution ", verbose);
 
+               BlockVector * exactsol_proj = problem_l->GetExactSolProj();
                BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
                for (int blk = 0; blk < numblocks_funct; ++blk)
-                   tmp2.GetBlock(blk) = problem_l->GetExactSolProj()->GetBlock(blk);
+                   tmp2.GetBlock(blk) = exactsol_proj->GetBlock(blk);
 
                CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp2,
                                "for the projection of the exact solution ", verbose);
+
+               delete exactsol_proj;
            }
 
        } // end of loop over levels

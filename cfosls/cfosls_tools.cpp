@@ -1439,7 +1439,6 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
         if (descr.with_Schwarz)
         {
             int size = FunctOps_lvls[0]->Height();
-            std::cout << "size = " << size << "\n";
 
             bool optimized_localsolve = descr.optimized_Schwarz;
 
@@ -1494,8 +1493,6 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
                          optimized_localsolve);
             }
 
-            std::cout << "SchwarzSmoother_new height = " << SchwarzSmoother_new->Height() << "\n";
-
             SchwarzSmoothers_lvls.Prepend(SchwarzSmoother_new);
 
             el2dofs_row_offsets.push_front(el2dofs_row_offsets_new);
@@ -1511,7 +1508,6 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         if (descr.with_Schwarz && descr.with_Hcurl)
         {
-            std::cout << "SchwarzSmoothers_lvls[0] height = " << SchwarzSmoothers_lvls[0]->Height() << "\n";
             SmootherSum * CombinedSmoother_new = new SmootherSum(*SchwarzSmoothers_lvls[0],
                                                                  *HcurlSmoothers_lvls[0], *FunctOps_lvls[0]);
             CombinedSmoothers_lvls.Prepend(CombinedSmoother_new);
