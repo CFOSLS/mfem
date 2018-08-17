@@ -1573,6 +1573,8 @@ public:
     void SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bool compute_error) const;
 
     void BuildSystem(bool verbose);
+
+    // Updates the problem, deletes the matrix, but doesn't construct the new one
     virtual void Update();
 
     void InitSolver(bool verbose);

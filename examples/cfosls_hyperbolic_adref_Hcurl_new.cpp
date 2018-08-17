@@ -1,24 +1,3 @@
-//                                MFEM(with 4D elements) CFOSLS for 3D/4D hyperbolic equation
-//                                  with adaptive refinement involving a div-free formulation
-//
-// Compile with: make
-//
-// Description:  This example code solves a simple 3D/4D hyperbolic problem over [0,1]^3(4)
-//               corresponding to the saddle point system
-//                                  sigma_1 = u * b
-//							 		sigma_2 - u        = 0
-//                                  div_(x,t) sigma    = f
-//                       with b = vector function (~velocity),
-//						 NO boundary conditions (which work only in case when b * n = 0 pointwise at the domain space boundary)
-//						 and initial condition:
-//                                  u(x,0)            = 0
-//               Here, we use a given exact solution
-//                                  u(xt) = uFun_ex(xt)
-//               and compute the corresponding r.h.s.
-//               We discretize with Raviart-Thomas finite elements (sigma), continuous H1 elements (u) and
-//					  discontinuous polynomials (mu) for the lagrange multiplier.
-//
-
 ///                           MFEM(with 4D elements) CFOSLS for 3D/4D transport equation
 ///                                      with adaptive mesh refinement,
 ///                                     solved by a minimization solver.
@@ -43,8 +22,8 @@
 /// The current 3D tests are either in cube (preferred) or in a cylinder, with a rotational velocity field b.
 ///
 /// The problem is then solved with adaptive mesh refinement (AMR).
-/// Different approaches can be used depending on the #defined macros, see their description around their
-/// declaration.
+/// Different approaches can be used depending on the #defined macros, see their description near their
+/// declaration below.
 ///
 /// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
 /// GeneralHierarchy, FOSLSProblem, FOSLSProblHierarchy, FOSLSEstimator, MultigridToolsHierarchy,
@@ -67,13 +46,16 @@
 #include <iomanip>
 #include <list>
 
-// avoids elimination of the scalar unknown from L^2, used only temporarily for studying the problem
+// Avoids elimination of the scalar unknown from L^2, used only temporarily for studying the problem
 // currently, minsolver produces incorrect result for this formulation, but
 // the saddle-point solve is fine, gives approximately the same error
 // as the formulation with eliminated scalar unknown for CYLINDER_CUBE_TEST (same large!)
 //#define HDIVL2L2
 
 // A test with a rotating Gaussian hill in the cubic domain.
+// Originally, the test was for the cylinder, hence "cylinder" test,
+// but later, to avoid errors from circle boundary approximation
+// the same test was considered in the cubic domain
 #define CYLINDER_CUBE_TEST
 
 // Defines whether boundary conditions for CYLINDER_CUBE_TEST are overconstraining (see below)
@@ -83,13 +65,13 @@
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
 #define OVERCONSTRAINED
 
-// if passive, the mesh is simply uniformly refined at each iteration
+// If passive, the mesh is simply uniformly refined at each iteration
 #define AMR
 
-// activates using the solution at the previous mesh as a starting guess for the next problem
-//#define CLEVER_STARTING_GUESS
-
-#define MULTILEVEL_PARTSOL
+// When active, this macro makes the code create an instance of DivConstraintSolver
+// whicha llows to search for a particular solution of the divergence constraint
+// The flag gets activated within some of APPROACHes below
+//#define PARTSOL_SETUP
 
 // Here the problem is solved by a preconditioned MINRES
 // used as a reference solution
@@ -97,13 +79,14 @@
 #define APPROACH_0
 
 // NOT MORE THAN ONE OF THE APPROACH_K, K > 0, BELOW SHOULD BE #DEFINED
+
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
-//#define APPROACH_1
+#define APPROACH_1
 
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
-// as the initial guess interpolant from the previous level
-// FIXME: What's the difference from APPROACH_3_2? Fix the description!
+// as the initial guess zero vector
+// It looks like it's the same as APPROACH_1, but implemented in a form closer to APPROACH_3
 //#define APPROACH_2
 
 // Here the problem is solved by the minimization solver,but uses one previous level
@@ -115,10 +98,9 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-#define APPROACH_3
+//#define APPROACH_3
 
 #ifdef APPROACH_0
-//#define     DIVFREE_MINSOLVER
 #endif
 
 #ifdef APPROACH_1
@@ -129,18 +111,16 @@
 #ifdef APPROACH_2
 #define     PARTSOL_SETUP
 #define     DIVFREE_MINSOLVER
-#define     CLEVER_STARTING_PARTSOL
+// it never actually goes into that so it's the same as APPROACH_1
+//#define     CLEVER_STARTING_PARTSOL
 #define     RECOARSENING_AMR
-//#undef     CLEVER_STARTING_GUESS
 #endif
-
 
 #ifdef APPROACH_3_2
 #define     PARTSOL_SETUP
 #define     DIVFREE_MINSOLVER
 #define     CLEVER_STARTING_PARTSOL
 #define     RECOARSENING_AMR
-//#undef     CLEVER_STARTING_GUESS
 #endif
 
 #ifdef APPROACH_3
@@ -148,7 +128,6 @@
 #define     DIVFREE_MINSOLVER
 #define     RECOARSENING_AMR
 #define     CLEVER_STARTING_PARTSOL
-//#define     CLEVER_STARTING_GUESS
 #endif
 
 using namespace std;
@@ -197,6 +176,8 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
+    // This must be consistent with what formulation is used below.
+    // Search for "using FormulType" below
     const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
@@ -215,11 +196,13 @@ int main(int argc, char *argv[])
     int feorder         = 0;
 
     if (verbose)
-        cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
+        cout << "Solving (С)FOSLS Transport equation in AMR setting \n";
+
+    // 2. Parse command-line options.
 
     OptionsParser args(argc, argv);
-    //args.AddOption(&mesh_file, "-m", "--mesh",
-    //               "Mesh file to use.");
+    args.AddOption(&mesh_file, "-m", "--mesh",
+                   "Mesh file to use.");
     args.AddOption(&feorder, "-o", "--feorder",
                    "Finite element order (polynomial degree).");
     args.AddOption(&ser_ref_levels, "-sref", "--sref",
@@ -276,6 +259,8 @@ int main(int argc, char *argv[])
 #endif
     }
 
+    // 3. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g.)
+
     /*
     // Hdiv-H1 case
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Hdiv-H1-L2 formulation must have space_for_S = `H1` \n");
@@ -317,6 +302,7 @@ int main(int argc, char *argv[])
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
 
+    // Printing in the output which macros have been #defined
     PrintDefinedMacrosStats(verbose);
 
 #ifdef HDIVL2L2
@@ -332,6 +318,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
 
+    // 4. Reading the mesh and performing a prescribed number of serial and parallel refinements
     Mesh *mesh = NULL;
 
     shared_ptr<ParMesh> pmesh;
@@ -364,7 +351,9 @@ int main(int argc, char *argv[])
     }
     int dim = nDimensions;
 
-//#if 0
+    // 4.1 Posprocessing the mesh in case of a "cylinder" test running in the cube
+    // If the domain cube was [0,1]^2 x [0,T] before, here we want to stretch it
+    // in (x,y) plane to cover [-1,1]^2 x [0,1] instead
 #ifdef CYLINDER_CUBE_TEST
 
     Vector vert_coos;
@@ -388,16 +377,8 @@ int main(int argc, char *argv[])
     }
     mesh->SetVertices(vert_coos);
 
-    /*
-    std::stringstream fname;
-    fname << "checkmesh.mesh";
-    std::ofstream ofid(fname.str().c_str());
-    ofid.precision(8);
-    pmesh->Print(ofid);
-
-    MPI_Finalize();
-    return 0;
-    */
+    // if we don't want to overconstrain the solution (see comments before
+    // #define OVERCONSTRAINED), we need to manually rearrange boundary attributes
 #ifndef OVERCONSTRAINED
     // rearranging boundary attributes which are now assigned to cube faces,
     // not to bot + square corners + top as we need
@@ -414,7 +395,6 @@ int main(int argc, char *argv[])
 #endif
 
 #endif
-//#endif
 
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
     {
@@ -435,8 +415,7 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
-    //    use the Raviart-Thomas finite elements of the specified order.
+    // 5. Creating an instance of the FOSLSProblem to be solved.
 
     int numblocks = 1;
 
@@ -451,13 +430,14 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Number of blocks in the formulation: " << numblocks << "\n";
 
-   if (verbose)
-       std::cout << "Running AMR ... \n";
-
    FormulType * formulat = new FormulType (dim, numsol, verbose);
    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
+   // for "cylinder" test in the cube, we redefine boundary attributes
+   // since they require special treatment in this case
+   // (either for overconstraining or for adjusting them fron general-purpose
+   // conditions from BdrConditions_CFOSLS_HdivL2_Hype to our re-arranged bdr attributes
 #ifdef CYLINDER_CUBE_TEST
    delete bdr_conds;
    MFEM_ASSERT(pmesh->bdr_attributes.Max() == 6, "For CYLINDER_CUBE_TEST there must be"
@@ -480,7 +460,7 @@ int main(int argc, char *argv[])
        (*bdr_attribs_data[1])[5] = 0;
    }
    *bdr_attribs_data[formulat->Nblocks() - 1] = 0;
-#else
+#else // in this case we have rearranged manually the bdr attributes, see above
    if (strcmp(space_for_S,"L2") == 0)
    {
        *bdr_attribs_data[0] = 0;
@@ -509,33 +489,14 @@ int main(int argc, char *argv[])
    bdr_conds->Set(bdr_attribs_data);
 #endif
 
-   /*
-   // Hdiv-L2 case
-   int numfoslsfuns = 1;
-
-   std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
-   // this works
-   grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
-
-   Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
-   for (int i = 0; i < integs.NumRows(); ++i)
-       for (int j = 0; j < integs.NumCols(); ++j)
-           integs(i,j) = NULL;
-
-   integs(0,0) = new VectorFEMassIntegrator(*Mytest.Ktilda);
-
-   FOSLSEstimator * estimator;
-
-   estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
-   */
-
-    //#if 0
+   // for minimization solver we need to build H(curl)-related components in the GeneralHierarchy
 #ifdef DIVFREE_MINSOLVER
    bool with_hcurl = true;
 #else
    bool with_hcurl = false;
 #endif
 
+   // 5.1 Creating a hierarchy of meshes
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
    hierarchy->ConstructDofTrueDofs();
    hierarchy->ConstructEl2Dofs();
@@ -543,22 +504,27 @@ int main(int argc, char *argv[])
 #ifdef DIVFREE_MINSOLVER
    hierarchy->ConstructDivfreeDops();
 #endif
+
+   // 5.2 Creating a problem hierarchy, which will be used in case when we ant to solve problems
+   // at previous levels
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
            FOSLSProblHierarchy<ProblemType, GeneralHierarchy>
            (*hierarchy, 1, *bdr_conds, *fe_formulat, prec_option, verbose);
 
    ProblemType * problem = prob_hierarchy->GetProblem(0);
 
-#ifdef MULTILEVEL_PARTSOL
+#ifdef PARTSOL_SETUP
    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
            GetFunctSpacesDescriptor();
 #endif
 
-   // FIXME: Change the name problem_mgtools, why _mgtools?
-   FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
+   // 5.3 Creating a "dynamic" problem which always lives on the finest level of the hierarchy
+   FOSLSProblem* dynamic_problem = hierarchy->BuildDynamicProblem<ProblemType>
            (*bdr_conds, *fe_formulat, prec_option, verbose);
-   hierarchy->AttachProblem(problem_mgtools);
+   hierarchy->AttachProblem(dynamic_problem);
 
+   // 5.4 In case we use minimization solver, here we create an instance of GeneralMinConstrSolver,
+   // building it on MultigridToolsHierarchy
 #ifdef DIVFREE_MINSOLVER
    ComponentsDescriptor * descriptor;
    {
@@ -575,7 +541,7 @@ int main(int argc, char *argv[])
                                              with_nobnd_op);
    }
    MultigridToolsHierarchy * mgtools_hierarchy =
-           new MultigridToolsHierarchy(*hierarchy, problem_mgtools->GetAttachedIndex(), *descriptor);
+           new MultigridToolsHierarchy(*hierarchy, dynamic_problem->GetAttachedIndex(), *descriptor);
 
    GeneralMinConstrSolver * NewSolver;
    {
@@ -587,7 +553,7 @@ int main(int argc, char *argv[])
 
        int numblocks_funct = numblocks - 1;
 
-       int size_funct = problem_mgtools->GetTrueOffsetsFunc()[numblocks_funct];
+       int size_funct = dynamic_problem->GetTrueOffsetsFunc()[numblocks_funct];
        NewSolver = new GeneralMinConstrSolver(size_funct, *mgtools_hierarchy, with_local_smoothers,
                                         optimized_localsolvers, with_hcurl_smoothers, stopcriteria_type, verbose);
 
@@ -603,17 +569,21 @@ int main(int argc, char *argv[])
    }
 #endif
 
-
-#if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
+   // 5.5 In case we solve for a particular solution of the divergence constraint,
+   // we create an instance of DivConstraintSolver here, building it on
+   // the dynamic problem and hierarchy
+#ifdef PARTSOL_SETUP
    bool optimized_localsolvers = true;
    bool with_hcurl_smoothers = true;
    DivConstraintSolver * partsol_finder;
 
    partsol_finder = new DivConstraintSolver
-           (*problem_mgtools, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
+           (*dynamic_problem, *hierarchy, optimized_localsolvers, with_hcurl_smoothers, verbose);
 
    bool report_funct = true;
-#endif // for #ifdef PARTSOL_SETUP or MULTILEVEL_PARTSOL
+#endif
+
+   // 6. Creating the error estimator
 
    int fosls_func_version = 1;
    if (verbose)
@@ -639,34 +609,46 @@ int main(int argc, char *argv[])
    Array<ParGridFunction*> extra_grfuns;
    Array2D<BilinearFormIntegrator *> integs;
 
-   DefineEstimatorComponents(problem_mgtools, fosls_func_version, grfuns_descriptor, extra_grfuns, integs, verbose);
+   // Create components required for the FOSLSEstimator: bilinear form integrators and grid functions
+   DefineEstimatorComponents(dynamic_problem, fosls_func_version, grfuns_descriptor, extra_grfuns, integs, verbose);
 
    FOSLSEstimator * estimator;
-   estimator = new FOSLSEstimator(*problem_mgtools, grfuns_descriptor, NULL, integs, verbose);
-   problem_mgtools->AddEstimator(*estimator);
+   estimator = new FOSLSEstimator(*dynamic_problem, grfuns_descriptor, NULL, integs, verbose);
+   dynamic_problem->AddEstimator(*estimator);
 
+   // ThresholdSmooRefiner is an extension of ThresholdRefiner which introduces
+   // additional parameter to compute local errors using intermediate face error
+   // indicators
    //ThresholdSmooRefiner refiner(*estimator, 0.0001); // 0.1, 0.001
    ThresholdRefiner refiner(*estimator);
 
    refiner.SetTotalErrorFraction(0.9); // 0.5
 
+   // Some additional vector arrays for temporary storage
 #ifdef PARTSOL_SETUP
+   // constraint righthand sides
    Array<Vector*> div_rhs_lvls(0);
+   // particular solutions to the constraint
    Array<BlockVector*> partsol_lvls(0);
+   // particular solution to the constraint, only blocks
+   // related to the functional variables
    Array<BlockVector*> partsol_funct_lvls(0);
+   // initial guesses for finding the particular solution
    Array<BlockVector*> initguesses_funct_lvls(0);
 #endif
 
 #ifdef APPROACH_0
+   // reference (preconditioned MINRES for saddle-point systems) solutions
    Array<BlockVector*> problem_refsols_lvls(0);
 #endif
 
+   // solutions (at all levels)
    Array<BlockVector*> problem_sols_lvls(0);
 
+   // used to store the functional value for the solution from the previous AMR iteration
    double saved_functvalue;
 
-//#if 0
-   // 12. The main AMR loop. In each iteration we solve the problem on the
+   // 7. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
    const int max_dofs = 300000;//1600000; 400000;
@@ -678,91 +660,19 @@ int main(int argc, char *argv[])
    if (verbose)
        std::cout << "starting n_el = " << hierarchy->GetFinestParMesh()->GetNE() << "\n";
 
-   double fixed_rtol = 1.0e-12; // 1.0e-10
-   double fixed_atol = 1.0e-15;
-   double initial_res_norm = -1.0;
-
    bool compute_error = true;
 
-   /*
-   Array<int> els_to_refine(1);
-   els_to_refine = hierarchy->GetFinestParMesh()->GetNE() / 2;
-   hierarchy->GetFinestParMesh()->GeneralRefinement(els_to_refine);
-
-   //////////////
-   bool recoarsen = true;
-   prob_hierarchy->Update(recoarsen);
-
-   problem_mgtools->BuildSystem(verbose);
-#ifdef DIVFREE_MINSOLVER
-   mgtools_hierarchy->Update(recoarsen);
-   NewSolver->UpdateProblem(*problem_mgtools);
-   NewSolver->Update(recoarsen);
-#endif
-
-#ifdef PARTSOL_SETUP
-   partsol_finder->UpdateProblem(*problem_mgtools);
-   partsol_finder->Update(recoarsen);
-#endif
-
-   /////////////////////////
-#ifdef DIVFREE_MINSOLVER
-   delete NewSolver;
-   delete mgtools_hierarchy;
-   delete descriptor;
-#endif
-
-#if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
-   delete partsol_finder;
-#endif
-
-#ifdef PARTSOL_SETUP
-   for (int i = 0; i < div_rhs_lvls.Size(); ++i)
-       delete div_rhs_lvls[i];
-   for (int i = 0; i < partsol_lvls.Size(); ++i)
-       delete partsol_lvls[i];
-   for (int i = 0; i < partsol_funct_lvls.Size(); ++i)
-       delete partsol_funct_lvls[i];
-   for (int i = 0; i < initguesses_funct_lvls.Size(); ++i)
-       delete initguesses_funct_lvls[i];
-#endif
-
-#ifdef APPROACH_0
-   for (int i = 0; i < problem_refsols_lvls.Size(); ++i)
-       delete problem_refsols_lvls[i];
-#endif
-
-//#endif // for #if 0
-
-   for (int i = 0; i < problem_sols_lvls.Size(); ++i)
-       delete problem_sols_lvls[i];
-   for (int i = 0; i < formulat->Nblocks(); ++i)
-       delete bdr_attribs_data[i];
-   delete hierarchy;
-   delete prob_hierarchy;
-
-   for (int i = 0; i < extra_grfuns.Size(); ++i)
-       if (extra_grfuns[i])
-           delete extra_grfuns[i];
-   for (int i = 0; i < integs.NumRows(); ++i)
-       for (int j = 0; j < integs.NumCols(); ++j)
-           if (integs(i,j))
-               delete integs(i,j);
-
-   delete problem_mgtools;
-   delete estimator;
-
-   delete bdr_conds;
-   delete formulat;
-   delete fe_formulat;
-
-   MPI_Finalize();
-   return 0;
-   */
-
    // Main loop (with AMR or uniform refinement depending on the predefined macro AMR)
-   int max_iter_amr = 2; // 21;
+   if (verbose)
+       std::cout << "Running AMR ... \n";
+
+   // upper limit on the number of AMR iterations
+   int max_iter_amr = 3; // 21;
+
+   // controls the print step of the solution into the output files (in terms of AMR iterations)
    int it_print_step = 5;
+   // controls the visualization step of the solution (in terms of AMR iterations)
+   int it_viz_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -778,111 +688,103 @@ int main(int argc, char *argv[])
        problem_refsols_lvls.Prepend(new BlockVector(problem->GetTrueOffsets()));
        *problem_refsols_lvls[0] = 0.0;
 
-       BlockVector saved_sol(problem_mgtools->GetTrueOffsets());
+       BlockVector saved_sol(dynamic_problem->GetTrueOffsets());
        saved_sol = 0.0;
-       problem_mgtools->SolveProblem(problem_mgtools->GetRhs(), saved_sol, verbose, false);
+       dynamic_problem->SolveProblem(dynamic_problem->GetRhs(), saved_sol, verbose, false);
        *problem_refsols_lvls[0] = saved_sol;
 
-       // functional value for the initial guess
-       BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
+       // functional value for the reference solution at the finest level
+       BlockVector reduced_problem_sol(dynamic_problem->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            reduced_problem_sol.GetBlock(blk) = saved_sol.GetBlock(blk);
+
 #ifdef DIVFREE_MINSOLVER
        CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
                        "for the problem solution via saddle-point system ", verbose);
 #endif
 
        if (compute_error)
-           problem_mgtools->ComputeError(saved_sol, verbose, true);
-
-       //MPI_Finalize();
-       //return 0;
-
-       /*
-       for (int l = 0; l < hierarchy->Nlevels(); ++l)
-       {
-           if (verbose)
-               std::cout << "l = " << l << ", ref problem sol funct value \n";
-           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
-                           "for the level problem solution via saddle-point system ", verbose);
-       }
-       */
+           dynamic_problem->ComputeError(saved_sol, verbose, true);
 #endif
 
 #ifdef PARTSOL_SETUP
+       // future initial guess for finding the particular solution
        initguesses_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
        *initguesses_funct_lvls[0] = 0.0;
 
+       // setting div_rhs_lvls[0] to be the constraint righthand side
        div_rhs_lvls.Prepend(new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size()));
-       problem_mgtools->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
+       dynamic_problem->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
 
+       // future paticular solution
        partsol_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
 #endif
 
 #ifdef APPROACH_1
+       // 7.1 Solving the problem at the finest level
+
        int l = 0;
-       ProblemType * problem_l = prob_hierarchy->GetProblem(l);
 
-       // initguesses is 0 except for the exact solutions's bdr values
+       // initguess is zero except for the exact solutions's bdr values
        *initguesses_funct_lvls[l] = 0.0;
-       problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
+       dynamic_problem->SetExactBndValues(*initguesses_funct_lvls[l]);
 
-       // computing funct rhside which absorbs the contribution of the non-homogeneous boundary conditions
-       BlockVector padded_initguess(problem_l->GetTrueOffsets());
+       // Computing functional rhside which absorbs the contribution of the non-homogeneous boundary conditions
+       // The reason we do this is that the DivConstraintSolver and GeneralMinConstrSolver
+       // work correctly only if the boundary conditions are zero
+
+       // we need padded vectors here which have the same number of blocks as the problem
+       // but we will use only the blocks corresponding to the functional variables
+       BlockVector padded_initguess(dynamic_problem->GetTrueOffsets());
        padded_initguess = 0.0;
        for (int blk = 0; blk < numblocks_funct; ++blk)
            padded_initguess.GetBlock(blk) = initguesses_funct_lvls[l]->GetBlock(blk);
 
-       BlockVector padded_rhs(problem_l->GetTrueOffsets());
-       problem_l->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
+       BlockVector padded_rhs(dynamic_problem->GetTrueOffsets());
+       dynamic_problem->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
 
        padded_rhs *= -1;
 
-       BlockVector NewRhs(problem_l->GetTrueOffsetsFunc());
+       BlockVector NewRhs(dynamic_problem->GetTrueOffsetsFunc());
        NewRhs = 0.0;
        for (int blk = 0; blk < numblocks_funct; ++blk)
            NewRhs.GetBlock(blk) = padded_rhs.GetBlock(blk);
-       problem_l->ZeroBndValues(NewRhs);
+       dynamic_problem->ZeroBndValues(NewRhs);
 
        partsol_finder->SetFunctRhs(NewRhs);
 
-       HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
+       HypreParMatrix & Constr_l = (HypreParMatrix&)(dynamic_problem->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
+       // Modifying the constraint righthand side to account for the non-zero initial guess
        Vector div_initguess(Constr_l.Height());
 
        Constr_l.Mult(initguesses_funct_lvls[0]->GetBlock(0), div_initguess);
 
        *div_rhs_lvls[0] -= div_initguess;
 
-       BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
+       BlockVector zero_vec(dynamic_problem->GetTrueOffsetsFunc());
        zero_vec = 0.0;
 
        if (verbose)
            std::cout << "Finding a particular solution... \n";
 
-       // only for debugging
-       //BlockVector reduced_saved_sol(problem_l->GetTrueOffsetsFunc());
-       //for (int blk = 0; blk < numblocks_funct; ++blk)
-           //reduced_saved_sol.GetBlock(blk) = saved_sol.GetBlock(blk);
-       //*div_rhs_lvls[0] += div_initguess;
-       //partsol_finder->FindParticularSolution(reduced_saved_sol, *partsol_funct_lvls[0], *div_rhs_lvls[0], verbose, report_funct);
-
+       // Finding a correction to the initial guess as a particular solution
        partsol_finder->FindParticularSolution(zero_vec, *partsol_funct_lvls[0], *div_rhs_lvls[0], verbose, report_funct);
 
+       // adding back the initial guess, so now partsol_funct_lvls[0] is a true particular
+       // solution to the constraint
        *partsol_funct_lvls[0] += *initguesses_funct_lvls[0];
+
+       // restoring the constraint righthand side (modified above)
        *div_rhs_lvls[0] += div_initguess;
 
-       // only for debugging, making partsol_funct[0] = solution of the saddle point system
-       //for (int blk = 0; blk < numblocks_funct; ++blk)
-           //partsol_funct_lvls[0]->GetBlock(blk) = saved_sol.GetBlock(blk);
-
-       // functional value for the initial guess
+       // functional value for the particular solution
        double starting_funct_value = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL,
                                                      *partsol_funct_lvls[l], "for the initial guess ", verbose);
 
-       // checking the initial guess
+       // checking that the particular solution satisfies the constraint
        {
-           problem_l->ComputeBndError(*partsol_funct_lvls[0]);
+           dynamic_problem->ComputeBndError(*partsol_funct_lvls[0]);
 
            Vector tempc(Constr_l.Height());
            Constr_l.Mult(partsol_funct_lvls[0]->GetBlock(0), tempc);
@@ -896,9 +798,6 @@ int main(int argc, char *argv[])
        zero_vec = 0.0;
        NewSolver->SetInitialGuess(l, zero_vec);
 
-       //div_rhs_lvls[0]->Print();
-
-
        Vector div_partsol(Constr_l.Height());
        Constr_l.Mult(partsol_funct_lvls[0]->GetBlock(0), div_partsol);
        *div_rhs_lvls[0] -= div_partsol;
@@ -909,18 +808,18 @@ int main(int argc, char *argv[])
 
        {
            // computing rhs = - Funct_nobnd * init_guess at level l, with zero boundary conditions imposed
-           BlockVector padded_initguess(problem_l->GetTrueOffsets());
+           BlockVector padded_initguess(dynamic_problem->GetTrueOffsets());
            padded_initguess = 0.0;
            for (int blk = 0; blk < numblocks_funct; ++blk)
                padded_initguess.GetBlock(blk) = partsol_funct_lvls[0]->GetBlock(blk);
 
-           BlockVector padded_rhs(problem_l->GetTrueOffsets());
-           problem_l->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
+           BlockVector padded_rhs(dynamic_problem->GetTrueOffsets());
+           dynamic_problem->GetOp_nobnd()->Mult(padded_initguess, padded_rhs);
 
            padded_rhs *= -1;
            for (int blk = 0; blk < numblocks_funct; ++blk)
                NewRhs.GetBlock(blk) = padded_rhs.GetBlock(blk);
-           problem_l->ZeroBndValues(NewRhs);
+           dynamic_problem->ZeroBndValues(NewRhs);
        }
 
        NewSolver->SetFunctRhs(NewRhs);
@@ -931,7 +830,7 @@ int main(int argc, char *argv[])
        NewSolver->SetFunctAdditionalVector(*partsol_funct_lvls[l]);
 
        // solving for correction
-       BlockVector correction(problem_l->GetTrueOffsetsFunc());
+       BlockVector correction(dynamic_problem->GetTrueOffsetsFunc());
        correction = 0.0;
 
        NewSolver->SetPrintLevel(0);
@@ -952,15 +851,15 @@ int main(int argc, char *argv[])
 
        if (l == 0)
        {
-           BlockVector tmp1(problem_l->GetTrueOffsetsFunc());
+           BlockVector tmp1(dynamic_problem->GetTrueOffsetsFunc());
            for (int blk = 0; blk < numblocks_funct; ++blk)
                tmp1.GetBlock(blk) = problem_sols_lvls[l]->GetBlock(blk);
 
            saved_functvalue = CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, tmp1,
                            "for the finest level solution ", verbose);
 
-           BlockVector * exactsol_proj = problem_l->GetExactSolProj();
-           BlockVector tmp2(problem_l->GetTrueOffsetsFunc());
+           BlockVector * exactsol_proj = dynamic_problem->GetExactSolProj();
+           BlockVector tmp2(dynamic_problem->GetTrueOffsetsFunc());
            for (int blk = 0; blk < numblocks_funct; ++blk)
                tmp2.GetBlock(blk) = exactsol_proj->GetBlock(blk);
 
@@ -969,25 +868,28 @@ int main(int argc, char *argv[])
 
            delete exactsol_proj;
        }
-
-       //MPI_Finalize();
-       //return 0;
 #endif
 
+       // all three approaches below are implemented in the same loop but with different parameters
 #if defined(APPROACH_2) || defined(APPROACH_3) || defined (APPROACH_3_2)
+
        // recoarsening constraint rhsides from finest to coarsest level
+       // recoarsened rhsides are used when we are computing particular solutions
+       // on any of the previous levels
        for (int l = 1; l < div_rhs_lvls.Size(); ++l)
            hierarchy->GetTruePspace(SpaceName::L2,l - 1)->MultTranspose(*div_rhs_lvls[l-1], *div_rhs_lvls[l]);
 
-       // re-solving all the problems with coarsened rhs, from coarsest to finest
+       // 7.1 Re-solving all the problems with (coarsened) rhs, from coarsest to finest
        // and using the previous soluition as a starting guess
 #ifdef RECOARSENING_AMR
        int coarsest_lvl; // coarsest level to be considered
+
 #ifdef APPROACH_2
        coarsest_lvl = 0;
 #endif
 
 #ifdef APPROACH_3_2
+       // if we have more tha one level, we step one level back, otherwise there is nowhere to go
        coarsest_lvl = ( hierarchy->Nlevels() > 1 ? 1 : 0);
 #endif
 
@@ -1004,17 +906,15 @@ int main(int argc, char *argv[])
                std::cout << "level " << l << "\n";
            ProblemType * problem_l = prob_hierarchy->GetProblem(l);
 
-           // solving the problem at level l
+           // Computing initial guess
 
            *initguesses_funct_lvls[l] = 0.0;
 
 #ifdef CLEVER_STARTING_PARTSOL
-           // create a better initial guess
+           // create a better initial guess by taking the interpolant of the previous solution
+           // whic would be available if we consider levels finer than the coarsest
            if (l < coarsest_lvl)
            {
-               //std::cout << "size of problem_sols_lvls[l + 1] = " << problem_sols_lvls[l + 1]->Size() << "\n";
-               //std::cout << "size of initguesses_funct_lvls[l] = " << initguesses_funct_lvls[l]->Size() << "\n";
-
                for (int blk = 0; blk < numblocks_funct; ++blk)
                {
                    //std::cout << "size of problem_sols_lvls[l + 1]->GetBlock(blk) = " << problem_sols_lvls[l + 1]->GetBlock(blk).Size() << "\n";
@@ -1023,15 +923,17 @@ int main(int argc, char *argv[])
                    hierarchy->GetTruePspace( (*space_names_funct)[blk], l)->Mult
                        (problem_sols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
                }
-
-               std::cout << "check init norm before bnd = " << initguesses_funct_lvls[l]->Norml2()
-                             / sqrt (initguesses_funct_lvls[l]->Size()) << "\n";
            }
 #endif
-           // setting correct bdr values
+           // setting correct bdr values for the initial guess
            problem_l->SetExactBndValues(*initguesses_funct_lvls[l]);
 
-           // computing funct rhside which absorbs the contribution of the non-homogeneous boundary conditions
+           // Computing funct rhside which absorbs the contribution of the non-homogeneous boundary conditions
+           // The reason we do this is that the DivConstraintSolver and GeneralMinConstrSolver
+           // work correctly only if the boundary conditions are zero
+
+           // Here we have to create padded vectors which have the same number of blocks as the problem
+           // although we actually use only blocks corresponding to the functional (not to the constraint)
            BlockVector padded_initguess(problem_l->GetTrueOffsets());
            padded_initguess = 0.0;
            for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -1042,6 +944,11 @@ int main(int argc, char *argv[])
 
            padded_rhs *= -1;
 
+           BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
+           zero_vec = 0.0;
+
+           // Since we want to absorb the initial guess in the rhs of the solver,
+           // we will have to move its contribution to the rhs corresponding to the functional
            BlockVector NewRhs(problem_l->GetTrueOffsetsFunc());
            NewRhs = 0.0;
            for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -1050,31 +957,40 @@ int main(int argc, char *argv[])
 
            partsol_finder->SetFunctRhs(NewRhs);
 
+           // Modifying the constraint rhs for the particular solution to be found,
+           // because we have initial guess with nonzero boundary conditions
            HypreParMatrix & Constr_l = (HypreParMatrix&)(problem_l->GetOp_nobnd()->GetBlock(numblocks - 1, 0));
 
            Vector div_initguess(Constr_l.Height());
            Constr_l.Mult(initguesses_funct_lvls[l]->GetBlock(0), div_initguess);
 
+           // we subtract contribution of the initial guess to the constraint, but we will add it back
+           // after we find the particular solution
            *div_rhs_lvls[l] -= div_initguess;
-
-           BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
-           zero_vec = 0.0;
 
            if (verbose)
                std::cout << "Finding a particular solution... \n";
+
+           // The reason we check the functional value is that in that the algorithm should never increase
+           // the functional value (of the approximation, with initial guess absorbed)
+           // If it doesn't, this is an indication of incorrect behavior
 
            // functional value for the initial guess for particular solution
            CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *initguesses_funct_lvls[l],
                            "for the particular solution ", verbose);
 
 
+           // Finding the particular solution, or a correction to it (without initial guess)
            partsol_finder->FindParticularSolution(l, Constr_l, zero_vec, *partsol_funct_lvls[l],
                                                   *div_rhs_lvls[l], verbose, report_funct);
 
+           // adding the initial guess, so that now partsol_funct_lvls[l] is a true particular solution
            *partsol_funct_lvls[l] += *initguesses_funct_lvls[l];
+
+           // restoring the constraint rhs (modified above)
            *div_rhs_lvls[l] += div_initguess;
 
-           // checking the particular solution
+           // checking whethr the particular solution satisfies the constraint
            {
                problem_l->ComputeBndError(*partsol_funct_lvls[l]);
 
@@ -1091,7 +1007,11 @@ int main(int argc, char *argv[])
                    CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(l), NULL, *partsol_funct_lvls[l],
                                       "for the particular solution ", verbose);
 
-           //BlockVector zero_vec(problem_l->GetTrueOffsetsFunc());
+           // Now we are going to setup the minimization solver, which will take particular solution
+           // as starting guess and hence work in the divergence-free space (implicitly)
+
+           // But again, as in the case for particular solution, we need to move the contribution of
+           // particular solution to the rhs, and solve for a correction
            zero_vec = 0.0;
            NewSolver->SetInitialGuess(l, zero_vec);
            NewSolver->SetConstrRhs(*div_rhs_lvls[l]);
@@ -1099,10 +1019,9 @@ int main(int argc, char *argv[])
            //if (verbose)
                //NewSolver->PrintAllOptions();
 
-           //BlockVector NewRhs(problem_l->GetTrueOffsetsFunc());
            NewRhs = 0.0;
 
-           // computing rhs = ...
+           // Computing modified rhs for the functional part of the problem
            {
                BlockVector padded_initguess(problem_l->GetTrueOffsets());
                padded_initguess = 0.0;
@@ -1119,22 +1038,31 @@ int main(int argc, char *argv[])
            }
 
            NewSolver->SetFunctRhs(NewRhs);
+
+           // Setting the stopping criteria tolerance
+           // Taking into account that we might be solving (after re-using previous levels) a problem
+           // with smaller starting functional value, we set the base value (value, with which the functional
+           // value is compared to at any iteration to check if w should stop) accordingly below:
+
+           // If we don't have a finer level, then we just take as the base value (see SetBaseValue())
+           // the functional value for the particular solution
            if (l == coarsest_lvl && it == 0)
                NewSolver->SetBaseValue(starting_funct_value);
-           else
+           else// otherwise, we use the functional value for the solution from the previous iteration
+               // which is a good approximation of the functional value for the solution, since
+               // it doesn't change in the test much from iteration to iteration (not with orders of magnitude)
                NewSolver->SetBaseValue(saved_functvalue);
+
+           // This one makes it possible for the solver to monitor the true functional value, taking
+           // into account the particular solution (so we add partsol_funct_lvls[l] to the correction
+           // which is computed at every iteration of the solver)
            NewSolver->SetFunctAdditionalVector(*partsol_funct_lvls[l]);
 
-
-           // solving for correction
+           // Solving for correction to the particular solution, which will minimize the functional as well
            BlockVector correction(problem_l->GetTrueOffsetsFunc());
            correction = 0.0;
-           //std::cout << "NewSolver size = " << NewSolver->Size() << "\n";
-           //std::cout << "NewRhs norm = " << NewRhs.Norml2() / sqrt (NewRhs.Size()) << "\n";
-           //if (l == 0)
-               //NewSolver->SetPrintLevel(1);
-           //else
-               NewSolver->SetPrintLevel(1);
+
+           NewSolver->SetPrintLevel(1);
 
            if (verbose && l == 0)
                std::cout << "Solving the finest level problem... \n";
@@ -1147,6 +1075,10 @@ int main(int argc, char *argv[])
                problem_sols_lvls[l]->GetBlock(blk) += correction.GetBlock(blk);
            }
 
+           // Saving the functional value at the finest level, and reporting the functional value
+           // for the projection of the exact solution. Since the projection is not w.r.t to the energy
+           // scalar product defined by the functional, our computed solution is better (gives smaller
+           // functional value) than the projection
            if (l == 0)
            {
                BlockVector tmp1(problem_l->GetTrueOffsetsFunc());
@@ -1181,30 +1113,29 @@ int main(int argc, char *argv[])
 #endif
 
        if (compute_error)
-           problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
+           dynamic_problem->ComputeError(*problem_sols_lvls[0], verbose, true);
 
-       // to make sure that problem has grfuns in correspondence with the problem_sol we compute here
-       // though for now its coordination already happens in ComputeError()
-       problem_mgtools->DistributeToGrfuns(*problem_sols_lvls[0]);
+       // to make sure that problem has grfuns which correspond to the computed problem solution
+       // we explicitly distribute the solution here
+       // though for now the coordination already happens in ComputeError()
+       dynamic_problem->DistributeToGrfuns(*problem_sols_lvls[0]);
 
-
-       // Send the solution by socket to a GLVis server.
-
-       if (visualization && (it % 5 == 0 || it == max_iter_amr - 1)) //&& it % 4 == 0 ) //it == max_iter_amr - 1)
+       // 7.2 (optional) Send the solution by socket to a GLVis server.
+       if (visualization && (it % it_viz_step == 0 || it == max_iter_amr - 1)) //&& it % 4 == 0 ) //it == max_iter_amr - 1)
        {
            int ne = pmesh->GetNE();
            for (int elind = 0; elind < ne; ++elind)
                pmesh->SetAttribute(elind, elind);
-           ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
+           ParGridFunction * sigma = dynamic_problem->GetGrFun(0);
            ParGridFunction * S;
 
 #ifdef HDIVL2L2
-           S = problem_mgtools->GetGrFun(1);
+           S = dynamic_problem->GetGrFun(1);
 #else
-           if (problem_mgtools->GetFEformulation().Nunknowns() >= 2)
-               S = problem_mgtools->GetGrFun(1);
+           if (dynamic_problem->GetFEformulation().Nunknowns() >= 2)
+               S = dynamic_problem->GetGrFun(1);
            else // only sigma = Hdiv-L2 formulation with eliminated S
-               S = (dynamic_cast<ProblemType*>(problem_mgtools))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
+               S = (dynamic_cast<ProblemType*>(dynamic_problem))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
 #endif
 
            char vishost[] = "localhost";
@@ -1215,8 +1146,8 @@ int main(int argc, char *argv[])
            sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
                   << it <<"'" << flush;
 
-           ParGridFunction * sigma_ex = new ParGridFunction(problem_mgtools->GetPfes(0));
-           BlockVector * exactsol_proj = problem_mgtools->GetExactSolProj();
+           ParGridFunction * sigma_ex = new ParGridFunction(dynamic_problem->GetPfes(0));
+           BlockVector * exactsol_proj = dynamic_problem->GetExactSolProj();
            sigma_ex->SetFromTrueDofs(exactsol_proj->GetBlock(0));
 
            socketstream sigmaex_sock(vishost, visport);
@@ -1232,11 +1163,13 @@ int main(int argc, char *argv[])
            s_sock << "solution\n" << *pmesh << *S << "window_title 'S, AMR iter No."
                   << it << "'" << flush;
 
-           if (!(problem_mgtools->GetFEformulation().Nunknowns() >= 2))
+           if (!(dynamic_problem->GetFEformulation().Nunknowns() >= 2))
                delete S;
 
        }
 
+       // 7.3 (optional) Printing the solution ino files with VTK format
+       // which can then be visualized be Paraview (hand-made) scripts
        if (output_solution && it % it_print_step == 0)
        {
            // don't know what exactly ref is used for
@@ -1257,16 +1190,16 @@ int main(int argc, char *argv[])
            pmesh->PrintVTK(fp_sigma, ref, true);
            //pmesh->PrintVTK(fp_sigma);
 
-           ParGridFunction * sigma = problem_mgtools->GetGrFun(0);
+           ParGridFunction * sigma = dynamic_problem->GetGrFun(0);
            ParGridFunction * S;
 
 #ifdef HDIVL2L2
-           S = problem_mgtools->GetGrFun(1);
+           S = dynamic_problem->GetGrFun(1);
 #else
-           if (problem_mgtools->GetFEformulation().Nunknowns() >= 2)
-               S = problem_mgtools->GetGrFun(1);
+           if (dynamic_problem->GetFEformulation().Nunknowns() >= 2)
+               S = dynamic_problem->GetGrFun(1);
            else // only sigma = Hdiv-L2 formulation with eliminated S
-               S = (dynamic_cast<ProblemType*>(problem_mgtools))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
+               S = (dynamic_cast<ProblemType*>(dynamic_problem))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
 #endif
            std::string field_name_sigma("sigma_h");
            sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
@@ -1290,14 +1223,13 @@ int main(int argc, char *argv[])
            S->SaveVTK(fp_S, field_name_S, ref);
 
 #ifndef HDIVL2L2
-           if (problem_mgtools->GetFEformulation().Nunknowns() < 2)
+           if (dynamic_problem->GetFEformulation().Nunknowns() < 2)
                delete S;
 #endif
-
-           //MPI_Finalize();
-           //return 0;
        }
 
+       // 7.4 Refine the mesh, either uniformly (if AMR was not #defined) or adaptively,
+       // using the estimator-refiner
 #ifdef AMR
        int nel_before = hierarchy->GetFinestParMesh()->GetNE();
 
@@ -1331,11 +1263,12 @@ int main(int argc, char *argv[])
                         100.0 * (global_nel_after - global_nel_before) * 1.0 / global_nel_before << "% \n\n";
        }
 
+       // Visualizing the local errors
        if (visualization && (it % 5 == 0 || it == max_iter_amr - 1) ) //it == max_iter_amr - 1)
        {
            const Vector& local_errors = estimator->GetLastLocalErrors();
            if (feorder == 0)
-               MFEM_ASSERT(local_errors.Size() == problem_mgtools->GetPfes(numblocks_funct)->TrueVSize(), "");
+               MFEM_ASSERT(local_errors.Size() == dynamic_problem->GetPfes(numblocks_funct)->TrueVSize(), "");
 
            FiniteElementCollection * l2_coll;
            if (feorder > 0)
@@ -1343,7 +1276,7 @@ int main(int argc, char *argv[])
 
            ParFiniteElementSpace * L2_space;
            if (feorder == 0)
-               L2_space = problem_mgtools->GetPfes(numblocks_funct);
+               L2_space = dynamic_problem->GetPfes(numblocks_funct);
            else
                L2_space = new ParFiniteElementSpace(problem->GetParMesh(), l2_coll);
            ParGridFunction * local_errors_pgfun = new ParGridFunction(L2_space);
@@ -1374,25 +1307,29 @@ int main(int argc, char *argv[])
           break;
        }
 
+       // 7.5 After the refinement, updating the hierarchy and everything else
        bool recoarsen = true;
+       // this also updates the underlying hierarchy
        prob_hierarchy->Update(recoarsen);
 
        problem = prob_hierarchy->GetProblem(0);
 
-       problem_mgtools->BuildSystem(verbose);
+       // Since the hierarchy was updated, we need to rebuild the problem
+       dynamic_problem->BuildSystem(verbose);
+
 #ifdef DIVFREE_MINSOLVER
        mgtools_hierarchy->Update(recoarsen);
-       NewSolver->UpdateProblem(*problem_mgtools);
+       NewSolver->UpdateProblem(*dynamic_problem);
        NewSolver->Update(recoarsen);
 #endif
 
 #ifdef PARTSOL_SETUP
-       partsol_finder->UpdateProblem(*problem_mgtools);
+       partsol_finder->UpdateProblem(*dynamic_problem);
        partsol_finder->Update(recoarsen);
 #endif
 
        // checking #dofs after the refinement
-       global_dofs = problem_mgtools->GlobalTrueProblemSize();
+       global_dofs = dynamic_problem->GlobalTrueProblemSize();
 
        if (global_dofs > max_dofs)
        {
@@ -1403,14 +1340,14 @@ int main(int argc, char *argv[])
 
    } // end of the main AMR loop
 
-   // Deallocating memory
+   // 8. Deallocating memory
 #ifdef DIVFREE_MINSOLVER
    delete NewSolver;
    delete mgtools_hierarchy;
    delete descriptor;
 #endif
 
-#if defined(PARTSOL_SETUP) && defined(MULTILEVEL_PARTSOL)
+#ifdef PARTSOL_SETUP
    delete partsol_finder;
 #endif
 
@@ -1430,8 +1367,6 @@ int main(int argc, char *argv[])
        delete problem_refsols_lvls[i];
 #endif
 
-//#endif // for #if 0
-
    for (int i = 0; i < problem_sols_lvls.Size(); ++i)
        delete problem_sols_lvls[i];
    for (int i = 0; i < formulat->Nblocks(); ++i)
@@ -1447,7 +1382,7 @@ int main(int argc, char *argv[])
            if (integs(i,j))
                delete integs(i,j);
 
-   delete problem_mgtools;
+   delete dynamic_problem;
    delete estimator;
 
    delete bdr_conds;
@@ -1456,7 +1391,6 @@ int main(int argc, char *argv[])
 
    MPI_Finalize();
    return 0;
-//#endif
 }
 
 // See it's declaration
@@ -1620,16 +1554,8 @@ void PrintDefinedMacrosStats(bool verbose)
     MFEM_ABORT("Cannot have both \n");
 #endif
 
-#ifdef CLEVER_STARTING_GUESS
-    if (verbose)
-        std::cout << "CLEVER_STARTING_GUESS active \n";
-#else
-    if (verbose)
-        std::cout << "CLEVER_STARTING_GUESS passive \n";
-#endif
-
-#if defined(CLEVER_STARTING_PARTSOL) && !defined(MULTILEVEL_PARTSOL)
-    MFEM_ABORT("CLEVER_STARTING_PARTSOL cannot be active if MULTILEVEL_PARTSOL is not \n");
+#if defined(CLEVER_STARTING_PARTSOL) && !defined(PARTSOL_SETUP)
+    MFEM_ABORT("CLEVER_STARTING_PARTSOL cannot be active if PARTSOL_SETUP is not \n");
 #endif
 
 #ifdef CLEVER_STARTING_PARTSOL
@@ -1638,14 +1564,6 @@ void PrintDefinedMacrosStats(bool verbose)
 #else
     if (verbose)
         std::cout << "CLEVER_STARTING_PARTSOL passive \n";
-#endif
-
-#ifdef MULTILEVEL_PARTSOL
-    if (verbose)
-        std::cout << "MULTILEVEL_PARTSOL active \n";
-#else
-    if (verbose)
-        std::cout << "MULTILEVEL_PARTSOL passive \n";
 #endif
 
 #ifdef CYLINDER_CUBE_TEST
@@ -1674,7 +1592,7 @@ void PrintDefinedMacrosStats(bool verbose)
 #endif
 }
 
-// See it's declaration
+// See it's declaration and comments inside
 void ReArrangeBdrAttributes(Mesh* mesh4cube)
 {
     Mesh * mesh = mesh4cube;
