@@ -4368,8 +4368,6 @@ GeneralMinConstrSolver::~GeneralMinConstrSolver()
         for (unsigned int i = 0; i < essbdrtruedofs_Func.size(); ++i)
             for (unsigned int j = 0; j < essbdrtruedofs_Func[i].size(); ++j)
                 delete essbdrtruedofs_Func[i][j];
-        for (unsigned int i = 0; i < offsets_funct.size(); ++i)
-            delete offsets_funct[i];
     }
 
     if (own_data)
