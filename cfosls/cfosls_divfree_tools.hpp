@@ -376,7 +376,9 @@ public:
         : LocalProblemSolver(size, Op_Blksmat, Constr_Spmat, D_tD_blks, AE_el,
                              El_to_Dofs_Op, El_to_Dofs_L2, BdrDofs_blks, EssBdrDofs_blks,
                              Optimized_LocalSolve, true)
-    {}
+    {
+        std::cout << "my Height 2 = " << Height() << "\n";
+    }
 
     LocalProblemSolver(int size, const BlockMatrix& Op_Blksmat,
                        const SparseMatrix& Constr_Spmat,
@@ -398,7 +400,7 @@ public:
           essbdrdofs_blocks(EssBdrDofs_blks),
           own_essbdr(copy_essbdr)
     {
-        std::cout << "my height = " << height << "\n";
+        std::cout << "my Height = " << Height() << "\n";
         finalized = 0;
         optimized_localsolve = Optimized_LocalSolve;
         compute_AEproblem_matrices.SetSize(numblocks + 1, numblocks + 1);
@@ -437,7 +439,7 @@ public:
 
         Setup();
 
-        std::cout << "my height in the end = " << height << "\n";
+        std::cout << "my Height in the end = " << Height() << "\n";
     }
 
     // Operator application: `y=A(x)`.
