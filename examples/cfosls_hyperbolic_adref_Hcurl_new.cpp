@@ -72,6 +72,9 @@
 // whicha llows to search for a particular solution of the divergence constraint
 // The flag gets activated within some of APPROACHes below
 //#define PARTSOL_SETUP
+// This macro, when #defined, activates usage of the minimization solver
+// In this example it is coupled with PARTSOL_SETUP, cannot be used without that flag.
+//#define DIVFREE_MINSOLVER
 
 // Here the problem is solved by a preconditioned MINRES
 // used as a reference solution
@@ -1538,7 +1541,7 @@ void PrintDefinedMacrosStats(bool verbose)
         std::cout << "PARTSOL_SETUP passive \n";
 #endif
 
-#if defined(PARTSOL_SETUP) && (!(defined(DIVFREE_HCURLSETUP) || defined(DIVFREE_MINSOLVER)))
+#if defined(PARTSOL_SETUP) && (!defined(DIVFREE_MINSOLVER))
     MFEM_ABORT("For PARTSOL_SETUP one of the divfree options must be active");
 #endif
 
@@ -1548,10 +1551,6 @@ void PrintDefinedMacrosStats(bool verbose)
 #else
     if (verbose)
         std::cout << "DIVFREE_MINSOLVER passive \n";
-#endif
-
-#if defined(DIVFREE_MINSOLVER) && defined(DIVFREE_HCURLSETUP)
-    MFEM_ABORT("Cannot have both \n");
 #endif
 
 #if defined(CLEVER_STARTING_PARTSOL) && !defined(PARTSOL_SETUP)
