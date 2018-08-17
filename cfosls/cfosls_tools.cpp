@@ -1346,33 +1346,6 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         d_td_Funct_lvls.push_front(hierarchy.GetDofTrueDof(*space_names_funct, 0));
 
-        if (recoarsen)
-        {
-            for (int l = 0; l < nlevels; ++l)
-            {
-                delete FunctOps_lvls[l];
-                if (descr.with_nobnd_op)
-                    delete FunctOps_nobnd_lvls[l];
-                if (descr.with_Schwarz || descr.with_coarsest_partfinder)
-                {
-                    delete Constraint_mat_lvls[l];
-                    delete Funct_mat_lvls[l];
-                }
-                if (l < nlevels - 1)
-                {
-                    if (descr.with_Schwarz)
-                        delete SchwarzSmoothers_lvls[l];
-                    if (descr.with_Hcurl)
-                        delete HcurlSmoothers_lvls[l];
-                    if (descr.with_Schwarz && descr.with_Hcurl)
-                        delete CombinedSmoothers_lvls[l];
-                    if (descr.with_monolithic_GS)
-                        delete MonolithicGSSmoothers_lvls[l];
-                }
-                //delete Mass_mat_lvls[l];
-            }
-        }
-
         BlockOperator * FunctOp_new = problem->GetFunctOp(*offsets_funct[0]);
         FunctOps_lvls.Prepend(FunctOp_new);
 
@@ -1548,6 +1521,30 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         if (recoarsen)
         {
+            for (int l = 1; l < nlevels; ++l)
+            {
+                delete FunctOps_lvls[l];
+                if (descr.with_nobnd_op)
+                    delete FunctOps_nobnd_lvls[l];
+                if (descr.with_Schwarz || descr.with_coarsest_partfinder)
+                {
+                    delete Constraint_mat_lvls[l];
+                    delete Funct_mat_lvls[l];
+                }
+                if (l < nlevels - 1)
+                {
+                    if (descr.with_Schwarz)
+                        delete SchwarzSmoothers_lvls[l];
+                    if (descr.with_Hcurl)
+                        delete HcurlSmoothers_lvls[l];
+                    if (descr.with_Schwarz && descr.with_Hcurl)
+                        delete CombinedSmoothers_lvls[l];
+                    if (descr.with_monolithic_GS)
+                        delete MonolithicGSSmoothers_lvls[l];
+                }
+                //delete Mass_mat_lvls[l];
+            }
+
             for (int l = 1; l < nlevels; ++l)
             {
                 FunctOps_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
