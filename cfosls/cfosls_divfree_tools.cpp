@@ -4626,9 +4626,11 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
 
             int numblocks_funct = space_names_funct->Size();
 
-            const Array<int> * offsets_funct_new =
-                    hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
-            offsets_funct.push_front(offsets_funct_new);
+            //const Array<int> * offsets_funct_new =
+                    //hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
+            //offsets_funct.push_front(offsets_funct_new);
+
+            offsets_funct.push_front(mgtools_hierarchy->GetOffsetsFunct()[0]);
 
             size = (*offsets_funct[0])[numblocks_funct];
 
