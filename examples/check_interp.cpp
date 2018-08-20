@@ -1,5 +1,19 @@
-//                       MFEM check for interpolation matrices in 3D and 4D
-//                       (for both standard and tensor-extended space-time meshes)
+///                       MFEM check for interpolation matrices in 3D and 4D
+///                       (for both standard and tensor-extended space-time meshes)
+///
+/// ARCHIVED EXAMPLE because it doesn't show anything useful aside the main idea
+/// of checking the interpolaton matrices
+///
+/// Checks whether M_coarse = P^T M_fine P where M is the mass matrix for
+/// one of the spaces: Hdiv, L2, H1, Hcurl (and Hdivskew in 4D) which form
+/// a lowest order de Rham sequence in 3D/4D.
+///
+/// (*) The code was tested a while ago in serial and in parallel, but not cleaned
+/// with a valgrind and not equipped with proper comments.
+///
+/// WARNING: In parallel the check might not work correctly, strange results
+/// were observed for Hdivskew off-diagonal parts (if remembered correctly),
+/// for the case when USE_TSL is activated
 
 #include "mfem.hpp"
 #include <fstream>
@@ -9,16 +23,23 @@
 #include <list>
 #include <unistd.h>
 
+// controls whether a check for H(curl) must be done
 #define WITH_HCURL
 
-//#define WITH_HDIVSKEW
+// controls whether a check for H(divskew) must be done
+#define WITH_HDIVSKEW
 
 #define VERBOSE_OFFD
 
 #define ZEROTOL (5.0e-14)
 
+// if active, constructs a mesh as a tensor extension of the lower-dimensional mesh
+// into a space-time cylinder.
 #define USE_TSL
 
+// if active, builds the fine mesh not as a uniformly refined coarse mesh but
+// rather as locally refined mesh with arbitrary elements chosen to be refined
+// at the coarse level
 //#define NONUNIFORM_REFINE
 
 using namespace std;
@@ -176,8 +197,8 @@ int main(int argc, char *argv[])
    }
    else // 4D case
    {
-       mesh_file = "../data/pmesh_tsl_1proc.mesh";
-       //mesh_file = "../data/cube4d_96.MFEM";
+       //mesh_file = "../data/pmesh_tsl_1proc.mesh";
+       mesh_file = "../data/cube4d_96.MFEM";
        //mesh_file = "../data/two_pentatops.MFEM";
        //mesh_file = "../data/two_pentatops_2.MFEM";
    }

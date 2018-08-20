@@ -1,39 +1,9 @@
-//                       MFEM Example 1 - Parallel Version (modified for using geometric MG)
-//
-// Compile with: make ex1p
-//
-// Sample runs:  mpirun -np 4 ex1p -m ../data/square-disc.mesh
-//               mpirun -np 4 ex1p -m ../data/star.mesh
-//               mpirun -np 4 ex1p -m ../data/escher.mesh
-//               mpirun -np 4 ex1p -m ../data/fichera.mesh
-//               mpirun -np 4 ex1p -m ../data/square-disc-p2.vtk -o 2
-//               mpirun -np 4 ex1p -m ../data/square-disc-p3.mesh -o 3
-//               mpirun -np 4 ex1p -m ../data/square-disc-nurbs.mesh -o -1
-//               mpirun -np 4 ex1p -m ../data/disc-nurbs.mesh -o -1
-//               mpirun -np 4 ex1p -m ../data/pipe-nurbs.mesh -o -1
-//               mpirun -np 4 ex1p -m ../data/ball-nurbs.mesh -o 2
-//               mpirun -np 4 ex1p -m ../data/star-surf.mesh
-//               mpirun -np 4 ex1p -m ../data/square-disc-surf.mesh
-//               mpirun -np 4 ex1p -m ../data/inline-segment.mesh
-//               mpirun -np 4 ex1p -m ../data/amr-quad.mesh
-//               mpirun -np 4 ex1p -m ../data/amr-hex.mesh
-//               mpirun -np 4 ex1p -m ../data/mobius-strip.mesh
-//               mpirun -np 4 ex1p -m ../data/mobius-strip.mesh -o -1 -sc
-//
-// Description:  This example code demonstrates the use of MFEM to define a
-//               simple finite element discretization of the Laplace problem
-//               -Delta u = 1 with homogeneous Dirichlet boundary conditions.
-//               Specifically, we discretize using a FE space of the specified
-//               order, or if order < 1 using an isoparametric/isogeometric
-//               space (i.e. quadratic for quadratic curvilinear mesh, NURBS for
-//               NURBS mesh, etc.)
-//
-//               The example highlights the use of mesh refinement, finite
-//               element grid functions, as well as linear and bilinear forms
-//               corresponding to the left-hand side and right-hand side of the
-//               discrete linear system. We also cover the explicit elimination
-//               of essential boundary conditions, static condensation, and the
-//               optional connection to the GLVis tool for visualization.
+///                       MFEM Example 1 - Parallel Version (modified for using geometric MG)
+///
+/// See description of Example 1 for MFEM at mfem.org.
+///
+/// This is a modified version in which the Laplace problem is considered.
+/// The problem is sovled with a geomtric multigrid preconditioner.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -43,8 +13,6 @@
 #include <list>
 #include <unistd.h>
 
-//#include "divfree_solver_tools.hpp"
-
 using namespace std;
 using namespace mfem;
 
@@ -53,7 +21,6 @@ int main(int argc, char *argv[])
    // 1. Initialize MPI.
    int num_procs, myid;
 
-   // 1. Initialize MPI
    MPI_Init(&argc, &argv);
    MPI_Comm comm = MPI_COMM_WORLD;
    MPI_Comm_size(comm, &num_procs);
@@ -64,7 +31,7 @@ int main(int argc, char *argv[])
    int nDimensions     = 3;
 
    int ser_ref_levels  = 1;
-   int par_ref_levels  = 2;
+   int par_ref_levels  = 1;
 
    // 2. Parse command-line options.
    const char *mesh_file = "../data/star.mesh";
@@ -107,6 +74,7 @@ int main(int argc, char *argv[])
        mesh_file = "../data/cube4d_96.MFEM";
    }
 
+   // 3. Reading the mesh and performing a prescribed number of serial and parallel refinements
    Mesh *mesh = NULL;
 
    ParMesh * pmesh;
@@ -153,7 +121,11 @@ int main(int argc, char *argv[])
 
    int dim = nDimensions;
 
-   // For geometric multigrid
+   // 4. Define the setup for the geometric multigrid
+   // Now it's not the optimal way, since the hierarchy of nested meshed
+   // and corresponding f.e. structures are created explicitly.
+   // A simpler way is to use GeneralHierarchy from mfem/cfosls/.
+   // For example, look at cfosls_hyperbolic_multigrid.cpp.
    int num_levels = par_ref_levels + 1;
    Array<ParMesh*> pmesh_lvls(num_levels);
    Array<ParFiniteElementSpace*> H_space_lvls(num_levels);
@@ -181,7 +153,7 @@ int main(int argc, char *argv[])
    Array< SparseMatrix* > P_H_lvls(num_levels - 1);
    const SparseMatrix* P_H_local;
 
-   // Creating hierarchy of everything needed for the geometric multigrid preconditioner
+   // 4.1 Creating hierarchy of everything needed for the geometric multigrid preconditioner
    for (int l = num_levels - 1; l >= 0; --l)
    {
        // creating pmesh for level l
@@ -223,7 +195,7 @@ int main(int argc, char *argv[])
 
    pmesh_lvls[0]->PrintInfo(std::cout); if(verbose) cout << endl;
 
-   // 7. Determine the list of true (i.e. parallel conforming) essential
+   // 5. Determine the list of true (i.e. parallel conforming) essential
    //    boundary dofs. In this example, the boundary conditions are defined
    //    by marking all the boundary attributes from the mesh as essential
    //    (Dirichlet) and converting them to a list of true dofs.
@@ -233,7 +205,7 @@ int main(int argc, char *argv[])
       H_space_lvls[0]->GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
    }
 
-   // 8. Set up the parallel linear form b(.) which corresponds to the
+   // 6. Set up the parallel linear form b(.) which corresponds to the
    //    right-hand side of the FEM linear system, which in this case is
    //    (1,phi_i) where phi_i are the basis functions in fespace.
    ParLinearForm *b = new ParLinearForm(H_space_lvls[0]);
@@ -241,19 +213,19 @@ int main(int argc, char *argv[])
    b->AddDomainIntegrator(new DomainLFIntegrator(one));
    b->Assemble();
 
-   // 9. Define the solution vector x as a parallel finite element grid function
+   // 7. Define the solution vector x as a parallel finite element grid function
    //    corresponding to fespace. Initialize x with initial guess of zero,
    //    which satisfies the boundary conditions.
    ParGridFunction x(H_space_lvls[0]);
    x = 0.0;
 
-   // 10. Set up the parallel bilinear form a(.,.) on the finite element space
+   // 8. Set up the parallel bilinear form a(.,.) on the finite element space
    //     corresponding to the Laplacian operator -Delta, by adding the Diffusion
    //     domain integrator.
    ParBilinearForm *a = new ParBilinearForm(H_space_lvls[0]);
    a->AddDomainIntegrator(new DiffusionIntegrator(one));
 
-   // 11. Assemble the parallel bilinear form and the corresponding linear
+   // 9. Assemble the parallel bilinear form and the corresponding linear
    //     system, applying any necessary transformations such as: parallel
    //     assembly, eliminating boundary conditions, applying conforming
    //     constraints for non-conforming AMR, static condensation, etc.
@@ -268,7 +240,7 @@ int main(int argc, char *argv[])
       cout << "Size of linear system: " << A.GetGlobalNumRows() << "\n";
    }
 
-   // 12. Define and apply a parallel CG solver for AX=B with the geometric multigrid preconditioner.
+   // 10. Define and apply a parallel CG solver for AX=B with the geometric multigrid preconditioner.
 
 #ifdef BND_FOR_MULTIGRID
    Multigrid * prec = new Multigrid(A, TrueP_H, EssBdrTrueDofs_H1);
@@ -308,17 +280,35 @@ int main(int argc, char *argv[])
    }
 
 
-   // 13. Recover the parallel grid function corresponding to X. This is the
+   // 11. Recover the parallel grid function corresponding to X. This is the
    //     local finite element solution on each processor.
    a->RecoverFEMSolution(X, *b, x);
 
-   // 16. Free the used memory.
+   // 12. Free the used memory.
+   delete prec;
+   for (int i = 0; i < H_space_lvls.Size(); ++i)
+       delete H_space_lvls[i];
+
+   for (int i = 0; i < TrueP_H.Size(); ++i)
+       delete TrueP_H[i];
+
+   for (unsigned int i = 0; i < EssBdrTrueDofs_H1.size(); ++i)
+       delete EssBdrTrueDofs_H1[i];
+
+   for (int i = 0; i < P_H_lvls.Size(); ++i)
+       delete P_H_lvls[i];
+
+   for (int i = 0; i < pmesh_lvls.Size(); ++i)
+       delete pmesh_lvls[i];
+
+   delete H_space;
+   delete h1_coll;
+
    delete a;
    delete b;
    delete pmesh;
 
    MPI_Finalize();
-
    return 0;
 }
 
