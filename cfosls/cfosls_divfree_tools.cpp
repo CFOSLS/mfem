@@ -4549,6 +4549,8 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
 
     Constr_global = (HypreParMatrix*)(&problem->GetOp_nobnd()->GetBlock(numblocks_funct,0));
 
+    Constr_rhs_global = NULL;
+
     init_guess = new BlockVector(*offsets_funct[0]);
     *init_guess = 0.0;
 
@@ -4587,9 +4589,7 @@ GeneralMinConstrSolver::GeneralMinConstrSolver(int size_,
                 ("tdof", *space_names_funct, essbdr_attribs, l);
     }
 
-
     Setup();
-
 }
 
 // in case when the solver is based on hierarchy (or mgtools),
@@ -4710,6 +4710,8 @@ void GeneralMinConstrSolver::Update(bool recoarsen)
                 ((CoarsestProblemSolver*)CoarseSolver)->ResetSolverParams();
             }
         }
+
+        Constr_rhs_global = NULL;
 
         update_counter = hierarchy_upd_cnt;
     }

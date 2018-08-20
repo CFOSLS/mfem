@@ -17,7 +17,7 @@
 ///
 /// This example demonstrates usage of AMR related classes from mfem/cfosls/, such as
 /// FOSLSEstimatorOnHier, FOSLSEstimator, etc.
-/// The estimator is created on FOSLSEstimatorOnHier which is older, not optimal way.
+/// The estimator is created on FOSLSEstimatorOnHier which represents an out-of-dated, not optimal way.
 /// The newer approach is to construct the estimator from a "dynamic" problem built on the
 /// mesh hierarchy (GeneralHierarchy) instead.
 ///
@@ -48,14 +48,8 @@
 // turned out that it doesn't bring any benefit
 //#define USE_GS_PREC
 
-// activates several debugging checks
-//#define DEBUGGING_CASE
-
 // if active, standard conforming H1 formulation for Laplace is used
 //#define H1FEMLAPLACE
-
-// doesn't work as designed, || f_H - P^T f_h || is still nonzero
-//#define USEALWAYS_COARSE_RHS
 
 using namespace std;
 using namespace mfem;
@@ -231,9 +225,7 @@ int main(int argc, char *argv[])
     }
 
     for (int l = 0; l < par_ref_levels; l++)
-    {
        pmesh->UniformRefinement();
-    }
 
     int dim = nDimensions;
 
@@ -267,10 +259,8 @@ int main(int argc, char *argv[])
 
 #ifdef H1FEMLAPLACE
        numfoslsfuns = 1;
-       int numblocks_funct = 1;
 #else
        numfoslsfuns = 2;
-       int numblocks_funct = 2;
 #endif
 
    // 6. Creating the FOSLS error estimator, first creating its components
@@ -326,12 +316,6 @@ int main(int argc, char *argv[])
    BlockVector * coarse_guess;
 #endif
 
-#ifdef DEBUGGING_CASE
-   Vector * rhs;
-   Vector * checkdiff;
-   Vector * coarse_rhs;
-#endif
-
    // 7. The main AMR loop. In each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh, then repeat.
 #ifdef AMR
@@ -367,33 +351,6 @@ int main(int argc, char *argv[])
        }
 
        bool compute_error = true;
-
-#ifdef DEBUGGING_CASE
-
-#ifdef USEALWAYS_COARSE_RHS
-       if (it == 0)
-       {
-           rhs = new Vector(problem->GetRhs().GetBlock(0).Size());
-           *rhs = problem->GetRhs().GetBlock(0);
-       }
-#else
-       rhs = &problem->GetRhs();//.GetBlock(0);
-#endif
-
-       if (verbose && it == 0)
-           std::cout << "rhs norm = " << rhs->Norml2() / sqrt (rhs->Size()) << "\n";
-       if (it == 0)
-       {
-           checkdiff = new Vector(rhs->Size());
-           *checkdiff = *rhs;
-       }
-
-       if (it == 0)
-       {
-           coarse_rhs = new Vector(rhs->Size());
-           *coarse_rhs = *rhs;
-       }
-#endif
 
 #ifdef CLEVER_STARTING_GUESS
        // if it's not the first iteration we reuse the previous solution
@@ -622,13 +579,7 @@ int main(int argc, char *argv[])
        problem->Solve(verbose, false);
 #endif
 
-#ifdef DEBUGGING_CASE
-       delete coarse_rhs;
-       coarse_rhs = new Vector(rhs->Size());
-       *coarse_rhs = *rhs;
-#endif
-
-       // Computing the error
+      // Computing the error
       BlockVector& problem_sol = problem->GetSol();
       if (compute_error)
       {
@@ -865,40 +816,6 @@ int main(int argc, char *argv[])
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
 
-#ifdef DEBUGGING_CASE
-#ifdef USEALWAYS_COARSE_RHS
-       Vector tempvec(rhs->Size());
-       tempvec = *rhs;
-       delete rhs;
-       rhs = new Vector(problem->GetRhs().GetBlock(0).Size());
-       Vector mass_coarse_diag;
-       ParBilinearForm mass_coarse(hierarchy->GetSpace(SpaceName::H1,1));
-       mass_coarse.AddDomainIntegrator(new MassIntegrator);
-       mass_coarse.Assemble();
-       mass_coarse.Finalize();
-       SparseMatrix * mass_coarse_spmat = mass_coarse.LoseMat();
-       mass_coarse_spmat->GetDiag(mass_coarse_diag);
-
-       for (int i = 0; i < tempvec.Size(); ++i)
-           tempvec[i] /= mass_coarse_diag[i];
-       prob_hierarchy->GetHierarchy().GetTruePspace(SpaceName::H1, 0)->Mult(tempvec, *rhs);
-
-       Vector mass_fine_diag;
-       ParBilinearForm mass_fine(hierarchy->GetSpace(SpaceName::H1,0));
-       mass_fine.AddDomainIntegrator(new MassIntegrator);
-       mass_fine.Assemble();
-       mass_fine.Finalize();
-       SparseMatrix * mass_fine_spmat = mass_fine.LoseMat();
-       mass_fine_spmat->GetDiag(mass_fine_diag);
-
-       for (int i = 0; i < rhs->Size(); ++i)
-           (*rhs)[i] *= mass_fine_diag[i];
-
-       delete mass_coarse_spmat;
-       delete mass_fine_spmat;
-#endif
-#endif
-
        // checking #dofs after the refinement
        global_dofs = problem->GlobalTrueProblemSize();
 
@@ -914,14 +831,6 @@ int main(int argc, char *argv[])
    // 13. Deallocating the memory
 
    delete coarse_guess;
-
-#ifdef DEBUGGING_CASE
-#ifdef      USEALWAYS_COARSE_RHS
-   delete rhs;
-#endif
-   delete checkdiff;
-   delete coarse_rhs;
-#endif
 
    delete hierarchy;
    delete prob_hierarchy;

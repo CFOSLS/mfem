@@ -486,7 +486,7 @@ public:
                               AE_el,
                               El_to_Dofs_Op, El_to_Dofs_L2,
                               BdrDofs_blks, EssBdrDofs_blks,
-                              false, false)
+                              Optimized_LocalSolve, true)
     {}
 
     LocalProblemSolverWithS(int size, const BlockMatrix& Op_Blksmat,

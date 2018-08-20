@@ -11,10 +11,7 @@
 ///                             (K sigma, sigma) -> min
 /// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
 /// and K = (I - bbT / || b ||);
-/// 2) or in Hdiv-L2-L2 case (recently added, not fully tested, if HDIVL2L2 is #defined)
-///                             || sigma - b * u || ^2 -> min
-/// where sigma is from H(div) and u is from L^2 *but not eliminated from the system as in 1));
-/// 3) or in Hdiv-H1-L2 case
+/// 2) or in Hdiv-H1-L2 case
 ///                             || sigma - b * u || ^2 -> min
 /// where sigma is from H(div) and u is from H^1;
 /// minimizing in all cases under the constraint
@@ -33,7 +30,8 @@
 /// In particular one can see here how to create a FOSLSDivfreeProblem (and related hierarchy)
 /// and set its operator from a FOSLSProblem.
 ///
-/// (*) This code is an archive code which was not cleaned for memory leaks and without extensive testing.
+/// (*) This code is an archive code which was not cleaned for memory leaks and lacks extensive testing.
+/// But represents some a useful setup with FOSLSDivfreeProblem which is not use din other examples
 ///
 /// Typical run of this example: ./cfosls_hyperbolic_adref_Hcurl --whichD 3 --spaceS L2 -no-vis
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also

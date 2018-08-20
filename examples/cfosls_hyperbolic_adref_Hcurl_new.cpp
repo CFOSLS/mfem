@@ -85,7 +85,7 @@
 
 // Here the problem is solved by the minimization solver, but uses only the finest level,
 // with zero starting guess, solved by minimization solver (i.e., partsol finder is also used)
-#define APPROACH_1
+//#define APPROACH_1
 
 // Here the problem is solved by the minimization solver, but uses only the finest level, and takes
 // as the initial guess zero vector
@@ -101,7 +101,7 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-//#define APPROACH_3
+#define APPROACH_3
 
 #ifdef APPROACH_0
 #endif
@@ -181,7 +181,7 @@ int main(int argc, char *argv[])
 
     // This must be consistent with what formulation is used below.
     // Search for "using FormulType" below
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
     // solver options
@@ -264,15 +264,14 @@ int main(int argc, char *argv[])
 
     // 3. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g.)
 
-    /*
     // Hdiv-H1 case
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Hdiv-H1-L2 formulation must have space_for_S = `H1` \n");
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
-    */
 
+    /*
     // Hdiv-L2 case
 #ifdef HDIVL2L2
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Hdiv-L2-L2 formulation must have space_for_S = `L2` \n");
@@ -287,6 +286,7 @@ int main(int argc, char *argv[])
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2hyp;
 #endif
+    */
 
     //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
@@ -420,6 +420,8 @@ int main(int argc, char *argv[])
 
     // 5. Creating an instance of the FOSLSProblem to be solved.
 
+    // Define how many blocks there will be in the problem (loose way, correct one
+    // would be to call Nblocks() for formulat which is defined below)
     int numblocks = 1;
 
     if (strcmp(space_for_S,"H1") == 0)
@@ -631,8 +633,6 @@ int main(int argc, char *argv[])
 #ifdef PARTSOL_SETUP
    // constraint righthand sides
    Array<Vector*> div_rhs_lvls(0);
-   // particular solutions to the constraint
-   Array<BlockVector*> partsol_lvls(0);
    // particular solution to the constraint, only blocks
    // related to the functional variables
    Array<BlockVector*> partsol_funct_lvls(0);
@@ -719,7 +719,7 @@ int main(int argc, char *argv[])
        div_rhs_lvls.Prepend(new Vector(problem->GetRhs().GetBlock(numblocks - 1).Size()));
        dynamic_problem->ComputeRhsBlock(*div_rhs_lvls[0], numblocks - 1);
 
-       // future paticular solution
+       // future particular solution
        partsol_funct_lvls.Prepend(new BlockVector(problem->GetTrueOffsetsFunc()));
 #endif
 
@@ -915,14 +915,11 @@ int main(int argc, char *argv[])
 
 #ifdef CLEVER_STARTING_PARTSOL
            // create a better initial guess by taking the interpolant of the previous solution
-           // whic would be available if we consider levels finer than the coarsest
+           // which would be available if we consider levels finer than the coarsest
            if (l < coarsest_lvl)
            {
                for (int blk = 0; blk < numblocks_funct; ++blk)
                {
-                   //std::cout << "size of problem_sols_lvls[l + 1]->GetBlock(blk) = " << problem_sols_lvls[l + 1]->GetBlock(blk).Size() << "\n";
-                   //std::cout << "size of initguesses_funct_lvls[l]->GetBlock(blk) = " << initguesses_funct_lvls[l]->GetBlock(blk).Size() << "\n";
-
                    hierarchy->GetTruePspace( (*space_names_funct)[blk], l)->Mult
                        (problem_sols_lvls[l + 1]->GetBlock(blk), initguesses_funct_lvls[l]->GetBlock(blk));
                }
@@ -993,7 +990,7 @@ int main(int argc, char *argv[])
            // restoring the constraint rhs (modified above)
            *div_rhs_lvls[l] += div_initguess;
 
-           // checking whethr the particular solution satisfies the constraint
+           // checking whether the particular solution satisfies the constraint
            {
                problem_l->ComputeBndError(*partsol_funct_lvls[l]);
 
@@ -1017,7 +1014,7 @@ int main(int argc, char *argv[])
            // particular solution to the rhs, and solve for a correction
            zero_vec = 0.0;
            NewSolver->SetInitialGuess(l, zero_vec);
-           NewSolver->SetConstrRhs(*div_rhs_lvls[l]);
+           //NewSolver->SetConstrRhs(*div_rhs_lvls[l]);
 
            //if (verbose)
                //NewSolver->PrintAllOptions();
@@ -1357,8 +1354,6 @@ int main(int argc, char *argv[])
 #ifdef PARTSOL_SETUP
    for (int i = 0; i < div_rhs_lvls.Size(); ++i)
        delete div_rhs_lvls[i];
-   for (int i = 0; i < partsol_lvls.Size(); ++i)
-       delete partsol_lvls[i];
    for (int i = 0; i < partsol_funct_lvls.Size(); ++i)
        delete partsol_funct_lvls[i];
    for (int i = 0; i < initguesses_funct_lvls.Size(); ++i)

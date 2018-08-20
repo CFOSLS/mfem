@@ -9,10 +9,7 @@
 ///                             (K sigma, sigma) -> min
 /// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
 /// and K = (I - bbT / || b ||);
-/// 2) or in Hdiv-L2-L2 case (recently added, not fully tested, if HDIVL2L2 is #defined)
-///                             || sigma - b * u || ^2 -> min
-/// where sigma is from H(div) and u is from L^2 *but not eliminated from the system as in 1));
-/// 3) or in Hdiv-H1-L2 case
+/// 2) or in Hdiv-H1-L2 case
 ///                             || sigma - b * u || ^2 -> min
 /// where sigma is from H(div) and u is from H^1;
 /// minimizing in all cases under the constraint
@@ -396,6 +393,13 @@ int main(int argc, char *argv[])
    }
 
    // 8. Free the used memory.
+   for (int i = 0; i < extra_grfuns.Size(); ++i)
+       if (extra_grfuns[i])
+           delete extra_grfuns[i];
+   for (int i = 0; i < integs.NumRows(); ++i)
+       for (int j = 0; j < integs.NumCols(); ++j)
+           if (integs(i,j))
+               delete integs(i,j);
 
    delete problem;
    delete estimator;
