@@ -463,7 +463,8 @@ public:
 
     // should be called if the finest mesh was refined and
     // one wants to extend the hierarchy
-    virtual void Update();
+    // returns the update counter
+    virtual int Update();
 
     // tells the hierarchy to construct divfree discrete operators
     void ConstructDivfreeDops();
@@ -685,7 +686,12 @@ public:
 
     // should be called if the finest mesh was refined and
     // one wants to extend the hierarchy, by adding an additional level
-    virtual void Update() override { MFEM_ABORT("Update() is not implemented for GeneralCylHierarchy!");}
+    // FIXME: Implement
+    virtual int Update() override
+    {
+        MFEM_ABORT("Update() is not implemented for GeneralCylHierarchy!");
+        return -1;
+    }
 
     /// various getters
     ParMeshCyl * GetPmeshcyl(int l) {return pmeshcyl_lvls[l];}
@@ -1591,6 +1597,14 @@ public:
     // Distributes a given vector (considered as a blockvector) to the grfuns
     void DistributeToGrfuns(const Vector& vec) const;
 
+    // Had to add it for have a more flexible code in the examples
+    // FIXME: Probably, it's a bad practice to do things like that
+    virtual ParGridFunction * RecoverS(const Vector& vec) const
+    {
+        MFEM_ABORT("RecoverS() must have been overriden in a child class");
+        return NULL;
+    }
+
     // getters
     BlockVector * GetInitialCondition();
     BlockVector * GetTrueInitialCondition();
@@ -1812,7 +1826,7 @@ public:
     ParGridFunction * RecoverS() const
     { return RecoverS(trueX->GetBlock(0));}
 
-    ParGridFunction * RecoverS(const Vector& sigma) const;
+    virtual ParGridFunction * RecoverS(const Vector& sigma) const override;
 };
 
 /// See the previous FIXME message
@@ -2235,7 +2249,10 @@ protected:
     Array<BlockOperator*> CoarsenedOps_lvls;
     Array<BlockOperator*> CoarsenedOps_nobnd_lvls;
     int prec_option;
+    int update_counter;
+
     bool verbose;
+
 public:
     virtual ~FOSLSProblHierarchy()
     {
@@ -2264,7 +2281,7 @@ public:
     // Updates the object
     // FIXME: Looks like new problem will be created even if the underlying GeneralHierarchy
     // doesn't get more levels
-    virtual void Update(bool recoarsen);
+    virtual int Update(bool recoarsen);
 
     // from coarser to finer
     void Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out);
@@ -2282,6 +2299,8 @@ public:
     // getters
     Problem* GetProblem(int l)
     {
+        if (!(l >=0 && l < nlevels))
+            std::cout << "Index in GetProblem() is out of bounds \n";
         MFEM_ASSERT(l >=0 && l < nlevels, "Index in GetProblem() is out of bounds");
         return problems_lvls[l];
     }
@@ -2307,6 +2326,7 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
     : fe_formulation(fe_formulation_), bdr_conditions(bdr_conditions_),
       nlevels(nlevels_),
       hierarchy(hierarchy_), prec_option(precond_option),
+      update_counter(hierarchy_.GetUpdateCounter()),
       verbose(verbose_)
 {
     problems_lvls.SetSize(nlevels);
@@ -2348,60 +2368,65 @@ FOSLSProblHierarchy<Problem, Hierarchy>::FOSLSProblHierarchy(Hierarchy& hierarch
 }
 
 template <class Problem, class Hierarchy>
-void FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
+int FOSLSProblHierarchy<Problem, Hierarchy>::Update(bool recoarsen)
 {
-    // update hierarchy
-    hierarchy.Update();
-
-    // create the new finest-level problem
-    Problem * problem_new = new Problem(hierarchy, 0, bdr_conditions, fe_formulation, prec_option, verbose);
-    problems_lvls.Prepend(problem_new);
-
-    // create new interpolation block operator
-    Array<int>& blkoffsets_true_row = problems_lvls[0]->GetTrueOffsets();
-    Array<int>& blkoffsets_true_col = problems_lvls[1]->GetTrueOffsets();
-    const Array<SpaceName>* space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
-
-    BlockOperator * TrueP_new = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
-
-    int numblocks = fe_formulation.Nblocks();
-    for (int blk = 0; blk < numblocks; ++blk)
+    // check the update counter (and update if necessary), if it's update counter went forward w.r.t
+    // to stored one in the problem hierarchy's instance, update the problem hierarchy
+    if (hierarchy.Update() != update_counter)
     {
-        HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace((*space_names)[blk], 0);
-        TrueP_new->SetBlock(blk, blk, TrueP_blk);
+        // create the new finest-level problem
+        Problem * problem_new = new Problem(hierarchy, 0, bdr_conditions, fe_formulation, prec_option, verbose);
+        problems_lvls.Prepend(problem_new);
+
+        // create new interpolation block operator
+        Array<int>& blkoffsets_true_row = problems_lvls[0]->GetTrueOffsets();
+        Array<int>& blkoffsets_true_col = problems_lvls[1]->GetTrueOffsets();
+        const Array<SpaceName>* space_names = fe_formulation.GetFormulation()->GetSpacesDescriptor();
+
+        BlockOperator * TrueP_new = new BlockOperator(blkoffsets_true_row, blkoffsets_true_col);
+
+        int numblocks = fe_formulation.Nblocks();
+        for (int blk = 0; blk < numblocks; ++blk)
+        {
+            HypreParMatrix * TrueP_blk = hierarchy.GetTruePspace((*space_names)[blk], 0);
+            TrueP_new->SetBlock(blk, blk, TrueP_blk);
+        }
+
+        TrueP_lvls.Prepend(TrueP_new);
+
+        // update number of levels
+        nlevels = hierarchy.Nlevels();
+
+        // delete the old coarsened ops
+        // if l == 0, these are the operators of the previous finest problem
+        // so we don't delete them
+        for (int l = 1; l < CoarsenedOps_lvls.Size(); ++l )
+            delete CoarsenedOps_lvls[l];
+
+        for (int l = 1; l < CoarsenedOps_nobnd_lvls.Size(); ++l )
+            delete CoarsenedOps_nobnd_lvls[l];
+
+        CoarsenedOps_lvls.SetSize(nlevels);
+        for (int l = 1; l < nlevels; ++l)
+            CoarsenedOps_lvls[l] = NULL;
+
+        CoarsenedOps_nobnd_lvls.SetSize(nlevels);
+        for (int l = 1; l < nlevels; ++l)
+            CoarsenedOps_nobnd_lvls[l] = NULL;
+
+        // reconstruct coarsened operators if required
+        if (recoarsen)
+        {
+            ConstructCoarsenedOps();
+            ConstructCoarsenedOps_nobnd();
+        }
+
+        update_counter = hierarchy.GetUpdateCounter();
+
     }
 
-    TrueP_lvls.Prepend(TrueP_new);
-
-    // update number of levels
-    nlevels = hierarchy.Nlevels();
-
-    // delete the old coarsened ops
-    // if l == 0, these are the operators of the previous finest problem
-    // so we don't delete them
-    for (int l = 1; l < CoarsenedOps_lvls.Size(); ++l )
-        delete CoarsenedOps_lvls[l];
-
-    for (int l = 1; l < CoarsenedOps_nobnd_lvls.Size(); ++l )
-        delete CoarsenedOps_nobnd_lvls[l];
-
-    CoarsenedOps_lvls.SetSize(nlevels);
-    for (int l = 1; l < nlevels; ++l)
-        CoarsenedOps_lvls[l] = NULL;
-
-    CoarsenedOps_nobnd_lvls.SetSize(nlevels);
-    for (int l = 1; l < nlevels; ++l)
-        CoarsenedOps_nobnd_lvls[l] = NULL;
-
-    // reconstruct coarsened operators if required
-    if (recoarsen)
-    {
-        ConstructCoarsenedOps();
-        ConstructCoarsenedOps_nobnd();
-    }
-
+    return update_counter;
 }
-
 
 template <class Problem, class Hierarchy>
 void FOSLSProblHierarchy<Problem, Hierarchy>::Interpolate(int coarse_lvl, int fine_lvl, const Vector& vec_in, Vector& vec_out)
@@ -3165,7 +3190,6 @@ public:
 /// hierarchy of meshes (problems)
 /// This object is constructed on top of the hierarchy and a "dynamic" problem defined
 /// at the finest level of the hierarchy
-/// TODO: Add destructor for MultigridToolsHierarchy and test it
 class MultigridToolsHierarchy
 {
 protected:
@@ -3217,7 +3241,9 @@ public:
         : MultigridToolsHierarchy(hierarchy_, *hierarchy_.GetProblem(problem_index), descriptor_) {}
 
     // Updates the tools hierarchy if the underlying GeneralHierarchy was updated
-    void Update(bool recoarsen);
+    // Returns true if the update was actually required, and else if it turned out there was
+    // nothing to update for the hierarchy
+    int Update(bool recoarsen);
 
 protected:
     // Troubles with such a constructor given in public is the implementation of Update(),

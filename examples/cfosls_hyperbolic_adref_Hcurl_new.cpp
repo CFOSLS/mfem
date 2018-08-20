@@ -651,7 +651,7 @@ int main(int argc, char *argv[])
    // used to store the functional value for the solution from the previous AMR iteration
    double saved_functvalue;
 
-   // 7. The main AMR loop. In each iteration we solve the problem on the
+   // 7. The main AMR loop. At each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
    const int max_dofs = 300000;//1600000; 400000;

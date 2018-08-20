@@ -1288,7 +1288,7 @@ MultigridToolsHierarchy::MultigridToolsHierarchy(GeneralHierarchy& hierarchy_, F
         delete fullbdr_attribs[i];
 }
 
-void MultigridToolsHierarchy::Update(bool recoarsen)
+int MultigridToolsHierarchy::Update(bool recoarsen)
 {
     int hierarchy_upd_cnt = hierarchy.GetUpdateCounter();
     if (update_counter != hierarchy_upd_cnt)
@@ -1553,8 +1553,11 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
                 Ops_lvls[l] = FunctOps_lvls[l];
 
-                FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
+                if (descr.with_nobnd_op)
+                    FunctOps_nobnd_lvls[l] = new RAPBlockHypreOperator(*BlockP_nobnd_lvls[l - 1],
                         *FunctOps_nobnd_lvls[l - 1], *BlockP_nobnd_lvls[l - 1], *offsets_funct[l]);
+                else
+                    FunctOps_nobnd_lvls[l] = NULL;
 
                 if (l < nlevels - 1)
                 {
@@ -1758,9 +1761,9 @@ void MultigridToolsHierarchy::Update(bool recoarsen)
 
         for (unsigned int i = 0; i < fullbdr_attribs.size(); ++i)
             delete fullbdr_attribs[i];
-
     } // end of if "update is needed"
 
+    return update_counter;
 }
 
 FOSLSProblem::FOSLSProblem(GeneralHierarchy& Hierarchy, BdrConditions& bdr_conditions,
@@ -2090,9 +2093,6 @@ void FOSLSProblem::InitSolver(bool verbose)
     if (prec)
          solver->SetPreconditioner(*prec);
     solver->SetPrintLevel(0);
-
-    //if (verbose)
-        //std::cout << "Here you should print out parameters of the linear solver \n";
 
     solver->iterative_mode = true;
 
@@ -3271,8 +3271,6 @@ ParGridFunction * FOSLSProblem_HdivL2hyp::RecoverS(const Vector& sigma) const
     B->Mult(sigma,bTsigma);
 
     Vector trueS(C->Height());
-
-    //CG(*C, bTsigma, trueS, 0, 5000, 1e-9, 1e-12);
 
     CGSolver cg;
     cg.SetPrintLevel(0);
@@ -5461,7 +5459,7 @@ GeneralHierarchy::~GeneralHierarchy()
 }
 
 
-void GeneralHierarchy::Update()
+int GeneralHierarchy::Update()
 {
     // TODO: Instead of checking the mesh number of elements to define
     // TODO: whether the hierarchy is to be updated one can use the same
@@ -5697,6 +5695,8 @@ void GeneralHierarchy::Update()
 
         ++update_counter;
     } // end of if update is required
+
+    return update_counter;
 }
 
 
