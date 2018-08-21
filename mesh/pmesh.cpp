@@ -5876,7 +5876,12 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
     if (Dim == 4)
         for ( int row = 0; row < group_proc.Size(); ++row )
         {
-            group_sface_I[row + 1] = group_sface_I[row] + Nsteps * face2Dto3D_coeff *
+            // without this if, valgrind reports "Invalid read"
+            // because meshbase.group_sedge has size 0 (for serial case)
+            if (meshbase.group_sface.Size() == 0)
+                group_sface_I[row + 1] = group_sface_I[row];
+            else
+                group_sface_I[row + 1] = group_sface_I[row] + Nsteps * face2Dto3D_coeff *
                     meshbase.group_sface.RowSize(row);
         }
     else //Dim == 3
@@ -6086,7 +6091,18 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
         group_splan_I[0] = 0;
         for ( int row = 0; row < group_proc.Size(); ++row )
         {
-            group_splan_I[row + 1] = group_splan_I[row] +
+            // without this if, valgrind reports "Invalid read"
+            // because meshbase.group_sedge has size 0 (for serial case)
+            if (meshbase.group_sface.Size() == 0)
+            {
+                if (meshbase.group_sedge.Size() == 0)
+                    group_splan_I[row + 1] = group_splan_I[row];
+                else
+                    group_splan_I[row + 1] = group_splan_I[row] +
+                            Nsteps * 2 * meshbase.group_sedge.RowSize(row);
+            }
+            else
+                group_splan_I[row + 1] = group_splan_I[row] +
                     (Nsteps * 2 + (Nsteps + 1))*meshbase.group_sface.RowSize(row) +
                     Nsteps * 2 * meshbase.group_sedge.RowSize(row);
         }
@@ -6333,8 +6349,14 @@ void ParMeshCyl::ParMeshSpaceTime_createShared( MPI_Comm comm, int Nsteps )
         // without this if, valgrind reports "Invalid read"
         // because meshbase.group_svert and meshbase.group_sedg
         // has size 0 (for serial case)
-        if (meshbase.group_svert.Size() == 0 || meshbase.group_sedge.Size() == 0)
-            group_sedge_I[row + 1] = group_sedge_I[row];
+        if (meshbase.group_svert.Size() == 0)
+        {
+            if (meshbase.group_sedge.Size() == 0)
+                group_sedge_I[row + 1] = group_sedge_I[row];
+            else
+                group_sedge_I[row + 1] = group_sedge_I[row] +
+                    ((Nsteps + 1) + Nsteps)*meshbase.group_sedge.RowSize(row);
+        }
         else
             group_sedge_I[row + 1] = group_sedge_I[row] +
                 ((Nsteps + 1) + Nsteps)*meshbase.group_sedge.RowSize(row) +
