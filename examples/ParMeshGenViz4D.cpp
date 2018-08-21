@@ -33,7 +33,6 @@
 
 using namespace std;
 using namespace mfem;
-using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
@@ -57,7 +56,7 @@ int main(int argc, char *argv[])
     bool convert_to_mesh = 0; // if true, converts the pmesh to a serial mesh and prints it out
 
     if (verbose)
-        std::cout << "Started example for parallel mesh generator" << std::endl;
+        std::cout << "Started example for the parallel mesh generator" << std::endl;
 
     int nDimensions     = 4;
 
@@ -247,8 +246,11 @@ int main(int argc, char *argv[])
         x = *X;
 
         chrono.Clear(); chrono.Start();
-        int intOrder = 8;
-        const IntegrationRule *irs[Geometry::NumGeom]; for (int i=0; i < Geometry::NumGeom; ++i) irs[i] = &(IntRules.Get(i, intOrder));
+        // FIXME: There is a memory leak related to the IntegrationRules in 4D, haven't fixed that
+        int intOrder = 2;//8;
+        const IntegrationRule *irs[Geometry::NumGeom];
+        for (int i=0; i < Geometry::NumGeom; ++i)
+            irs[i] = &(IntRules.Get(i, intOrder));
         double norm = x.ComputeL2Error(u_exact, irs);
         if(verbose) cout << "L2 norm: " << norm << endl;
         if(verbose) cout << "Computing error took " << chrono.UserTime() << "s." << endl;

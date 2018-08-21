@@ -296,6 +296,7 @@ public:
     bool have_slabs_structure;
 
 public:
+    virtual ~ParMeshCyl() {}
     // Warning: only PENTATOPE case for 4D mesh and TETRAHEDRON case for 3D are considered
 
    // Actual parallel 3D->4D/2D->3D mesh generator, version 2 (main).

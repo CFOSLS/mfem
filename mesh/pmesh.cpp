@@ -5169,14 +5169,15 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     if ( dim == 3 )
         faces_tbl_3d = GetElementToFaceTable(1);
 
-
+    /*
     STable4D *faces_tbl_4d = NULL;
     if ( dim == 4 )
     {
         faces_tbl_4d = GetElementToFaceTable4D(1);
     }
+    */
 
-    GenerateFaces();
+    //GenerateFaces();
 
     NumOfPlanars = 0;
     el_to_planar = NULL;
@@ -5190,6 +5191,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     }
     */
 
+    /*
     if (NumOfBdrElements == 0 && Dim > 2)
     {
        // in 3D, generate boundary elements before we 'MarkForRefinement'
@@ -5201,6 +5203,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
        GenerateFaces();
        GenerateBoundaryElements();
     }
+    */
 
     int curved = 0;
     int generate_edges = 1;
@@ -5278,12 +5281,14 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
 
     // some clean up for unneeded tables
 
+    /*
     if (dim == 4)
     {
         delete faces_tbl_4d;
         //delete planar_tbl;
     }
-    else //dim == 3
+    */
+    if (dim == 3)
         delete faces_tbl_3d;
 
     // ****************************************************************************
