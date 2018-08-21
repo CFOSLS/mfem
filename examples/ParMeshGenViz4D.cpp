@@ -150,6 +150,12 @@ int main(int argc, char *argv[])
 
     (dynamic_cast<ParMeshCyl*>(pmesh))->Refine(par_ref_cyl_levels);
 
+#ifdef MFEM_MEM_ALLOC
+    if (nDimensions == 4)
+        std::cout << "Memory leak was reported by valgrind in 4D around faces and bdr elements"
+                     "when MFEM_MEM_ALLOC = YES is set in defaults.mk prior to building MFEM \n";
+#endif
+
     // if true, converts a pmesh to a mesh (so a global mesh will be produced on each process)
     // which can be printed in a file (as a whole)
     // can be useful for testing purposes
