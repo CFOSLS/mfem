@@ -52,14 +52,12 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(comm, &myid);
 
     bool verbose = (myid == 0);
-    bool solve_problem = 0; // if true, solves a model problem
+    bool solve_problem = 1; // if true, solves a model problem
     bool visualization = 1; // if true, created VTK output for paraview
     bool convert_to_mesh = 0; // if true, converts the pmesh to a serial mesh and prints it out
 
     if (verbose)
-    {
         std::cout << "Started example for parallel mesh generator" << std::endl;
-    }
 
     int nDimensions     = 4;
 

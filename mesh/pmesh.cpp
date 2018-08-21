@@ -5181,12 +5181,14 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     NumOfPlanars = 0;
     el_to_planar = NULL;
 
+    /*
     STable3D *planar_tbl = NULL;
     if( dim == 4 )
     {
        planar_tbl = GetElementToPlanarTable(1);
        GeneratePlanars();
     }
+    */
 
     if (NumOfBdrElements == 0 && Dim > 2)
     {
@@ -5279,7 +5281,7 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
     if (dim == 4)
     {
         delete faces_tbl_4d;
-        delete planar_tbl;
+        //delete planar_tbl;
     }
     else //dim == 3
         delete faces_tbl_3d;
