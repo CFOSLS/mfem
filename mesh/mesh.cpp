@@ -5408,6 +5408,7 @@ STable3D * Mesh::GetElementToPlanarTable(int ret_trigtbl)
    el_to_planar->Finalize();
    NumOfPlanars = trig_tbl->NumberOfElements();
 
+   if (bel_to_planar != NULL) { delete bel_to_planar; }
    bel_to_planar = new Table(NumOfBdrElements, 6);  // 6 planars at most for cube
    for (i = 0; i < NumOfBdrElements; i++)
    {

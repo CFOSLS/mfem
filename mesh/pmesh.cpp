@@ -5062,6 +5062,12 @@ ParMeshCyl::ParMeshCyl(MPI_Comm comm, ParMesh& Meshbase, double Tinit, double Ta
         return;
     }
 
+#ifdef MFEM_MEM_ALLOC
+    if (dim == 4)
+        std::cout << "A memory leak was reported by valgrind in 4D around faces and bdr elements"
+                     "when MFEM_MEM_ALLOC = YES is set in defaults.mk prior to building MFEM \n";
+#endif
+
     if (Slabs_widths)
         have_slabs_structure = true;
 
