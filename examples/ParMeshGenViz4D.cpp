@@ -1,13 +1,7 @@
-/*
- * A place holder for any temporary tests in parelag setup
- */
-
 //                                MFEM(with 4D elements) CFOSLS for 3D/4D hyperbolic equation
 //                                  with mesh generator and visualization
 //
 // Compile with: make
-//
-// Sample runs:  ./HybridHdivL2 -dim 3 or ./HybridHdivL2 -dim 4
 //
 // Description:  This example code solves a simple 3D/4D hyperbolic problem over [0,1]^3(4)
 //               corresponding to the saddle point system
@@ -59,7 +53,7 @@ int main(int argc, char *argv[])
 
     bool verbose = (myid == 0);
     bool solve_problem = 0; // if true, solves a model problem
-    bool visualization = 0; // if true, created VTK output for paraview
+    bool visualization = 1; // if true, created VTK output for paraview
     bool convert_to_mesh = 0; // if true, converts the pmesh to a serial mesh and prints it out
 
     if (verbose)
@@ -71,44 +65,13 @@ int main(int argc, char *argv[])
 
     int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
-    int Nsteps          = 2;   // number of time slabs (e.g. Nsteps = 2 corresponds to 3 levels: t = 0, t = tau, t = 2 * tau
-    double tau          = 0.5; // time step
+    int par_ref_cyl_levels = 0; // number of additional refinements to be done for the generated space-time cylinder
+    int Nt              = 2;   // number of time slabs (e.g. Nsteps = 2 corresponds to 3 levels: t = 0, t = tau, t = 2 * tau
+    double tau          = 0.5; // time step for a slab
 
-
-    int generate_frombase   = 1; // if 0, read mesh from file; if 1, read base mesh from file and extend it to (d+1)-mesh
-    int generate_parallel   = generate_frombase * 1; // 0 for serial mesh extension, 1 for parallel
-    int whichparallel       = generate_parallel * 2; // default value is 2 (doesn't us qhull)
-    int bnd_method          = 1; // default value is 1
-    int local_method        = 2; // default value is 2
-
-    //const char *mesh_file = "../build3/meshes/cube_3d_moderate.mesh";
-    //const char *mesh_file = "../build3/meshes/square_2d_moderate.mesh";
-
-    //const char *mesh_file = "../build3/meshes/cube4d_low.MFEM";
-    //const char *mesh_file = "./data/cube4d.MFEM";
-    const char *mesh_file = "dsadsad";
-    //const char *mesh_file = "../build3/mesh_par1_id0_np_1.mesh";
-    //const char *mesh_file = "../build3/mesh_par1_id0_np_2.mesh";
-    //const char *mesh_file = "../build3/meshes/tempmesh_frompmesh.mesh";
-    //const char *mesh_file = "../build3/meshes/orthotope3D_moderate.mesh";
-    //const char *mesh_file = "../build3/meshes/sphere3D_0.1to0.2.mesh";
-    //const char * mesh_file = "../build3/meshes/orthotope3D_fine.mesh";
-
-    //const char * meshbase_file = "../build3/meshes/sphere3D_0.1to0.2.mesh";
-    //const char * meshbase_file = "../build3/meshes/sphere3D_0.05to0.1.mesh";
-    //const char * meshbase_file = "../build3/meshes/sphere3D_veryfine.mesh";
-    //const char * meshbase_file = "../build3/meshes/beam-tet.mesh";
-    //const char * meshbase_file = "../build3/meshes/escher-p3.mesh";
     //const char * meshbase_file = "./data/orthotope3D_moderate.mesh";
     //const char * meshbase_file = "./data/orthotope3D_fine.mesh";
     const char * meshbase_file = "../data/cube_3d_moderate.mesh";
-    //const char * meshbase_file = "./data/cube_3d_moderate.mesh";
-    //const char * meshbase_file = "./data/square_2d_moderate.mesh";
-    //const char * meshbase_file = "../build3/meshes/square_2d_fine.mesh";
-    //const char * meshbase_file = "../build3/meshes/square-disc.mesh";
-    //const char *meshbase_file = "dsadsad";
-    //const char * meshbase_file = "../build3/meshes/circle_fine_0.1.mfem";
-    //const char * meshbase_file = "../build3/meshes/circle_moderate_0.2.mfem";
 
     int feorder         = 0; // in 4D cannot use feorder > 0
 
@@ -116,32 +79,22 @@ int main(int argc, char *argv[])
         std::cout << "Parsing input options" << std::endl;
 
     OptionsParser args(argc, argv);
-    args.AddOption(&mesh_file, "-m", "--mesh",
-                   "Mesh file to use.");
     args.AddOption(&meshbase_file, "-mbase", "--meshbase",
                    "Mesh base file to use.");
     args.AddOption(&feorder, "-o", "--feorder",
                    "Finite element order (polynomial degree).");
     args.AddOption(&ser_ref_levels, "-sref", "--sref",
-                   "Number of serial refinements 4d mesh.");
+                   "Number of serial refinements for the base mesh.");
     args.AddOption(&par_ref_levels, "-pref", "--pref",
-                   "Number of parallel refinements 4d mesh.");
+                   "Number of parallel refinements for the base mesh.");
+    args.AddOption(&par_ref_cyl_levels, "-pcref", "--pref-cyl",
+                   "Number of parallel refinements for the generated space-time mesh.");
     args.AddOption(&nDimensions, "-dim", "--whichD",
                    "Dimension of the space-time problem.");
-    args.AddOption(&Nsteps, "-nstps", "--nsteps",
+    args.AddOption(&Nt, "-nstps", "--nsteps",
                    "Number of time steps.");
     args.AddOption(&tau, "-tau", "--tau",
                    "Time step.");
-    args.AddOption(&generate_frombase, "-gbase", "--genfrombase",
-                   "Generating mesh from the base mesh.");
-    args.AddOption(&generate_parallel, "-gp", "--genpar",
-                   "Generating mesh in parallel.");
-    args.AddOption(&whichparallel, "-pv", "--parver",
-                   "Version of parallel algorithm.");
-    args.AddOption(&bnd_method, "-bnd", "--bndmeth",
-                   "Method for generating boundary elements.");
-    args.AddOption(&local_method, "-loc", "--locmeth",
-                   "Method for local mesh procedure.");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -165,193 +118,40 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Number of mpi processes: " << num_procs << endl << flush;
 
-#ifndef WITH_QHULL
-    if (verbose)
-    {
-        cout << "WITH_QHULL flag is not set -> local method = 2 must be used" << endl;
-    }
-    if (local_method !=2 )
-    {
-        if (verbose)
-            cout << "Wrong local_method is provided." << endl;
-        MPI_Finalize();
-        return 0;
-    }
-
-#endif
-
     StopWatch chrono;
 
-    Mesh *mesh = NULL;
-
-    shared_ptr<ParMesh> pmesh;
-
-    if (nDimensions == 3 || nDimensions == 4)
+    Mesh *meshbase = NULL;
+    ifstream imesh(meshbase_file);
+    if (!imesh)
     {
-        if ( generate_frombase == 1 )
-        {
-            if ( verbose )
-                cout << "Creating a " << nDimensions << "d mesh from a " <<
-                        nDimensions - 1 << "d mesh from the file " << meshbase_file << endl;
-
-            Mesh * meshbase;
-            ifstream imesh(meshbase_file);
-            if (!imesh)
-            {
-                 cerr << "\nCan not open mesh file for base mesh: " <<
-                                                    meshbase_file << endl << flush;
-                 MPI_Finalize();
-                 return -2;
-            }
-            meshbase = new Mesh(imesh, 1, 1);
-            imesh.close();
-
-            meshbase->MeshCheck(verbose);
-
-            for (int l = 0; l < ser_ref_levels; l++)
-                meshbase->UniformRefinement();
-
-            /*
-            if ( verbose )
-            {
-                std::stringstream fname;
-                fname << "mesh_" << nDimensions - 1 << "dbase.mesh";
-                std::ofstream ofid(fname.str().c_str());
-                ofid.precision(8);
-                meshbase->Print(ofid);
-
-            }
-            */
-
-            if (verbose)
-                meshbase->PrintInfo();
-
-
-            if (generate_parallel == 1) //parallel version
-            {
-                ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
-
-                /*
-                std::stringstream fname;
-                fname << "pmesh_"<< nDimensions - 1 << "dbase_" << myid << ".mesh";
-                std::ofstream ofid(fname.str().c_str());
-                ofid.precision(8);
-                pmesh3dbase->Print(ofid);
-                */
-
-                chrono.Clear();
-                chrono.Start();
-
-                if ( whichparallel == 1 )
-                {
-                    if ( nDimensions == 3)
-                    {
-                        if  (myid == 0)
-                            cout << "Not implemented for 2D->3D. Use parallel version2"
-                                    " instead" << endl << flush;
-                        MPI_Finalize();
-                        return 0;
-                    }
-                    else // nDimensions == 4
-                    {
-                        mesh = new Mesh( comm, *pmeshbase, tau, Nsteps, bnd_method, local_method);
-                        if ( myid == 0)
-                            cout << "Success: ParMesh is created by deprecated method"
-                                 << endl << flush;
-
-                        std::stringstream fname;
-                        fname << "mesh_par1_id" << myid << "_np_" << num_procs << ".mesh";
-                        std::ofstream ofid(fname.str().c_str());
-                        ofid.precision(8);
-                        mesh->Print(ofid);
-
-                        MPI_Barrier(comm);
-                    }
-                }
-                else
-                {
-                    if (myid == 0)
-                        cout << "Starting parallel \"" << nDimensions-1 << "D->"
-                             << nDimensions <<"D\" mesh generator" << endl;
-
-                    pmesh = make_shared<ParMesh>( comm, *pmeshbase, tau, Nsteps,
-                                                  bnd_method, local_method);
-
-                    if ( myid == 0)
-                        cout << "Success: ParMesh created" << endl << flush;
-                    MPI_Barrier(comm);
-                }
-
-                chrono.Stop();
-                if (myid == 0 && whichparallel == 2)
-                    cout << "Timing: Space-time mesh extension done in parallel in "
-                              << chrono.RealTime() << " seconds.\n" << endl << flush;
-                delete pmeshbase;
-            }
-            else // serial version
-            {
-                if (myid == 0)
-                    cout << "Starting serial \"" << nDimensions-1 << "D->"
-                         << nDimensions <<"D\" mesh generator" << endl;
-                mesh = new Mesh( *meshbase, tau, Nsteps, bnd_method, local_method);
-                if ( myid == 0)
-                    cout << "Timing: Space-time mesh extension done in serial in "
-                              << chrono.RealTime() << " seconds.\n" << endl << flush;
-            }
-
-            delete meshbase;
-
-        }
-        else // not generating from a lower dimensional mesh
-        {
-            cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
-            ifstream imesh(mesh_file);
-            if (!imesh)
-            {
-                 std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
-                 MPI_Finalize();
-                 return -2;
-            }
-            else
-            {
-                mesh = new Mesh(imesh, 1, 1);
-                imesh.close();
-            }
-
-        }
-
-    }
-    else //if nDimensions is no 3 or 4
-    {
-        if (myid == 0)
-            cerr << "Case nDimensions = " << nDimensions << " is not supported"
-                 << endl << flush;
+        std::cerr << "\nCan not open mesh base file: " << meshbase_file << '\n' << std::endl;
         MPI_Finalize();
-        return -1;
-
+        return -2;
     }
-
-    if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
+    else
     {
-        // Checking that mesh is legal = domain and boundary volume + checking boundary elements and faces consistency
-        if (myid == 0)
-            cout << "Checking the mesh" << endl << flush;
-        mesh->MeshCheck(verbose);
-
-        for (int l = 0; l < ser_ref_levels; l++)
-            mesh->UniformRefinement();
-
-        if ( verbose )
-            cout << "Creating parmesh(" << nDimensions <<
-                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
-        pmesh = make_shared<ParMesh>(comm, *mesh);
-        delete mesh;
+        if (verbose)
+             std::cout << "meshbase_file: " << meshbase_file << "\n";
+        meshbase = new Mesh(imesh, 1, 1);
+        imesh.close();
     }
 
+    meshbase->CheckElementOrientation(true);
+
+    for (int l = 0; l < ser_ref_levels; l++)
+        meshbase->UniformRefinement();
+
+    ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
     for (int l = 0; l < par_ref_levels; l++)
-    {
-       pmesh->UniformRefinement();
-    }
+        pmeshbase->UniformRefinement();
+
+    delete meshbase;
+
+    ParMesh * pmesh = new ParMeshCyl(comm, *pmeshbase, 0.0, tau, Nt);
+
+    delete pmeshbase;
+
+    (dynamic_cast<ParMeshCyl*>(pmesh))->Refine(par_ref_cyl_levels);
 
     // if true, converts a pmesh to a mesh (so a global mesh will be produced on each process)
     // which can be printed in a file (as a whole)
@@ -359,7 +159,7 @@ int main(int argc, char *argv[])
     if (convert_to_mesh)
     {
         int * partitioning = new int [pmesh->GetNE()];
-        Mesh * convertedpmesh = new Mesh (*pmesh.get(), &partitioning);
+        Mesh * convertedpmesh = new Mesh (*pmesh, &partitioning);
         if (verbose)
         {
             std::stringstream fname;
@@ -368,8 +168,9 @@ int main(int argc, char *argv[])
             ofid.precision(8);
             convertedpmesh->Print(ofid);
         }
+        delete partitioning;
+        delete convertedpmesh;
     }
-
 
     //if(dim==3) pmesh->ReorientTetMesh();
 
@@ -388,7 +189,7 @@ int main(int argc, char *argv[])
         FiniteElementCollection *fec;
         if(dim==4) fec = new RT0_4DFECollection;
         else fec = new RT_FECollection(order,dim);
-        ParFiniteElementSpace fespace(pmesh.get(), fec);
+        ParFiniteElementSpace fespace(pmesh, fec);
 
         int dofs = fespace.GlobalTrueVSize();
         if(verbose) cout << "dofs: " << dofs << endl;
@@ -487,23 +288,27 @@ int main(int argc, char *argv[])
             cout << "RT: order " << feorder << " for 3D" << endl;
         }
 
-        ParFiniteElementSpace *R_space = new ParFiniteElementSpace(pmesh.get(), hdiv_coll);
+        ParFiniteElementSpace *R_space = new ParFiniteElementSpace(pmesh, hdiv_coll);
 
         // creating Hdiv grid-function slices (and printing them in VTK format in a file for paraview)
         ParGridFunction *pgridfuntest = new ParGridFunction(R_space);
         VectorFunctionCoefficient Hdivtest_fun_coeff(nDimensions, Hdivtest_fun);
         pgridfuntest->ProjectCoefficient(Hdivtest_fun_coeff);
-        pgridfuntest->ComputeSlices ( 0.1, 2, 0.3, myid, false);
+        ComputeSlices (*pgridfuntest, 0.1, 2, 0.3, myid, false);
 
         // creating mesh slices (and printing them in VTK format in a file for paraview)
-        pmesh->ComputeSlices ( 0.1, 2, 0.3, myid);
+        ComputeSlices (*pmesh, 0.1, 2, 0.3, myid);
+
+        if (verbose)
+            cout << "Test Hdiv function was sliced successfully" << endl;
+
+        delete hdiv_coll;
+        delete R_space;
     }
 
-    if (verbose)
-        cout << "Test Hdiv function was sliced successfully" << endl;
+    delete pmesh;
 
     MPI_Finalize();
-
     return 0;
 }
 

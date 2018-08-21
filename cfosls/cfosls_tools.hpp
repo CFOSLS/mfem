@@ -3339,6 +3339,18 @@ double sprod(std::vector<double> vec1, std::vector<double> vec2);
 // compares pairs<int,double> with respect to the second (double) elements
 bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
 
+// forvideo = true -> all points have the same time coordinate = 0, which is good for visualizing via ParaView
+// forvideo = false -> all points are written with the actual time coordinate which corresponds to the considered time moment
+void ComputeSlices(const GridFunction& pgfun, double t0, int Nmoments, double deltat, int myid, bool forvideo);
+void computeSliceCellValues (const GridFunction& pgfun, int elind, std::vector<std::vector<double> > & pvec,
+                       std::vector<std::vector<double> > & ipoints, std::vector<int>& edgemarkers,
+                       std::vector<std::vector<double> >& cellpnts, std::vector<int>& elvertslocal, int & nip, int & vertex_count,
+                             std::vector<double> & vertvalueslocal);
+void outputSliceGridFuncVTK (const GridFunction& pgfun, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
+                                std::list<int> &celltypes, int cellstructsize, std::list<std::vector<int> > &elvrtindices,
+                                //std::list<std::vector<double> > & cellvertvalues);
+std::list<double > & cellvalues, bool forvideo);
+
 } // for namespace mfem
 
 
