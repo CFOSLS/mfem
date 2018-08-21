@@ -1971,8 +1971,22 @@ public:
             Operators_[l-1]->CopyRowStarts();
             */
 
+            HypreParMatrix * temp = ParMult(Operators_[l], P[l-1]);
+            temp->CopyColStarts();
+            temp->CopyRowStarts();
 
-            Operators_[l-1] = RAP(P[l-1], Operators_[l], P[l-1]);
+            HypreParMatrix * PT = P[l-1]->Transpose();
+            PT->CopyColStarts();
+            PT->CopyRowStarts();
+
+            // RAP brings trouble for the memory deallocation
+            //Operators_[l-1] = RAP(P[l-1], Operators_[l], P[l-1]);
+            Operators_[l-1] = ParMult(PT, temp);
+            Operators_[l-1]->CopyColStarts();
+            Operators_[l-1]->CopyRowStarts();
+
+            delete PT;
+            delete temp;
 //#ifdef COMPARE_MG
             Eliminate_ib_block(*Operators_[l-1], *essbdrtdofs_lvls[Operators_.Size() - l], *essbdrtdofs_lvls[Operators_.Size() - l] );
             HypreParMatrix * temphpmat = Operators_[l-1]->Transpose();
