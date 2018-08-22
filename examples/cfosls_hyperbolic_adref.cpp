@@ -30,7 +30,7 @@
 /// (**) This code was tested in serial and in parallel.
 /// (***) The example was tested for memory leaks with valgrind, in 3D.
 ///
-/// Typical run of this example: ./cfosls_hyperbolic_adref_Hcurl_new --whichD 3 --spaceS L2 -no-vis
+/// Typical run of this example: ./cfosls_hyperbolic_adref --whichD 3 --spaceS L2 -no-vis
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
 ///
@@ -78,6 +78,7 @@ int main(int argc, char *argv[])
     // These must be consistent with what formulation is used below.
     // Search for "using FormulType" below
     const char *space_for_S = "H1";     // "H1" or "L2"
+    // "H1" for sigma seems to produce incorrect results for now
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
 
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -370,8 +371,7 @@ int main(int argc, char *argv[])
           break;
        }
 
-       /*
-        * Just an example of how Mesh and parGridFunction slicing can be done
+       // Just an example of how Mesh and parGridFunction slicing can be done
        if (it == 0 || it == 1)
        {
            double t0 = 0.1;
@@ -379,17 +379,15 @@ int main(int argc, char *argv[])
            double deltat = 0.2;
 
            ComputeSlices(*problem->GetParMesh(), t0, Nmoments, deltat, myid);
-       }
-       */
 
-       /*
-       Vector& solution = problem->GetSol();
-       BlockVector sol_viewer(solution.GetData(), problem->GetTrueOffsets());
-       ParGridFunction * sol_sigma_h = new ParGridFunction(problem->GetPfes(0));
-       sol_sigma_h->SetFromTrueDofs(sol_viewer.GetBlock(0));
-       sol_sigma_h->ComputeSlices (t0, Nmoments, deltat, myid, false);
-       delete sol_sigma_h;
-       */
+           Vector& solution = problem->GetSol();
+           BlockVector sol_viewer(solution.GetData(), problem->GetTrueOffsets());
+           ParGridFunction * sol_sigma_h = new ParGridFunction(problem->GetPfes(0));
+           sol_sigma_h->SetFromTrueDofs(sol_viewer.GetBlock(0));
+           ComputeSlices(*sol_sigma_h, t0, Nmoments, deltat, myid, false);
+           delete sol_sigma_h;
+       }
+
    }
 
    // 8. Free the used memory.

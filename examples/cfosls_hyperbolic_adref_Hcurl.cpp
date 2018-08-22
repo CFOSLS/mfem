@@ -2,7 +2,7 @@
 ///                                      with adaptive mesh refinement,
 ///                       solved by a multigrid preconditioner in the div-free formulation.
 ///
-/// ARCHIVE CODE: Poorly tested, and some combinations of options macros can work incorrectly
+/// ARCHIVE CODE: Poorly tested, and some combinations of option macros can work incorrectly
 ///
 /// The problem considered in this example is
 ///                             du/dt + b * u = f (either 3D or 4D in space-time)
