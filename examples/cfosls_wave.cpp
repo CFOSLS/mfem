@@ -1,26 +1,28 @@
-//
-//                                MFEM CFOSLS Wave equation (+ mesh generator) solved by hypre
-//
-// Compile with: make
-//
-// Description:
-//               This example code solves a simple 4D Wave equation over [0,1]^d, d=3,4
-//               written in first-order formulation
-//                                  sigma_1 + grad u   = 0
-//                                  sigma_2 - u_t      = 0
-//                                  div_(x,t) sigma    = f
-//                       with boundary conditions:
-//                                   u(x,t)            = 0      on the spatial boundary
-//                                   u(x,0)            = u0     (initial condition on u)
-//                                   du/dt(x,0)        = ut0    (initial condition on du/dt)
-//               Here, we use a given exact solution
-//                                  u(xt) = uFun_ex(xt)
-//               and compute the corresponding r.h.s.
-//               We discretize with Raviart-Thomas finite elements (sigma), continuous H1 elements (u) and
-//		 discontinuous polynomials (mu) for the lagrange multiplier.
-//               Solver: ~ hypre with a block-diagonal preconditioner with BoomerAMG
-//
-
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D wave equation
+///                                     solved by a preconditioned MINRES.
+///
+/// The problem considered in this example is
+///                             d^2/dt^2 u - laplace(u) = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+///                             || sigma - (-dx(u), dt(u))^T || ^2 -> min
+/// where sigma is from H(div) and u is from H^1;
+/// minimizing under the constraint
+///                             div sigma = f.
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+///
+/// The problem is then solved by a preconditioned MINRES.
+///
+/// This example demonstrates usage of FOSLSProblem from mfem/cfosls/, but in addition to this
+/// shorter way of solving the problem shows the older way, explicitly defining and assembling all
+/// the bilinear forms and stuff.
+///
+/// (**) This code was tested in serial and in parallel.
+/// (***) The example was tested for memory leaks with valgrind, in 3D.
+///
+/// Typical run of this example: ./cfosls_wave --whichD 3 -no-vis
+///
+/// Another examples of the same kind are cfosls_parabolic.cpp, cfosls_laplace.cpp and cfosls_hyperbolic.cpp.
+///
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
@@ -28,19 +30,13 @@
 #include <iomanip>
 #include <list>
 
-#define MYZEROTOL (1.0e-13)
-
 using namespace std;
 using namespace mfem;
-using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
 int main(int argc, char *argv[])
 {
-    StopWatch chrono;
-
-
     // 1. Initialize MPI.
     int num_procs, myid;
     MPI_Init(&argc, &argv);
@@ -57,9 +53,17 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
 
-    const char *formulation = "cfosls";      // "cfosls" or "fosls"
-    bool with_divdiv = false;                // should be true for fosls and can be false for cfosls
+    const char *formulation = "cfosls";     // or "fosls", switches on/off the constraint
+    // should be true for fosls and can be false for cfosls
+    // if with_divdiv = true, then the formulation is as if we add a term ||div sigma - f||^2
+    // to the CFOSLS functional (then we have additional div-div term for sigma and nonzero rhs
+    // in the first equation
+    bool with_divdiv = false;
+
     bool use_ADS = false;                    // works only in 3D and for with_divdiv = true
+    int max_num_iter = 150000;
+    double rtol = 1e-12;
+    double atol = 1e-14;
 
     const char *mesh_file = "../data/cube_3d_fine.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
@@ -68,7 +72,6 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/cube4d.MFEM";
     //const char *mesh_file = "../data/pmesh_cube_for_test.mesh";
     //const char *mesh_file = "../data/mesh4_saved";
-    //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../build3/mesh_par1_id0_np_1.mesh";
     //const char *mesh_file = "../build3/mesh_par1_id0_np_2.mesh";
     //const char *mesh_file = "../data/tempmesh_frompmesh.mesh";
@@ -76,28 +79,15 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
     //const char * mesh_file = "../data/orthotope3D_fine.mesh";
 
-    //const char * meshbase_file = "../data/sphere3D_0.1to0.2.mesh";
-    //const char * meshbase_file = "../data/sphere3D_0.05to0.1.mesh";
-    //const char * meshbase_file = "../data/sphere3D_veryfine.mesh";
-    //const char * meshbase_file = "../data/beam-tet.mesh";
-    //const char * meshbase_file = "../data/escher-p3.mesh";
-    //const char * meshbase_file = "../data/orthotope3D_moderate.mesh";
-    //const char * meshbase_file = "../data/orthotope3D_fine.mesh";
-    //const char * meshbase_file = "../data/square_2d_moderate.mesh";
-    //const char * meshbase_file = "../data/square_2d_fine.mesh";
-    //const char * meshbase_file = "../data/square-disc.mesh";
-    //const char *meshbase_file = "dsadsad";
-    //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
-    //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
-
     int feorder         = 0;
 
     if (verbose)
-        cout << "Solving (C)FOSLS Wave equation with MFEM & hypre" << endl;
+        cout << "Solving (C)FOSLS Wave equation\n";
 
+    // 2. Parse command-line options.
     OptionsParser args(argc, argv);
-    //args.AddOption(&mesh_file, "-m", "--mesh",
-    //               "Mesh file to use.");
+    args.AddOption(&mesh_file, "-m", "--mesh",
+                   "Mesh file to use.");
     args.AddOption(&feorder, "-o", "--feorder",
                    "Finite element order (polynomial degree).");
     args.AddOption(&ser_ref_levels, "-sref", "--sref",
@@ -132,9 +122,6 @@ int main(int argc, char *argv[])
        args.PrintOptions(cout);
     }
 
-    if (verbose)
-        std::cout << "Running tests for the paper: \n";
-
     if (nDimensions == 3)
     {
         numsol = -34;
@@ -167,10 +154,9 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    //DEFAULTED LINEAR SOLVER OPTIONS
-    int max_num_iter = 150000;
-    double rtol = 1e-12;
-    double atol = 1e-14;
+    StopWatch chrono;
+
+    // 3. Reading the mesh and performing a prescribed number of serial and parallel refinements
 
     Mesh *mesh = NULL;
 
@@ -205,15 +191,15 @@ int main(int argc, char *argv[])
     }
 
     for (int l = 0; l < par_ref_levels; l++)
-    {
        pmesh->UniformRefinement();
-    }
 
     int dim = pmesh->Dimension();
 
     //if(dim==3) pmesh->ReorientTetMesh();
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
+
+    // 4. Define and create the problem to be solved (CFOSLS Hdiv-H1-L2 formulation here)
 
     using FormulType = CFOSLSFormulation_HdivH1Wave;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Wave;
@@ -237,11 +223,10 @@ int main(int argc, char *argv[])
     problem->Solve(verbose, checkbnd);
 
     if (verbose)
-        std::cout << "Now proceeding with the older way which involves more explicit problem construction\n";
+        std::cout << "Now proceeding with the older way which involves more "
+                     "explicit problem construction\n";
 
-
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
-    //    use the Raviart-Thomas finite elements of the specified order.
+    // 5. Define parallel finite element spaces on the parallel mesh.
 
     FiniteElementCollection *hdiv_coll, *h1_coll, *l2_coll;
     if (dim == 4)
@@ -298,7 +283,7 @@ int main(int argc, char *argv[])
         std::cout << "***********************************************************\n";
     }
 
-    // 7. Define the two BlockStructure of the problem.  block_offsets is used
+    // 6. Define the two BlockStructure of the problem.  block_offsets is used
     //    for Vector based on dof (like ParGridFunction or ParLinearForm),
     //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
     //    for the rhs and solution of the linear system).  The offsets computed
@@ -307,7 +292,6 @@ int main(int argc, char *argv[])
     int numblocks = 2;
     if (strcmp(formulation,"cfosls") == 0)
         numblocks = 3;
-
 
     Array<int> block_offsets(numblocks + 1); // number of variables + 1
     block_offsets[0] = 0;
@@ -325,18 +309,7 @@ int main(int argc, char *argv[])
         block_trueOffsets[3] = W_space->TrueVSize();
     block_trueOffsets.PartialSum();
 
-
-    // 8. Define the coefficients, analytical solution, and rhs of the PDE.
-    Wave_test Mytest(nDimensions,numsol);
-
-    ConstantCoefficient k(1.0);
-    ConstantCoefficient zero(.0);
-    Vector vzero(dim); vzero = 0.;
-    VectorConstantCoefficient vzero_coeff(vzero);
-
-    //----------------------------------------------------------
-    // Setting boundary conditions.
-    //----------------------------------------------------------
+    // 7. Define the boundary conditions (attributes)
 
     Array<int> ess_bdrS(pmesh->bdr_attributes.Max());       // applied to H^1 variable
     ess_bdrS = 1;
@@ -354,11 +327,10 @@ int main(int argc, char *argv[])
         ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
     }
 
-    // 8.5 some additional parelag stuff which is used for coarse lagrange
-    // multiplier implementation at the matrix level
+    // 8. Define the parallel grid function and parallel linear forms, solution
+    //    vector and rhs, and the analytical solution.
 
-    // 9. Define the parallel grid function and parallel linear forms, solution
-    //    vector and rhs.
+    Wave_test Mytest(nDimensions,numsol);
 
     BlockVector * x, * rhs;
     x = new BlockVector(block_offsets);
@@ -388,7 +360,6 @@ int main(int argc, char *argv[])
         {
             if (verbose)
                 cout << "No div-driven rhside term in the formulation" << endl;
-            fform->AddDomainIntegrator(new VectordivDomainLFIntegrator(zero));
         }
     else // if fosls, then we need righthand side term here
     {
@@ -400,7 +371,6 @@ int main(int argc, char *argv[])
 
     ParLinearForm *qform(new ParLinearForm);
     qform->Update(H_space, rhs->GetBlock(1), 0);
-    qform->AddDomainIntegrator(new VectorDomainLFIntegrator(vzero_coeff));
     qform->Assemble();
 
     ParLinearForm *gform(new ParLinearForm);
@@ -412,7 +382,7 @@ int main(int argc, char *argv[])
     }
 
 
-    // 10. Assemble the finite element matrices for the operator
+    // 9. Assemble the finite element matrices for the operator
     //
     //                       CFOSLS = [  A   B  D^T ]
     //                                [ B^T  C   0  ]
@@ -423,6 +393,7 @@ int main(int argc, char *argv[])
     //     B = (sigma, [ dx(S), -dtS] )
     //     C = ( [dx(S), -dtS], [dx(V),-dtV] )
     //     D = ( div(sigma), mu )
+    // (if with_dividv = false, formulation = cfosls)
 
     chrono.Clear();
     chrono.Start();
@@ -528,13 +499,12 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "System built in " << chrono.RealTime() << "s. \n";
 
-    // 11. Construct the operators for preconditioner
+    // 10. Construct the operators for preconditioner
     //
-    //                 P = [ diag(M)         0         ]
-    //                     [  0       B diag(M)^-1 B^T ]
-    //
-    //     Here we use Symmetric Gauss-Seidel to approximate the inverse of the
-    //     pressure Schur Complement.
+    //                 P = [ diag(A)         0                0                    ]
+    //                     [  0         BoomerAMG(C)          0                    ]
+    //                     [  0              0         BoomerAMG(B diag(A)^-1 B^T )]
+    // Instead of diag(A)+BoomerAMG(Schur) for the first and third blocks one can also use ADS(A)+I
     if (verbose)
     {
         if (use_ADS == true)
@@ -566,9 +536,7 @@ int main(int argc, char *argv[])
         invA = new HypreDiagScale(*A);
     }
     else // use_ADS
-    {
         invA = new HypreADS(*A, R_space);
-    }
     invA->iterative_mode = false;
 
     Operator * invL;
@@ -581,9 +549,7 @@ int main(int argc, char *argv[])
             ((HypreBoomerAMG *)invL)->iterative_mode = false;
         }
         else // use_ADS
-        {
             invL = new IdentityOperator(D->Height());
-        }
     }
 
 
@@ -595,7 +561,6 @@ int main(int argc, char *argv[])
     invC->iterative_mode = false;
 
     BlockDiagonalPreconditioner * prec = new BlockDiagonalPreconditioner(block_trueOffsets);
-    //BlockDiagonalPreconditioner prec(block_trueOffsets);
     prec->SetDiagonalBlock(0, invA);
     prec->SetDiagonalBlock(1, invC);
     if (strcmp(formulation,"cfosls") == 0)
@@ -605,7 +570,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
 
-    // 12. Solve the linear system with MINRES.
+    // 11. Solve the linear system with MINRES.
     //     Check the norm of the unpreconditioned residual.
 
     MINRESSolver solver(MPI_COMM_WORLD);
@@ -649,24 +614,27 @@ int main(int argc, char *argv[])
     }
 
     // Checking the residual in the divergence constraint
-    Vector vec1 = trueX->GetBlock(0);
-    Vector Dvec1(trueRhs->GetBlock(2).Size());
-    D->Mult(vec1, Dvec1);
-    Dvec1 -= trueRhs->GetBlock(2);
-    double local_res_norm = Dvec1.Norml2();
-    double global_res_norm = 0.0;
-    MPI_Reduce(&local_res_norm, &global_res_norm, 1,
-               MPI_DOUBLE, MPI_SUM, 0, comm);
-    double local_rhs_norm = trueRhs->GetBlock(2).Norml2();
-    double global_rhs_norm = 0.0;
-    MPI_Reduce(&local_rhs_norm, &global_rhs_norm, 1,
-               MPI_DOUBLE, MPI_SUM, 0, comm);
-    if (verbose)
+    if (strcmp(formulation,"cfosls") == 0)
     {
-        cout << "rel res_norm for the conservation law = " << global_res_norm / global_rhs_norm << endl;
+        Vector vec1 = trueX->GetBlock(0);
+        Vector Dvec1(trueRhs->GetBlock(2).Size());
+        D->Mult(vec1, Dvec1);
+        Dvec1 -= trueRhs->GetBlock(2);
+        double local_res_norm = Dvec1.Norml2();
+        double global_res_norm = 0.0;
+        MPI_Reduce(&local_res_norm, &global_res_norm, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, comm);
+        double local_rhs_norm = trueRhs->GetBlock(2).Norml2();
+        double global_rhs_norm = 0.0;
+        MPI_Reduce(&local_rhs_norm, &global_rhs_norm, 1,
+                   MPI_DOUBLE, MPI_SUM, 0, comm);
+        if (verbose)
+            cout << "rel res_norm for the conservation law = " <<
+                    global_res_norm / global_rhs_norm << "\n";
     }
-
-
+    // 12. Extract the parallel grid function corresponding to the finite element
+    //     approximation X. This is the local solution on each processor. Compute
+    //     L2 error norms.
     ParGridFunction *S(new ParGridFunction);
     S->MakeRef(H_space, x->GetBlock(1), 0);
     S->Distribute(&(trueX->GetBlock(1)));
@@ -674,10 +642,6 @@ int main(int argc, char *argv[])
     ParGridFunction *sigma(new ParGridFunction);
     sigma->MakeRef(R_space, x->GetBlock(0), 0);
     sigma->Distribute(&(trueX->GetBlock(0)));
-
-    // 13. Extract the parallel grid function corresponding to the finite element
-    //     approximation X. This is the local solution on each processor. Compute
-    //     L2 error norms.
 
     int order_quad = max(2, 2*feorder+1);
     const IntegrationRule *irs[Geometry::NumGeom];
@@ -769,7 +733,8 @@ int main(int argc, char *argv[])
 
     // Check value of functional and mass conservation
     {
-        trueX->GetBlock(2) = 0.0;
+        if (strcmp(formulation,"cfosls") == 0)
+            trueX->GetBlock(2) = 0.0;
         *trueRhs = 0.0;;
         CFOSLSop->Mult(*trueX, *trueRhs);
         double localFunctional = (*trueX)*(*trueRhs);
@@ -784,24 +749,50 @@ int main(int argc, char *argv[])
             cout << "Relative Energy Error = " << sqrt(globalFunctional+err_div*err_div)/norm_div<< "\n";
         }
 
-        ParLinearForm massform(W_space);
-        massform.AddDomainIntegrator(new DomainLFIntegrator(*(Mytest.GetRhs())));
-        massform.Assemble();
+        Vector * trueRhs_part;
+        if (strcmp(formulation,"fosls") == 0)
+        {
+            gform->Update(W_space);
+            gform->AddDomainIntegrator(new DomainLFIntegrator(*(Mytest.GetRhs())));
+            gform->Assemble();
+            trueRhs_part = gform->ParallelAssemble();
+            delete gform;
+        }
+        else
+            trueRhs_part = gform->ParallelAssemble();
 
-        double mass_loc = massform.Norml1();
+        double mass_loc = trueRhs_part->Norml1();
         double mass;
         MPI_Reduce(&mass_loc, &mass, 1,
                    MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         if (verbose)
             cout << "Sum of local mass = " << mass<< "\n";
 
-        trueRhs->GetBlock(2) -= massform;
-        double mass_loss_loc = trueRhs->GetBlock(2).Norml1();
+        Vector DtrueSigma(W_space->TrueVSize());
+        DtrueSigma = 0.0;
+        if (strcmp(formulation,"fosls") == 0)
+        {
+            ParMixedBilinearForm *Dblock(new ParMixedBilinearForm(R_space, W_space));
+            Dblock->AddDomainIntegrator(new VectorFEDivergenceIntegrator);
+            Dblock->Assemble();
+            Dblock->Finalize();
+            D = Dblock->ParallelAssemble();
+            delete Dblock;
+        }
+
+        D->Mult(trueX->GetBlock(0), DtrueSigma); // D for divergence
+        DtrueSigma -= *trueRhs_part;
+        double mass_loss_loc = DtrueSigma.Norml1();
         double mass_loss;
         MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
                    MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         if (verbose)
-            cout << "Sum of local mass loss = " << mass_loss<< "\n";
+            cout << "Sum of local mass loss = " << mass_loss << "\n";
+
+        if (strcmp(formulation,"fosls") == 0)
+            delete D;
+
+        delete trueRhs_part;
     }
 
     if (verbose)
@@ -811,10 +802,8 @@ int main(int argc, char *argv[])
 
     if(verbose)
     {
-        if ( norm_sigma > MYZEROTOL )
-        {
+        if ( norm_sigma > 1.0e-13 )
             cout << "|| sigma_ex - Pi_h sigma_ex || / || sigma_ex || = " << projection_error_sigma / norm_sigma << endl;
-        }
         else
             cout << "|| Pi_h sigma_ex || = " << projection_error_sigma << " (sigma_ex = 0) \n ";
     }
@@ -822,12 +811,13 @@ int main(int argc, char *argv[])
 
     if(verbose)
     {
-       if ( norm_S > MYZEROTOL )
+       if ( norm_S > 1.0e-13 )
            cout << "|| S_ex - Pi_h S_ex || / || S_ex || = " << projection_error_S / norm_S << endl;
        else
            cout << "|| Pi_h S_ex ||  = " << projection_error_S << " (S_ex = 0) \n";
     }
 
+    // 13. Visualization (optional)
     if (visualization)
     {
         // Make sure all ranks have sent their 'u' solution before initiating
@@ -903,7 +893,7 @@ int main(int argc, char *argv[])
 
     }
 
-    // 17. Free the used memory.
+    // 14. Free the used memory.
     delete fform;
     delete qform;
     if (strcmp(formulation,"cfosls") == 0)

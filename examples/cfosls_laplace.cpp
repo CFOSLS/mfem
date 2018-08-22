@@ -1,6 +1,28 @@
-//
-//                        MFEM CFOSLS Poisson equation
-//
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D laplace equation
+///                                     solved by a preconditioned MINRES.
+///
+/// The problem considered in this example is
+///                             laplace(u) = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+///                             || sigma - (- grad u) || ^2 -> min
+/// where sigma is from H(div) and u is from H^1;
+/// minimizing under the constraint
+///                             div sigma = f.
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+///
+/// The problem is then solved by a preconditioned MINRES.
+///
+/// This example demonstrates usage of FOSLSProblem from mfem/cfosls/, but in addition to this
+/// shorter way of solving the problem shows the older way, explicitly defining and assembling all
+/// the bilinear forms and stuff.
+///
+/// (**) This code was tested in serial and in parallel.
+/// (***) The example was tested for memory leaks with valgrind, in 3D.
+///
+/// Typical run of this example: ./cfosls_laplace --whichD 3 -no-vis
+///
+/// Another examples of the same kind are cfosls_wave.cpp, cfosls_parabolic.cpp and cfosls_hyperbolic.cpp.
+
 
 #include "mfem.hpp"
 #include <fstream>
@@ -10,26 +32,23 @@
 #include <list>
 #include <unistd.h>
 
-#define MYZEROTOL (1.0e-13)
-
 using namespace std;
 using namespace mfem;
-using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
 int main(int argc, char *argv[])
 {
-    int num_procs, myid;
-    bool visualization = 0;
-
     // 1. Initialize MPI
+    int num_procs, myid;
+
     MPI_Init(&argc, &argv);
     MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_size(comm, &num_procs);
     MPI_Comm_rank(comm, &myid);
 
     bool verbose = (myid == 0);
+    bool visualization = 0;
 
     int nDimensions     = 3;
     int numsol          = 4;
@@ -39,11 +58,15 @@ int main(int argc, char *argv[])
 
     const char *space_for_S = "H1";    // "H1" or "L2"
 
+    // if true, the mesh is refined non-uniformly
+    // and a hexahedral mesh is used instead of simplicial
     bool aniso_refine = false;
-    bool refine_t_first = false;
 
     // solver options
     int prec_option = 1;        // defines whether to use preconditioner or not, and which one
+    int max_num_iter = 150000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
 
     //const char *mesh_file = "../data/cube_3d_fine.mesh";
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
@@ -51,15 +74,15 @@ int main(int argc, char *argv[])
 
     //const char *mesh_file = "../data/cube4d_low.MFEM";
     //const char *mesh_file = "../data/cube4d_96.MFEM";
-    //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char * mesh_file = "../data/orthotope3D_fine.mesh";
 
     int feorder         = 0;
 
     if (verbose)
-        cout << "Solving CFOSLS Poisson equation with MFEM & hypre \n";
+        cout << "Solving CFOSLS Poisson equation \n";
 
+    // 2. Parse command-line options.
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file, "-m", "--mesh",
                    "Mesh file to use.");
@@ -79,11 +102,6 @@ int main(int argc, char *argv[])
     args.AddOption(&aniso_refine, "-aniso", "--aniso-refine", "-iso",
                    "--iso-refine",
                    "Using anisotropic or isotropic refinement.");
-    args.AddOption(&refine_t_first, "-refine-t-first", "--refine-time-first",
-                   "-refine-x-first", "--refine-space-first",
-                   "Refine time or space first in anisotropic refinement.");
-    args.AddOption(&space_for_S, "-spaceS", "--spaceS",
-                   "Space for S: L2 or H1.");
     args.Parse();
     if (!args.Good())
     {
@@ -99,14 +117,6 @@ int main(int argc, char *argv[])
         args.PrintOptions(cout);
     }
 
-    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 for the laplace equation!\n");
-
-    if (verbose)
-        std::cout << "Space for S: H1 \n";
-
-    if (verbose)
-        std::cout << "Running tests for the paper: \n";
-
     if (nDimensions == 3)
     {
         numsol = -3;
@@ -121,13 +131,6 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
                   << ", mesh_file = " << mesh_file << "\n";
-
-    Laplace_test Mytest(nDimensions, numsol);
-
-    ConstantCoefficient zerocoeff(0.0);
-    Vector zerovec(nDimensions);
-    zerovec = 0.0;
-    VectorConstantCoefficient zerocoeff_vec(zerovec);
 
     if (verbose)
         cout << "Number of mpi processes: " << num_procs << endl << flush;
@@ -156,10 +159,7 @@ int main(int argc, char *argv[])
     chrono_total.Clear();
     chrono_total.Start();
 
-    //DEFAULTED LINEAR SOLVER OPTIONS
-    int max_num_iter = 150000;
-    double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-14;//1e-9;//1e-12;
+    // 3. Reading the mesh and performing a prescribed number of serial and parallel refinements
 
     Mesh *mesh = NULL;
 
@@ -245,14 +245,13 @@ int main(int argc, char *argv[])
     }
 
     for (int l = 0; l < par_ref_levels; l++)
-    {
        pmesh->UniformRefinement();
-    }
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
     int dim = nDimensions;
 
+    // 4. Define and create the problem to be solved (CFOSLS Hdiv-H1-L2 formulation here)
     using FormulType = CFOSLSFormulation_Laplace;
     using FEFormulType = CFOSLSFEFormulation_HdivH1L2_Laplace;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1Laplace;
@@ -271,20 +270,10 @@ int main(int argc, char *argv[])
     problem->Solve(verbose, checkbnd);
 
     if (verbose)
-        std::cout << "Now proceeding with the older way which involves more explicit problem construction\n";
+        std::cout << "Now proceeding with the older way which involves more "
+                     "explicit problem construction\n";
 
-    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
-    ess_bdrSigma = 0;
-
-    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
-    ess_bdrS = 1;
-
-    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
-    all_bdrSigma = 1;
-
-    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
-    all_bdrS = 1;
-
+    // 5. Define parallel finite element spaces on the parallel mesh.
     FiniteElementCollection *hdiv_coll;
     ParFiniteElementSpace *R_space;
     FiniteElementCollection *l2_coll;
@@ -329,28 +318,17 @@ int main(int argc, char *argv[])
     }
     H_space = new ParFiniteElementSpace(pmesh.get(), h1_coll);
 
-    ParFiniteElementSpace * S_space;
-    if (strcmp(space_for_S,"H1") == 0)
-        S_space = H_space;
-    else // "L2"
-        S_space = W_space;
-
-    ParGridFunction * sigma_exact_finest;
-    sigma_exact_finest = new ParGridFunction(R_space);
-    sigma_exact_finest->ProjectCoefficient(*Mytest.GetSigma());
-    Vector sigma_exact_truedofs(R_space->GetTrueVSize());
-    sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
-
-    ParGridFunction * S_exact_finest;
-    Vector S_exact_truedofs;
-    S_exact_finest = new ParGridFunction(S_space);
-    S_exact_finest->ProjectCoefficient(*Mytest.GetU());
-    S_exact_truedofs.SetSize(S_space->GetTrueVSize());
-    S_exact_finest->ParallelProject(S_exact_truedofs);
-
+    // just a nickname
+    ParFiniteElementSpace * S_space = H_space;
 
     chrono.Clear();
     chrono.Start();
+
+    // 6. Define the block structure of the problem.
+    //    block_offsets is used for Vector based on dof (like ParGridFunction or ParLinearForm),
+    //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
+    //    for the rhs and solution of the linear system).  The offsets computed
+    //    here are local to the processor.
 
     int numblocks = 2;
 
@@ -389,9 +367,19 @@ int main(int argc, char *argv[])
     trueX = 0.0;
     trueRhs = 0.0;
 
-    //----------------------------------------------------------
-    // Setting boundary conditions.
-    //----------------------------------------------------------
+    // 7. Define the boundary conditions (attributes)
+
+    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
+    ess_bdrSigma = 0;
+
+    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
+    ess_bdrS = 1;
+
+    Array<int> all_bdrSigma(pmesh->bdr_attributes.Max());
+    all_bdrSigma = 1;
+
+    Array<int> all_bdrS(pmesh->bdr_attributes.Max());
+    all_bdrS = 1;
 
     if (verbose)
     {
@@ -403,6 +391,23 @@ int main(int argc, char *argv[])
         std::cout << "ess bdr S: \n";
         ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
     }
+
+    // 8. Define the parallel grid function and parallel linear forms, solution
+    //    vector and rhs, and the analytical solution.
+    Laplace_test Mytest(nDimensions, numsol);
+
+    ParGridFunction * sigma_exact_finest;
+    sigma_exact_finest = new ParGridFunction(R_space);
+    sigma_exact_finest->ProjectCoefficient(*Mytest.GetSigma());
+    Vector sigma_exact_truedofs(R_space->GetTrueVSize());
+    sigma_exact_finest->ParallelProject(sigma_exact_truedofs);
+
+    ParGridFunction * S_exact_finest;
+    Vector S_exact_truedofs;
+    S_exact_finest = new ParGridFunction(S_space);
+    S_exact_finest->ProjectCoefficient(*Mytest.GetU());
+    S_exact_truedofs.SetSize(S_space->GetTrueVSize());
+    S_exact_finest->ParallelProject(S_exact_truedofs);
 
     chrono.Stop();
     if (verbose)
@@ -425,12 +430,22 @@ int main(int argc, char *argv[])
     Constrrhsform->Assemble();
 
     ParLinearForm * Sigmarhsform = new ParLinearForm(R_space);
-    Sigmarhsform->AddDomainIntegrator(new VectorFEDomainLFIntegrator(zerocoeff_vec));
     Sigmarhsform->Assemble();
 
     ParLinearForm * Srhsform = new ParLinearForm(S_space);
-    Srhsform->AddDomainIntegrator(new DomainLFIntegrator(zerocoeff));
     Srhsform->Assemble();
+
+    // 9. Assemble the finite element matrices for the CFOSLS operator
+    //
+    //                       CFOSLS = [  M   B  D^T ]
+    //                                [ B^T  C   0  ]
+    //                                [  D   0   0  ]
+    //     where:
+    //
+    //     M = (sigma, tau)_{H(div)}
+    //     B = (sigma, - grad(S) )
+    //     C = ( grad S, grad V )
+    //     D = ( div(sigma), mu )
 
     // mass matrix for H(div)
     ParBilinearForm *Mblock(new ParBilinearForm(R_space));
@@ -482,12 +497,9 @@ int main(int argc, char *argv[])
 
     // setting block operator of the system
     MainOp->SetBlock(0,0, M);
-    if (strcmp(space_for_S,"H1") == 0) // S is present
-    {
-        MainOp->SetBlock(0,1, B);
-        MainOp->SetBlock(1,0, BT);
-        MainOp->SetBlock(1,1, C);
-    }
+    MainOp->SetBlock(0,1, B);
+    MainOp->SetBlock(1,0, BT);
+    MainOp->SetBlock(1,1, C);
     MainOp->SetBlock(0,2, ConstrT);
     MainOp->SetBlock(2,0, Constr);
     MainOp->owns_blocks = true;
@@ -572,6 +584,12 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
+    // 10. Construct the operators for preconditioner
+    //
+    //                 P = [ diag(M)         0                0                    ]
+    //                     [  0         BoomerAMG(C)          0                    ]
+    //                     [  0              0         BoomerAMG(B diag(A)^-1 B^T )]
+
     Solver *prec;
     prec = new BlockDiagonalPreconditioner(block_trueOffsets);
 
@@ -606,6 +624,9 @@ int main(int argc, char *argv[])
     chrono.Stop();
     if (verbose)
         std::cout << "Preconditioner was created in "<< chrono.RealTime() <<" seconds.\n";
+
+    // 11. Solve the linear system with MINRES.
+    //     Check the norm of the unpreconditioned residual.
 
     MINRESSolver solver(comm);
     if (verbose)
@@ -703,15 +724,15 @@ int main(int argc, char *argv[])
         std::cout << "true err sigma rel norm = " << trueerr_sigma_relnorm << "\n";
     }
 
+    // 12. Extract the parallel grid function corresponding to the finite element
+    //     approximation X. This is the local solution on each processor. Compute
+    //     L2 error norms.
+
     ParGridFunction * S = new ParGridFunction(H_space);
     S->Distribute(&(trueX.GetBlock(1)));
 
     ParGridFunction * sigma = new ParGridFunction(R_space);
     sigma->Distribute(&(trueX.GetBlock(0)));
-
-    // 13. Extract the parallel grid function corresponding to the finite element
-    //     approximation X. This is the local solution on each processor. Compute
-    //     L2 error norms.
 
     int order_quad = max(2, 2*feorder+1);
     const IntegrationRule *irs[Geometry::NumGeom];
@@ -728,7 +749,7 @@ int main(int argc, char *argv[])
 
     if (verbose)
     {
-        if ( norm_sigma > MYZEROTOL )
+        if ( norm_sigma > 1.0e-13 )
             cout << "|| sigma_h - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
         else
             cout << "|| sigma || = " << err_sigma << " (sigma_ex = 0)" << endl;
@@ -758,7 +779,6 @@ int main(int argc, char *argv[])
     }
 
     double norm_S = 0.0;
-    //if (withS)
     {
         ParGridFunction * S_exact = new ParGridFunction(S_space);
         S_exact->ProjectCoefficient(*Mytest.GetU());
@@ -767,14 +787,13 @@ int main(int argc, char *argv[])
         norm_S = ComputeGlobalLpNorm(2, *Mytest.GetU(), *pmesh, irs);
         if (verbose)
         {
-            if ( norm_S > MYZEROTOL )
+            if ( norm_S > 1.0e-13 )
                 std::cout << "|| S_h - S_ex || / || S_ex || = " <<
                              err_S / norm_S << "\n";
             else
                 std::cout << "|| S_h || = " << err_S << " (S_ex = 0) \n";
         }
 
-        if (strcmp(space_for_S,"H1") == 0)
         {
             ParFiniteElementSpace * GradSpace;
             FiniteElementCollection *hcurl_coll;
@@ -822,7 +841,7 @@ int main(int argc, char *argv[])
 
     if(verbose)
     {
-        if ( norm_sigma > MYZEROTOL )
+        if ( norm_sigma > 1.0e-13 )
         {
             cout << "|| sigma_ex - Pi_h sigma_ex || / || sigma_ex || = " << projection_error_sigma / norm_sigma << endl;
         }
@@ -830,13 +849,12 @@ int main(int argc, char *argv[])
             cout << "|| Pi_h sigma_ex || = " << projection_error_sigma << " (sigma_ex = 0) \n ";
     }
 
-    //if (withS)
     {
         double projection_error_S = S_exact->ComputeL2Error(*Mytest.GetU(), irs);
 
         if(verbose)
         {
-            if ( norm_S > MYZEROTOL )
+            if ( norm_S > 1.0e-13 )
                 cout << "|| S_ex - Pi_h S_ex || / || S_ex || = " << projection_error_S / norm_S << endl;
             else
                 cout << "|| Pi_h S_ex ||  = " << projection_error_S << " (S_ex = 0) \n";
@@ -847,12 +865,12 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Errors were computed in "<< chrono.RealTime() <<" seconds.\n";
 
+    // 13. Visualization (optional)
     if (visualization && nDimensions < 4)
     {
         char vishost[] = "localhost";
         int  visport   = 19916;
 
-        //if (withS)
         {
             socketstream S_ex_sock(vishost, visport);
             S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
@@ -968,6 +986,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
 
+    // 14. Free the used memory.
     delete Constrrhsform;
     delete Sigmarhsform;
     delete Srhsform;
