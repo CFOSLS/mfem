@@ -29,8 +29,6 @@
 #include <iomanip>
 #include <list>
 
-#define MYZEROTOL (1.0e-13)
-
 using namespace std;
 using namespace mfem;
 using std::shared_ptr;
@@ -61,7 +59,7 @@ int main(int argc, char *argv[])
     int nDimensions     = 4;
 
     int ser_ref_levels  = 0;
-    int par_ref_levels  = 0;
+    int par_ref_levels  = 1;
     int par_ref_cyl_levels = 1; // number of additional refinements to be done for the generated space-time cylinder
     int Nt              = 2;   // number of time slabs (e.g. Nsteps = 2 corresponds to 3 levels: t = 0, t = tau, t = 2 * tau
     double tau          = 0.5; // time step for a slab

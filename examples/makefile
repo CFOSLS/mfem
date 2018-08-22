@@ -31,7 +31,7 @@ PAR_EXAMPLES = ex1p ex2p ex3p ex4p ex5p ex6p ex7p ex8p ex9p ex10p ex11p ex12p\
  cfosls_hyperbolic_newsolver cfosls_laplace_newsolver cfosls_laplace laplace_mg scalability1 check_interp \   cfosls_hyperbolic_timestepping cfosls_hyperbolic_tst_multigrid \
  cfosls_hyperbolic_adref cfosls_hyperbolic_adref_Hcurl cfosls_hyperbolic_adref_Hcurl_new \
 cfosls_laplace_adref_Hcurl cfosls_laplace_adref_Hcurl_new \
-cfosls_hyperbolic_multigrid test_example
+cfosls_hyperbolic_multigrid test_example heat_timestepping
 ifeq ($(MFEM_USE_MPI),NO)
    EXAMPLES = $(SEQ_EXAMPLES)
 else
