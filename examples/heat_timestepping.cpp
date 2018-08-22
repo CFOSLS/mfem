@@ -28,16 +28,15 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
     bool verbose = (myid == 0);
-    bool compute_error = true;
+    bool compute_error = false;
     bool visualization = 0;
 
     int nDimensions     = 4; // dimension of the space + time
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 2;
+    int ser_ref_levels  = 0;
+    int par_ref_levels  = 1;
 
-    int ntsteps = 40;
-    double deltat = 1.0/40.0;
+    int ntsteps = 26;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
@@ -66,8 +65,8 @@ int main(int argc, char *argv[])
                    "Dimension of the space-time problem.");
     args.AddOption(&ntsteps, "-nst", "--nsteps",
                    "Number of time steps.");
-    args.AddOption(&deltat, "-dt", "--deltat",
-                   "Time step.");
+    //args.AddOption(&deltat, "-dt", "--deltat",
+                   //"Time step.");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -87,13 +86,15 @@ int main(int argc, char *argv[])
        args.PrintOptions(cout);
     }
 
+    double deltat = 1.0/(1.0 * ntsteps);
+
     if (verbose)
         std::cout << "Running tests for the report: \n";
 
     if (nDimensions == 3)
         mesh_file = "../data/square_2d_moderate.mesh";
     else if (nDimensions == 4)
-        mesh_file = "../data/cube_3d_moderate.mesh";
+        mesh_file = "../data/cube_3d_0.07to0.09.netgen";
     else
     {
         MFEM_ABORT("This example was desgined to work in either 3D or 4D (space-time).")
@@ -116,7 +117,7 @@ int main(int argc, char *argv[])
     StopWatch chrono;
 
     if (verbose)
-        cout << "Reading a " << nDimensions << "d mesh from the file " << mesh_file << endl;
+        cout << "Reading a " << nDimensions - 1 << "d space mesh from the file " << mesh_file << endl;
     ifstream imesh(mesh_file);
     if (!imesh)
     {
@@ -136,8 +137,8 @@ int main(int argc, char *argv[])
             mesh->UniformRefinement();
 
         if ( verbose )
-            cout << "Creating parmesh(" << nDimensions <<
-                    "d) from the serial mesh (" << nDimensions << "d)" << endl << flush;
+            cout << "Creating parmesh(" << nDimensions - 1 <<
+                    "d) from the serial mesh (" << nDimensions - 1 << "d)" << endl << flush;
         pmesh = make_shared<ParMesh>(comm, *mesh);
         delete mesh;
     }
@@ -150,6 +151,30 @@ int main(int argc, char *argv[])
     //if(spacedim==3) pmesh->ReorientTetMesh();
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
+    if (verbose)
+        std::cout << "# of timesteps: " << ntsteps << "\n"
+                  << "deltat: " << deltat << "\n";
+
+    /*
+    {
+        int local_nverts = pmesh->GetNV();
+        int global_nverts = 0;
+        MPI_Reduce(&local_nverts, &global_nverts, 1, MPI_INT, MPI_SUM, 0, comm);
+
+        if (verbose)
+            std::cout << "Global number of vertices (in the space mesh, "
+                         "with multiple counts for shared vertices) = " << global_nverts << "\n";
+        if (verbose)
+            std::cout << "Global number of vertices (with time steps, with multiple "
+                         "counts for shared vertices) = " << global_nverts * (ntsteps + 1) << "\n";
+
+        chrono.Clear();
+        chrono.Start();
+
+        MPI_Finalize();
+        return 0;
+    }
+    */
 
     // 6. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
@@ -327,8 +352,13 @@ int main(int argc, char *argv[])
         std::cout << "Global number of vertices (with time steps, with multiple "
                      "counts for shared vertices) = " << global_nverts * (ntsteps + 1) << "\n";
 
+#ifdef MFEM_DEBUG
+    StopWatch chrono_2;
+#endif
+
     chrono.Clear();
     chrono.Start();
+
     for (int n = 0; n < ntsteps; ++n)
     {
         ParLinearForm *fform = new ParLinearForm(H_space);
@@ -348,10 +378,17 @@ int main(int argc, char *argv[])
 
         trueRhs.GetBlock(0) += tempvec;
 
-        //next_sol = prev_sol;
-        next_sol = 0.0;
+        next_sol = prev_sol;
+        //next_sol = 0.0;
+
+#ifdef MFEM_DEBUG
+        chrono_2.Clear();
+        chrono_2.Start();
+#endif
+
         solver.Mult(trueRhs, next_sol);
 
+#ifdef MFEM_DEBUG
         if (verbose)
         {
            if (solver.GetConverged())
@@ -360,9 +397,9 @@ int main(int argc, char *argv[])
            else
               std::cout << "CG did not converge in " << solver.GetNumIterations()
                         << " iterations. Residual norm is " << solver.GetFinalNorm() << ".\n";
-           std::cout << "CG solver took " << chrono.RealTime() << "s. \n";
+           std::cout << "CG solver took " << chrono_2.RealTime() << "s. \n";
         }
-
+#endif
         // Computing error for S
         if (compute_error)
         {
@@ -429,7 +466,8 @@ int main(int argc, char *argv[])
         delete fform;
     }
 
-    chrono.Stop();
+    if (verbose)
+        std::cout << "Time-stepping loop was finished in " << chrono.RealTime() << "s. \n";
 
     MFEM_ASSERT(fabs(time - 1.0) < 1.0e-13, "The time interval must be [0,1]");
 
