@@ -37,17 +37,20 @@
 #include <iomanip>
 #include <list>
 
-// Adds regularization to the weighted mass matrix in Hdiv-L2 formulation
-// The report on regularization though showed that in this particular case regularization
-// doesn't help
+//#define TESTING
+//#define TESTING2
+
+//#define COARSER_MULTIPLIER
+
 //#define REGULARIZE_A
 
-// Activates a special code block where eigenvalues of the weighted mass matrix from
-// Hdiv-L2 formulation are computed
 //#define EIGENVALUE_STUDY
+
+#define MYZEROTOL (1.0e-13)
 
 using namespace std;
 using namespace mfem;
+using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 
@@ -132,24 +135,36 @@ void MyOperator::Mult(const Vector& x, Vector& y) const
     Vector tmp1(rightmat.Height());
     rightmat.Mult(x, tmp1);
     Vector tmp2(leftmat.Width());
-
+    /*
+    if (inner_niter > 1)
+    {
+        std::cout << "Implementation is wrong \n";
+        for ( int iter = 0; iter < inner_niter; ++iter)
+        {
+            middleop.Mult(tmp1, tmp2);
+            if (iter < inner_niter - 1)
+                tmp1 = tmp2;
+        }
+    }
+    else
+        middleop.Mult(tmp1, tmp2);
+    */
     middleop.Mult(tmp1, tmp2);
     leftmat.Mult(tmp2, y);
 }
 
 int main(int argc, char *argv[])
 {
-    // 1. Initialize MPI
     int num_procs, myid;
+    bool visualization = 1;
 
+    // 1. Initialize MPI
     MPI_Init(&argc, &argv);
     MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_size(comm, &num_procs);
     MPI_Comm_rank(comm, &myid);
 
     bool verbose = (myid == 0);
-
-    bool visualization = 1;
 
     int nDimensions     = 3;
     int numsol          = -3;
@@ -166,27 +181,39 @@ int main(int argc, char *argv[])
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
     bool use_ADS = false;
-    int max_iter = 150000;
-    double rtol = 1e-12;//1e-7;//1e-9;
-    double atol = 1e-14;//1e-9;//1e-12;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
 
     //const char *mesh_file = "../data/cube4d_low.MFEM";
     //const char *mesh_file = "../data/cube4d.MFEM";
+    //const char *mesh_file = "dsadsad";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
     //const char * mesh_file = "../data/orthotope3D_fine.mesh";
 
+    //const char * meshbase_file = "../data/sphere3D_0.1to0.2.mesh";
+    //const char * meshbase_file = "../data/sphere3D_0.05to0.1.mesh";
+    //const char * meshbase_file = "../data/sphere3D_veryfine.mesh";
+    //const char * meshbase_file = "../data/beam-tet.mesh";
+    //const char * meshbase_file = "../data/escher-p3.mesh";
+    //const char * meshbase_file = "../data/orthotope3D_moderate.mesh";
+    //const char * meshbase_file = "../data/orthotope3D_fine.mesh";
+    //const char * meshbase_file = "../data/square_2d_moderate.mesh";
+    //const char * meshbase_file = "../data/square_2d_fine.mesh";
+    //const char * meshbase_file = "../data/square-disc.mesh";
+    //const char *meshbase_file = "dsadsad";
+    //const char * meshbase_file = "../data/circle_fine_0.1.mfem";
+    //const char * meshbase_file = "../data/circle_moderate_0.2.mfem";
+
     int feorder         = 0;
 
     if (verbose)
-        cout << "Solving (С)FOSLS Transport equation \n";
+        cout << "Solving (С)FOSLS Transport equation with MFEM & hypre \n";
 
     OptionsParser args(argc, argv);
-    args.AddOption(&mesh_file, "-m", "--mesh",
-                   "Mesh file to use.");
+    //args.AddOption(&mesh_file, "-m", "--mesh",
+    //               "Mesh file to use.");
     args.AddOption(&feorder, "-o", "--feorder",
                    "Finite element order (polynomial degree).");
     args.AddOption(&ser_ref_levels, "-sref", "--sref",
@@ -301,28 +328,26 @@ int main(int argc, char *argv[])
         std::cout << "use_ADS = " << use_ADS << "\n";
     }
 
-    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
-                "Formulation must be cfosls or fosls!\n");
-    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0,
-                "Space for S must be H1 or L2!\n");
-    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0,
-                "Space for sigma must be Hdiv or H1!\n");
+    MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0, "Formulation must be cfosls or fosls!\n");
+    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0 || strcmp(space_for_S,"L2") == 0, "Space for S must be H1 or L2!\n");
+    MFEM_ASSERT(strcmp(space_for_sigma,"Hdiv") == 0 || strcmp(space_for_sigma,"H1") == 0, "Space for sigma must be Hdiv or H1!\n");
 
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0
-                                                       && strcmp(space_for_S,"H1") == 0),
-                "Sigma from H1vec must be coupled with S from H1!\n");
-    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0
-                                                       && use_ADS == false),
-                "ADS cannot be used when sigma is from H1vec!\n");
-    MFEM_ASSERT(!(strcmp(formulation,"fosls") == 0 && strcmp(space_for_S,"L2") == 0 && !keep_divdiv),
-                "For FOSLS formulation with S from L2 div-div term must be present!\n");
-    MFEM_ASSERT(!(strcmp(formulation,"cfosls") == 0 && strcmp(space_for_S,"H1") == 0 && keep_divdiv),
-                "For CFOSLS formulation with S from H1 div-div term must not be present for sigma!\n");
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && strcmp(space_for_S,"H1") == 0), "Sigma from H1vec must be coupled with S from H1!\n");
+    MFEM_ASSERT(!strcmp(space_for_sigma,"H1") == 0 || (strcmp(space_for_sigma,"H1") == 0 && use_ADS == false), "ADS cannot be used when sigma is from H1vec!\n");
+    MFEM_ASSERT(!(strcmp(formulation,"fosls") == 0 && strcmp(space_for_S,"L2") == 0 && !keep_divdiv), "For FOSLS formulation with S from L2 div-div term must be present!\n");
+    MFEM_ASSERT(!(strcmp(formulation,"cfosls") == 0 && strcmp(space_for_S,"H1") == 0 && keep_divdiv), "For CFOSLS formulation with S from H1 div-div term must not be present for sigma!\n");
+
+
 
     if (verbose)
         std::cout << "Number of mpi processes: " << num_procs << "\n";
 
     StopWatch chrono;
+
+    //DEFAULTED LINEAR SOLVER OPTIONS
+    int max_iter = 150000;
+    double rtol = 1e-12;//1e-7;//1e-9;
+    double atol = 1e-14;//1e-9;//1e-12;
 
     Mesh *mesh = NULL;
 
@@ -393,6 +418,17 @@ int main(int argc, char *argv[])
             }
         }
         pmesh->SetVertices(vert_coos);
+
+        /*
+        std::stringstream fname;
+        fname << "checkmesh.mesh";
+        std::ofstream ofid(fname.str().c_str());
+        ofid.precision(8);
+        pmesh->Print(ofid);
+
+        MPI_Finalize();
+        return 0;
+        */
     }
 
     //if(dim==3) pmesh->ReorientTetMesh();
@@ -830,6 +866,66 @@ int main(int argc, char *argv[])
        delete Bblock;
    }
 
+#ifdef TESTING
+    Array<int> block_truetestOffsets(3); // number of variables + 1
+    block_truetestOffsets[0] = 0;
+    //block_truetestOffsets[1] = C_space->TrueVSize();
+    block_truetestOffsets[1] = Sigma_space->TrueVSize();
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        block_truetestOffsets[2] = S_space->TrueVSize();
+    block_truetestOffsets.PartialSum();
+
+    BlockOperator *TestOp = new BlockOperator(block_truetestOffsets);
+
+    TestOp->SetBlock(0,0, A);
+    TestOp->SetBlock(0,1, BT);
+    TestOp->SetBlock(1,0, B);
+    TestOp->SetBlock(1,1, C);
+
+    IterativeSolver * testsolver;
+    testsolver = new CGSolver(comm);
+    if (verbose)
+        cout << "Linear test solver: CG \n";
+
+    testsolver->SetAbsTol(atol);
+    testsolver->SetRelTol(rtol);
+    testsolver->SetMaxIter(max_iter);
+    testsolver->SetOperator(*TestOp);
+
+    testsolver->SetPrintLevel(0);
+
+    BlockVector truetestX(block_truetestOffsets), truetestRhs(block_truetestOffsets);
+    truetestX = 0.0;
+    truetestRhs = 1.0;
+
+    fform->ParallelAssemble(truetestRhs.GetBlock(0));
+    if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+        qform->ParallelAssemble(truetestRhs.GetBlock(1));
+
+    truetestX = 0.0;
+    testsolver->Mult(truetestRhs, truetestX);
+
+    chrono.Stop();
+
+    if (verbose)
+    {
+        if (testsolver->GetConverged())
+            std::cout << "Linear solver converged in " << testsolver->GetNumIterations()
+                      << " iterations with a residual norm of " << testsolver->GetFinalNorm() << ".\n";
+        else
+            std::cout << "Linear solver did not converge in " << testsolver->GetNumIterations()
+                      << " iterations. Residual norm is " << testsolver->GetFinalNorm() << ".\n";
+        std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+    }
+
+    delete TestOp;
+    delete testsolver;
+
+    MPI_Finalize();
+    return 0;
+#endif
+
+
    //----------------
    //  D Block:
    //-----------------
@@ -852,6 +948,65 @@ int main(int argc, char *argv[])
 
       delete Dblock;
    }
+
+#ifdef TESTING2
+   {
+       MFEM_ASSERT(strcmp(formulation,"cfosls") == 0, "For TESTING2 we need gform thus cfosls formulation \n");
+
+       Array<int> block_truetestOffsets(3); // number of variables + 1
+       block_truetestOffsets[0] = 0;
+       //block_truetestOffsets[1] = C_space->TrueVSize();
+       block_truetestOffsets[1] = Sigma_space->TrueVSize();
+       if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+           block_truetestOffsets[2] = W_space->TrueVSize();
+       block_truetestOffsets.PartialSum();
+
+       BlockOperator *TestOp = new BlockOperator(block_truetestOffsets);
+
+       TestOp->SetBlock(0,0, A);
+       TestOp->SetBlock(0,1, DT);
+       TestOp->SetBlock(1,0, D);
+
+       IterativeSolver * testsolver;
+       testsolver = new MINRESSolver(comm);
+       if (verbose)
+           cout << "Linear test solver: MINRES \n";
+
+       testsolver->SetAbsTol(atol);
+       testsolver->SetRelTol(rtol);
+       testsolver->SetMaxIter(max_iter);
+       testsolver->SetOperator(*TestOp);
+
+       testsolver->SetPrintLevel(1);
+
+       BlockVector truetestX(block_truetestOffsets), truetestRhs(block_truetestOffsets);
+       truetestX = 0.0;
+       truetestRhs = 0.0;
+
+       gform->ParallelAssemble(truetestRhs.GetBlock(1));
+
+       truetestX = 0.0;
+       testsolver->Mult(truetestRhs, truetestX);
+
+       chrono.Stop();
+
+       if (verbose)
+       {
+           if (testsolver->GetConverged())
+               std::cout << "Linear solver converged in " << testsolver->GetNumIterations()
+                         << " iterations with a residual norm of " << testsolver->GetFinalNorm() << ".\n";
+           else
+               std::cout << "Linear solver did not converge in " << testsolver->GetNumIterations()
+                         << " iterations. Residual norm is " << testsolver->GetFinalNorm() << ".\n";
+           std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
+       }
+   }
+
+
+   MPI_Finalize();
+   return 0;
+#endif
+
 
    //=======================================================
    // Setting up the block system Matrix
