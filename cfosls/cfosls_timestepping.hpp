@@ -1048,8 +1048,8 @@ protected:
     bool verbose;
 
     // Temporary vectors used in Mult()
-    Vector init_vec;
-    Vector init_vec2;
+    mutable Vector init_vec;
+    mutable Vector init_vec2;
 public:
     virtual ~TSTSpecialSolveOp() {}
 
