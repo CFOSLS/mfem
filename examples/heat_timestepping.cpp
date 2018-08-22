@@ -13,10 +13,13 @@ using namespace mfem;
 using std::shared_ptr;
 using std::make_shared;
 
-double tdf_rhs_3D(const Vector & vec, double t);
-double tdf_rhs_4D(const Vector & vec, double t);
+// analytical solution and rhs for 3D (2d+time)
 double tdf_u_3D(const Vector & vec, double t);
+double tdf_rhs_3D(const Vector & vec, double t);
+
+// analytical solution and rhs for 4D (3d+time)
 double tdf_u_4D(const Vector & vec, double t);
+double tdf_rhs_4D(const Vector & vec, double t);
 
 int main(int argc, char *argv[])
 {
@@ -36,6 +39,7 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
 
+    // Number of time-steps (deltat is computed as 1/ntsteps below)
     int ntsteps = 26;
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
@@ -47,11 +51,16 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
     //const char * mesh_file = "../data/orthotope3D_fine.mesh";
 
+    int max_num_iter = 10000;
+    double rtol = 1e-12;
+    double atol = 1e-14;
+
     int feorder         = 0;
 
     if (verbose)
-        cout << "Solving heat equation with time-stepping \n";
+        cout << "Solving heat equation with implicit Euler for time-stepping \n";
 
+    // 2. Parse command-line options.
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file, "-m", "--mesh",
                    "Mesh file to use (must define a space only mesh).");
@@ -65,8 +74,6 @@ int main(int argc, char *argv[])
                    "Dimension of the space-time problem.");
     args.AddOption(&ntsteps, "-nst", "--nsteps",
                    "Number of time steps.");
-    //args.AddOption(&deltat, "-dt", "--deltat",
-                   //"Time step.");
     args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -86,10 +93,8 @@ int main(int argc, char *argv[])
        args.PrintOptions(cout);
     }
 
+    // define deltat = time step
     double deltat = 1.0/(1.0 * ntsteps);
-
-    if (verbose)
-        std::cout << "Running tests for the report: \n";
 
     if (nDimensions == 3)
         mesh_file = "../data/square_2d_moderate.mesh";
@@ -106,22 +111,21 @@ int main(int argc, char *argv[])
     if (verbose)
         cout << "Number of mpi processes: " << num_procs << endl << flush;
 
-    int max_num_iter = 10000;
-    double rtol = 1e-12;
-    double atol = 1e-14;
+    StopWatch chrono;
+
+    // 3. Reading the mesh and performing a prescribed number of serial and parallel refinements
 
     Mesh *mesh = NULL;
 
     shared_ptr<ParMesh> pmesh;
 
-    StopWatch chrono;
-
     if (verbose)
-        cout << "Reading a " << nDimensions - 1 << "d space mesh from the file " << mesh_file << endl;
+        cout << "Reading a " << nDimensions - 1 << "d space mesh from the file "
+             << mesh_file << "\n";
     ifstream imesh(mesh_file);
     if (!imesh)
     {
-         std::cerr << "\nCan not open mesh file: " << mesh_file << '\n' << std::endl;
+         std::cerr << "\nCan not open mesh file: " << mesh_file << "\n";
          MPI_Finalize();
          return -2;
     }
@@ -138,7 +142,7 @@ int main(int argc, char *argv[])
 
         if ( verbose )
             cout << "Creating parmesh(" << nDimensions - 1 <<
-                    "d) from the serial mesh (" << nDimensions - 1 << "d)" << endl << flush;
+                    "d) from the serial mesh (" << nDimensions - 1 << "d) \n";
         pmesh = make_shared<ParMesh>(comm, *mesh);
         delete mesh;
     }
@@ -155,29 +159,8 @@ int main(int argc, char *argv[])
         std::cout << "# of timesteps: " << ntsteps << "\n"
                   << "deltat: " << deltat << "\n";
 
-    /*
-    {
-        int local_nverts = pmesh->GetNV();
-        int global_nverts = 0;
-        MPI_Reduce(&local_nverts, &global_nverts, 1, MPI_INT, MPI_SUM, 0, comm);
-
-        if (verbose)
-            std::cout << "Global number of vertices (in the space mesh, "
-                         "with multiple counts for shared vertices) = " << global_nverts << "\n";
-        if (verbose)
-            std::cout << "Global number of vertices (with time steps, with multiple "
-                         "counts for shared vertices) = " << global_nverts * (ntsteps + 1) << "\n";
-
-        chrono.Clear();
-        chrono.Start();
-
-        MPI_Finalize();
-        return 0;
-    }
-    */
-
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
-    //    use the Raviart-Thomas finite elements of the specified order.
+    // 4. Define a parallel finite element space on the parallel mesh. Here we
+    //    use the linear (or of order (feorder+1)) Lagrange elements for H1.
 
     FiniteElementCollection *h1_coll;
     h1_coll = new H1_FECollection(feorder+1, spacedim);
@@ -193,7 +176,7 @@ int main(int argc, char *argv[])
         std::cout << "***********************************************************\n";
     }
 
-    // 7. Define the block structure of the problem.
+    // 5. Define the block structure of the problem.
     //    block_offsets is used for Vector based on dof (like ParGridFunction or ParLinearForm),
     //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
     //    for the rhs and solution of the linear system).  The offsets computed
@@ -217,7 +200,19 @@ int main(int argc, char *argv[])
     trueX = 0.0;
     trueRhs = 0.0;
 
-    // 8. Define the coefficients, analytical solution, and rhs of the PDE.
+    // 6. Define boundary conditions (attributes)
+
+    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
+    ess_bdrS = 1;
+
+    if (verbose)
+    {
+        std::cout << "Boundary conditions: \n";
+        std::cout << "ess bdr S: \n";
+        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
+    }
+
+    // 7. Define the coefficients, analytical solution, and rhs of the PDE.
 
     FunctionCoefficient * rhs_func_coeff;
     if (spacedim == 2)
@@ -233,21 +228,7 @@ int main(int argc, char *argv[])
 
     ConstantCoefficient invtau_coeff(1.0/deltat);
 
-    //----------------------------------------------------------
-    // Setting boundary conditions.
-    //----------------------------------------------------------
-
-    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
-    ess_bdrS = 1;
-
-    if (verbose)
-    {
-        std::cout << "Boundary conditions: \n";
-        std::cout << "ess bdr S: \n";
-        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
-    }
-
-    // 10. Assemble the finite element matrices for the implicit in time approximation:
+    // 8. Assemble the finite element matrices for the implicit in time approximation:
     //
     //                       M * (u^{n+1} - u^n) / tau  + L * u^{n+1} = M * f^{n+1}
     //
@@ -257,6 +238,7 @@ int main(int argc, char *argv[])
     //     where:
     //     M = (u,v), mass matrix for H^1
     //     L = (-laplace(u),v) = (grad u, grad v)
+    // As a preconditioner we use BoomerAMG which works nicely for this type of elliptic operators
 
     chrono.Clear();
     chrono.Start();
@@ -269,14 +251,6 @@ int main(int argc, char *argv[])
     Ablock->EliminateEssentialBC(ess_bdrS);
     Ablock->Finalize();
     HypreParMatrix *A = Ablock->ParallelAssemble();
-    delete Ablock;
-
-    Ablock = new ParBilinearForm(H_space);
-    Ablock->AddDomainIntegrator(new DiffusionIntegrator);
-    Ablock->AddDomainIntegrator(new MassIntegrator(invtau_coeff));
-    Ablock->Assemble();
-    Ablock->Finalize();
-    HypreParMatrix *A_nobnd = Ablock->ParallelAssemble();
     delete Ablock;
 
     ParBilinearForm *Mblock = new ParBilinearForm(H_space);
@@ -310,6 +284,7 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Preconditioner built in " << chrono.RealTime() << "s. \n";
 
+    // 9. Create a CG solver
     CGSolver solver(MPI_COMM_WORLD);
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
@@ -318,12 +293,17 @@ int main(int argc, char *argv[])
     solver.SetPreconditioner(*prec);
     solver.SetPrintLevel(0);
 
+    // 10. Main loop over time iterations.
+
+    // current time
+    double time = 0.0;
+
+    // step for visualization (if visualization = true_
+    int n_step_viz = 5;
+
+    // creating initial data on true dofs
     Array<int> essbdr_tdofs;
     H_space->GetEssentialTrueDofs(ess_bdrS, essbdr_tdofs);
-
-    // Main loop over time iterations.
-    double time = 0.0;
-    int n_step_viz = 5;
 
     u_func_coeff->SetTime(time);
     ParGridFunction *S_exact = new ParGridFunction(H_space);
@@ -338,6 +318,8 @@ int main(int argc, char *argv[])
 
     Vector next_sol(H_space->GetTrueVSize());
 
+    // Reporting how many vertices there will be in total (not accurate count,
+    // shared vertices are accounted for multiple times)
     int local_nverts = pmesh->GetNV();
     int global_nverts = 0;
     MPI_Reduce(&local_nverts, &global_nverts, 1, MPI_INT, MPI_SUM, 0, comm);
@@ -469,13 +451,14 @@ int main(int argc, char *argv[])
     if (verbose)
         std::cout << "Time-stepping loop was finished in " << chrono.RealTime() << "s. \n";
 
-    MFEM_ASSERT(fabs(time - 1.0) < 1.0e-13, "The time interval must be [0,1]");
+    MFEM_ASSERT(fabs(time - 1.0) < 1.0e-13, "The time interval must be [0,1] "
+                                            "(remove the assertion if this is not what is neeeded)");
 
+    // 11. Free the used memory.
     delete u_func_coeff;
     delete rhs_func_coeff;
 
     delete CFOSLSop;
-    delete A_nobnd;
     delete prec;
 
     delete S;

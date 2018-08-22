@@ -30,6 +30,7 @@
 /// change the source code, around 4.
 ///
 /// Another examples of the same kind are cfosls_parabolic.cpp, cfosls_wave.cpp and cfosls_laplace.cpp.
+/// These are much cleaner than this one, since the are less options for the formulations.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -51,7 +52,6 @@ using namespace std;
 using namespace mfem;
 using std::shared_ptr;
 using std::make_shared;
-
 
 // Some Operator inheriting classes used for analyzing the preconditioner
 
@@ -159,7 +159,8 @@ int main(int argc, char *argv[])
     int par_ref_levels  = 0;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls" (switch on/off constraint)
-    const char *space_for_S = "L2";     // "H1" or "L2"
+    const char *space_for_S = "H1";     // "H1" or "L2"
+    // space_for_sigma = "H1" doesn't work now! The solver doesn't converge
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     // in case space_for_S = "L2" defines whether we eliminate S from the system
     bool eliminateS = false;
@@ -174,7 +175,6 @@ int main(int argc, char *argv[])
 
     const char *mesh_file = "../data/cube_3d_moderate.mesh";
     //const char *mesh_file = "../data/square_2d_moderate.mesh";
-
     //const char *mesh_file = "../data/cube4d_low.MFEM";
     //const char *mesh_file = "../data/cube4d.MFEM";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
@@ -1009,7 +1009,7 @@ int main(int argc, char *argv[])
    solver.iterative_mode = false;
    if (prec_option > 0)
         solver.SetPreconditioner(*prec);
-   solver.SetPrintLevel(1);
+   solver.SetPrintLevel(0);
    trueX = 0.0;
 
    chrono.Clear();
@@ -1083,37 +1083,49 @@ int main(int argc, char *argv[])
       irs[i] = &(IntRules.Get(i, order_quad));
    }
 
-
    double err_sigma = sigma->ComputeL2Error(*Mytest.GetSigma(), irs);
    double norm_sigma = ComputeGlobalLpNorm(2, *Mytest.GetSigma(), *pmesh, irs);
    if (verbose)
        cout << "|| sigma - sigma_ex || / || sigma_ex || = " << err_sigma / norm_sigma << endl;
 
-   DiscreteLinearOperator Div(Sigma_space, W_space);
-   Div.AddDomainInterpolator(new DivergenceInterpolator());
-   ParGridFunction DivSigma(W_space);
-   Div.Assemble();
-   Div.Mult(*sigma, DivSigma);
+   double err_div = 0.0;
+   double norm_div = 0.0;
 
-   double err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
-   double norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
-
-   if (verbose)
+   if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
    {
-       if (fabs(norm_div) > 1.0e-13)
-           cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
-                 << err_div/norm_div  << "\n";
-       else
-           cout << "|| div sigma_h || ( div (sigma_ex) == 0) = "
-                 << err_div << "\n";
+       DiscreteLinearOperator Div(Sigma_space, W_space);
+       Div.AddDomainInterpolator(new DivergenceInterpolator());
+       ParGridFunction DivSigma(W_space);
+       Div.Assemble();
+       Div.Mult(*sigma, DivSigma);
+
+       err_div = DivSigma.ComputeL2Error(*Mytest.GetRhs(),irs);
+       norm_div = ComputeGlobalLpNorm(2, *Mytest.GetRhs(), *pmesh, irs);
+
+       if (verbose)
+       {
+           if (fabs(norm_div) > 1.0e-13)
+               cout << "|| div (sigma_h - sigma_ex) || / ||div (sigma_ex)|| = "
+                     << err_div/norm_div  << "\n";
+           else
+               cout << "|| div sigma_h || ( div (sigma_ex) == 0) = "
+                     << err_div << "\n";
+       }
+
+       if (verbose)
+       {
+           cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
+           cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
+                     << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
+       }
+   }
+   else
+   {
+       if (verbose)
+           std::cout << "Divergence operator has not been implemented for vector H^1 space \n";
    }
 
-   if (verbose)
-   {
-       cout << "Actually it will be ~ continuous L2 + discrete L2 for divergence" << endl;
-       cout << "|| sigma_h - sigma_ex ||_Hdiv / || sigma_ex ||_Hdiv = "
-                 << sqrt(err_sigma*err_sigma + err_div * err_div)/sqrt(norm_sigma*norm_sigma + norm_div * norm_div)  << "\n";
-   }
+
 
    // Computing error for S
 
@@ -1180,15 +1192,32 @@ int main(int argc, char *argv[])
        {
            if (strcmp(space_for_S,"H1") == 0) // S is present
            {
-               cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
-               cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
-               cout << "Smth is wrong with the functional computation for H1 case \n";
-               cout << "Relative Energy Error = " << sqrt(globalFunctional+norm_div*norm_div)/norm_div << "\n";
+               if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+               {
+                   cout << "|| sigma_h - L(S_h) ||^2 + || div_h (bS_h) - f ||^2 = " <<
+                           globalFunctional+err_div*err_div << "\n";
+                   cout << "|| f ||^2 = " << norm_div*norm_div  << "\n";
+                   cout << "Smth is wrong with the functional computation for H1 case \n";
+                   cout << "Relative Energy Error = " << sqrt(globalFunctional+norm_div*norm_div)/norm_div << "\n";
+               }
+               else
+               {
+                   cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+               }
            }
            else // if S is from L2
            {
-               cout << "|| sigma_h - L(S_h) ||^2 + || div_h (sigma_h) - f ||^2 = " << globalFunctional+err_div*err_div << "\n";
-               cout << "Energy Error = " << sqrt(globalFunctional+err_div*err_div) << "\n";
+               if (strcmp(space_for_sigma,"Hdiv") == 0) // sigma is from Hdiv
+               {
+                   cout << "|| sigma_h - L(S_h) ||^2 + || div_h (sigma_h) - f ||^2 = " <<
+                           globalFunctional+err_div*err_div << "\n";
+                   cout << "Energy Error = " << sqrt(globalFunctional+err_div*err_div) << "\n";
+               }
+               else
+               {
+                   cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
+                   cout << "Energy Error = " << sqrt(globalFunctional) << "\n";
+               }
            }
        }
 
@@ -1240,9 +1269,6 @@ int main(int argc, char *argv[])
       u_sock.precision(8);
       u_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'sigma_exact'"
              << endl;
-      // Make sure all ranks have sent their 'u' solution before initiating
-      // another set of GLVis connections (one from each rank):
-
 
       socketstream uu_sock(vishost, visport);
       uu_sock << "parallel " << num_procs << " " << myid << "\n";

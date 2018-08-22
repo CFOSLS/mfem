@@ -182,7 +182,7 @@ int main(int argc, char *argv[])
     // This must be consistent with what formulation is used below.
     // Search for "using FormulType" below
     const char *space_for_S = "H1";     // "H1" or "L2"
-    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
+    const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1" ("H1" needs to be fixed)
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
@@ -195,6 +195,9 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
     //const char *mesh_file = "../data/orthotope3D_fine.mesh";
+    //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
+    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
     int feorder         = 0;
 
@@ -287,14 +290,6 @@ int main(int argc, char *argv[])
     using ProblemType = FOSLSProblem_HdivL2hyp;
 #endif
     */
-
-    //mesh_file = "../data/netgen_cylinder_mesh_0.1to0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
-    //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
-
-    //mesh_file = "../data/pmesh_check.mesh";
-    mesh_file = "../data/cube_3d_moderate.mesh";
-    //mesh_file = "../examples/amr_1storder_it_10.mesh";
 
 #ifdef CYLINDER_CUBE_TEST
     if (verbose)
@@ -412,9 +407,7 @@ int main(int argc, char *argv[])
     }
 
     for (int l = 0; l < par_ref_levels; l++)
-    {
        pmesh->UniformRefinement();
-    }
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
