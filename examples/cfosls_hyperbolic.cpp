@@ -20,6 +20,8 @@
 /// This example demonstrates usage of several classes from mfem/cfosls/, such as
 /// FOSLSProblem and show its equivalence to the standard MFEM's way of assembling and solving the problem
 ///
+/// (*) There are a lot of options for the formulation in this example, many of them were not tested in a while.
+/// Hence they might work incorrectly.
 /// (**) This code was tested in serial and in parallel.
 /// (***) The example was tested for memory leaks with valgrind, in 3D.
 ///
@@ -27,8 +29,7 @@
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
 ///
-/// Another examples on adaptive mesh refinement, are cfosls_laplace_adref_Hcurl_new.cpp,
-/// cfosls_laplace_adref_Hcurl.cpp and cfosls_hyperbolic_adref_Hcurl.cpp.
+/// Another examples of the same kind are cfosls_parabolic.cpp, cfosls_wave.cpp and cfosls_laplace.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -157,16 +158,17 @@ int main(int argc, char *argv[])
     int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
-    const char *formulation = "cfosls"; // "cfosls" or "fosls"
+    const char *formulation = "cfosls"; // "cfosls" or "fosls" (switch on/off constraint)
     const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
-    bool eliminateS = false;            // in case space_for_S = "L2" defines whether we eliminate S from the system
-    bool keep_divdiv = false;           // in case space_for_S = "L2" defines whether we keep div-div term in the system
+    // in case space_for_S = "L2" defines whether we eliminate S from the system
+    bool eliminateS = false;
+    // in case space_for_S = "L2" defines whether we keep div-div term in the system
+    bool keep_divdiv = false;
 
     // solver options
     int prec_option = 1; //defines whether to use preconditioner or not, and which one
     bool use_ADS = false;
-    int max_iter = 150000;
     double rtol = 1e-12;//1e-7;//1e-9;
     double atol = 1e-14;//1e-9;//1e-12;
 
@@ -177,12 +179,14 @@ int main(int argc, char *argv[])
     //const char *mesh_file = "../data/cube4d.MFEM";
     //const char *mesh_file = "../data/orthotope3D_moderate.mesh";
     //const char *mesh_file = "../data/sphere3D_0.1to0.2.mesh";
-    //const char * mesh_file = "../data/orthotope3D_fine.mesh";
+    //const char *mesh_file = "../data/orthotope3D_fine.mesh";
 
     int feorder         = 0;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation \n";
+
+    // 2. Parse command-line options.
 
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file, "-m", "--mesh",
@@ -262,10 +266,6 @@ int main(int argc, char *argv[])
         std::cout << "eliminated \n";
     }
 
-    if (verbose)
-        std::cout << "Running tests for the paper: \n";
-
-    /*
     if (nDimensions == 3)
     {
         numsol = -3;
@@ -276,7 +276,6 @@ int main(int argc, char *argv[])
         numsol = -4;
         mesh_file = "../data/cube4d_96.MFEM";
     }
-    */
 
     mesh_file = "../data/cube_3d_moderate.mesh";
 
@@ -297,9 +296,7 @@ int main(int argc, char *argv[])
     }
 
     if (verbose)
-    {
         std::cout << "use_ADS = " << use_ADS << "\n";
-    }
 
     MFEM_ASSERT(strcmp(formulation,"cfosls") == 0 || strcmp(formulation,"fosls") == 0,
                 "Formulation must be cfosls or fosls!\n");
@@ -324,6 +321,7 @@ int main(int argc, char *argv[])
 
     StopWatch chrono;
 
+    // 4. Reading the mesh and performing a prescribed number of serial and parallel refinements
     Mesh *mesh = NULL;
 
     shared_ptr<ParMesh> pmesh;
@@ -354,7 +352,6 @@ int main(int argc, char *argv[])
         return -1;
 
     }
-    //mesh = new Mesh(2, 2, 2, Element::HEXAHEDRON, 1);
 
     if (mesh) // if only serial mesh was generated previously, parallel mesh is initialized here
     {
@@ -371,6 +368,7 @@ int main(int argc, char *argv[])
     for (int l = 0; l < par_ref_levels; l++)
        pmesh->UniformRefinement();
 
+    // for the cylinder test in the cube, we dilate the mesh so that it covers [-1,1]^d x [0,1]
     if (numsol == 8)
     {
         Vector vert_coos;
@@ -399,7 +397,7 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
-    // 6. Define a parallel finite element space on the parallel mesh. Here we
+    // 5. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
     int dim = nDimensions;
 
@@ -486,7 +484,7 @@ int main(int argc, char *argv[])
        std::cout << "***********************************************************\n";
     }
 
-    // 7. Define the two BlockStructure of the problem.  block_offsets is used
+    // 6. Define the two BlockStructure of the problem.  block_offsets is used
     //    for Vector based on dof (like ParGridFunction or ParLinearForm),
     //    block_trueOffstes is used for Vector based on trueDof (HypreParVector
     //    for the rhs and solution of the linear system).  The offsets computed
@@ -573,12 +571,7 @@ int main(int argc, char *argv[])
     x.GetBlock(0) = *sigma_exact;
     x.GetBlock(1) = *S_exact;
 
-   // 8. Define the coefficients, analytical solution, and rhs of the PDE.
-   ConstantCoefficient zero(.0);
-
-   //----------------------------------------------------------
-   // Setting boundary conditions.
-   //----------------------------------------------------------
+   // 7. Setting boundary conditions (attirbutes)
 
    Array<int> ess_bdrS(pmesh->bdr_attributes.Max());
    Array<int> ess_bdrSigma(pmesh->bdr_attributes.Max());
@@ -587,6 +580,9 @@ int main(int argc, char *argv[])
    ess_bdrS = 0;
    ess_bdrSigma = 0;
 
+   // setting specially boundary attributes for cylinder test in the cube
+   // for now, we make the problem overconstrained, see more comments around
+   // OVERCONSTRAINED macro in the cfosls_hyperbolic_adref_Hcurl_new.cpp
    if (numsol == 8)
    {
        MFEM_ASSERT(pmesh->bdr_attributes.Max() == 6, "");
@@ -621,10 +617,11 @@ int main(int argc, char *argv[])
        std::cout << "ess bdr S: \n";
        ess_bdrS.Print(std::cout, pmesh->bdr_attributes.Max());
    }
-   //-----------------------
 
-   // 9. Define the parallel grid function and parallel linear forms, solution
+   // 8. Define the parallel grid function and parallel linear forms, solution
    //    vector and rhs.
+
+   ConstantCoefficient zero(.0);
 
    ParLinearForm *fform = new ParLinearForm(Sigma_space);
    if (strcmp(space_for_S,"L2") == 0 && keep_divdiv) // if L2 for S and we keep div-div term
@@ -662,8 +659,7 @@ int main(int argc, char *argv[])
        gform->Assemble();
    }
 
-   // 10. Assemble the finite element matrices for the CFOSLS operator  A
-   //     where:
+   // 9. Assemble the finite element matrices for the CFOSLS operator
 
    ParBilinearForm *Ablock(new ParBilinearForm(Sigma_space));
    HypreParMatrix *A;
@@ -853,42 +849,43 @@ int main(int argc, char *argv[])
       delete Dblock;
    }
 
+   // 10. Setting up the linear system to be solved and a preconditioner for it's matrix
    //=======================================================
    // Setting up the block system Matrix
    //-------------------------------------------------------
 
-  tempblknum = 0;
-  fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
-  tempblknum++;
-  if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-  {
-    qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
-    tempblknum++;
-  }
-  if (strcmp(formulation,"cfosls") == 0)
-     gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+   tempblknum = 0;
+   fform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+   tempblknum++;
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+   {
+     qform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
+     tempblknum++;
+   }
+   if (strcmp(formulation,"cfosls") == 0)
+      gform->ParallelAssemble(trueRhs.GetBlock(tempblknum));
 
-  BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets);
-  CFOSLSop->SetBlock(0,0, A);
-  if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
-  {
-      CFOSLSop->SetBlock(0,1, BT);
-      CFOSLSop->SetBlock(1,0, B);
-      CFOSLSop->SetBlock(1,1, C);
-      if (strcmp(formulation,"cfosls") == 0)
-      {
-        CFOSLSop->SetBlock(0,2, DT);
-        CFOSLSop->SetBlock(2,0, D);
-      }
-  }
-  else // no S
-      if (strcmp(formulation,"cfosls") == 0)
-      {
-        CFOSLSop->SetBlock(0,1, DT);
-        CFOSLSop->SetBlock(1,0, D);
-      }
+   BlockOperator *CFOSLSop = new BlockOperator(block_trueOffsets);
+   CFOSLSop->SetBlock(0,0, A);
+   if (strcmp(space_for_S,"H1") == 0 || !eliminateS) // S is present
+   {
+       CFOSLSop->SetBlock(0,1, BT);
+       CFOSLSop->SetBlock(1,0, B);
+       CFOSLSop->SetBlock(1,1, C);
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+         CFOSLSop->SetBlock(0,2, DT);
+         CFOSLSop->SetBlock(2,0, D);
+       }
+   }
+   else // no S
+       if (strcmp(formulation,"cfosls") == 0)
+       {
+         CFOSLSop->SetBlock(0,1, DT);
+         CFOSLSop->SetBlock(1,0, D);
+       }
 
-  CFOSLSop->owns_blocks = true;
+   CFOSLSop->owns_blocks = true;
 
    if (verbose)
        cout << "Final saddle point matrix assembled \n";
@@ -996,7 +993,7 @@ int main(int argc, char *argv[])
        if (verbose)
            cout << "No preconditioner is used. \n";
 
-   // 12. Solve the linear system with MINRES.
+   // 11. Solve the linear system with MINRES.
    //     Check the norm of the unpreconditioned residual.
 
    if (verbose)
@@ -1075,7 +1072,7 @@ int main(int argc, char *argv[])
        delete C;
    }
 
-   // 13. Extract the parallel grid function corresponding to the finite element
+   // 12. Extract the parallel grid function corresponding to the finite element
    //     approximation X. This is the local solution on each processor. Compute
    //     L2 error norms.
 
@@ -1161,6 +1158,10 @@ int main(int argc, char *argv[])
    }
 
    // Check value of functional and mass conservation
+   // This might be not fully correct, old code
+   // The newer version of functional computation can be found in corresponding FOSLSProblem children
+   // in cfosls/cfosls_tools.cpp, e.g., for Hdiv-L2 formulation look at ComputeFuncError() in
+   // FOSLSProblem_HdivL2hyp class.
    if (strcmp(formulation,"cfosls") == 0) // if CFOSLS, otherwise code requires some changes
    {
        double localFunctional = 0.0;//-2.0*(trueX.GetBlock(0)*trueRhs.GetBlock(0));
@@ -1229,6 +1230,7 @@ int main(int argc, char *argv[])
                        << projection_error_S / norm_S << endl;
 
 
+   // 13. Visualization (optional)
    if (visualization && nDimensions < 4)
    {
       char vishost[] = "localhost";
@@ -1281,7 +1283,7 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh->GetComm());
    }
 
-   // 17. Free the used memory.
+   // 14. Free the used memory.
    delete S_exact;
    delete sigma_exact;
 
