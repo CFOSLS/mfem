@@ -1,7 +1,8 @@
 //                                MFEM(with 4D elements) CFOSLS with S from H1 for 3D/4D hyperbolic equation
 //                                  with mesh generator and visualization
 //
-// Compile with: make
+// ARCHIVED EXAMPLE: Used a looong time ago for experiments with multigrid on anisotropic mesh hierarchy
+//
 //
 // Description:  This example code solves a simple 3D/4D hyperbolic problem over [0,1]^3(4)
 //               corresponding to the saddle point system

@@ -397,9 +397,41 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
+    int dim = nDimensions;
+
+    // 4.5 Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g., here)
+
+    // Hdiv-H1 case
+    MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
+    using FormulType = CFOSLSFormulation_HdivH1Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
+    using ProblemType = FOSLSProblem_HdivH1L2hyp;
+
+    /*
+    // Hdiv-L2 case
+    MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
+    using FormulType = CFOSLSFormulation_HdivL2Hyper;
+    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
+    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
+    using ProblemType = FOSLSProblem_HdivL2hyp;
+    */
+
+    FormulType * formulat = new FormulType (dim, numsol, verbose);
+    FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
+    BdrCondsType * bdr_conds = new BdrCondsType(*pmesh);
+
+    ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+
+    problem->Solve(verbose, true);
+
+    delete problem;
+    delete formulat;
+    delete fe_formulat;
+    delete bdr_conds;
+
     // 5. Define a parallel finite element space on the parallel mesh. Here we
     //    use the Raviart-Thomas finite elements of the specified order.
-    int dim = nDimensions;
 
     FiniteElementCollection *hdiv_coll;
     if ( dim == 4 )

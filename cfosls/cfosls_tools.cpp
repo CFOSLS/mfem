@@ -8420,7 +8420,7 @@ void computeSliceCellValues (const GridFunction& grfun, int elind, vector<vector
     edgeends[1].reserve(dim);
 
     DenseMatrix M(dim, dim);
-    Vector sol(4), rh(4);
+    Vector sol(dim), rh(dim);
 
     vector<double> ip(dim);
 

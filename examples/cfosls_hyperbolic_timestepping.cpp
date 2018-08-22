@@ -304,19 +304,19 @@ int main(int argc, char *argv[])
    // 4. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g., here)
 
    // Hdiv-H1 case
+   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
    using FormulType = CFOSLSFormulation_HdivH1Hyper;
    using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
    using ProblemType = FOSLSCylProblem_HdivH1L2hyp;
-   MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
 
    /*
    // Hdiv-L2 case
+   MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
    using FormulType = CFOSLSFormulation_HdivL2Hyper;
    using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
    using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
    using ProblemType = FOSLSCylProblem_HdivL2hyp;
-   MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
    */
 
    FormulType * formulat = new FormulType (dim, numsol, verbose);
@@ -327,10 +327,9 @@ int main(int argc, char *argv[])
    /*
    ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-   problem->Solve(verbose);
+   problem->Solve(verbose, true);
 
    delete problem;
-
    MPI_Finalize();
    return 0;
    */
@@ -512,7 +511,7 @@ int main(int argc, char *argv[])
    fine_timestepping->ComputeError(checksol);
    fine_timestepping->ComputeBndError(checksol);
 
-   // 17. Free the used memory.
+   // 10. Free the used memory.
    delete fine_timestepping;
 
    for (int tslab = 0; tslab < nslabs; ++tslab )
