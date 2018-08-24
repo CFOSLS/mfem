@@ -125,8 +125,9 @@ double CheckFunctValueNew(MPI_Comm comm, const Operator& Funct, const Vector* tr
         std::cout << "Functional norm " << string << global_func << " ... \n";
     return global_func;
 }
+
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
-bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
+bool CheckConstrRes(const Vector& sigma, const Operator& Constr, const Vector* ConstrRhs,
                                                 char const* string)
 {
     bool passed = true;
@@ -152,6 +153,29 @@ bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vec
 
     return passed;
 }
+
+/*
+// Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
+bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
+                                                char const* string)
+{
+    bool passed = true;
+    Vector res_constr(Constr.Height());
+    Constr.Mult(sigma, res_constr);
+    if (ConstrRhs)
+        res_constr -= *ConstrRhs;
+    double constr_norm = res_constr.Norml2() / sqrt (res_constr.Size());
+    if (fabs(constr_norm) > 1.0e-13)
+    {
+        //res_constr.Print();
+        std::cout << "Constraint residual norm " << string << ": "
+                  << constr_norm << " ... \n";
+        passed = false;
+    }
+
+    return passed;
+}
+*/
 
 // true for truedofs, false for dofs
 bool CheckBdrError (const Vector& Candidate, const Vector* Given_bdrdata, const Array<int>& ess_bdr, bool dof_or_truedof)
@@ -2516,7 +2540,7 @@ DivConstraintSolver::DivConstraintSolver(FOSLSProblem& problem_, GeneralHierarch
         {
             SweepsNum = ipow(1, l); // = 1
 
-            Smoothers_lvls[l + 1] = new HcurlGSSSmoother(*BlockOps_lvls[l],
+            Smoothers_lvls[l] = new HcurlGSSSmoother(*BlockOps_lvls[l],
                                                      *hierarchy->GetDivfreeDop(l),
                                                      //*hierarchy->GetEssBdrTdofsOrDofs("tdof", SpaceName::HCURL,
                                                                                //essbdr_attribs_Hcurl, l),

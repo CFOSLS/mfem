@@ -43,8 +43,8 @@
 /// change the source code.
 ///
 /// Other examples with geometric multigrid are cfosls_hyperbolic_anisoMG.cpp (look there
-/// for a cleaner example with geometric MG only, in the newest interfaces)
-/// and cfosls_hyperbolic_newsolver.
+/// for a cleaner example with geometric MG only, using the newest interfaces)
+/// and cfosls_hyperbolic_newsolver (much more messy).
 
 #include "mfem.hpp"
 #include <fstream>
@@ -53,6 +53,11 @@
 #include <iomanip>
 #include <list>
 #include <unistd.h>
+
+// If active, constructs and uses MultigridToolsHierarchy, which is
+// the latest and shortest way to create multigrid preconditioner
+// Otherwise, multigrid components are constructe in a more straightforward way
+#define USE_MULTIGRID_TOOLS
 
 // if active, constructs a particular solution for the minimization solver
 // via DivConstraintSolver instead of simply re-using the particular solution
@@ -64,7 +69,7 @@
 // (and for the minimization solver if USE_DIVCONSTRAINT_SOLVER is not #defined)
 // via either older multilevel code or by simple solving the Poisson equation
 // (the option's switch is with_multilevel = true/false flag in the code)
-//#define USE_OLD_PARTSOL
+#define USE_OLD_PARTSOL
 
 // activates using the local solvers (Schwarz smoothers) for the minimization solver
 #define SOLVE_WITH_LOCALSOLVERS
@@ -316,6 +321,8 @@ int main(int argc, char *argv[])
 
     pmesh->PrintInfo(std::cout); if(verbose) cout << "\n";
 
+    // 5.2 Creating the FOSLS problem and it's div-free counterpart on top of the hierarchy
+
     // creating an instance of the problem at the finest mesh of the hierarchy
     FormulType * formulat = new FormulType (dim, numsol, verbose);
     FEFormulType* fe_formulat = new FEFormulType(*formulat, feorder);
@@ -344,8 +351,9 @@ int main(int argc, char *argv[])
 
     hierarchy->AttachProblem(divfree_problem);
 
-    // creating components which will be used for multigrid and divconstraint solver
-    // built on the original problem
+    // 5.3 creating components which will be used for multigrid and divconstraint solver
+    // built on the original problem, if USE_MULTIGRID_TOOLS was #defined
+#ifdef USE_MULTIGRID_TOOLS
     ComponentsDescriptor * descriptor;
     {
         bool with_Schwarz = true;
@@ -362,20 +370,7 @@ int main(int argc, char *argv[])
     }
     MultigridToolsHierarchy * mgtools_hierarchy =
             new MultigridToolsHierarchy(*hierarchy, 0, *descriptor);
-
-    // defining space names for the original problem, for the functional and the related divfree problem
-    // just useful aliases
-    const Array<SpaceName>* space_names_problem = problem->GetFEformulation().GetFormulation()
-            ->GetSpacesDescriptor();
-
-    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()
-            ->GetFunctSpacesDescriptor();
-
-    const Array<SpaceName>* space_names_divfree = divfree_problem->GetFEformulation().GetFormulation()
-            ->GetFunctSpacesDescriptor();
-
-    // extracting some boundary attributes
-    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
+#endif
 
     std::vector<Array<int>*>& essbdr_attribs = problem->GetBdrConditions().GetAllBdrAttribs();
 
@@ -388,9 +383,6 @@ int main(int argc, char *argv[])
             essbdr_attribs[i]->Print(std::cout, pmesh->bdr_attributes.Max());
         }
     }
-
-    HypreParMatrix * Constraint_global = (HypreParMatrix*)
-            (&problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0));
 
     // 6. Finding a particular solution to the divergence constraint
     chrono.Clear();
@@ -476,14 +468,6 @@ int main(int argc, char *argv[])
 
         sigmahat.ParallelProject(Sigmahat_truedofs);
 
-        /*
-        for (int l = 0; l < ref_levels; ++l)
-        {
-            delete el2dofs_R[l];
-            delete el2dofs_W[l];
-        }
-        */
-
         delete coarse_essbdr_dofs_Hdiv;
 
         delete M_local;
@@ -553,7 +537,7 @@ int main(int argc, char *argv[])
         std::cout << "Checking that particular solution in parallel version "
                      "satisfies the divergence constraint \n";
 
-    if (!CheckConstrRes(Sigmahat_truedofs, *Constraint_global,
+    if (!CheckConstrRes(Sigmahat_truedofs, problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0),
                         &problem->GetRhs().GetBlock(numblocks_funct),
                         "in the old code for the particular solution"))
         std::cout << "Failure! \n";
@@ -562,23 +546,31 @@ int main(int argc, char *argv[])
             std::cout << "Success \n";
 #endif // for #ifdef USE_OLD_PARTSOL
 
+    Array<int>& offsets_problem = problem->GetTrueOffsets();
+    Array<int>& offsets_func = problem->GetTrueOffsetsFunc();
+
+    BlockVector ParticSol(offsets_func);
+    ParticSol = 0.0;
+
 #ifdef USE_DIVCONSTRAINT_SOLVER
     if (verbose)
         std::cout << "Constructing a DivConstraintSolver to find the particular solution \n";
     chrono.Clear();
     chrono.Start();
 
-    // newer constructor
     bool opt_localsolvers = true;
     bool with_hcurl_smoothers = true;
-    // old, worked
-    // in this way PartSolFinder would built and own its components
-    //DivConstraintSolver PartsolFinder(*problem, *hierarchy, opt_localsolvers,
-                                      //with_hcurl_smoothers, verbose);
 
-    // newer way to construct DivConstraintSolver, main components are borrowed from mgtools_hierarchy
-    DivConstraintSolver PartsolFinder(*mgtools_hierarchy, opt_localsolvers,
+#ifndef USE_MULTIGRID_TOOLS
+    // old, worked
+    // in this way PartSolFinder would build and own its components
+    DivConstraintSolver * PartsolFinder = new DivConstraintSolver(*problem, *hierarchy, opt_localsolvers,
                                       with_hcurl_smoothers, verbose);
+#else
+    // newer way to construct DivConstraintSolver, main components are borrowed from mgtools_hierarchy
+    DivConstraintSolver * PartsolFinder = new DivConstraintSolver(*mgtools_hierarchy, opt_localsolvers,
+                                      with_hcurl_smoothers, verbose);
+#endif
 
     // Constructing the constraint rhs
     FunctionCoefficient * rhs_coeff = problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs();
@@ -595,14 +587,8 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    Array<int>& offsets_problem = problem->GetTrueOffsets();
-    Array<int>& offsets_func = problem->GetTrueOffsetsFunc();
-
-    BlockVector ParticSol(offsets_func);
-    ParticSol = 0.0;
-
     BlockVector * Xinit_truedofs = problem->GetTrueInitialConditionFunc();
-    PartsolFinder.FindParticularSolution(*Xinit_truedofs, ParticSol, ConstrRhs, verbose);
+    PartsolFinder->FindParticularSolution(*Xinit_truedofs, ParticSol, ConstrRhs, verbose);
 
     chrono.Stop();
 
@@ -619,63 +605,14 @@ int main(int argc, char *argv[])
 
     if (verbose)
         std::cout << "Checking that particular solution in parallel version satisfies the divergence constraint \n";
-    MFEM_ASSERT(CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &problem->GetRhs().GetBlock(numblocks_funct),
+    MFEM_ASSERT(CheckConstrRes(ParticSol.GetBlock(0), problem->GetOp_nobnd()->GetBlock(numblocks_funct, 0),
+                               &problem->GetRhs().GetBlock(numblocks_funct),
                                "in the main code for the particular solution"), "");
 
     Sigmahat_truedofs = ParticSol.GetBlock(0);
+#else
+    ParticSol.GetBlock(0) = Sigmahat_truedofs;
 #endif // for #ifdef USE_DIVCONSTRAINT_SOLVER
-
-    // creating the block operator for the divergence-free problem
-
-    BlockOperator * orig_op = problem->GetOp();
-    const HypreParMatrix * divfree_dop = hierarchy->GetDivfreeDop(0);
-
-    HypreParMatrix * divfree_dop_mod = CopyHypreParMatrix(*divfree_dop);
-
-    const Array<int> * hcurl_essbdr_tdofs = hierarchy->GetEssBdrTdofsOrDofs
-                                        ("tdof", SpaceName::HCURL, essbdr_attribs_Hcurl, 0);
-
-    const Array<int> * hdiv_essbdr_tdofs = hierarchy->GetEssBdrTdofsOrDofs
-                                        ("tdof", SpaceName::HDIV, *essbdr_attribs[0], 0);
-
-    Eliminate_ib_block(*divfree_dop_mod,
-                       *hcurl_essbdr_tdofs,
-                       *hdiv_essbdr_tdofs);
-
-    delete hcurl_essbdr_tdofs;
-    delete hdiv_essbdr_tdofs;
-
-    // creating different block offsets (all on truedofs)
-    std::vector<const Array<int> *> divfree_offsets(nlevels);
-    divfree_offsets[0] = hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_divfree);
-
-    // transferring the first block of the functional operator from hdiv into hcurl
-    BlockOperator * divfree_funct_op = new BlockOperator(*divfree_offsets[0]);
-
-    HypreParMatrix * op_00 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,0)));
-    HypreParMatrix * A00 = RAP(divfree_dop_mod, op_00, divfree_dop_mod);
-    A00->CopyRowStarts();
-    A00->CopyColStarts();
-    divfree_funct_op->SetBlock(0,0, A00);
-
-    HypreParMatrix * A10, * A01, *op_11;
-    if (strcmp(space_for_S,"H1") == 0)
-    {
-        op_11 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,1)));
-
-        HypreParMatrix * op_10 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,0)));
-        A10 = ParMult(op_10, divfree_dop_mod);
-        A10->CopyRowStarts();
-        A10->CopyColStarts();
-
-        A01 = A10->Transpose();
-        A01->CopyRowStarts();
-        A01->CopyColStarts();
-
-        divfree_funct_op->SetBlock(1,0, A10);
-        divfree_funct_op->SetBlock(0,1, A01);
-        divfree_funct_op->SetBlock(1,1, op_11);
-    }
 
     if (verbose)
         std::cout << "End of setting up the problem in the divergence-free formulation \n";
@@ -683,7 +620,10 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    // setting multigrid components
+    // 7. Creating the necessary multigrid components and multigrid preconditioner for div-free formulation
+#ifndef USE_MULTIGRID_TOOLS
+    const Array<SpaceName>* space_names_divfree = divfree_problem->GetFEformulation().GetFormulation()
+            ->GetFunctSpacesDescriptor();
 
     // constructing coarsest level essential boundary dofs indices in terms of
     // the global vector (for all components at once)
@@ -724,6 +664,9 @@ int main(int argc, char *argv[])
     Array<Operator*> Smoo_mg(nlevels - 1);
     Operator* CoarseSolver_mg;
 
+    std::vector<const Array<int> *> divfree_offsets(nlevels);
+    divfree_offsets[0] = hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_divfree);
+
     for (int l = 0; l < num_levels; ++l)
     {
         if (l < num_levels - 1)
@@ -740,7 +683,7 @@ int main(int argc, char *argv[])
         }
 
         if (l == 0)
-            BlockOps_mg[l] = divfree_funct_op;
+            BlockOps_mg[l] = divfree_problem->GetOp();
         else
         {
             BlockOps_mg[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd[l - 1],
@@ -790,6 +733,11 @@ int main(int argc, char *argv[])
 
     ((CGSolver*)CoarseSolver_mg)->SetPreconditioner(*CoarsePrec_mg);
 
+    // old interface
+    GeneralMultigrid * GeneralMGprec =
+            new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
+
+#else // i.e., if USE_MULTIGRID_TOOLD was #defined
     // newer interface, using MultigridToolsHierarchy
     ComponentsDescriptor * divfree_descriptor;
     {
@@ -813,16 +761,40 @@ int main(int argc, char *argv[])
     for (int l = 0; l < nlevels - 1; ++l)
         casted_monolitGSSmoothers[l] = mgtools_divfree_hierarchy->GetMonolitGSSmoothers()[l];
 
+    int coarsest_level = num_levels - 1;
+    CGSolver * CoarseSolver_mg = new CGSolver(comm);
+    CoarseSolver_mg->SetAbsTol(sqrt(1e-32));
+    CoarseSolver_mg->SetRelTol(sqrt(1e-12));
+    CoarseSolver_mg->SetMaxIter(100);
+    CoarseSolver_mg->SetPrintLevel(0);
+    //CoarseSolver_mg->SetOperator(*Ops_mg[coarsest_level]);
+    CoarseSolver_mg->SetOperator(*mgtools_divfree_hierarchy->GetOps()[coarsest_level]);
+    CoarseSolver_mg->iterative_mode = false;
+
+    BlockDiagonalPreconditioner * CoarsePrec_mg =
+            new BlockDiagonalPreconditioner(mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->ColOffsets());
+
+    HypreParMatrix &blk00 = (HypreParMatrix&)mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->GetBlock(0,0);
+    HypreSmoother * precU = new HypreSmoother(blk00, HypreSmoother::Type::l1GS, 1);
+    CoarsePrec_mg->SetDiagonalBlock(0, precU);
+
+    if (strcmp(space_for_S,"H1") == 0)
+    {
+        HypreParMatrix &blk11 = (HypreParMatrix&)mgtools_divfree_hierarchy->GetBlockOps()[coarsest_level]->GetBlock(1,1);
+        HypreSmoother * precS = new HypreSmoother(blk11, HypreSmoother::Type::l1GS, 1);
+        CoarsePrec_mg->SetDiagonalBlock(1, precS);
+    }
+    CoarsePrec_mg->owns_blocks = true;
+
+    CoarseSolver_mg->SetPreconditioner(*CoarsePrec_mg);
+
     GeneralMultigrid * GeneralMGprec =
             new GeneralMultigrid(nlevels,
                                  mgtools_divfree_hierarchy->GetPs_bnd(),
                                  mgtools_divfree_hierarchy->GetOps(),
                                  *CoarseSolver_mg,
                                  casted_monolitGSSmoothers);
-
-    // old interface
-    //GeneralMultigrid * GeneralMGprec =
-            //new GeneralMultigrid(nlevels, P_mg, Ops_mg, *CoarseSolver_mg, Smoo_mg);
+#endif
 
     chrono.Stop();
     if (verbose)
@@ -831,30 +803,24 @@ int main(int argc, char *argv[])
     chrono.Clear();
     chrono.Start();
 
-    //////////////////////// computing right hand side for the problem in divergence-free setting
+    // 8. Preparing rhs for the div-free formulation (accounting for the particular solution)
+    // and solving the div-free problem with the multigrid preconditioner
 
-    BlockVector trueXhat(orig_op->ColOffsets());
+    BlockVector trueXhat(problem->GetTrueOffsets());
     trueXhat = 0.0;
     trueXhat.GetBlock(0) = Sigmahat_truedofs;
 
-    BlockVector truetemp1(orig_op->ColOffsets());
-    orig_op->Mult(trueXhat, truetemp1);
+    BlockVector truetemp1(problem->GetTrueOffsets());
+    problem->GetOp()->Mult(trueXhat, truetemp1);
     truetemp1 -= problem->GetRhs();
-
     truetemp1 *= -1;
 
-    HypreParMatrix * DivfreeT_dop = divfree_dop_mod->Transpose();
-
-    BlockVector trueRhs_divfree(divfree_funct_op->ColOffsets());
+    BlockVector trueRhs_divfree(divfree_problem->GetTrueOffsetsFunc());
     trueRhs_divfree = 0.0;
-    DivfreeT_dop->Mult(truetemp1.GetBlock(0), trueRhs_divfree.GetBlock(0));
-
-    delete DivfreeT_dop;
+    divfree_problem->GetDivfreeHpMat().MultTranspose(truetemp1.GetBlock(0), trueRhs_divfree.GetBlock(0));
 
     if (strcmp(space_for_S,"H1") == 0)
         trueRhs_divfree.GetBlock(1) = truetemp1.GetBlock(1);
-
-    ////////////////////////
 
     chrono.Stop();
     if (verbose)
@@ -867,12 +833,12 @@ int main(int argc, char *argv[])
     solver.SetAbsTol(sqrt(atol));
     solver.SetRelTol(sqrt(rtol));
     solver.SetMaxIter(max_num_iter);
-    solver.SetOperator(*divfree_funct_op);
+    solver.SetOperator(*divfree_problem->GetOp());
     if (with_prec)
         solver.SetPreconditioner(*GeneralMGprec);
     solver.SetPrintLevel(1);
 
-    BlockVector trueX(*divfree_offsets[0]);
+    BlockVector trueX(divfree_problem->GetTrueOffsets());
     trueX = 0.0;
 
     chrono.Clear();
@@ -891,9 +857,10 @@ int main(int argc, char *argv[])
         std::cout << "Linear solver took " << chrono.RealTime() << "s. \n";
     }
 
-    BlockVector finalSol(orig_op->ColOffsets());
+    // casting the solution back to the original formulation and checking the error
+    BlockVector finalSol(problem->GetTrueOffsets());
     finalSol = 0.0;
-    divfree_dop_mod->Mult(trueX.GetBlock(0), finalSol.GetBlock(0));
+    divfree_problem->GetDivfreeHpMat().Mult(trueX.GetBlock(0), finalSol.GetBlock(0));
     if (strcmp(space_for_S,"H1") == 0)
         finalSol.GetBlock(1) = trueX.GetBlock(1);
     finalSol += trueXhat;
@@ -902,35 +869,26 @@ int main(int argc, char *argv[])
     problem->ComputeError(finalSol, verbose, checkbnd);
 
     if (verbose)
-        std::cout << "Errors in the MG code were computed via FOSLSProblem routine \n";
+        std::cout << "Errors for the div-free formulation have been computed \n";
 
     chrono.Clear();
     chrono.Start();
+
+    // 9. Creating necessary components and constructing a minimization solver (in the form of a special multigrid)
+#ifndef USE_MULTIGRID_TOOLS
+    // defining space names for the original problem, for the functional and the related divfree problem
+    // just useful aliases
+    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()
+            ->GetFunctSpacesDescriptor();
+
+    // extracting some boundary attributes
+    const Array<int> &essbdr_attribs_Hcurl = problem->GetBdrConditions().GetBdrAttribs(0);
 
     std::vector<const Array<int> *> offsets_hdivh1(nlevels);
     offsets_hdivh1[0] = hierarchy->ConstructTrueOffsetsforFormul(0, *space_names_funct);
 
     std::vector<const Array<int> *> offsets_sp_hdivh1(nlevels);
     offsets_sp_hdivh1[0] = hierarchy->ConstructOffsetsforFormul(0, *space_names_funct);
-
-    // manually truncating the original problem's operator into the operator
-    // which correspond to the functional (dropping the constraint)
-    BlockOperator * funct_op = new BlockOperator(*offsets_hdivh1[0]);
-
-    HypreParMatrix * funct_op_00 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,0)));
-    funct_op->SetBlock(0,0, funct_op_00);
-
-    HypreParMatrix * funct_op_01, *funct_op_10, *funct_op_11;
-    if (strcmp(space_for_S,"H1") == 0)
-    {
-        funct_op_01 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(0,1)));
-        funct_op_10 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,0)));
-        funct_op_11 = dynamic_cast<HypreParMatrix*>(&(orig_op->GetBlock(1,1)));
-
-        funct_op->SetBlock(0,1, funct_op_01);
-        funct_op->SetBlock(1,0, funct_op_10);
-        funct_op->SetBlock(1,1, funct_op_11);
-    }
 
     // setting multigrid components from the older parts of the code
     Array<BlockOperator*> BlockP_mg_nobnd_plus(nlevels - 1);
@@ -1005,22 +963,23 @@ int main(int argc, char *argv[])
         if (l < num_levels - 1)
         {
             offsets_hdivh1[l + 1] = hierarchy->ConstructTrueOffsetsforFormul(l + 1, *space_names_funct);
-            BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul(l, *space_names_funct,
-                                                                         *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
-            P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose(*BlockP_mg_nobnd_plus[l],
-                                                              *coarsebnd_indces_funct_lvls[l],
-                                                              *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
+            BlockP_mg_nobnd_plus[l] = hierarchy->ConstructTruePforFormul
+                    (l, *space_names_funct, *offsets_hdivh1[l], *offsets_hdivh1[l + 1]);
+            P_mg_plus[l] = new BlkInterpolationWithBNDforTranspose
+                    (*BlockP_mg_nobnd_plus[l], *coarsebnd_indces_funct_lvls[l], *offsets_hdivh1[l],
+                     *offsets_hdivh1[l + 1]);
         }
 
         if (l == 0)
-            BlockOps_mg_plus[l] = funct_op;
+            //BlockOps_mg_plus[l] = funct_op;
+            BlockOps_mg_plus[l] = problem->GetFunctOp(problem->GetTrueOffsetsFunc());
         else
         {
             BlockOps_mg_plus[l] = new RAPBlockHypreOperator(*BlockP_mg_nobnd_plus[l - 1],
                     *BlockOps_mg_plus[l - 1], *BlockP_mg_nobnd_plus[l - 1], *offsets_hdivh1[l]);
 
-            std::vector<Array<int>* > essbdr_tdofs_funct = hierarchy->GetEssBdrTdofsOrDofs
-                    ("tdof", *space_names_funct, essbdr_attribs, l);
+            std::vector<Array<int>* > essbdr_tdofs_funct =
+                    hierarchy->GetEssBdrTdofsOrDofs("tdof", *space_names_funct, essbdr_attribs, l);
             EliminateBoundaryBlocks(*BlockOps_mg_plus[l], essbdr_tdofs_funct);
 
             for (unsigned int i = 0; i < essbdr_tdofs_funct.size(); ++i)
@@ -1172,35 +1131,30 @@ int main(int argc, char *argv[])
     ((CoarsestProblemHcurlSolver*)CoarseSolver_mg_plus)->ResetSolverParams();
 
     // old, working interface
-    //GeneralMultigrid * GeneralMGprec_plus =
-            //new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
+    GeneralMultigrid * GeneralMGprec_plus =
+            new GeneralMultigrid(nlevels, P_mg_plus, Ops_mg_plus, *CoarseSolver_mg_plus, Smoo_mg_plus);
+
+#else // i.e., if USE_MULTIGRID_TOOLS was #defined
 
     Array<Operator*> Smoo_ops(nlevels - 1);
-#ifdef SOLVE_WITH_LOCALSOLVERS
     for (int i = 0; i < Smoo_ops.Size(); ++i)
+    {
+#ifdef SOLVE_WITH_LOCALSOLVERS
         Smoo_ops[i] = mgtools_hierarchy->GetCombinedSmoothers()[i];
 #else
-    for (int i = 0; i < Smoo_ops.Size(); ++i)
         Smoo_ops[i] = mgtools_hierarchy->GetHcurlSmoothers()[i];
 #endif
+    }
 
     // newer interface using MultigridTools
     GeneralMultigrid * GeneralMGprec_plus =
             new GeneralMultigrid(nlevels, mgtools_hierarchy->GetPs_bnd(), mgtools_hierarchy->GetOps(),
                                  *mgtools_hierarchy->GetCoarsestSolver_Hcurl(),
                                  Smoo_ops);
+#endif
 
-    int TestmaxIter(400);
-
-    CGSolver Testsolver(MPI_COMM_WORLD);
-    Testsolver.SetAbsTol(sqrt(atol));
-    Testsolver.SetRelTol(sqrt(rtol));
-    Testsolver.SetMaxIter(TestmaxIter);
-
-    Testsolver.SetOperator(*funct_op);
-    Testsolver.SetPreconditioner(*GeneralMGprec_plus);
-
-    Testsolver.SetPrintLevel(1);
+    // 10. Preparing rhs (accounting for the particular solution) and solving the original problem with
+    // a minimization solver (which works in the subspace of functions which satisfy the divergence constraint)
 
     BlockVector trueXtest(offsets_func);
     trueXtest = 0.0;
@@ -1225,6 +1179,24 @@ int main(int argc, char *argv[])
     for (int blk = 0; blk < numblocks_funct; ++blk)
         trueRhstest.GetBlock(blk) -= truetemp.GetBlock(blk);
 
+    // Creating the CG solver
+    int TestmaxIter(400);
+
+    CGSolver Testsolver(MPI_COMM_WORLD);
+    Testsolver.SetAbsTol(sqrt(atol));
+    Testsolver.SetRelTol(sqrt(rtol));
+    Testsolver.SetMaxIter(TestmaxIter);
+
+#ifndef USE_MULTIGRID_TOOLS
+    Testsolver.SetOperator(*BlockOps_mg_plus[0]);
+#else
+    Testsolver.SetOperator(*mgtools_hierarchy->GetOps()[0]);
+#endif
+
+    Testsolver.SetPreconditioner(*GeneralMGprec_plus);
+
+    Testsolver.SetPrintLevel(1);
+
     chrono.Stop();
     if (verbose)
         std::cout << "Solving the system \n";
@@ -1245,13 +1217,6 @@ int main(int argc, char *argv[])
                       << " iterations. Residual norm is " << Testsolver.GetFinalNorm() << ".\n";
         std::cout << "Linear solver (CG + new solver) took " << chrono.RealTime() << "s. \n";
         std::cout << "Global system size = " << "... not computed \n";
-
-        /*
-        if (strcmp(space_for_S,"H1") == 0) // S is present
-            std::cout << "System size: " << Atest->M() + Ctest->M() << "\n" << std::flush;
-        else
-            std::cout << "System size: " << Atest->M() << "\n" << std::flush;
-        */
     }
 
     chrono.Clear();
@@ -1267,37 +1232,27 @@ int main(int argc, char *argv[])
 
     problem->ComputeError(tempvec, verbose, checkbnd);
 
-    //for (int blk = 0; blk < numblocks_funct; ++blk)
-        //problem->ComputeError(trueXtest, verbose, checkbnd, blk);
-
     chrono.Stop();
     if (verbose)
-        std::cout << "Errors were computed in " << chrono.RealTime() <<" seconds.\n";
+        std::cout << "Errors for the minimization solver were computed in " << chrono.RealTime() <<" seconds.\n";
 
     chrono_total.Stop();
     if (verbose)
         std::cout << "Total time consumed was " << chrono_total.RealTime() <<" seconds.\n";
 
-    // Deallocating memory
+    // 11. Deallocating used memory.
 
 #ifdef USE_DIVCONSTRAINT_SOLVER
     delete Xinit_truedofs;
 #endif
-    delete divfree_dop_mod;
 
     delete hierarchy;
     delete problem;
     delete divfree_problem;
 
-    delete descriptor;
-    delete mgtools_hierarchy;
+    delete PartsolFinder;
 
-    delete divfree_descriptor;
-    delete mgtools_divfree_hierarchy;
-
-    for (unsigned int i = 0; i < coarsebnd_indces_funct_lvls.size(); ++i)
-        delete coarsebnd_indces_funct_lvls[i];
-
+#ifndef USE_MULTIGRID_TOOLS
     for (unsigned int i = 0; i < coarsebnd_indces_divfree_lvls.size(); ++i)
         delete coarsebnd_indces_divfree_lvls[i];
 
@@ -1307,18 +1262,18 @@ int main(int argc, char *argv[])
     for (int i = 0; i < BlockP_mg_nobnd.Size(); ++i)
         delete BlockP_mg_nobnd[i];
 
-    for (int i = 0; i < BlockOps_mg.Size(); ++i)
+    // BlockOps_mg[0] is the operator of divfree_problem, already deleted
+    for (int i = 1; i < BlockOps_mg.Size(); ++i)
         delete BlockOps_mg[i];
-
-    delete A00;
-    if (strcmp(space_for_S,"H1") == 0) // S is present
-    {
-        delete A01;
-        delete A10;
-    }
 
     for (int i = 0; i < Smoo_mg.Size(); ++i)
         delete Smoo_mg[i];
+
+    for (unsigned int i = 0; i < divfree_offsets.size(); ++i)
+        delete divfree_offsets[i];
+
+    for (unsigned int i = 0; i < coarsebnd_indces_funct_lvls.size(); ++i)
+        delete coarsebnd_indces_funct_lvls[i];
 
     for (int i = 0; i < Smoo_mg_plus.Size(); ++i)
         delete Smoo_mg_plus[i];
@@ -1328,9 +1283,6 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < BlockP_mg_nobnd_plus.Size(); ++i)
         delete BlockP_mg_nobnd_plus[i];
-
-    for (int i = 0; i < BlockOps_mg_plus.Size(); ++i)
-        delete BlockOps_mg_plus[i];
 
     for (int i = 0; i < Funct_mat_lvls_mg.Size(); ++i)
         delete Funct_mat_lvls_mg[i];
@@ -1350,12 +1302,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < el2dofs_funct_lvls.Size(); ++i)
         delete el2dofs_funct_lvls[i];
 
-    delete CoarseSolver_mg;
-    delete CoarsePrec_mg;
     delete CoarseSolver_mg_plus;
-
-    delete GeneralMGprec;
-    delete GeneralMGprec_plus;
 
     for (unsigned int i = 0; i < dtd_row_offsets.size(); ++i)
         delete dtd_row_offsets[i];
@@ -1375,8 +1322,21 @@ int main(int argc, char *argv[])
     for (unsigned int i = 0; i < offsets_sp_hdivh1.size(); ++i)
         delete offsets_sp_hdivh1[i];
 
-    for (unsigned int i = 0; i < divfree_offsets.size(); ++i)
-        delete divfree_offsets[i];
+    for (int i = 0; i < BlockOps_mg_plus.Size(); ++i)
+        delete BlockOps_mg_plus[i];
+#else
+    delete descriptor;
+    delete mgtools_hierarchy;
+
+    delete divfree_descriptor;
+    delete mgtools_divfree_hierarchy;
+#endif
+
+    delete CoarseSolver_mg;
+    delete CoarsePrec_mg;
+
+    delete GeneralMGprec;
+    delete GeneralMGprec_plus;
 
     delete bdr_conds;
     delete formulat;

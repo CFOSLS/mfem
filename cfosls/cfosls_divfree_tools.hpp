@@ -51,8 +51,14 @@ double CheckFunctValue(MPI_Comm comm, const Operator& Funct, const Vector* truef
 double CheckFunctValueNew(MPI_Comm comm, const Operator& Funct, const Vector* truefunct_addvec,
                        const Vector& truevec, char const * string, bool print);
 
+/*
 // Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
 bool CheckConstrRes(const Vector& sigma, const HypreParMatrix& Constr, const Vector* ConstrRhs,
+                                                char const* string);
+*/
+
+// Computes and prints the norm of || Constr * sigma - ConstrRhs ||_2,h, everything on true dofs
+bool CheckConstrRes(const Vector& sigma, const Operator& Constr, const Vector* ConstrRhs,
                                                 char const* string);
 // true for truedofs, false for dofs
 bool CheckBdrError (const Vector& Candidate, const Vector* Given_bdrdata,
