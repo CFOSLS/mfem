@@ -164,6 +164,8 @@ int main(int argc, char *argv[])
     {
         //mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
         mesh_file = "../data/netgen_lshape3D_onemoretry_coarsest.netgen";
+        MFEM_ABORT("Something is wrong with the mesh, unlike other tests. A FOSLSProblem cannot "
+                   "assemble the matrix for unnown reason, fails in assembling the (1,1) block. \n");
     }
 
     if (verbose)

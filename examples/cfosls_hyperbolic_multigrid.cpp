@@ -33,10 +33,8 @@
 /// FOSLSProblem, FOSLSDivfreeProblem, GeneralAnisoHierarchy, GeneralMultirid,
 /// MultigridToolsHierarchy and DivConstraintSolver.
 ///
-/// (*) The code also shows how multigrid preconditioners were constructed previously, without classes
-/// from cfosls/. Hence it's big and has multiple blocks which do the same thing using different interfaces.
-/// (**) This code was tested in serial and in parallel
-/// (***) The example was tested for memory leaks with valgrind, in 3D.
+/// (*) This code was tested in serial and in parallel.
+/// (**) The example was tested for memory leaks with valgrind, in 3D.
 ///
 /// Typical run of this example: ./cfosls_hyperbolic_multigrid --whichD 3 --spaceS L2 -no-vis
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also

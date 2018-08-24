@@ -1,6 +1,14 @@
-//
-//                        MFEM CFOSLS Poisson equation with multigrid (debugging & testing of a new multilevel solver)
-//
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D Poisson equation
+///                       solved by geometric multigrid preconditioner in div-free setting
+///                              and also by a minimization solver (old interfaces)
+///
+/// ARCHIVED EXAMPLE
+/// This code shows the old way of constructing multigrid preconditioners from explicitly built
+/// hierarchy of meshes and f.e. spaces. Look in cfosls_hyperbolic_multigrid.cpp example
+/// for a much cleaner way exploiting tools available from cfosls/
+///
+/// In the end, when MINSOLVER_TESTING is #defined, also shows a usage of the new interface
+/// for constructing multigrid preconditioner using classes from cfosls/.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -82,7 +90,7 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = 11;
+    int numsol          = -3;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 1;
@@ -265,6 +273,8 @@ int main(int argc, char *argv[])
     if (numsol == 11)
     {
         mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
+        MFEM_ABORT("Something is wrong with the mesh, unlike other tests. A FOSLSProblem cannot "
+                   "assemble the matrix for unnown reason, fails in assembling the (1,1) block. \n");
     }
 
     if (verbose)
@@ -3683,9 +3693,10 @@ int main(int argc, char *argv[])
     BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
     int nlevels = ref_levels + 1;
-    GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], 0, verbose);
+    GeneralHierarchy * hierarchy = new GeneralHierarchy(nlevels, *pmesh_lvls[num_levels - 1], feorder, verbose);
     hierarchy->ConstructDivfreeDops();
     hierarchy->ConstructDofTrueDofs();
+    hierarchy->ConstructEl2Dofs();
 
     FOSLSProblem* problem_mgtools = hierarchy->BuildDynamicProblem<ProblemType>
             (*bdr_conds, *fe_formulat, prec_option, verbose);
@@ -3726,23 +3737,21 @@ int main(int argc, char *argv[])
     MinSolver->SetRelTol(1.0e-6);
     MinSolver->SetMaxIter(200);
     MinSolver->SetPrintLevel(2);
-    MinSolver->SetStopCriteriaType(0);
+    MinSolver->SetStopCriteriaType(3);
 
-    if (!CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &Floc, "in the main code for the particular solution"))
+    if (!CheckConstrRes(ParticSol.GetBlock(0), *Constraint_global, &Floc,
+                        "in the main code for the particular solution"))
         std::cout << "Failure! \n";
     else
         if (verbose)
             std::cout << "Success \n";
 
-    //std::cout << "ParticSol blk 0 norm = " << ParticSol.GetBlock(0).Norml2() / sqrt (ParticSol.GetBlock(0).Size()) << "\n";
-    //std::cout << "ParticSol blk 1 norm = " << ParticSol.GetBlock(1).Norml2() / sqrt (ParticSol.GetBlock(1).Size()) << "\n";
-
     //MinSolver->SetInitialGuess(ParticSol);
     BlockVector zero_vec(problem_mgtools->GetTrueOffsetsFunc());
     zero_vec = 0.0;
     MinSolver->SetInitialGuess(zero_vec);
-    MinSolver->SetConstrRhs(problem_mgtools->GetRhs().GetBlock(numblocks_funct));
-    //MinSolver->SetUnSymmetric();
+    //MinSolver->SetConstrRhs(problem_mgtools->GetRhs().GetBlock(numblocks_funct));
+    MinSolver->SetFunctAdditionalVector(ParticSol);
 
     if (verbose)
         MinSolver->PrintAllOptions();

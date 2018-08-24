@@ -1,6 +1,11 @@
-//
-//                        MFEM CFOSLS Transport equation with multigrid (div-free part)
-//
+///
+///                        MFEM CFOSLS Transport equation with multigrid (div-free part)
+///
+/// DEEP ARCHIVE:
+/// The code in this example first evolved into cfosls_hyperbolic_newsolver.cpp
+/// and then into cfosls_hyperbolic_multigrid.cpp. The latter is much cleaner and uses better
+/// newer interfaces. This code was saved for some hypothetical unknown reason of digging up
+/// older codes.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -9,7 +14,14 @@
 #include <iomanip>
 #include <list>
 
+// this one was deleted. either look for it in the history of the repository,
+// or replace the Transport_test_divfree by Hyper_test from cfosls/cfosls_testsuite.hpp
+// an remove numcurl from the example code.
+// E.g., exactly this was done in cfosls_parabolic_newsolver.cpp which is in general
+// a newer (but not the newest!) version of the code here.
 #include "cfosls_testsuite.hpp"
+
+// this can be found in the examples/archive/ folder
 #include "divfree_solver_tools.hpp"
 
 // if undefined, a code with new integrators is used

@@ -1,6 +1,56 @@
-//
-//                        MFEM CFOSLS Transport equation with multigrid (debugging & testing of a new multilevel solver)
-//
+///                           MFEM(with 4D elements) CFOSLS for 3D/4D transport equation
+///                       solved by geometric multigrid preconditioner in div-free setting
+///                                   and also by a minimization solver (old interfaces)
+///
+/// ARCHIVED EXAMPLE
+/// This code shows the old way of constructing multigrid preconditioners from explicitly built
+/// hierarchy of meshes and f.e. spaces. Look in cfosls_hyperbolic_multigrid.cpp example
+/// for a much cleaner way exploiting tools available from cfosls/
+///
+/// The problem considered in this example is
+///                             du/dt + b * u = f (either 3D or 4D in space-time)
+/// casted in the CFOSLS formulation
+/// 1) either in Hdiv-L2 case:
+///                             (K sigma, sigma) -> min
+/// where sigma is from H(div), u is recovered (as an element of L^2) from sigma = b * u,
+/// and K = (I - bbT / || b ||);
+/// 2) or in Hdiv-H1-L2 case
+///                             || sigma - b * u || ^2 -> min
+/// where sigma is from H(div) and u is from H^1;
+/// minimizing in all cases under the constraint
+///                             div sigma = f.
+///
+/// The problem is discretized using RT, linear Lagrange and discontinuous constants in 3D/4D.
+/// The current 3D tests are either in cube.
+///
+/// The problem is then solved by two different multigrid setups:
+/// 1) In the div-free formulation, where we first find a particular solution to the
+/// divergence constraint, and then search for the div-free correction, casting the system's
+/// first component into H(curl) (in 3D).
+/// Then, to find the div-free correction, CG is used, preconditioned by a geometric multigrid.
+/// 2) With a minimization solver, where we first find a particular solution to the
+/// divergence constraint and then minimize the functional over the correction subspace.
+/// Unlike 1), we don't cast the problem explicitly into H(curl), but iterations of the
+/// minimization solver keep the vectors in the corresponding subspace where first block component
+/// is from H(div) and satisfies the prescribed divergence constraint.
+///
+/// (*) The code shows how multigrid preconditioners were constructed previously, without classes
+/// from cfosls/. Hence it's big and has multiple blocks which do the same thing using different interfaces.
+/// There was an attempt to modify this example, but eventually the code was fully rewritten in
+/// cfosls_hyperbolic_multigrid.cpp.
+///
+/// (**) This code was tested in serial and in parallel for the report on CFOSLS.
+///
+/// (***) The example was tested for memory leaks with valgrind, in 3D, was neither cleaned
+/// nor properly commented.
+///
+/// Typical run of this example: ./cfosls_hyperbolic_newsolver --whichD 3 --spaceS L2 -no-vis
+/// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
+/// change the source code.
+///
+/// Other examples with geometric multigrid are cfosls_hyperbolic_anisoMG.cpp (look there
+/// for a cleaner example with geometric MG only, using the newest interfaces) and
+/// cfosls_hyperbolic_multigrid.cpp (recommended).
 
 #include "mfem.hpp"
 #include <fstream>

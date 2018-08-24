@@ -1,6 +1,14 @@
-//
-//                        MFEM CFOSLS Heat equation with multilevel algorithm and multigrid (div-free part)
-//
+///
+///                        MFEM CFOSLS Heat equation with multilevel algorithm and multigrid (div-free part)
+///
+///
+/// DEEP ARCHIVE:
+/// The code similar to this but for transport equation, cfosls_hyperb_divfree.cpp first evolved
+/// into cfosls_hyperbolic_newsolver.cpp and then into cfosls_hyperbolic_multigrid.cpp. The latter is much
+/// cleaner and uses better newer interfaces. This code was saved for some hypothetical unknown reason of
+/// digging up older codes.
+/// If you really want to use multigrid for heat equation, consider changing the problem (which reduces to
+/// replacing about 50 lines) in cfosls_hyperbolic_multigrid.cpp.
 
 #include "mfem.hpp"
 #include <fstream>
@@ -9,7 +17,14 @@
 #include <iomanip>
 #include <list>
 
+// this one was deleted. either look for it in the history of the repository,
+// or replace the Heat_test_divfree by Parab_test from cfosls/cfosls_testsuite.hpp
+// an remove numcurl from the example code.
+// E.g., exactly this was done in cfosls_parabolic_newsolver.cpp which is in general
+// a newer (but not the newest!) version of the code here.
 #include "cfosls_testsuite.hpp"
+
+// this can be found in the examples/archive/ folder
 #include "divfree_solver_tools.hpp"
 
 #define MYZEROTOL (1.0e-13)

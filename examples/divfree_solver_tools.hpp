@@ -1,3 +1,8 @@
+/// A SUPPORT FILE FOR THE ARCHIVED EXAMPLES cfosls_hyperb_divfree.cpp,
+/// cfosls_parab_divfree.cpp and cfosls_wave_divfree.cpp.
+/// In the latest code version all the stuff in this file was modified, 
+/// improved and stored in cfosls/cfosls_divfree_tools.hpp,.cpp.
+
 #include "mfem.hpp"
 #include "linalg/linalg.hpp"
 
