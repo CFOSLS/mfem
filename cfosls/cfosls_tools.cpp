@@ -5158,13 +5158,19 @@ void InterpolationWithBNDforTranspose::MultTranspose(const Vector &x, Vector &y)
     }
 }
 
-GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
-                                   bool verbose, bool with_hcurl_)
-    : num_lvls(num_levels), pmesh(pmesh_), with_hcurl(with_hcurl_),
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_)
+    : num_lvls(num_levels), pmesh(pmesh_), with_hcurl(false),
       divfreedops_constructed (false), doftruedofs_constructed (true),
       el2dofs_constructed(false),
-      pmesh_ne(0), update_counter(0)
+      pmesh_ne(0), update_counter(0),
+      fully_initialized(false)
+{}
+
+void GeneralHierarchy::Init(int feorder_, bool verbose, bool with_hcurl_)
 {
+    feorder = feorder_;
+    with_hcurl = with_hcurl_;
+
     pmesh_ne = pmesh.GetNE();
     int dim = pmesh.Dimension();
 
@@ -5352,6 +5358,19 @@ GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder,
     } // end of loop over levels
 }
 
+
+
+GeneralHierarchy::GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder_,
+                                   bool verbose, bool with_hcurl_)
+    : num_lvls(num_levels), pmesh(pmesh_), feorder(feorder_), with_hcurl(with_hcurl_),
+      divfreedops_constructed (false), doftruedofs_constructed (true),
+      el2dofs_constructed(false),
+      pmesh_ne(0), update_counter(0),
+      fully_initialized(true)
+{
+    Init(feorder_, verbose, with_hcurl_);
+}
+
 GeneralHierarchy::~GeneralHierarchy()
 {
     int dim = pmesh.Dimension();
@@ -5457,7 +5476,6 @@ GeneralHierarchy::~GeneralHierarchy()
         //delete problems[i];
 
 }
-
 
 int GeneralHierarchy::Update()
 {
@@ -6341,6 +6359,41 @@ BlockOperator* GeneralHierarchy::GetDofTrueDof(const Array<SpaceName>& space_nam
 
     return res;
 }
+
+void GeneralAnisoHierarchy::RefineAndCopy(int lvl, ParMesh* pmesh)
+{
+    MFEM_ASSERT(!dynamic_cast<ParMeshCyl*> (pmesh),
+                "GeneralAnisoHierarchy is not designed to work with cylinder meshes \n");
+
+    if (lvl == num_lvls - 1)
+        pmesh_lvls[lvl] = new ParMesh(*pmesh);
+    else
+    {
+        if (ref_flags_lvls[lvl] >= 0)
+        {
+            Array<Refinement> refs(pmesh->GetNE());
+            for (int i = 0; i < pmesh->GetNE(); i++)
+                refs[i] = Refinement(i, ref_flags_lvls[lvl]);
+            pmesh->GeneralRefinement(refs, -1, -1);
+        }
+        else
+            pmesh->UniformRefinement();
+
+        pmesh_lvls[lvl] = new ParMesh(*pmesh);
+    }
+}
+
+int GeneralAnisoHierarchy::Update()
+{
+    GeneralHierarchy::Update();
+
+    // if you see this warning, this means that after construction, the finest mesh of the hierarchy was refined
+    // but the ref_flags_lvls was not updated by a user's call to PrependRefFlag().
+    if (ref_flags_lvls.Size() != num_lvls - 1)
+        std::cout << "WARNING: ref_flags_lvls is not up-to-date w.r.t"
+                     " to the GeneralAnisoHierarchy's hierarchy of meshes \n";
+}
+
 
 void GeneralCylHierarchy::ConstructRestrictions()
 {

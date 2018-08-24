@@ -37,7 +37,7 @@
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
 ///
-/// Another examples on adaptive mesh refinement, are cfosls_laplace_adref_Hcurl_new.cpp,
+/// Other examples on adaptive mesh refinement, are cfosls_laplace_adref_Hcurl_new.cpp,
 /// cfosls_laplace_adref_Hcurl.cpp and cfosls_hyperbolic_adref_Hcurl_new.cpp.
 
 #include "mfem.hpp"

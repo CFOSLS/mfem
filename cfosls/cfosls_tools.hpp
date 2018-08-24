@@ -360,7 +360,6 @@ enum SpaceName {HDIV = 0, H1 = 1, L2 = 2, HCURL = 3, HDIVSKEW = 4};
 class FOSLSFormulation;
 
 /// a class for hierarchy of spaces of finite element spaces based on a nested sequence of meshes
-///
 class GeneralHierarchy
 {
 protected:
@@ -429,6 +428,8 @@ protected:
     Array<SparseMatrix*> el2dofs_Hcurl_lvls;
     Array<SparseMatrix*> el2dofs_Hdivskew_lvls;
 
+    int feorder;
+
     // defines whether Hcurl f.e. space must be built in the hierarchy
     // one might not want to built it, because of the limitations on Hcurl f.e. spaces
     // e.g., higher-order f.e. Nedelec space doesn't allow to refine the mesh
@@ -449,6 +450,8 @@ protected:
     // they don't belong to the hierarchy but they will be updated when the hierarchy is.
     Array<FOSLSProblem*> problems;
 
+    bool fully_initialized;
+
 public:
     virtual ~GeneralHierarchy();
 
@@ -457,7 +460,7 @@ public:
         : GeneralHierarchy(num_levels, pmesh_, feorder, verbose, true) {}
     // but we might want not to do so, due to the limitations of higher-order Nedelec spaces
     // w.r.t to further mesh refinement
-    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder, bool verbose, bool with_hcurl_);
+    GeneralHierarchy(int num_levels, ParMesh& pmesh_, int feorder_, bool verbose, bool with_hcurl_);
 
     ParMesh* GetFinestParMesh() {return &pmesh;}
 
@@ -588,6 +591,14 @@ protected:
     // used in constructing the hierarchy of meshes
     virtual void RefineAndCopy(int lvl, ParMesh* pmesh);
 
+    // These are used for delayed initialization in GeneralAnisoHierarchy
+    // The reason to use these are because we want in GeneralAnisoHierarchy to replace a part
+    // of the constructor (related to the mesh hierarchy construction) via an overriden RefineAndCopy()
+    GeneralHierarchy(int num_levels, ParMesh& pmesh_);
+
+    void Init(int feorder, bool verbose, bool with_hcurl);
+    void Init(int feorder, bool verbose)
+    { Init(feorder, verbose, true); }
 };
 
 template <class Problem> Problem*
@@ -603,6 +614,50 @@ GeneralHierarchy::BuildDynamicProblem(BdrConditions& bdr_conditions, FOSLSFEForm
 {
     return new Problem(*this, bdr_conditions, fe_formulation, prec_option, verbose);
 }
+
+/// An extension of GeneralHierarchy to the case when the mesh is refined anisotropically
+/// this class could be used for building anisotropic multigrid
+/// Unfortunately, curren MFEM doesn't support copying of non-conforming ParMesh'es which
+/// is necessary for RefineAndCopy to work.
+/// So, the code is written but cannot be tested for now.
+class GeneralAnisoHierarchy : public GeneralHierarchy
+{
+protected:
+    // for each level, stores the refinement flag which will be applied to all elements in the mesh
+    // size of the Array = number of levels - 1
+    // for a uniform refinement one can store in ref_flags_lvls any negative value
+    Array<int> ref_flags_lvls;
+
+public:
+    virtual ~GeneralAnisoHierarchy() {}
+
+    GeneralAnisoHierarchy(const Array<int>& ref_flags_lvls_, ParMesh& pmesh_, int feorder_,
+                          bool verbose_, bool with_hcurl_)
+        : GeneralHierarchy(ref_flags_lvls_.Size() + 1, pmesh_)
+    {
+        ref_flags_lvls.SetSize(ref_flags_lvls_.Size());
+        for (int i = 0; i < ref_flags_lvls_.Size(); ++i)
+            ref_flags_lvls[i] = ref_flags_lvls_[i];
+
+        Init(feorder_, verbose_, with_hcurl_);
+    }
+
+    // need to override this, to update ref_flags_lvls accordingly to the hierarchy update
+    virtual int Update() override;
+
+    // helps to keep track of hierarchy updates in ref_flags_lvls
+    // for whichever reason a user wants to keep the correspondence between
+    // the underlying hierarchy of meshes and ref_flags_lvls
+    void PrependRefFlag(int flag) {ref_flags_lvls.Prepend(flag);}
+
+    const Array<int> & GetRefFlagsLvls() const {return ref_flags_lvls;}
+
+protected:
+    // this is the main difference w.r.t the base class,
+    // it uses ref_flags_lvls to define refinement flag for the mesh at given level
+    virtual void RefineAndCopy(int lvl, ParMesh* pmesh) override;
+};
+
 
 /// a specific GeneralHierarchy which is built on a hierarchy of ParMeshCyl
 /// (cylinder meshes) objects.

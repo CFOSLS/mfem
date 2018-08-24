@@ -27,7 +27,7 @@
 ///
 /// Typical run of this example: ./cfosls_laplace_adref_Hcurl --whichD 3 -no-vis
 ///
-/// Another examples on adaptive mesh refinement, with more complicated solvers, are
+/// Other examples on adaptive mesh refinement, with more complicated solvers, are
 /// cfosls_laplace_adref_Hcurl_new.cpp and cfosls_hyperbolic_adref_Hcurl_new.cpp.
 
 #include "mfem.hpp"

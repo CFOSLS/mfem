@@ -29,7 +29,7 @@
 /// If you want to use the Hdiv-H1-L2 formulation, you will need not only change --spaceS option but also
 /// change the source code, around 4.
 ///
-/// Another examples of the same kind are cfosls_parabolic.cpp, cfosls_wave.cpp and cfosls_laplace.cpp.
+/// Other examples of the same kind are cfosls_parabolic.cpp, cfosls_wave.cpp and cfosls_laplace.cpp.
 /// These are much cleaner than this one, since the are less options for the formulations.
 
 #include "mfem.hpp"

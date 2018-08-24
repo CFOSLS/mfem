@@ -21,8 +21,8 @@
 ///
 /// Typical run of this example: ./cfosls_wave --whichD 3 -no-vis
 ///
-/// Another examples of the same kind are cfosls_parabolic.cpp, cfosls_laplace.cpp and cfosls_hyperbolic.cpp.
-///
+/// Other examples of the same kind are cfosls_parabolic.cpp, cfosls_laplace.cpp and cfosls_hyperbolic.cpp.
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
