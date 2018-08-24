@@ -25,15 +25,16 @@ namespace mfem
     Geometry::TRIANGLE - triangle with vertices (0,0), (1,0), (0,1)
     Geometry::SQUARE   - the unit square (0,1)x(0,1)
     Geometry::TETRAHEDRON - w/ vert. (0,0,0),(1,0,0),(0,1,0),(0,0,1)
-    Geometry::CUBE - the unit cube                                    */
+    Geometry::CUBE - the unit cube
+    Geometry::PENTATOPE - w/ vert. (0,0,0,0),(1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1)
+    Geometry::TESSERACT - the 4d unit cube                                           */
 class Geometry
 {
 public:
-   enum Type { POINT, SEGMENT, TRIANGLE, SQUARE, TETRAHEDRON, CUBE };
+   enum Type { POINT, SEGMENT, TRIANGLE, SQUARE, TETRAHEDRON, CUBE, PENTATOPE, TESSERACT };
 
-   static const int NumGeom = 6;
-   static const int MaxDim = 3;
-   static const int NumBdrArray[NumGeom];
+   static const int NumGeom = 8;
+   static const int NumBdrArray[];
    static const char *Name[NumGeom];
    static const double Volume[NumGeom];
    static const int Dimension[NumGeom];
@@ -42,60 +43,40 @@ public:
    static const int NumFaces[NumGeom];
 
    // Structure that holds constants describing the Geometries.
+   // Currently it contains just the space dimension.
    template <Type Geom> struct Constants;
 
 private:
    IntegrationRule *GeomVert[NumGeom];
    IntegrationPoint GeomCenter[NumGeom];
-   DenseMatrix *GeomToPerfGeomJac[NumGeom];
    DenseMatrix *PerfGeomToGeomJac[NumGeom];
 
 public:
    Geometry();
    ~Geometry();
 
-   /** @brief Return an IntegrationRule consisting of all vertices of the given
-       Geometry::Type, @a GeomType. */
    const IntegrationRule *GetVertices(int GeomType);
-
-   /// Return the center of the given Geometry::Type, @a GeomType.
    const IntegrationPoint &GetCenter(int GeomType)
    { return GeomCenter[GeomType]; }
-
-   /// Get a random point in the reference element specified by @a GeomType.
-   /** This method uses the function rand() for random number generation. */
+   /** Get a random point in the reference element specified by GeomType.
+       This method uses the function rand() for random number generation. */
    static void GetRandomPoint(int GeomType, IntegrationPoint &ip);
-
    /// Check if the given point is inside the given reference element.
    static bool CheckPoint(int GeomType, const IntegrationPoint &ip);
-   /** @brief Check if the given point is inside the given reference element.
-       Overload for fuzzy tolerance. */
-   static bool CheckPoint(int GeomType, const IntegrationPoint &ip, double eps);
-
-   /// Project a point @a end, onto the given Geometry::Type, @a GeomType.
-   /** Check if the @a end point is inside the reference element, if not
-       overwrite it with the point on the boundary that lies on the line segment
-       between @a beg and @a end (@a beg must be inside the element). Return
-       true if @a end is inside the element, and false otherwise. */
+   /** Check if the end point is inside the reference element, if not overwrite
+       it with the point on the boundary that lies on the line segment between
+       beg and end (beg must be inside the element). Return true if end is
+       inside the element, and false otherwise. */
    static bool ProjectPoint(int GeomType, const IntegrationPoint &beg,
                             IntegrationPoint &end);
 
-   /// Project a point @a ip, onto the given Geometry::Type, @a GeomType.
-   /** If @a ip is outside the element, replace it with the point on the
-       boundary that is closest to the original @a ip and return false;
-       otherwise, return true without changing @a ip. */
-   static bool ProjectPoint(int GeomType, IntegrationPoint &ip);
-
-   const DenseMatrix &GetGeomToPerfGeomJac(int GeomType) const
-   { return *GeomToPerfGeomJac[GeomType]; }
    DenseMatrix *GetPerfGeomToGeomJac(int GeomType)
    { return PerfGeomToGeomJac[GeomType]; }
    void GetPerfPointMat(int GeomType, DenseMatrix &pm);
    void JacToPerfJac(int GeomType, const DenseMatrix &J,
                      DenseMatrix &PJ) const;
 
-   /// Return the number of boundary "faces" of a given Geometry::Type.
-   int NumBdr(int GeomType) { return NumBdrArray[GeomType]; }
+   int NumBdr (int GeomType) { return NumBdrArray[GeomType]; }
 };
 
 template <> struct Geometry::Constants<Geometry::POINT>
@@ -182,6 +163,12 @@ template <> struct Geometry::Constants<Geometry::TETRAHEDRON>
       static const int I[NumVert];
       static const int J[NumEdges][2]; // {end,edge_idx}
    };
+
+   static const int NumOrient = 24;
+   static const int Orient[NumOrient][NumVert];
+   // The inverse of orientation 'j' is InvOrient[j].
+   static const int InvOrient[NumOrient];
+
 };
 
 template <> struct Geometry::Constants<Geometry::CUBE>
@@ -202,6 +189,45 @@ template <> struct Geometry::Constants<Geometry::CUBE>
    };
 };
 
+template <> struct Geometry::Constants<Geometry::PENTATOPE>
+{
+   static const int Dimension = 4;
+   static const int NumVert = 5;
+   static const int NumEdges = 10;
+   static const int Edges[NumEdges][2];
+   static const int NumFaces = 5;
+   static const int FaceTypes[NumFaces];
+   static const int MaxFaceVert = 4;
+   static const int FaceVert[NumFaces][MaxFaceVert];
+   static const int NumPlanar = 10;
+   static const int MaxPlanarVert = 3;
+   static const int PlanarVert[NumPlanar][MaxPlanarVert];
+   // Lower-triangular part of the local vertex-to-vertex graph.
+   struct VertToVert
+   {
+      static const int I[NumVert];
+      static const int J[NumEdges][2]; // {end,edge_idx}
+   };
+};
+
+template <> struct Geometry::Constants<Geometry::TESSERACT>
+{
+   static const int Dimension = 4;
+   static const int NumVert = 16;
+   static const int NumEdges = 32;
+   static const int Edges[NumEdges][2];
+   static const int NumFaces = 8;
+   static const int FaceTypes[NumFaces];
+   static const int MaxFaceVert = 8;
+   static const int FaceVert[NumFaces][MaxFaceVert];
+   // Lower-triangular part of the local vertex-to-vertex graph.
+   struct VertToVert
+   {
+      static const int I[NumVert];
+      static const int J[NumEdges][2]; // {end,edge_idx}
+   };
+};
+
 extern Geometry Geometries;
 
 class RefinedGeometry
@@ -210,8 +236,7 @@ public:
    int Times, ETimes;
    IntegrationRule RefPts;
    Array<int> RefGeoms, RefEdges;
-   int NumBdrEdges; // at the beginning of RefEdges
-   int Type;
+   int NumBdrEdges; // at the begining of RefEdges
 
    RefinedGeometry(int NPts, int NRefG, int NRefE, int NBdrE = 0) :
       RefPts(NPts), RefGeoms(NRefG), RefEdges(NRefE), NumBdrEdges(NBdrE) { }
@@ -220,24 +245,14 @@ public:
 class GeometryRefiner
 {
 private:
-   int type; // Quadrature1D type (ClosedUniform is default)
-   Array<RefinedGeometry *> RGeom[Geometry::NumGeom];
-   Array<IntegrationRule *> IntPts[Geometry::NumGeom];
-
-   RefinedGeometry *FindInRGeom(int Geom, int Times, int ETimes, int Type);
-   IntegrationRule *FindInIntPts(int Geom, int NPts);
-
+   int type; // 0 - uniform points, otherwise - poly1d.ClosedPoints
+   RefinedGeometry *RGeom[Geometry::NumGeom];
+   IntegrationRule *IntPts[Geometry::NumGeom];
 public:
    GeometryRefiner();
 
-   /// Set the Quadrature1D type of points to use for subdivision.
    void SetType(const int t) { type = t; }
-   /// Get the Quadrature1D type of points used for subdivision.
-   int GetType() const { return type; }
-
-   RefinedGeometry *Refine(int Geom, int Times, int ETimes = 1);
-
-   /// @note This method always uses Quadrature1D::OpenUniform points.
+   RefinedGeometry *Refine (int Geom, int Times, int ETimes = 1);
    const IntegrationRule *RefineInterior(int Geom, int Times);
 
    ~GeometryRefiner();

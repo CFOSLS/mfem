@@ -17,7 +17,6 @@
 #include "matrix.hpp"
 #include "densemat.hpp"
 #include "../general/table.hpp"
-#include "../general/globals.hpp"
 
 #include <iostream>
 #include <iomanip>
@@ -28,33 +27,6 @@
 #include <float.h>
 #define copysign _copysign
 #endif
-
-
-#ifdef MFEM_USE_LAPACK
-extern "C" void
-dgemm_(char *, char *, int *, int *, int *, double *, double *,
-       int *, double *, int *, double *, double *, int *);
-extern "C" void
-dgetrf_(int *, int *, double *, int *, int *, int *);
-extern "C" void
-dgetrs_(char *, int *, int *, double *, int *, int *, double *, int *, int *);
-extern "C" void
-dgetri_(int *N, double *A, int *LDA, int *IPIV, double *WORK,
-        int *LWORK, int *INFO);
-extern "C" void
-dsyevr_(char *JOBZ, char *RANGE, char *UPLO, int *N, double *A, int *LDA,
-        double *VL, double *VU, int *IL, int *IU, double *ABSTOL, int *M,
-        double *W, double *Z, int *LDZ, int *ISUPPZ, double *WORK, int *LWORK,
-        int *IWORK, int *LIWORK, int *INFO);
-extern "C" void
-dsyev_(char *JOBZ, char *UPLO, int *N, double *A, int *LDA, double *W,
-       double *WORK, int *LWORK, int *INFO);
-extern "C" void
-dgesvd_(char *JOBU, char *JOBVT, int *M, int *N, double *A, int *LDA,
-        double *S, double *U, int *LDU, double *VT, int *LDVT, double *WORK,
-        int *LWORK, int *INFO);
-#endif
-
 
 namespace mfem
 {
@@ -72,10 +44,12 @@ DenseMatrix::DenseMatrix(const DenseMatrix &m) : Matrix(m.height, m.width)
    int hw = height * width;
    if (hw > 0)
    {
-      MFEM_ASSERT(m.data, "invalid source matrix");
       data = new double[hw];
       capacity = hw;
-      std::memcpy(data, m.data, sizeof(double)*hw);
+      for (int i = 0; i < hw; i++)
+      {
+         data[i] = m.data[i];
+      }
    }
    else
    {
@@ -483,6 +457,10 @@ double DenseMatrix::Det() const
       }
       case 4:
       {
+
+         //const double *d = data;
+         //return d[12]*d[9]*d[6]*d[3]-d[8]*d[13]*d[6]*d[3]-d[12]*d[5]*d[10]*d[3]+d[4]*d[13]*d[10]*d[3]+d[8]*d[5]*d[14]*d[3]-d[4]*d[9]*d[14]*d[3]-d[12]*d[9]*d[2]*d[7]+d[8]*d[13]*d[2]*d[7]+d[12]*d[1]*d[10]*d[7]-d[0]*d[13]*d[10]*d[7]-d[8]*d[1]*d[14]*d[7]+d[0]*d[9]*d[14]*d[7]+d[12]*d[5]*d[2]*d[11]-d[4]*d[13]*d[2]*d[11]-d[12]*d[1]*d[6]*d[11]+d[0]*d[13]*d[6]*d[11]+d[4]*d[1]*d[14]*d[11]-d[0]*d[5]*d[14]*d[11]-d[8]*d[5]*d[2]*d[15]+d[4]*d[9]*d[2]*d[15]+d[8]*d[1]*d[6]*d[15]-d[0]*d[9]*d[6]*d[15]-d[4]*d[1]*d[10]*d[15]+d[0]*d[5]*d[10]*d[15];
+
          const double *d = data;
          return
             d[ 0] * (d[ 5] * (d[10] * d[15] - d[11] * d[14]) -
@@ -511,7 +489,7 @@ double DenseMatrix::Det() const
          return lu_factors.Det();
       }
    }
-   // not reachable
+   return 0.0;
 }
 
 double DenseMatrix::Weight() const
@@ -539,15 +517,6 @@ double DenseMatrix::Weight() const
    }
    mfem_error("DenseMatrix::Weight()");
    return 0.0;
-}
-
-void DenseMatrix::Set(double alpha, const double *A)
-{
-   const int s = Width()*Height();
-   for (int i = 0; i < s; i++)
-   {
-      data[i] = alpha*A[i];
-   }
 }
 
 void DenseMatrix::Add(const double c, const DenseMatrix &A)
@@ -592,24 +561,21 @@ DenseMatrix &DenseMatrix::operator=(const DenseMatrix &m)
    return *this;
 }
 
-DenseMatrix &DenseMatrix::operator+=(const double *m)
-{
-   const int hw = Height()*Width();
-   for (int i = 0; i < hw; i++)
-   {
-      data[i] += m[i];
-   }
-   return *this;
-}
-
-DenseMatrix &DenseMatrix::operator+=(const DenseMatrix &m)
+DenseMatrix &DenseMatrix::operator+=(DenseMatrix &m)
 {
    MFEM_ASSERT(Height() == m.Height() && Width() == m.Width(),
                "incompatible matrix sizes.");
-   return *this += m.GetData();
+
+   for (int j = 0; j < width; j++)
+      for (int i = 0; i < height; i++)
+      {
+         (*this)(i, j) += m(i, j);
+      }
+
+   return *this;
 }
 
-DenseMatrix &DenseMatrix::operator-=(const DenseMatrix &m)
+DenseMatrix &DenseMatrix::operator-=(DenseMatrix &m)
 {
    for (int j = 0; j < width; j++)
       for (int i = 0; i < height; i++)
@@ -638,6 +604,16 @@ void DenseMatrix::Neg()
       data[i] = -data[i];
    }
 }
+
+#ifdef MFEM_USE_LAPACK
+extern "C" void
+dgetrf_(int *, int *, double *, int *, int *, int *);
+extern "C" void
+dgetrs_(char *, int *, int *, double *, int *, int *, double *, int *, int *);
+extern "C" void
+dgetri_(int *N, double *A, int *LDA, int *IPIV, double *WORK,
+        int *LWORK, int *INFO);
+#endif
 
 void DenseMatrix::Invert()
 {
@@ -749,51 +725,6 @@ void DenseMatrix::Invert()
 #endif
 }
 
-void DenseMatrix::SquareRootInverse()
-{
-   // Square root inverse using Denman--Beavers
-#ifdef MFEM_DEBUG
-   if (Height() <= 0 || Height() != Width())
-   {
-      mfem_error("DenseMatrix::SquareRootInverse() matrix not square.");
-   }
-#endif
-
-   DenseMatrix tmp1(Height());
-   DenseMatrix tmp2(Height());
-   DenseMatrix tmp3(Height());
-
-   tmp1 = (*this);
-   (*this) = 0.0;
-   for (int v = 0; v < Height() ; v++) { (*this)(v,v) = 1.0; }
-
-   for (int j = 0; j < 10; j++)
-   {
-      for (int i = 0; i < 10; i++)
-      {
-         tmp2 = tmp1;
-         tmp3 = (*this);
-
-         tmp2.Invert();
-         tmp3.Invert();
-
-         tmp1 += tmp3;
-         (*this) += tmp2;
-
-         tmp1 *= 0.5;
-         (*this) *= 0.5;
-      }
-      mfem::Mult((*this), tmp1, tmp2);
-      for (int v = 0; v < Height() ; v++) { tmp2(v,v) -= 1.0; }
-      if (tmp2.FNorm() < 1e-10) { break; }
-   }
-
-   if (tmp2.FNorm() > 1e-10)
-   {
-      mfem_error("DenseMatrix::SquareRootInverse not converged");
-   }
-}
-
 void DenseMatrix::Norm2(double *v) const
 {
    for (int j = 0; j < Width(); j++)
@@ -825,7 +756,7 @@ double DenseMatrix::MaxMaxNorm() const
    return norm;
 }
 
-void DenseMatrix::FNorm(double &scale_factor, double &scaled_fnorm2) const
+double DenseMatrix::FNorm() const
 {
    int i, hw = Height() * Width();
    double max_norm = 0.0, entry, fnorm2;
@@ -841,8 +772,7 @@ void DenseMatrix::FNorm(double &scale_factor, double &scaled_fnorm2) const
 
    if (max_norm == 0.0)
    {
-      scale_factor = scaled_fnorm2 = 0.0;
-      return;
+      return 0.0;
    }
 
    fnorm2 = 0.0;
@@ -852,9 +782,23 @@ void DenseMatrix::FNorm(double &scale_factor, double &scaled_fnorm2) const
       fnorm2 += entry * entry;
    }
 
-   scale_factor = max_norm;
-   scaled_fnorm2 = fnorm2;
+   return max_norm * sqrt(fnorm2);
 }
+
+#ifdef MFEM_USE_LAPACK
+extern "C" void
+dsyevr_(char *JOBZ, char *RANGE, char *UPLO, int *N, double *A, int *LDA,
+        double *VL, double *VU, int *IL, int *IU, double *ABSTOL, int *M,
+        double *W, double *Z, int *LDZ, int *ISUPPZ, double *WORK, int *LWORK,
+        int *IWORK, int *LIWORK, int *INFO);
+extern "C" void
+dsyev_(char *JOBZ, char *UPLO, int *N, double *A, int *LDA, double *W,
+       double *WORK, int *LWORK, int *INFO);
+extern "C" void
+dgesvd_(char *JOBU, char *JOBVT, int *M, int *N, double *A, int *LDA,
+        double *S, double *U, int *LDU, double *VT, int *LDVT, double *WORK,
+        int *LWORK, int *INFO);
+#endif
 
 void dsyevr_Eigensystem(DenseMatrix &a, Vector &ev, DenseMatrix *evect)
 {
@@ -920,17 +864,17 @@ void dsyevr_Eigensystem(DenseMatrix &a, Vector &ev, DenseMatrix *evect)
 
    if (INFO != 0)
    {
-      mfem::err << "dsyevr_Eigensystem(...): DSYEVR error code: "
-                << INFO << endl;
+      cerr << "dsyevr_Eigensystem(...): DSYEVR error code: "
+           << INFO << endl;
       mfem_error();
    }
 
 #ifdef MFEM_DEBUG
    if (M < N)
    {
-      mfem::err << "dsyevr_Eigensystem(...):\n"
-                << " DSYEVR did not find all eigenvalues "
-                << M << "/" << N << endl;
+      cerr << "dsyevr_Eigensystem(...):\n"
+           << " DSYEVR did not find all eigenvalues "
+           << M << "/" << N << endl;
       mfem_error();
    }
    if (CheckFinite(W, N) > 0)
@@ -964,19 +908,19 @@ void dsyevr_Eigensystem(DenseMatrix &a, Vector &ev, DenseMatrix *evect)
          }
          if (VU > 0.5)
          {
-            mfem::err << "dsyevr_Eigensystem(...):"
-                      << " Z^t Z - I deviation = " << VU
-                      << "\n W[max] = " << W[N-1] << ", W[min] = "
-                      << W[0] << ", N = " << N << endl;
+            cerr << "dsyevr_Eigensystem(...):"
+                 << " Z^t Z - I deviation = " << VU
+                 << "\n W[max] = " << W[N-1] << ", W[min] = "
+                 << W[0] << ", N = " << N << endl;
             mfem_error();
          }
       }
    if (VU > 1e-9)
    {
-      mfem::err << "dsyevr_Eigensystem(...):"
-                << " Z^t Z - I deviation = " << VU
-                << "\n W[max] = " << W[N-1] << ", W[min] = "
-                << W[0] << ", N = " << N << endl;
+      cerr << "dsyevr_Eigensystem(...):"
+           << " Z^t Z - I deviation = " << VU
+           << "\n W[max] = " << W[N-1] << ", W[min] = "
+           << W[0] << ", N = " << N << endl;
    }
    if (VU > 1e-5)
    {
@@ -999,10 +943,10 @@ void dsyevr_Eigensystem(DenseMatrix &a, Vector &ev, DenseMatrix *evect)
       }
    if (VU > 1e-9)
    {
-      mfem::err << "dsyevr_Eigensystem(...):"
-                << " max matrix deviation = " << VU
-                << "\n W[max] = " << W[N-1] << ", W[min] = "
-                << W[0] << ", N = " << N << endl;
+      cerr << "dsyevr_Eigensystem(...):"
+           << " max matrix deviation = " << VU
+           << "\n W[max] = " << W[N-1] << ", W[min] = "
+           << W[0] << ", N = " << N << endl;
    }
    if (VU > 1e-5)
    {
@@ -1064,7 +1008,7 @@ void dsyev_Eigensystem(DenseMatrix &a, Vector &ev, DenseMatrix *evect)
 
    if (INFO != 0)
    {
-      mfem::err << "dsyev_Eigensystem: DSYEV error code: " << INFO << endl;
+      cerr << "dsyev_Eigensystem: DSYEV error code: " << INFO << endl;
       mfem_error();
    }
 
@@ -1119,7 +1063,7 @@ void DenseMatrix::SingularValues(Vector &sv) const
    delete [] work;
    if (info)
    {
-      mfem::err << "DenseMatrix::SingularValues : info = " << info << endl;
+      cerr << "DenseMatrix::SingularValues : info = " << info << endl;
       mfem_error();
    }
 #else
@@ -1714,9 +1658,9 @@ inline int Reduce3S(
       d2  -= 2*v2*w2;
       d23 -= v2*w3 + v3*w2;
       d3  -= 2*v3*w3;
+#ifdef MFEM_DEBUG
       // compute the offdiagonal entries on the first row/column of B which
-      // should be zero (for debugging):
-#if 0
+      // should be zero:
       s = d12 - v1*w2 - v2*w1;  // b12 = 0
       s = d13 - v1*w3 - v3*w1;  // b13 = 0
 #endif
@@ -1757,9 +1701,8 @@ inline void GetScalingFactor(const double &d_max, double &mult)
 
 double DenseMatrix::CalcSingularvalue(const int i) const
 {
-   MFEM_ASSERT(Height() == Width() && Height() > 0 && Height() < 4,
-               "The matrix must be square and sized 1, 2, or 3 to compute the"
-               " singular values."
+   MFEM_ASSERT(Height() == Width() && Height() > 0 && Height() < 5,
+               "The matrix must be square and sized 1, 2, or 3 to compute the singular values."
                << "  Height() = " << Height()
                << ", Width() = " << Width());
 
@@ -1926,12 +1869,12 @@ double DenseMatrix::CalcSingularvalue(const int i) const
          {
             if (R < 0.)
             {
-               // R = -1.;
+               R = -1.;
                r = 2*sqrtQ;
             }
             else
             {
-               // R = 1.;
+               R = 1.;
                r = -2*sqrtQ;
             }
          }
@@ -2019,7 +1962,7 @@ double DenseMatrix::CalcSingularvalue(const int i) const
          Reduce3S(mode, b11, b22, b33, b12, b13, b23,
                   c1, c2, c3, v1, v2, v3, g);
          // Q = I - g v v^t
-         // P - permutation matrix switching rows and columns 1 and k
+         // P - permitation matrix switching rows and columns 1 and k
 
          // find the eigenvalues of
          //  | b22 b23 |
@@ -2144,12 +2087,12 @@ void DenseMatrix::CalcEigenvalues(double *lambda, double *vec) const
          {
             if (R < 0.)
             {
-               // R = -1.;
+               R = -1.;
                r = 2*sqrtQ;
             }
             else
             {
-               // R = 1.;
+               R = 1.;
                r = -2*sqrtQ;
             }
          }
@@ -2212,7 +2155,7 @@ void DenseMatrix::CalcEigenvalues(double *lambda, double *vec) const
          int k = Reduce3S(mode, d11, d22, d33, d12, d13, d23,
                           c1, c2, c3, v1, v2, v3, g);
          // Q = I - 2 v v^t
-         // P - permutation matrix switching entries 1 and k
+         // P - permitation matrix switching entries 1 and k
 
          // find the eigenvalues and eigenvectors for
          // | d22 d23 |
@@ -2420,7 +2363,7 @@ void DenseMatrix::Transpose()
    }
 }
 
-void DenseMatrix::Transpose(const DenseMatrix &A)
+void DenseMatrix::Transpose(DenseMatrix &A)
 {
    SetSize(A.Width(),A.Height());
 
@@ -2925,8 +2868,8 @@ void DenseMatrix::TestInversion()
    {
       C(i,i) -= 1.0;
    }
-   mfem::out << "size = " << width << ", i_max = " << C.MaxMaxNorm()
-             << ", cond_F = " << FNorm()*copy.FNorm() << endl;
+   cout << "size = " << width << ", i_max = " << C.MaxMaxNorm()
+        << ", cond_F = " << FNorm()*copy.FNorm() << endl;
 }
 
 DenseMatrix::~DenseMatrix()
@@ -2949,27 +2892,22 @@ void Add(const DenseMatrix &A, const DenseMatrix &B,
       }
 }
 
-void Add(double alpha, const double *A,
-         double beta,  const double *B, DenseMatrix &C)
-{
-   const int m = C.Height()*C.Width();
-   double *C_data = C.GetData();
-   for (int i = 0; i < m; i++)
-   {
-      C_data[i] = alpha*A[i] + beta*B[i];
-   }
-}
-
 void Add(double alpha, const DenseMatrix &A,
          double beta,  const DenseMatrix &B, DenseMatrix &C)
 {
-   MFEM_ASSERT(A.Height() == C.Height(), "");
-   MFEM_ASSERT(B.Height() == C.Height(), "");
-   MFEM_ASSERT(A.Width() == C.Width(), "");
-   MFEM_ASSERT(B.Width() == C.Width(), "");
-   Add(alpha, A.GetData(), beta, B.GetData(), C);
+   for (int j = 0; j < C.Width(); j++)
+      for (int i = 0; i < C.Height(); i++)
+      {
+         C(i,j) = alpha * A(i,j) + beta * B(i,j);
+      }
 }
 
+
+#ifdef MFEM_USE_LAPACK
+extern "C" void
+dgemm_(char *, char *, int *, int *, int *, double *, double *,
+       int *, double *, int *, double *, double *, int *);
+#endif
 
 void Mult(const DenseMatrix &b, const DenseMatrix &c, DenseMatrix &a)
 {
@@ -3042,7 +2980,7 @@ void AddMult(const DenseMatrix &b, const DenseMatrix &c, DenseMatrix &a)
 void CalcAdjugate(const DenseMatrix &a, DenseMatrix &adja)
 {
 #ifdef MFEM_DEBUG
-   if (a.Width() > a.Height() || a.Width() < 1 || a.Height() > 3)
+   if (a.Width() > a.Height() || a.Width() < 1 || a.Height() > 4)
    {
       mfem_error("CalcAdjugate(...)");
    }
@@ -3095,7 +3033,7 @@ void CalcAdjugate(const DenseMatrix &a, DenseMatrix &adja)
       adja(1,0) = -a(1,0);
       adja(1,1) =  a(0,0);
    }
-   else
+   else if (a.Width() == 3)
    {
       adja(0,0) = a(1,1)*a(2,2)-a(1,2)*a(2,1);
       adja(0,1) = a(0,2)*a(2,1)-a(0,1)*a(2,2);
@@ -3109,13 +3047,51 @@ void CalcAdjugate(const DenseMatrix &a, DenseMatrix &adja)
       adja(2,1) = a(0,1)*a(2,0)-a(0,0)*a(2,1);
       adja(2,2) = a(0,0)*a(1,1)-a(0,1)*a(1,0);
    }
+   else if (a.Width() == 4)
+   {
+      adja(0,0) = -a(1,3)*a(2,2)*a(3,1)+a(1,2)*a(2,3)*a(3,1)+a(1,3)*a(2,1)*a(3,2)-a(1,
+                                                                                    1)*a(2,3)*a(3,2)-a(1,2)*a(2,1)*a(3,3)+a(1,1)*a(2,2)*a(3,3);
+      adja(0,1) = a(0,3)*a(2,2)*a(3,1)-a(0,2)*a(2,3)*a(3,1)-a(0,3)*a(2,1)*a(3,2)+a(0,
+                                                                                   1)*a(2,3)*a(3,2)+a(0,2)*a(2,1)*a(3,3)-a(0,1)*a(2,2)*a(3,3);
+      adja(0,2) = -a(0,3)*a(1,2)*a(3,1)+a(0,2)*a(1,3)*a(3,1)+a(0,3)*a(1,1)*a(3,2)-a(0,
+                                                                                    1)*a(1,3)*a(3,2)-a(0,2)*a(1,1)*a(3,3)+a(0,1)*a(1,2)*a(3,3);
+      adja(0,3) = a(0,3)*a(1,2)*a(2,1)-a(0,2)*a(1,3)*a(2,1)-a(0,3)*a(1,1)*a(2,2)+a(0,
+                                                                                   1)*a(1,3)*a(2,2)+a(0,2)*a(1,1)*a(2,3)-a(0,1)*a(1,2)*a(2,3);
+
+      adja(1,0) = a(1,3)*a(2,2)*a(3,0)-a(1,2)*a(2,3)*a(3,0)-a(1,3)*a(2,0)*a(3,2)+a(1,
+                                                                                   0)*a(2,3)*a(3,2)+a(1,2)*a(2,0)*a(3,3)-a(1,0)*a(2,2)*a(3,3);
+      adja(1,1) = -a(0,3)*a(2,2)*a(3,0)+a(0,2)*a(2,3)*a(3,0)+a(0,3)*a(2,0)*a(3,2)-a(0,
+                                                                                    0)*a(2,3)*a(3,2)-a(0,2)*a(2,0)*a(3,3)+a(0,0)*a(2,2)*a(3,3);
+      adja(1,2) = a(0,3)*a(1,2)*a(3,0)-a(0,2)*a(1,3)*a(3,0)-a(0,3)*a(1,0)*a(3,2)+a(0,
+                                                                                   0)*a(1,3)*a(3,2)+a(0,2)*a(1,0)*a(3,3)-a(0,0)*a(1,2)*a(3,3);
+      adja(1,3) = -a(0,3)*a(1,2)*a(2,0)+a(0,2)*a(1,3)*a(2,0)+a(0,3)*a(1,0)*a(2,2)-a(0,
+                                                                                    0)*a(1,3)*a(2,2)-a(0,2)*a(1,0)*a(2,3)+a(0,0)*a(1,2)*a(2,3);
+
+      adja(2,0) = -a(1,3)*a(2,1)*a(3,0)+a(1,1)*a(2,3)*a(3,0)+a(1,3)*a(2,0)*a(3,1)-a(1,
+                                                                                    0)*a(2,3)*a(3,1)-a(1,1)*a(2,0)*a(3,3)+a(1,0)*a(2,1)*a(3,3);
+      adja(2,1) = a(0,3)*a(2,1)*a(3,0)-a(0,1)*a(2,3)*a(3,0)-a(0,3)*a(2,0)*a(3,1)+a(0,
+                                                                                   0)*a(2,3)*a(3,1)+a(0,1)*a(2,0)*a(3,3)-a(0,0)*a(2,1)*a(3,3);
+      adja(2,2) = -a(0,3)*a(1,1)*a(3,0)+a(0,1)*a(1,3)*a(3,0)+a(0,3)*a(1,0)*a(3,1)-a(0,
+                                                                                    0)*a(1,3)*a(3,1)-a(0,1)*a(1,0)*a(3,3)+a(0,0)*a(1,1)*a(3,3);
+      adja(2,3) = a(0,3)*a(1,1)*a(2,0)-a(0,1)*a(1,3)*a(2,0)-a(0,3)*a(1,0)*a(2,1)+a(0,
+                                                                                   0)*a(1,3)*a(2,1)+a(0,1)*a(1,0)*a(2,3)-a(0,0)*a(1,1)*a(2,3);
+
+      adja(3,0) = a(1,2)*a(2,1)*a(3,0)-a(1,1)*a(2,2)*a(3,0)-a(1,2)*a(2,0)*a(3,1)+a(1,
+                                                                                   0)*a(2,2)*a(3,1)+a(1,1)*a(2,0)*a(3,2)-a(1,0)*a(2,1)*a(3,2);
+      adja(3,1) = -a(0,2)*a(2,1)*a(3,0)+a(0,1)*a(2,2)*a(3,0)+a(0,2)*a(2,0)*a(3,1)-a(0,
+                                                                                    0)*a(2,2)*a(3,1)-a(0,1)*a(2,0)*a(3,2)+a(0,0)*a(2,1)*a(3,2);
+      adja(3,2) = a(0,2)*a(1,1)*a(3,0)-a(0,1)*a(1,2)*a(3,0)-a(0,2)*a(1,0)*a(3,1)+a(0,
+                                                                                   0)*a(1,2)*a(3,1)+a(0,1)*a(1,0)*a(3,2)-a(0,0)*a(1,1)*a(3,2);
+      adja(3,3) = -a(0,2)*a(1,1)*a(2,0)+a(0,1)*a(1,2)*a(2,0)+a(0,2)*a(1,0)*a(2,1)-a(0,
+                                                                                    0)*a(1,2)*a(2,1)-a(0,1)*a(1,0)*a(2,2)+a(0,0)*a(1,1)*a(2,2);
+   }
 }
 
 void CalcAdjugateTranspose(const DenseMatrix &a, DenseMatrix &adjat)
 {
 #ifdef MFEM_DEBUG
    if (a.Height() != a.Width() || adjat.Height() != adjat.Width() ||
-       a.Width() != adjat.Width() || a.Width() < 1 || a.Width() > 3)
+       a.Width() != adjat.Width() || a.Width() < 1 || a.Width() > 4)
    {
       mfem_error("CalcAdjugateTranspose(...)");
    }
@@ -3131,7 +3107,7 @@ void CalcAdjugateTranspose(const DenseMatrix &a, DenseMatrix &adjat)
       adjat(0,1) = -a(1,0);
       adjat(1,1) =  a(0,0);
    }
-   else
+   else if (a.Width() == 3)
    {
       adjat(0,0) = a(1,1)*a(2,2)-a(1,2)*a(2,1);
       adjat(1,0) = a(0,2)*a(2,1)-a(0,1)*a(2,2);
@@ -3145,11 +3121,17 @@ void CalcAdjugateTranspose(const DenseMatrix &a, DenseMatrix &adjat)
       adjat(1,2) = a(0,1)*a(2,0)-a(0,0)*a(2,1);
       adjat(2,2) = a(0,0)*a(1,1)-a(0,1)*a(1,0);
    }
+   else if (a.Width() == 4)
+   {
+      CalcAdjugate(a, adjat);
+      adjat.Transpose();
+      //    mfem_error("CalcAdjugateTranspose(...) - please implement the case for d = 4");
+   }
 }
 
 void CalcInverse(const DenseMatrix &a, DenseMatrix &inva)
 {
-   MFEM_ASSERT(a.Width() <= a.Height() && a.Width() >= 1 && a.Height() <= 3, "");
+   MFEM_ASSERT(a.Width() <= a.Height() && a.Width() >= 1 && a.Height() <= 4, "");
    MFEM_ASSERT(inva.Height() == a.Width(), "incorrect dimensions");
    MFEM_ASSERT(inva.Width() == a.Height(), "incorrect dimensions");
 
@@ -3227,6 +3209,12 @@ void CalcInverse(const DenseMatrix &a, DenseMatrix &inva)
          inva(2,1) = (a(0,1)*a(2,0)-a(0,0)*a(2,1))*t;
          inva(2,2) = (a(0,0)*a(1,1)-a(0,1)*a(1,0))*t;
          break;
+      case 4:
+      {
+         CalcAdjugate(a, inva);
+         inva *= t;
+         break;
+      }
    }
 }
 
@@ -3234,7 +3222,7 @@ void CalcInverseTranspose(const DenseMatrix &a, DenseMatrix &inva)
 {
 #ifdef MFEM_DEBUG
    if ( (a.Width() != a.Height()) || ( (a.Height()!= 1) && (a.Height()!= 2)
-                                       && (a.Height()!= 3) ) )
+                                       && (a.Height()!= 3) && (a.Height()!= 4)) )
    {
       mfem_error("CalcInverseTranspose(...)");
    }
@@ -3266,13 +3254,20 @@ void CalcInverseTranspose(const DenseMatrix &a, DenseMatrix &inva)
          inva(1,2) = (a(0,1)*a(2,0)-a(0,0)*a(2,1))*t;
          inva(2,2) = (a(0,0)*a(1,1)-a(0,1)*a(1,0))*t;
          break;
+      case 4:
+      {
+         CalcAdjugateTranspose(a, inva);
+         inva *= t;
+         break;
+      }
    }
 }
 
 void CalcOrtho(const DenseMatrix &J, Vector &n)
 {
    MFEM_ASSERT( ((J.Height() == 2 && J.Width() == 1)
-                 || (J.Height() == 3 && J.Width() == 2))
+                 || (J.Height() == 3 && J.Width() == 2)
+                 || (J.Height() == 4 && J.Width() == 3))
                 && (J.Height() == n.Size()),
                 "Matrix must be 3x2 or 2x1, "
                 << "and the Vector must be sized with the rows. "
@@ -3287,11 +3282,22 @@ void CalcOrtho(const DenseMatrix &J, Vector &n)
       n(0) =  d[1];
       n(1) = -d[0];
    }
-   else
+   else if (J.Height() == 3)
    {
       n(0) = d[1]*d[5] - d[2]*d[4];
       n(1) = d[2]*d[3] - d[0]*d[5];
       n(2) = d[0]*d[4] - d[1]*d[3];
+   }
+   else if (J.Height() == 4)
+   {
+      n(0) = -d[3]*d[6]*d[9]+d[2]*d[7]*d[9]+d[3]*d[5]*d[10]-d[1]*d[7]*d[10]
+             -d[2]*d[5]*d[11]+d[1]*d[6]*d[11];
+      n(1) = d[3]*d[6]*d[8]-d[2]*d[7]*d[8]-d[3]*d[4]*d[10]+d[0]*d[7]*d[10]
+             +d[2]*d[4]*d[11]-d[0]*d[6]*d[11];
+      n(2) = -d[3]*d[5]*d[8]+d[1]*d[7]*d[8]+d[3]*d[4]*d[9]-d[0]*d[7]*d[9]
+             -d[1]*d[4]*d[11]+d[0]*d[5]*d[11];
+      n(3) = d[2]*d[5]*d[8]-d[1]*d[6]*d[8]-d[2]*d[4]*d[9]+d[0]*d[6]*d[9]
+             +d[1]*d[4]*d[10]-d[0]*d[5]*d[10];
    }
 }
 
@@ -4186,7 +4192,7 @@ void DenseMatrixInverse::TestInversion()
    {
       C(i,i) -= 1.0;
    }
-   mfem::out << "size = " << width << ", i_max = " << C.MaxMaxNorm() << endl;
+   cout << "size = " << width << ", i_max = " << C.MaxMaxNorm() << endl;
 }
 
 DenseMatrixInverse::~DenseMatrixInverse()
@@ -4217,20 +4223,6 @@ DenseMatrixEigensystem::DenseMatrixEigensystem(DenseMatrix &m)
 #endif
 }
 
-DenseMatrixEigensystem::DenseMatrixEigensystem(
-   const DenseMatrixEigensystem &other)
-   : mat(other.mat), EVal(other.EVal), EVect(other.EVect), ev(NULL, other.n),
-     n(other.n)
-{
-#ifdef MFEM_USE_LAPACK
-   jobz = other.jobz;
-   uplo = other.uplo;
-   lwork = other.lwork;
-
-   work = new double[lwork];
-#endif
-}
-
 void DenseMatrixEigensystem::Eval()
 {
 #ifdef MFEM_DEBUG
@@ -4247,8 +4239,8 @@ void DenseMatrixEigensystem::Eval()
 
    if (info != 0)
    {
-      mfem::err << "DenseMatrixEigensystem::Eval(): DSYEV error code: "
-                << info << endl;
+      cerr << "DenseMatrixEigensystem::Eval(): DSYEV error code: "
+           << info << endl;
       mfem_error();
    }
 #else
@@ -4313,7 +4305,7 @@ void DenseMatrixSVD::Eval(DenseMatrix &M)
 
    if (info)
    {
-      mfem::err << "DenseMatrixSVD::Eval() : info = " << info << endl;
+      cerr << "DenseMatrixSVD::Eval() : info = " << info << endl;
       mfem_error();
    }
 #else

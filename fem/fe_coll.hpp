@@ -51,6 +51,8 @@ public:
 
    int HasFaceDofs(int GeomType) const;
 
+   int HasPlanarDofs(int GeomType) const;
+
    virtual const FiniteElement *TraceFiniteElementForGeometry(
       int GeomType) const
    {
@@ -325,6 +327,8 @@ private:
    const BiLinear2DFiniteElement QuadrilateralFE;
    const Linear3DFiniteElement TetrahedronFE;
    const TriLinear3DFiniteElement ParallelepipedFE;
+   const Linear4DFiniteElement PentatopeFE;
+   const QuadLinear4DFiniteElement TesseractFE;
 public:
    LinearFECollection() { }
 
@@ -348,6 +352,7 @@ private:
    const BiQuad2DFiniteElement QuadrilateralFE;
    const Quadratic3DFiniteElement TetrahedronFE;
    const LagrangeHexFiniteElement ParallelepipedFE;
+   const Quadratic4DFiniteElement PentatopeFE;
 
 public:
    QuadraticFECollection() : ParallelepipedFE(2) { }
@@ -775,6 +780,62 @@ public:
    virtual const char * Name() const { return "ND1_3D"; }
 };
 
+class ND1_4DFECollection : public FiniteElementCollection
+{
+private:
+   const Nedelec1PentFiniteElement NedPentatopFE;
+
+public:
+   ND1_4DFECollection() { }
+
+   virtual const FiniteElement *
+   FiniteElementForGeometry(int GeomType) const;
+
+   virtual int DofForGeometry(int GeomType) const;
+
+   virtual int * DofOrderForOrientation(int GeomType, int Or) const;
+
+   virtual const char * Name() const { return "ND1_4D"; }
+};
+
+class ND2_4DFECollection : public FiniteElementCollection
+{
+private:
+   const Nedelec1FullPentFiniteElement NedPentatopFE;
+
+public:
+   ND2_4DFECollection() { }
+
+   virtual const FiniteElement *
+   FiniteElementForGeometry(int GeomType) const;
+
+   virtual int DofForGeometry(int GeomType) const;
+
+   virtual int * DofOrderForOrientation(int GeomType, int Or) const;
+
+   virtual const char * Name() const { return "ND2_4D"; }
+};
+
+
+class DivSkew1_4DFECollection : public FiniteElementCollection
+{
+private:
+   const DivSkew1PentFiniteElement DivSkew0PentatopFE;
+
+public:
+   DivSkew1_4DFECollection() { }
+
+   virtual const FiniteElement *
+   FiniteElementForGeometry(int GeomType) const;
+
+   virtual int DofForGeometry(int GeomType) const;
+
+   virtual int * DofOrderForOrientation(int GeomType, int Or) const;
+
+   virtual const char * Name() const { return "F2K0_4D"; }
+};
+
+
 /** First order Raviart-Thomas finite elements in 3D. This class is kept only
     for backward compatibility, consider using RT_FECollection instead. */
 class RT0_3DFECollection : public FiniteElementCollection
@@ -816,6 +877,53 @@ public:
    virtual int * DofOrderForOrientation(int GeomType, int Or) const;
 
    virtual const char * Name() const { return "RT1_3D"; }
+};
+
+/** First order Raviart-Thomas finite elements in 4D. */
+class RT0_4DFECollection : public FiniteElementCollection
+{
+protected:
+   int ob_type; // open BasisType
+   char rt_name[32];
+   FiniteElement *RT_Elements[Geometry::NumGeom];
+   int RT_dof[Geometry::NumGeom];
+   int *SegDofOrd[2], *TriDofOrd[6], *QuadDofOrd[8];
+   int *TetraDofOrd[24]; // FIX IT: what should be the size of DofOrd array? Number of tetrahedron orientations? Then it's 24
+
+   // Initialize only the face elements
+   void InitFaces(const int p, const int dim, const int map_type,
+                  const bool signs);
+
+   // Constructor used by the constructor of the DG0_Interface_4DFECollection
+   // classes
+   RT0_4DFECollection(const int p, const int dim, const int map_type,
+                   const bool signs,
+                   const int ob_type = BasisType::GaussLegendre);
+private:
+   const P0TetFiniteElement TetrahedronFE;
+   const RT0PentFiniteElement PentatopeFE;
+public:
+   RT0_4DFECollection() { };
+
+   virtual const FiniteElement *
+   FiniteElementForGeometry(int GeomType) const;
+
+   virtual int DofForGeometry(int GeomType) const;
+
+   virtual int * DofOrderForOrientation(int GeomType, int Or) const;
+
+   virtual const char * Name() const { return "RT0_4D"; };
+};
+
+/** 0th order discontinuous finite elements defined on the interface
+    between mesh elements (faces). The functions in this space are single-valued
+    on each face and are discontinuous across its boundary. */
+class DG0_Interface_4DFECollection : public RT0_4DFECollection
+{
+public:
+   DG0_Interface_4DFECollection(const int p, const int dim,
+                             const int map_type = FiniteElement::VALUE,
+                             const int ob_type = BasisType::GaussLegendre);
 };
 
 /// Discontinuous collection defined locally by a given finite element.

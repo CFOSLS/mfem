@@ -19,6 +19,8 @@
 #include <limits>
 #include <ostream>
 #include <string>
+#include <list>
+//#include <vector>
 
 namespace mfem
 {
@@ -378,8 +380,16 @@ public:
 
    /// Destroys grid function.
    virtual ~GridFunction() { Destroy(); }
+
 };
 
+// definitions are in mesh/mesh.cpp
+void reorder_cellvertices ( int dim, int nip, std::vector<std::vector<double> > & cellpnts, std::vector<int> & elvertexes);
+bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation);
+bool sortQuadril2d(std::vector<std::vector<double> > & Points, int * permutation);
+bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &b);
+double l2Norm(std::vector<double> vec);
+double sprod(std::vector<double> vec1, std::vector<double> vec2);
 
 /** Overload operator<< for std::ostream and GridFunction; valid also for the
     derived class ParGridFunction */

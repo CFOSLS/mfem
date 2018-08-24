@@ -15,16 +15,15 @@ namespace mfem
 {
 
 const char *Geometry::Name[NumGeom] =
-{ "Point", "Segment", "Triangle", "Square", "Tetrahedron", "Cube" };
+{ "Point", "Segment", "Triangle", "Square", "Tetrahedron", "Cube", "Pentatope", "Tesseract" };
 
 const double Geometry::Volume[NumGeom] =
-{ 1.0, 1.0, 0.5, 1.0, 1./6, 1.0 };
+{ 1.0, 1.0, 0.5, 1.0, 1./6, 1.0, 1./24., 1.0 };
 
 Geometry::Geometry()
 {
    // Vertices for Geometry::POINT
-   GeomVert[0] =  new IntegrationRule(1);
-   GeomVert[0]->IntPoint(0).x = 0.0;
+   GeomVert[0] = NULL; // No vertices, dimension is 0
 
    // Vertices for Geometry::SEGMENT
    GeomVert[1] = new IntegrationRule(2);
@@ -112,6 +111,34 @@ Geometry::Geometry()
    GeomVert[5]->IntPoint(7).y = 1.0;
    GeomVert[5]->IntPoint(7).z = 1.0;
 
+   // Vertices for Geometry::PENTATOPE
+   GeomVert[6] = new IntegrationRule(5);
+   GeomVert[6]->IntPoint(0).x = 0.0;
+   GeomVert[6]->IntPoint(0).y = 0.0;
+   GeomVert[6]->IntPoint(0).z = 0.0;
+   GeomVert[6]->IntPoint(0).t = 0.0;
+
+   GeomVert[6]->IntPoint(1).x = 1.0;
+   GeomVert[6]->IntPoint(1).y = 0.0;
+   GeomVert[6]->IntPoint(1).z = 0.0;
+   GeomVert[6]->IntPoint(1).t = 0.0;
+
+   GeomVert[6]->IntPoint(2).x = 0.0;
+   GeomVert[6]->IntPoint(2).y = 1.0;
+   GeomVert[6]->IntPoint(2).z = 0.0;
+   GeomVert[6]->IntPoint(2).t = 0.0;
+
+   GeomVert[6]->IntPoint(3).x = 0.0;
+   GeomVert[6]->IntPoint(3).y = 0.0;
+   GeomVert[6]->IntPoint(3).z = 1.0;
+   GeomVert[6]->IntPoint(3).t = 0.0;
+
+   GeomVert[6]->IntPoint(4).x = 0.0;
+   GeomVert[6]->IntPoint(4).y = 0.0;
+   GeomVert[6]->IntPoint(4).z = 0.0;
+   GeomVert[6]->IntPoint(4).t = 1.0;
+
+
    GeomCenter[POINT].x = 0.0;
    GeomCenter[POINT].y = 0.0;
    GeomCenter[POINT].z = 0.0;
@@ -136,12 +163,10 @@ Geometry::Geometry()
    GeomCenter[CUBE].y = 0.5;
    GeomCenter[CUBE].z = 0.5;
 
-   GeomToPerfGeomJac[POINT]       = NULL;
-   GeomToPerfGeomJac[SEGMENT]     = new DenseMatrix(1);
-   GeomToPerfGeomJac[TRIANGLE]    = new DenseMatrix(2);
-   GeomToPerfGeomJac[SQUARE]      = new DenseMatrix(2);
-   GeomToPerfGeomJac[TETRAHEDRON] = new DenseMatrix(3);
-   GeomToPerfGeomJac[CUBE]        = new DenseMatrix(3);
+   GeomCenter[PENTATOPE].x = 0.2;
+   GeomCenter[PENTATOPE].y = 0.2;
+   GeomCenter[PENTATOPE].z = 0.2;
+   GeomCenter[PENTATOPE].t = 0.2;
 
    PerfGeomToGeomJac[POINT]       = NULL;
    PerfGeomToGeomJac[SEGMENT]     = NULL;
@@ -150,29 +175,22 @@ Geometry::Geometry()
    PerfGeomToGeomJac[TETRAHEDRON] = new DenseMatrix(3);
    PerfGeomToGeomJac[CUBE]        = NULL;
 
-   GeomToPerfGeomJac[SEGMENT]->Diag(1.0, 1);
    {
       Linear2DFiniteElement TriFE;
       IsoparametricTransformation tri_T;
       tri_T.SetFE(&TriFE);
       GetPerfPointMat (TRIANGLE, tri_T.GetPointMat());
-      tri_T.FinalizeTransformation();
       tri_T.SetIntPoint(&GeomCenter[TRIANGLE]);
-      *GeomToPerfGeomJac[TRIANGLE] = tri_T.Jacobian();
       CalcInverse(tri_T.Jacobian(), *PerfGeomToGeomJac[TRIANGLE]);
    }
-   GeomToPerfGeomJac[SQUARE]->Diag(1.0, 2);
    {
       Linear3DFiniteElement TetFE;
       IsoparametricTransformation tet_T;
       tet_T.SetFE(&TetFE);
       GetPerfPointMat (TETRAHEDRON, tet_T.GetPointMat());
-      tet_T.FinalizeTransformation();
       tet_T.SetIntPoint(&GeomCenter[TETRAHEDRON]);
-      *GeomToPerfGeomJac[TETRAHEDRON] = tet_T.Jacobian();
       CalcInverse(tet_T.Jacobian(), *PerfGeomToGeomJac[TETRAHEDRON]);
    }
-   GeomToPerfGeomJac[CUBE]->Diag(1.0, 3);
 }
 
 Geometry::~Geometry()
@@ -180,7 +198,6 @@ Geometry::~Geometry()
    for (int i = 0; i < NumGeom; i++)
    {
       delete PerfGeomToGeomJac[i];
-      delete GeomToPerfGeomJac[i];
       delete GeomVert[i];
    }
 }
@@ -195,6 +212,7 @@ const IntegrationRule * Geometry::GetVertices(int GeomType)
       case Geometry::SQUARE:      return GeomVert[3];
       case Geometry::TETRAHEDRON: return GeomVert[4];
       case Geometry::CUBE:        return GeomVert[5];
+      case Geometry::PENTATOPE:   return GeomVert[6];
       default:
          mfem_error ("Geometry::GetVertices(...)");
    }
@@ -267,32 +285,6 @@ void Geometry::GetRandomPoint(int GeomType, IntegrationPoint &ip)
    }
 }
 
-
-namespace internal
-{
-
-// Fuzzy equality operator with absolute tolerance eps.
-inline bool NearlyEqual(double x, double y, double eps)
-{
-   return std::abs(x-y) <= eps;
-}
-
-// Fuzzy greater than comparison operator with absolute tolerance eps.
-// Returns true when x is greater than y by at least eps.
-inline bool FuzzyGT(double x, double y, double eps)
-{
-   return (x > y + eps);
-}
-
-// Fuzzy less than comparison operator with absolute tolerance eps.
-// Returns true when x is less than y by at least eps.
-inline bool FuzzyLT(double x, double y, double eps)
-{
-   return (x < y - eps);
-}
-
-}
-
 // static method
 bool Geometry::CheckPoint(int GeomType, const IntegrationPoint &ip)
 {
@@ -325,67 +317,6 @@ bool Geometry::CheckPoint(int GeomType, const IntegrationPoint &ip)
    return true;
 }
 
-bool Geometry::CheckPoint(int GeomType, const IntegrationPoint &ip, double eps)
-{
-   switch (GeomType)
-   {
-      case Geometry::POINT:
-         if (! internal::NearlyEqual(ip.x, 0.0, eps))
-         {
-            return false;
-         }
-         break;
-      case Geometry::SEGMENT:
-         if ( internal::FuzzyLT(ip.x, 0.0, eps)
-              || internal::FuzzyGT(ip.x, 1.0, eps) )
-         {
-            return false;
-         }
-         break;
-      case Geometry::TRIANGLE:
-         if ( internal::FuzzyLT(ip.x, 0.0, eps)
-              || internal::FuzzyLT(ip.y, 0.0, eps)
-              || internal::FuzzyGT(ip.x+ip.y, 1.0, eps) )
-         {
-            return false;
-         }
-         break;
-      case Geometry::SQUARE:
-         if ( internal::FuzzyLT(ip.x, 0.0, eps)
-              || internal::FuzzyGT(ip.x, 1.0, eps)
-              || internal::FuzzyLT(ip.y, 0.0, eps)
-              || internal::FuzzyGT(ip.y, 1.0, eps) )
-         {
-            return false;
-         }
-         break;
-      case Geometry::TETRAHEDRON:
-         if ( internal::FuzzyLT(ip.x, 0.0, eps)
-              || internal::FuzzyLT(ip.y, 0.0, eps)
-              || internal::FuzzyLT(ip.z, 0.0, eps)
-              || internal::FuzzyGT(ip.x+ip.y+ip.z, 1.0, eps) )
-         {
-            return false;
-         }
-         break;
-      case Geometry::CUBE:
-         if ( internal::FuzzyLT(ip.x, 0.0, eps)
-              || internal::FuzzyGT(ip.x, 1.0, eps)
-              || internal::FuzzyLT(ip.y, 0.0, eps)
-              || internal::FuzzyGT(ip.y, 1.0, eps)
-              || internal::FuzzyLT(ip.z, 0.0, eps)
-              || internal::FuzzyGT(ip.z, 1.0, eps) )
-         {
-            return false;
-         }
-         break;
-      default:
-         MFEM_ABORT("Unknown type of reference element!");
-   }
-   return true;
-}
-
-
 namespace internal
 {
 
@@ -409,32 +340,6 @@ inline bool IntersectSegment(double lbeg[N], double lend[N],
       if (dim >= 1) { end.x = t*lend[0] + (1.0-t)*lbeg[0]; }
       if (dim >= 2) { end.y = t*lend[1] + (1.0-t)*lbeg[1]; }
       if (dim >= 3) { end.z = t*lend[2] + (1.0-t)*lbeg[2]; }
-      return false;
-   }
-   return true;
-}
-
-inline bool ProjectTriangle(double &x, double &y)
-{
-   if (x < 0.0)
-   {
-      x = 0.0;
-      if (y < 0.0)      { y = 0.0; }
-      else if (y > 1.0) { y = 1.0; }
-      return false;
-   }
-   if (y < 0.0)
-   {
-      if (x > 1.0) { x = 1.0; }
-      y = 0.0;
-      return false;
-   }
-   const double l3 = 1.0-x-y;
-   if (l3 < 0.0)
-   {
-      if (y - x > 1.0)       { x = 0.0; y = 1.0; }
-      else if (y - x < -1.0) { x = 1.0; y = 0.0; }
-      else                   { x += l3/2; y += l3/2; }
       return false;
    }
    return true;
@@ -489,93 +394,6 @@ bool Geometry::ProjectPoint(int GeomType, const IntegrationPoint &beg,
       }
       default:
          MFEM_ABORT("Unknown type of reference element!");
-   }
-   return true;
-}
-
-// static method
-bool Geometry::ProjectPoint(int GeomType, IntegrationPoint &ip)
-{
-   // If ip is outside the element, replace it with the point on the boundary
-   // that is closest to the original ip and return false; otherwise, return
-   // true without changing ip.
-
-   switch (GeomType)
-   {
-      case SEGMENT:
-      {
-         if (ip.x < 0.0)      { ip.x = 0.0; return false; }
-         else if (ip.x > 1.0) { ip.x = 1.0; return false; }
-         return true;
-      }
-
-      case TRIANGLE:
-      {
-         return internal::ProjectTriangle(ip.x, ip.y);
-      }
-
-      case SQUARE:
-      {
-         bool in_x, in_y;
-         if (ip.x < 0.0)      { in_x = false; ip.x = 0.0; }
-         else if (ip.x > 1.0) { in_x = false; ip.x = 1.0; }
-         else                 { in_x = true; }
-         if (ip.y < 0.0)      { in_y = false; ip.y = 0.0; }
-         else if (ip.y > 1.0) { in_y = false; ip.y = 1.0; }
-         else                 { in_y = true; }
-         return in_x && in_y;
-      }
-
-      case TETRAHEDRON:
-      {
-         if (ip.z < 0.0)
-         {
-            ip.z = 0.0;
-            internal::ProjectTriangle(ip.x, ip.y);
-            return false;
-         }
-         if (ip.y < 0.0)
-         {
-            ip.y = 0.0;
-            internal::ProjectTriangle(ip.x, ip.z);
-            return false;
-         }
-         if (ip.x < 0.0)
-         {
-            ip.x = 0.0;
-            internal::ProjectTriangle(ip.y, ip.z);
-            return false;
-         }
-         const double l4 = 1.0-ip.x-ip.y-ip.z;
-         if (l4 < 0.0)
-         {
-            const double l4_3 = l4/3;
-            ip.x += l4_3;
-            ip.y += l4_3;
-            internal::ProjectTriangle(ip.x, ip.y);
-            ip.z = 1.0-ip.x-ip.y;
-            return false;
-         }
-         return true;
-      }
-
-      case CUBE:
-      {
-         bool in_x, in_y, in_z;
-         if (ip.x < 0.0)      { in_x = false; ip.x = 0.0; }
-         else if (ip.x > 1.0) { in_x = false; ip.x = 1.0; }
-         else                 { in_x = true; }
-         if (ip.y < 0.0)      { in_y = false; ip.y = 0.0; }
-         else if (ip.y > 1.0) { in_y = false; ip.y = 1.0; }
-         else                 { in_y = true; }
-         if (ip.z < 0.0)      { in_z = false; ip.z = 0.0; }
-         else if (ip.z > 1.0) { in_z = false; ip.z = 1.0; }
-         else                 { in_z = true; }
-         return in_x && in_y && in_z;
-      }
-
-      default:
-         MFEM_ABORT("Reference element type is not supported!");
    }
    return true;
 }
@@ -654,7 +472,7 @@ void Geometry::JacToPerfJac(int GeomType, const DenseMatrix &J,
    }
 }
 
-const int Geometry::NumBdrArray[NumGeom] = { 0, 2, 3, 4, 4, 6 };
+const int Geometry::NumBdrArray[] = { 0, 2, 3, 4, 4, 6 };
 const int Geometry::Dimension[NumGeom] = { 0, 1, 2, 2, 3, 3 };
 const int Geometry::NumVerts[NumGeom] = { 1, 2, 3, 4, 4, 8 };
 const int Geometry::NumEdges[NumGeom] = { 0, 1, 3, 4, 6, 12 };
@@ -724,6 +542,17 @@ Constants<Geometry::TETRAHEDRON>::VertToVert::I[4] = {0, 3, 5, 6};
 const int Geometry::
 Constants<Geometry::TETRAHEDRON>::VertToVert::J[6][2] =
 {{1, 0}, {2, 1}, {3, 2}, {2, 3}, {3, 4}, {3, 5}};
+const int Geometry::
+Constants<Geometry::TETRAHEDRON>::Orient[24][4] =
+{
+    // follows Mesh::GetTetOrientation
+   {0, 1, 2, 3}, {1, 0, 2, 3}, {1, 2, 0, 3}, {2, 1, 0, 3},
+   {2, 0, 1, 3}, {0, 2, 1, 3}, {0, 2, 3, 1}, {2, 0, 3, 1},
+   {2, 3, 0, 1}, {3, 2, 0, 1}, {3, 0, 2, 1}, {0, 3, 2, 1},
+   {0, 3, 1, 2}, {3, 0, 1, 2}, {3, 1, 0, 2}, {1, 3, 0, 2},
+   {1, 0, 3, 2}, {0, 1, 3, 2}, {2, 1, 3, 0}, {1, 2, 3, 0},
+   {1, 3, 2, 0}, {3, 1, 2, 0}, {3, 2, 1, 0}, {2, 3, 1, 0}
+};
 
 const int Geometry::
 Constants<Geometry::CUBE>::Edges[12][2] =
@@ -757,112 +586,157 @@ Constants<Geometry::CUBE>::VertToVert::J[12][2] =
    {7,-7}                  // 6,7:-7
 };
 
+
+const int Geometry::
+Constants<Geometry::PENTATOPE>::Edges[10][2] =
+{{0, 1}, {0, 2}, {0, 3}, {0, 4}, {1, 2}, {1, 3}, {1, 4}, {2, 3}, {2, 4}, {3, 4}};
+const int Geometry::
+Constants<Geometry::PENTATOPE>::FaceTypes[5] =
+{
+   Geometry::TETRAHEDRON, Geometry::TETRAHEDRON,
+   Geometry::TETRAHEDRON, Geometry::TETRAHEDRON,
+   Geometry::TETRAHEDRON
+};
+const int Geometry::
+Constants<Geometry::PENTATOPE>::FaceVert[5][4] =
+{
+   {0, 1, 2, 3}, {0, 1, 2, 4},
+   {0, 1, 3, 4}, {0, 2, 3, 4},
+   {1, 2, 3, 4}
+   // {0, 1, 2, 3}, {1, 0, 2, 4},     //<---- sorted such that the normal vectors are outer normal vectors
+   // {0, 1, 3, 4}, {2, 0, 3, 4},
+   // {1, 2, 3, 4}
+};
+const int Geometry::
+Constants<Geometry::PENTATOPE>::PlanarVert[10][3] =
+{
+   {0, 1, 2}, {0, 1, 3}, {0, 1, 4},
+   {0, 2, 3}, {0, 2, 4}, {0, 3, 4},
+   {1, 2, 3}, {1, 2, 4}, {1, 3, 4},
+   {2, 3, 4}
+};
+
+//const int Geometry::
+//Constants<Geometry::PENTATOPE>::VertToVert::I[4] = {0, 3, 5, 6};
+//const int Geometry::
+//Constants<Geometry::PENTATOPE>::VertToVert::J[6][2] =
+//{{1, 0}, {2, 1}, {3, 2}, {2, 3}, {3, 4}, {3, 5}};
+
+
+const int Geometry::
+Constants<Geometry::TESSERACT>::FaceVert[8][8] =
+{
+   // {8,11,12,15,0,3,4,7},   //x bottom
+   // {1,2,6,5,9,10,14,13},   //x top
+   // {0,1,5,4,8,9,13,12},    //y bottom
+   // {2,3,7,6,10,11,15,14},  //y top
+   // {8,9,10,11,0,1,2,3},    // z bottom
+   // {4,5,6,7,12,13,14,15},  //z top
+   // {0,1,2,3,4,5,6,7},      //t botom
+   // {12,13,14,15,8,9,10,11} //t top
+   {8,11,15,12,0,3,7,4},   //x bottom
+   {1,2,6,5,9,10,14,13},   //x top
+   {0,1,5,4,8,9,13,12},    //y bottom
+   {2,3,7,6,10,11,15,14},  //y top
+   {8,9,10,11,0,1,2,3},    // z bottom
+   {4,5,6,7,12,13,14,15},  //z top
+   {0,1,2,3,4,5,6,7},      //t botom
+   {12,13,14,15,8,9,10,11} //t top
+};
+
+
 Geometry Geometries;
 
 
 GeometryRefiner::GeometryRefiner()
 {
-   type = Quadrature1D::ClosedUniform;
+   type = 0;
+   for (int i = 0; i < Geometry::NumGeom; i++)
+   {
+      RGeom[i] = NULL;
+      IntPts[i] = NULL;
+   }
 }
 
 GeometryRefiner::~GeometryRefiner()
 {
    for (int i = 0; i < Geometry::NumGeom; i++)
    {
-      for (int j = 0; j < RGeom[i].Size(); j++) { delete RGeom[i][j]; }
-      for (int j = 0; j < IntPts[i].Size(); j++) { delete IntPts[i][j]; }
+      delete RGeom[i];
+      delete IntPts[i];
    }
 }
 
-RefinedGeometry *GeometryRefiner::FindInRGeom(int Geom, int Times, int ETimes,
-                                              int Type)
-{
-   Array<RefinedGeometry *> &RGA = RGeom[Geom];
-   for (int i = 0; i < RGA.Size(); i++)
-   {
-      RefinedGeometry &RG = *RGA[i];
-      if (RG.Times == Times && RG.ETimes == ETimes && RG.Type == Type)
-      {
-         return &RG;
-      }
-   }
-   return NULL;
-}
-
-IntegrationRule *GeometryRefiner::FindInIntPts(int Geom, int NPts)
-{
-   Array<IntegrationRule *> &IPA = IntPts[Geom];
-   for (int i = 0; i < IPA.Size(); i++)
-   {
-      IntegrationRule &ir = *IPA[i];
-      if (ir.GetNPoints() == NPts) { return &ir; }
-   }
-   return NULL;
-}
-
-RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
+RefinedGeometry * GeometryRefiner::Refine (int Geom, int Times, int ETimes)
 {
    int i, j, k, l;
 
-   Times = std::max(Times, 1);
-   ETimes = std::max(ETimes, 1);
-   const double *cp = poly1d.GetPoints(Times, BasisType::GetNodalBasis(type));
-
-   RefinedGeometry *RG = FindInRGeom(Geom, Times, ETimes, type);
-   if (RG) { return RG; }
+   const double *cp = NULL;
+   if (type)
+   {
+      cp = poly1d.ClosedPoints(Times);
+   }
 
    switch (Geom)
    {
-      case Geometry::POINT:
-      {
-         RG = new RefinedGeometry(1, 1, 0);
-         RG->Times = 1;
-         RG->ETimes = 0;
-         RG->Type = type;
-         RG->RefPts.IntPoint(0).x = cp[0];
-         RG->RefGeoms[0] = 0;
-
-         RGeom[Geometry::POINT].Append(RG);
-         return RG;
-      }
-
       case Geometry::SEGMENT:
       {
-         RG = new RefinedGeometry(Times+1, 2*Times, 0);
-         RG->Times = Times;
-         RG->ETimes = 0;
-         RG->Type = type;
+         const int g = Geometry::SEGMENT;
+         if (RGeom[g] != NULL && RGeom[g]->Times == Times)
+         {
+            return RGeom[g];
+         }
+         delete RGeom[g];
+         RGeom[g] = new RefinedGeometry(Times+1, 2*Times, 0);
+         RGeom[g]->Times = Times;
+         RGeom[g]->ETimes = 0;
          for (i = 0; i <= Times; i++)
          {
-            IntegrationPoint &ip = RG->RefPts.IntPoint(i);
-            ip.x = cp[i];
+            IntegrationPoint &ip = RGeom[g]->RefPts.IntPoint(i);
+            ip.x = (type == 0) ? double(i) / Times : cp[i];
          }
-         Array<int> &G = RG->RefGeoms;
+         Array<int> &G = RGeom[g]->RefGeoms;
          for (i = 0; i < Times; i++)
          {
             G[2*i+0] = i;
             G[2*i+1] = i+1;
          }
 
-         RGeom[Geometry::SEGMENT].Append(RG);
-         return RG;
+         return RGeom[g];
       }
 
       case Geometry::TRIANGLE:
       {
-         RG = new RefinedGeometry((Times+1)*(Times+2)/2, 3*Times*Times,
-                                  3*Times*(ETimes+1), 3*Times);
-         RG->Times = Times;
-         RG->ETimes = ETimes;
-         RG->Type = type;
+         if (RGeom[2] != NULL && RGeom[2]->Times == Times &&
+             RGeom[2]->ETimes == ETimes)
+         {
+            return RGeom[2];
+         }
+
+         if (RGeom[2] != NULL)
+         {
+            delete RGeom[2];
+         }
+         RGeom[2] = new RefinedGeometry((Times+1)*(Times+2)/2, 3*Times*Times,
+                                        3*Times*(ETimes+1), 3*Times);
+         RGeom[2]->Times = Times;
+         RGeom[2]->ETimes = ETimes;
          for (k = j = 0; j <= Times; j++)
             for (i = 0; i <= Times-j; i++, k++)
             {
-               IntegrationPoint &ip = RG->RefPts.IntPoint(k);
-               ip.x = cp[i]/(cp[i] + cp[j] + cp[Times-i-j]);
-               ip.y = cp[j]/(cp[i] + cp[j] + cp[Times-i-j]);
+               IntegrationPoint &ip = RGeom[2]->RefPts.IntPoint(k);
+               if (type == 0)
+               {
+                  ip.x = double(i) / Times;
+                  ip.y = double(j) / Times;
+               }
+               else
+               {
+                  ip.x = cp[i]/(cp[i] + cp[j] + cp[Times-i-j]);
+                  ip.y = cp[j]/(cp[i] + cp[j] + cp[Times-i-j]);
+               }
             }
-         Array<int> &G = RG->RefGeoms;
+         Array<int> &G = RGeom[2]->RefGeoms;
          for (l = k = j = 0; j < Times; j++, k++)
             for (i = 0; i < Times-j; i++, k++)
             {
@@ -876,8 +750,8 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
                   G[l++] = k+Times-j+1;
                }
             }
-         Array<int> &E = RG->RefEdges;
-         int lb = 0, li = 2*RG->NumBdrEdges;
+         Array<int> &E = RGeom[2]->RefEdges;
+         int lb = 0, li = 2*RGeom[2]->NumBdrEdges;
          // horizontal edges
          for (k = 0; k < Times; k += Times/ETimes)
          {
@@ -912,25 +786,41 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
             }
          }
 
-         RGeom[Geometry::TRIANGLE].Append(RG);
-         return RG;
+         return RGeom[2];
       }
 
       case Geometry::SQUARE:
       {
-         RG = new RefinedGeometry((Times+1)*(Times+1), 4*Times*Times,
-                                  4*(ETimes+1)*Times, 4*Times);
-         RG->Times = Times;
-         RG->ETimes = ETimes;
-         RG->Type = type;
+         if (RGeom[3] != NULL && RGeom[3]->Times == Times &&
+             RGeom[3]->ETimes == ETimes)
+         {
+            return RGeom[3];
+         }
+
+         if (RGeom[3] != NULL)
+         {
+            delete RGeom[3];
+         }
+         RGeom[3] = new RefinedGeometry((Times+1)*(Times+1), 4*Times*Times,
+                                        4*(ETimes+1)*Times, 4*Times);
+         RGeom[3]->Times = Times;
+         RGeom[3]->ETimes = ETimes;
          for (k = j = 0; j <= Times; j++)
             for (i = 0; i <= Times; i++, k++)
             {
-               IntegrationPoint &ip = RG->RefPts.IntPoint(k);
-               ip.x = cp[i];
-               ip.y = cp[j];
+               IntegrationPoint &ip = RGeom[3]->RefPts.IntPoint(k);
+               if (type == 0)
+               {
+                  ip.x = double(i) / Times;
+                  ip.y = double(j) / Times;
+               }
+               else
+               {
+                  ip.x = cp[i];
+                  ip.y = cp[j];
+               }
             }
-         Array<int> &G = RG->RefGeoms;
+         Array<int> &G = RGeom[3]->RefGeoms;
          for (l = k = j = 0; j < Times; j++, k++)
             for (i = 0; i < Times; i++, k++)
             {
@@ -939,8 +829,8 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
                G[l++] = k+Times+2;
                G[l++] = k+Times+1;
             }
-         Array<int> &E = RG->RefEdges;
-         int lb = 0, li = 2*RG->NumBdrEdges;
+         Array<int> &E = RGeom[3]->RefEdges;
+         int lb = 0, li = 2*RGeom[3]->NumBdrEdges;
          // horizontal edges
          for (k = 0; k <= Times; k += Times/ETimes)
          {
@@ -962,27 +852,45 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
             }
          }
 
-         RGeom[Geometry::SQUARE].Append(RG);
-         return RG;
+         return RGeom[3];
       }
 
       case Geometry::CUBE:
       {
-         RG = new RefinedGeometry ((Times+1)*(Times+1)*(Times+1),
-                                   8*Times*Times*Times, 0);
-         RG->Times = Times;
-         RG->ETimes = ETimes;
-         RG->Type = type;
+         const int g = Geometry::CUBE;
+         if (RGeom[g] != NULL && RGeom[g]->Times == Times &&
+             RGeom[g]->ETimes == ETimes)
+         {
+            return RGeom[g];
+         }
+
+         if (RGeom[g] != NULL)
+         {
+            delete RGeom[g];
+         }
+         RGeom[g] = new RefinedGeometry ((Times+1)*(Times+1)*(Times+1),
+                                         8*Times*Times*Times, 0);
+         RGeom[g]->Times = Times;
+         RGeom[g]->ETimes = ETimes;
          for (l = k = 0; k <= Times; k++)
             for (j = 0; j <= Times; j++)
                for (i = 0; i <= Times; i++, l++)
                {
-                  IntegrationPoint &ip = RG->RefPts.IntPoint(l);
-                  ip.x = cp[i];
-                  ip.y = cp[j];
-                  ip.z = cp[k];
+                  IntegrationPoint &ip = RGeom[g]->RefPts.IntPoint(l);
+                  if (type == 0)
+                  {
+                     ip.x = double(i) / Times;
+                     ip.y = double(j) / Times;
+                     ip.z = double(k) / Times;
+                  }
+                  else
+                  {
+                     ip.x = cp[i];
+                     ip.y = cp[j];
+                     ip.z = cp[k];
+                  }
                }
-         Array<int> &G = RG->RefGeoms;
+         Array<int> &G = RGeom[g]->RefGeoms;
          for (l = k = 0; k < Times; k++)
             for (j = 0; j < Times; j++)
                for (i = 0; i < Times; i++)
@@ -997,12 +905,23 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
                   G[l++] = i+0 + (j+1 + (k+1) * (Times+1)) * (Times+1);
                }
 
-         RGeom[Geometry::CUBE].Append(RG);
-         return RG;
+         return RGeom[g];
       }
 
       case Geometry::TETRAHEDRON:
       {
+         const int g = Geometry::TETRAHEDRON;
+         if (RGeom[g] != NULL && RGeom[g]->Times == Times &&
+             RGeom[g]->ETimes == ETimes)
+         {
+            return RGeom[g];
+         }
+
+         if (RGeom[g] != NULL)
+         {
+            delete RGeom[g];
+         }
+
          // subdivide the tetrahedron with vertices
          // (0,0,0), (0,0,1), (1,1,1), (0,1,1)
 
@@ -1017,10 +936,7 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
          // number of elements: n^3
 
          const int n = Times;
-         RG = new RefinedGeometry((n+3)*(n+2)*(n+1)/6, 4*n*n*n, 0);
-         RG->Times = Times;
-         RG->ETimes = ETimes;
-         RG->Type = type;
+         RGeom[g] = new RefinedGeometry((n+3)*(n+2)*(n+1)/6, 4*n*n*n, 0);
          // enumerate and define the vertices
          Array<int> vi((n+1)*(n+1)*(n+1));
          vi = -1;
@@ -1029,16 +945,25 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
             for (j = 0; j <= k; j++)
                for (i = 0; i <= j; i++)
                {
-                  IntegrationPoint &ip = RG->RefPts.IntPoint(m);
+                  IntegrationPoint &ip = RGeom[g]->RefPts.IntPoint(m);
                   // map the coordinates to the reference tetrahedron
                   // (0,0,0) -> (0,0,0)
                   // (0,0,1) -> (1,0,0)
                   // (1,1,1) -> (0,1,0)
                   // (0,1,1) -> (0,0,1)
-                  double w = cp[k-j] + cp[i] + cp[j-i] + cp[Times-k];
-                  ip.x = cp[k-j]/w;
-                  ip.y = cp[i]/w;
-                  ip.z = cp[j-i]/w;
+                  if (type == 0)
+                  {
+                     ip.x = double(k - j) / n;
+                     ip.y = double(i) / n;
+                     ip.z = double(j - i) / n;
+                  }
+                  else
+                  {
+                     double w = cp[k-j] + cp[i] + cp[j-i] + cp[Times-k];
+                     ip.x = cp[k-j]/w;
+                     ip.y = cp[i]/w;
+                     ip.z = cp[j-i]/w;
+                  }
                   l = i + (j + k * (n+1)) * (n+1);
                   vi[l] = m;
                   m++;
@@ -1048,7 +973,7 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
             mfem_error("GeometryRefiner::Refine() for TETRAHEDRON #1");
          }
          // elements
-         Array<int> &G = RG->RefGeoms;
+         Array<int> &G = RGeom[g]->RefGeoms;
          m = 0;
          for (k = 0; k < n; k++)
             for (j = 0; j <= k; j++)
@@ -1111,21 +1036,20 @@ RefinedGeometry * GeometryRefiner::Refine(int Geom, int Times, int ETimes)
                mfem_error("GeometryRefiner::Refine() for TETRAHEDRON #3");
             }
 
-         RGeom[Geometry::TETRAHEDRON].Append(RG);
-         return RG;
+         return RGeom[g];
       }
 
       default:
 
-         return NULL;
+         return RGeom[0];
    }
 }
 
 const IntegrationRule *GeometryRefiner::RefineInterior(int Geom, int Times)
 {
-   IntegrationRule *ir = NULL;
+   int g = Geom;
 
-   switch (Geom)
+   switch (g)
    {
       case Geometry::SEGMENT:
       {
@@ -1133,13 +1057,13 @@ const IntegrationRule *GeometryRefiner::RefineInterior(int Geom, int Times)
          {
             return NULL;
          }
-         ir = FindInIntPts(Geom, Times-1);
-         if (ir == NULL)
+         if (IntPts[g] == NULL || IntPts[g]->GetNPoints() != Times-1)
          {
-            ir = new IntegrationRule(Times-1);
+            delete IntPts[g];
+            IntPts[g] = new IntegrationRule(Times-1);
             for (int i = 1; i < Times; i++)
             {
-               IntegrationPoint &ip = ir->IntPoint(i-1);
+               IntegrationPoint &ip = IntPts[g]->IntPoint(i-1);
                ip.x = double(i) / Times;
                ip.y = ip.z = 0.0;
             }
@@ -1153,14 +1077,15 @@ const IntegrationRule *GeometryRefiner::RefineInterior(int Geom, int Times)
          {
             return NULL;
          }
-         ir = FindInIntPts(Geom, ((Times-1)*(Times-2))/2);
-         if (ir == NULL)
+         if (IntPts[g] == NULL ||
+             IntPts[g]->GetNPoints() != ((Times-1)*(Times-2))/2)
          {
-            ir = new IntegrationRule(((Times-1)*(Times-2))/2);
+            delete IntPts[g];
+            IntPts[g] = new IntegrationRule(((Times-1)*(Times-2))/2);
             for (int k = 0, j = 1; j < Times-1; j++)
                for (int i = 1; i < Times-j; i++, k++)
                {
-                  IntegrationPoint &ip = ir->IntPoint(k);
+                  IntegrationPoint &ip = IntPts[g]->IntPoint(k);
                   ip.x = double(i) / Times;
                   ip.y = double(j) / Times;
                   ip.z = 0.0;
@@ -1175,14 +1100,14 @@ const IntegrationRule *GeometryRefiner::RefineInterior(int Geom, int Times)
          {
             return NULL;
          }
-         ir = FindInIntPts(Geom, (Times-1)*(Times-1));
-         if (ir == NULL)
+         if (IntPts[g] == NULL || IntPts[g]->GetNPoints() != (Times-1)*(Times-1))
          {
-            ir = new IntegrationRule((Times-1)*(Times-1));
+            delete IntPts[g];
+            IntPts[g] = new IntegrationRule((Times-1)*(Times-1));
             for (int k = 0, j = 1; j < Times; j++)
                for (int i = 1; i < Times; i++, k++)
                {
-                  IntegrationPoint &ip = ir->IntPoint(k);
+                  IntegrationPoint &ip = IntPts[g]->IntPoint(k);
                   ip.x = double(i) / Times;
                   ip.y = double(j) / Times;
                   ip.z = 0.0;
@@ -1195,8 +1120,7 @@ const IntegrationRule *GeometryRefiner::RefineInterior(int Geom, int Times)
          mfem_error("GeometryRefiner::RefineInterior(...)");
    }
 
-   if (ir) { IntPts[Geom].Append(ir); }
-   return ir;
+   return IntPts[g];
 }
 
 GeometryRefiner GlobGeometryRefiner;

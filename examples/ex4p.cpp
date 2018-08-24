@@ -41,11 +41,84 @@
 using namespace std;
 using namespace mfem;
 
-// Exact solution, F, and r.h.s., f. See below for implementation.
-void F_exact(const Vector &, Vector &);
-void f_exact(const Vector &, Vector &);
-double freq = 1.0, kappa;
+#define WITH_PREC
+//#define REGULARIZE
+//#define IDENTITYK
+#define WITH_DIVDIV
+#define H2CONTROL_DIVDIV
 
+
+class VectordivDomainLFIntegrator : public LinearFormIntegrator
+{
+    Vector divshape;
+    Coefficient &Q;
+    int oa, ob;
+public:
+    /// Constructs a domain integrator with a given Coefficient
+    VectordivDomainLFIntegrator(Coefficient &QF, int a = 2, int b = 0)
+    // the old default was a = 1, b = 1
+    // for simple elliptic problems a = 2, b = -2 is ok
+        : Q(QF), oa(a), ob(b) { }
+
+    /// Constructs a domain integrator with a given Coefficient
+    VectordivDomainLFIntegrator(Coefficient &QF, const IntegrationRule *ir)
+        : LinearFormIntegrator(ir), Q(QF), oa(1), ob(1) { }
+
+    /** Given a particular Finite Element and a transformation (Tr)
+       computes the element right hand side element vector, elvect. */
+    virtual void AssembleRHSElementVect(const FiniteElement &el,
+                                        ElementTransformation &Tr,
+                                        Vector &elvect);
+
+    using LinearFormIntegrator::AssembleRHSElementVect;
+};
+//---------
+
+//------------------
+void VectordivDomainLFIntegrator::AssembleRHSElementVect(
+        const FiniteElement &el, ElementTransformation &Tr, Vector &elvect)//don't need the matrix but the vector
+{
+    int dof = el.GetDof();
+
+    divshape.SetSize(dof);       // vector of size dof
+    elvect.SetSize(dof);
+    elvect = 0.0;
+
+    const IntegrationRule *ir = IntRule;
+    if (ir == NULL)
+    {
+        // ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob + Tr.OrderW());
+        ir = &IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
+        // int order = 2 * el.GetOrder() ; // <--- OK for RTk
+        // ir = &IntRules.Get(el.GetGeomType(), order);
+    }
+
+    for (int i = 0; i < ir->GetNPoints(); i++)
+    {
+        const IntegrationPoint &ip = ir->IntPoint(i);
+        el.CalcDivShape(ip, divshape);
+
+        Tr.SetIntPoint (&ip);
+        //double val = Tr.Weight() * Q.Eval(Tr, ip);
+        // Chak: Looking at how MFEM assembles in VectorFEDivergenceIntegrator, I think you dont need Tr.Weight() here
+        // I think this is because the RT (or other vector FE) basis is scaled by the geometry of the mesh
+        double val = Q.Eval(Tr, ip);
+
+        add(elvect, ip.weight * val, divshape, elvect);
+        //cout << "elvect = " << elvect << endl;
+    }
+}
+
+// Exact solution, F, and r.h.s., f. See below for implementation.
+double uFun_ex(const Vector& xt); // Exact Solution
+double fFun(const Vector& xt); // Source f
+void bfFun_ex(const Vector& xt, Vector& gradf);
+void gradfFun_ex(const Vector& xt, Vector& gradf);
+void sigmaFun_ex(const Vector& xt, Vector& sigma);
+double bTb_ex(const Vector& xt);
+void bFun_ex (const Vector& xt, Vector& b);
+void Ktilda_ex(const Vector& xt, DenseMatrix& Ktilda);
+void bbT_ex(const Vector& xt, DenseMatrix& bbT);
 int main(int argc, char *argv[])
 {
    // 1. Initialize MPI.
@@ -55,22 +128,23 @@ int main(int argc, char *argv[])
    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
    // 2. Parse command-line options.
-   const char *mesh_file = "../data/star.mesh";
+//   const char *mesh_file = "../data/beam-tet.mesh";
    int order = 1;
    bool set_bc = true;
    bool static_cond = false;
    bool hybridization = false;
    bool visualization = 1;
+   int par_ref_levels = 3;
 
    OptionsParser args(argc, argv);
-   args.AddOption(&mesh_file, "-m", "--mesh",
-                  "Mesh file to use.");
+//   args.AddOption(&mesh_file, "-m", "--mesh",
+//                  "Mesh file to use.");
    args.AddOption(&order, "-o", "--order",
                   "Finite element order (polynomial degree).");
    args.AddOption(&set_bc, "-bc", "--impose-bc", "-no-bc", "--dont-impose-bc",
                   "Impose or not essential boundary conditions.");
-   args.AddOption(&freq, "-f", "--frequency", "Set the frequency for the exact"
-                  " solution.");
+//   args.AddOption(&freq, "-f", "--frequency", "Set the frequency for the exact"
+//                  " solution.");
    args.AddOption(&static_cond, "-sc", "--static-condensation", "-no-sc",
                   "--no-static-condensation", "Enable static condensation.");
    args.AddOption(&hybridization, "-hb", "--hybridization", "-no-hb",
@@ -78,6 +152,9 @@ int main(int argc, char *argv[])
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
+   args.AddOption(&par_ref_levels, "-r", "--ref",
+                     "Number of parallel refinement steps.");
+
    args.Parse();
    if (!args.Good())
    {
@@ -92,12 +169,13 @@ int main(int argc, char *argv[])
    {
       args.PrintOptions(cout);
    }
-   kappa = freq * M_PI;
+//   kappa = freq * M_PI;
 
    // 3. Read the (serial) mesh from the given mesh file on all processors.  We
    //    can handle triangular, quadrilateral, tetrahedral, hexahedral, surface
    //    and volume, as well as periodic meshes with the same code.
-   Mesh *mesh = new Mesh(mesh_file, 1, 1);
+//   Mesh *mesh = new Mesh(mesh_file, 1, 1);
+   Mesh *mesh = new Mesh(2,2,2,mfem::Element::TETRAHEDRON,1);
    int dim = mesh->Dimension();
    int sdim = mesh->SpaceDimension();
 
@@ -122,13 +200,19 @@ int main(int argc, char *argv[])
    ParMesh *pmesh = new ParMesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    {
-      int par_ref_levels = 2;
       for (int l = 0; l < par_ref_levels; l++)
       {
          pmesh->UniformRefinement();
       }
    }
    pmesh->ReorientTetMesh();
+
+#if defined(REGULARIZE) || defined(H2CONTROL_DIVDIV)
+   double h_min, h_max, kappa_min, kappa_max;
+   pmesh->GetCharacteristics(h_min, h_max, kappa_min, kappa_max);
+   if (myid == 0)
+       std::cout << "coarse mesh steps: min " << h_min << " max " << h_max << "\n";
+#endif
 
    // 6. Define a parallel finite element space on the parallel mesh. Here we
    //    use the Raviart-Thomas finite elements of the specified order.
@@ -148,7 +232,8 @@ int main(int argc, char *argv[])
    if (pmesh->bdr_attributes.Size())
    {
       Array<int> ess_bdr(pmesh->bdr_attributes.Max());
-      ess_bdr = set_bc ? 1 : 0;
+      ess_bdr = 0;
+      ess_bdr[0] = 1;
       fespace->GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
    }
 
@@ -156,9 +241,9 @@ int main(int argc, char *argv[])
    //    right-hand side of the FEM linear system, which in this case is
    //    (f,phi_i) where f is given by the function f_exact and phi_i are the
    //    basis functions in the finite element fespace.
-   VectorFunctionCoefficient f(sdim, f_exact);
+   FunctionCoefficient f(fFun);
    ParLinearForm *b = new ParLinearForm(fespace);
-   b->AddDomainIntegrator(new VectorFEDomainLFIntegrator(f));
+   b->AddDomainIntegrator(new VectordivDomainLFIntegrator(f));
    b->Assemble();
 
    // 9. Define the solution vector x as a parallel finite element grid function
@@ -167,17 +252,59 @@ int main(int argc, char *argv[])
    //    when eliminating the non-homogeneous boundary condition to modify the
    //    r.h.s. vector b.
    ParGridFunction x(fespace);
-   VectorFunctionCoefficient F(sdim, F_exact);
+   VectorFunctionCoefficient F(sdim, sigmaFun_ex);
    x.ProjectCoefficient(F);
 
    // 10. Set up the parallel bilinear form corresponding to the H(div)
    //     diffusion operator grad alpha div + beta I, by adding the div-div and
    //     the mass domain integrators.
-   Coefficient *alpha = new ConstantCoefficient(1.0);
-   Coefficient *beta  = new ConstantCoefficient(1.0);
+   MatrixFunctionCoefficient *beta  = new MatrixFunctionCoefficient(dim, Ktilda_ex);
+
    ParBilinearForm *a = new ParBilinearForm(fespace);
+#ifdef WITH_DIVDIV
+   if (myid == 0)
+     std::cout << "With a div-div term \n";
+
+   double weight = 1.0;
+#ifdef H2CONTROL_DIVDIV
+   if (myid == 0)
+     std::cout << "With a h^2 coefficient for div-div term \n";
+   weight = h_min * h_min;
+#else
+   if (myid == 0)
+     std::cout << "Without a h^2 coefficient for div-div term \n";
+#endif
+
+   Coefficient *alpha = new ConstantCoefficient(weight);
+
    a->AddDomainIntegrator(new DivDivIntegrator(*alpha));
+#else
+   if (myid == 0)
+     std::cout << "Without a div-div term \n";
+#endif
    a->AddDomainIntegrator(new VectorFEMassIntegrator(*beta));
+
+#ifdef IDENTITYK
+   if (myid == 0)
+     std::cout << "K is identity \n";
+#else
+   if (myid == 0)
+       std::cout << "K is a bad weight \n";
+#endif
+
+#ifdef REGULARIZE
+   if (myid == 0)
+       std::cout << "regularization is ON \n";
+   h = h_min * h_min;
+   if (myid == 0)
+       std::cout << "regularization parameter: " << h << "\n";
+
+   Coefficient *epsilon = new ConstantCoefficient(h);
+   a->AddDomainIntegrator(new VectorFEMassIntegrator(*epsilon));
+#else
+   if (myid == 0)
+       std::cout << "regularization is OFF \n";
+#endif
 
    // 11. Assemble the parallel bilinear form and the corresponding linear
    //     system, applying any necessary transformations such as: parallel
@@ -203,6 +330,9 @@ int main(int argc, char *argv[])
    Vector B, X;
    a->FormLinearSystem(ess_tdof_list, x, *b, A, X, B);
 
+//   A.Add(1.0, *CCT);
+//   CCT->Add(1.0, A);
+
    HYPRE_Int glob_size = A.GetGlobalNumRows();
    if (myid == 0)
    {
@@ -216,9 +346,10 @@ int main(int argc, char *argv[])
    CGSolver *pcg = new CGSolver(A.GetComm());
    pcg->SetOperator(A);
    pcg->SetRelTol(1e-12);
-   pcg->SetMaxIter(500);
-   pcg->SetPrintLevel(1);
-   if (hybridization) { prec = new HypreBoomerAMG(A); }
+   pcg->SetMaxIter(50000);
+   pcg->SetPrintLevel(0);
+   if (hybridization) { prec = new HypreBoomerAMG(A);
+       ((HypreBoomerAMG*)prec)->SetPrintLevel(0); }
    else
    {
       ParFiniteElementSpace *prec_fespace =
@@ -226,8 +357,18 @@ int main(int argc, char *argv[])
       if (dim == 2)   { prec = new HypreAMS(A, prec_fespace); }
       else            { prec = new HypreADS(A, prec_fespace); }
    }
+#ifdef WITH_PREC
+   if (myid == 0)
+       std::cout << "Solving with a preconditioner \n";
    pcg->SetPreconditioner(*prec);
+#else
+   if (myid == 0)
+       std::cout << "Solving without a preconditioner \n";
+#endif
    pcg->Mult(B, X);
+
+   if (myid == 0)
+       cout << "Number of iterations = " << pcg->GetNumIterations() <<"\n";
 
    // 13. Recover the parallel grid function corresponding to X. This is the
    //     local finite element solution on each processor.
@@ -288,38 +429,111 @@ int main(int argc, char *argv[])
 }
 
 
-// The exact solution (for non-surface meshes)
-void F_exact(const Vector &p, Vector &F)
+//double fFun(const Vector& xt)
+//{
+//    return 0.0;
+//}
+
+//void bFun_ex(const Vector& xt, Vector& b )
+//{
+//    b.SetSize(xt.Size());
+
+//    if (xt.Size() == 3)
+//    {
+//        b(0) = -xt(1);
+//        b(1) = xt(0);
+//    }
+//    else
+//    {
+//        b(0) = sin(xt(0)*M_PI)*cos(xt(1)*M_PI)*cos(xt(2)*M_PI);
+//        b(1) = -0.5*sin(xt(1)*M_PI)*cos(xt(0)*M_PI)*cos(xt(2)*M_PI);
+//        b(2) = -0.5*sin(xt(2)*M_PI)*cos(xt(0)*M_PI)*cos(xt(1)*M_PI);
+//    }
+
+//    b(xt.Size()-1) = 1.;
+//}
+
+//void bfFun_ex(const Vector& xt, Vector& bf)
+//{
+//    bf.SetSize(xt.Size());
+//    bFun_ex(xt, bf);
+//    bf *= fFun(xt);
+//}
+
+void sigmaFun_ex(const Vector& xt, Vector& sigma)
 {
-   int dim = p.Size();
-
-   double x = p(0);
-   double y = p(1);
-   // double z = (dim == 3) ? p(2) : 0.0;
-
-   F(0) = cos(kappa*x)*sin(kappa*y);
-   F(1) = cos(kappa*y)*sin(kappa*x);
-   if (dim == 3)
-   {
-      F(2) = 0.0;
-   }
+    Vector b;
+    bFun_ex(xt, b);
+    sigma.SetSize(xt.Size());
+    sigma(xt.Size()-1) = uFun_ex(xt);
+    for (int i = 0; i < xt.Size()-1; i++)
+        sigma(i) = b(i) * sigma(xt.Size()-1);
 }
 
-// The right hand side
-void f_exact(const Vector &p, Vector &f)
+void Ktilda_ex(const Vector& xt, DenseMatrix& Ktilda)
 {
-   int dim = p.Size();
+    int nDim = xt.Size();
+    Vector b;
+    bFun_ex(xt,b);
 
-   double x = p(0);
-   double y = p(1);
-   // double z = (dim == 3) ? p(2) : 0.0;
+    double bTbInv = (-1.0/(b*b));
+    Ktilda.Diag(1.0,nDim);
+#ifndef IDENTITYK
+    AddMult_a_VVt(bTbInv,b,Ktilda);
+#endif
+}
 
-   double temp = 1 + 2*kappa*kappa;
+double bTb_ex(const Vector& xt)
+{
+    Vector b;
+    bFun_ex(xt,b);
+    return 1.*(b*b);
+}
 
-   f(0) = temp*cos(kappa*x)*sin(kappa*y);
-   f(1) = temp*cos(kappa*y)*sin(kappa*x);
-   if (dim == 3)
-   {
-      f(2) = 0;
-   }
+void bbT_ex(const Vector& xt, DenseMatrix& bbT)
+{
+    Vector b;
+    bFun_ex(xt,b);
+    MultVVt(b, bbT);
+}
+
+
+double uFun_ex(const Vector& xt)
+{
+    double t = xt(xt.Size()-1);
+//    return t;
+    return sin(t)*exp(t)*xt(0)*xt(1);
+}
+
+double fFun(const Vector& xt)
+{
+//    double tmp = 0.;
+//    for (int i = 0; i < xt.Size()-1; i++)
+//        tmp += xt(i);
+//    return 1.;//+ (xt.Size()-1-2*tmp) * uFun_ex(xt);
+    double t = xt(xt.Size()-1);
+    Vector b;
+    bFun_ex(xt, b);
+    return (cos(t)*exp(t)+sin(t)*exp(t))*xt(0)*xt(1)+
+            b(0)*sin(t)*exp(t)*xt(1) + b(1)*sin(t)*exp(t)*xt(0);
+}
+
+void bFun_ex(const Vector& xt, Vector& b)
+{
+    b.SetSize(xt.Size());
+    b = 0.;
+
+    b(xt.Size()-1) = 1.;
+
+    if (xt.Size() == 3)
+    {
+        b(0) = sin(xt(0)*M_PI)*cos(xt(1)*M_PI);
+        b(1) = -sin(xt(1)*M_PI)*cos(xt(0)*M_PI);
+    }
+    else
+    {
+        b(0) = sin(xt(0)*M_PI)*cos(xt(1)*M_PI)*cos(xt(2)*M_PI);
+        b(1) = -0.5*sin(xt(1)*M_PI)*cos(xt(0)*M_PI)*cos(xt(2)*M_PI);
+        b(2) = -0.5*sin(xt(2)*M_PI)*cos(xt(0)*M_PI)*cos(xt(1)*M_PI);
+    }
 }

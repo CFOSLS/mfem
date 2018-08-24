@@ -22,8 +22,10 @@ namespace mfem
 class BilinearFormIntegrator : public NonlinearFormIntegrator
 {
 protected:
-   BilinearFormIntegrator(const IntegrationRule *ir = NULL) :
-      NonlinearFormIntegrator(ir) { }
+   const IntegrationRule *IntRule;
+
+   BilinearFormIntegrator(const IntegrationRule *ir = NULL)
+   { IntRule = ir; }
 
 public:
    /// Given a particular Finite Element computes the element matrix elmat.
@@ -63,12 +65,6 @@ public:
                                     const Vector &elfun, DenseMatrix &elmat)
    { AssembleElementMatrix(el, Tr, elmat); }
 
-   virtual void AssembleFaceGrad(const FiniteElement &el1,
-                                 const FiniteElement &el2,
-                                 FaceElementTransformations &Tr,
-                                 const Vector &elfun, DenseMatrix &elmat)
-   { AssembleFaceMatrix(el1, el2, Tr, elmat); }
-
    virtual void ComputeElementFlux(const FiniteElement &el,
                                    ElementTransformation &Trans,
                                    Vector &u,
@@ -79,6 +75,8 @@ public:
                                     ElementTransformation &Trans,
                                     Vector &flux, Vector *d_energy = NULL)
    { return 0.0; }
+
+   void SetIntRule(const IntegrationRule *ir) { IntRule = ir; }
 
    virtual ~BilinearFormIntegrator() { }
 };
@@ -333,7 +331,7 @@ protected:
 
    MixedScalarVectorIntegrator(VectorCoefficient &vq, bool _transpose = false,
                                bool _cross_2d = false)
-      : VQ(&vq), transpose(_transpose), cross_2d(_cross_2d) {}
+      : VQ(&vq), transpose(_transpose) , cross_2d(_cross_2d) {}
 
    inline virtual bool VerifyFiniteElementTypes(
       const FiniteElement & trial_fe,
@@ -1715,10 +1713,14 @@ private:
 
    int Q_order;
 
+   int vecDim = -1; //otherwise it may happen that VQ = MQ = null, vecDim not initialized and VectorMassIntegrator::AssembleElementMatrix will use not initialized value
+
 public:
    /// Construct an integrator with coefficient 1.0
-   VectorMassIntegrator()
-   { Q = NULL; VQ = NULL; MQ = NULL; Q_order = 0; }
+   VectorMassIntegrator(int vDim=-1)
+   { Q = NULL; VQ = NULL; MQ = NULL; Q_order = 0; vecDim = vDim;}
+   VectorMassIntegrator(int vDim, Coefficient *q) : Q(q)
+   { VQ = NULL; MQ = NULL; Q_order = 0; vecDim = vDim;}
    /** Construct an integrator with scalar coefficient q.
        If possible, save memory by using a scalar integrator since
        the resulting matrix is block diagonal with the same diagonal
@@ -1994,9 +1996,11 @@ private:
    DenseMatrix gshape;
    DenseMatrix pelmat;
 
+   int vecDim;
+
 public:
-   VectorDiffusionIntegrator() { Q = NULL; }
-   VectorDiffusionIntegrator(Coefficient &q) { Q = &q; }
+   VectorDiffusionIntegrator(int vDim=-1) { Q = NULL; vecDim = vDim; }
+   VectorDiffusionIntegrator(Coefficient &q, int vDim=-1) { Q = &q; vecDim = vDim; }
 
    virtual void AssembleElementMatrix(const FiniteElement &el,
                                       ElementTransformation &Trans,
@@ -2169,11 +2173,11 @@ class DGElasticityIntegrator : public BilinearFormIntegrator
 {
 public:
    DGElasticityIntegrator(double alpha_, double kappa_)
-      : lambda(NULL), mu(NULL), alpha(alpha_), kappa(kappa_) { }
+      : lambda(NULL), mu(NULL), alpha(alpha_), kappa(kappa_) {}
 
    DGElasticityIntegrator(Coefficient &lambda_, Coefficient &mu_,
                           double alpha_, double kappa_)
-      : lambda(&lambda_), mu(&mu_), alpha(alpha_), kappa(kappa_) { }
+      : lambda(&lambda_), mu(&mu_), alpha(alpha_), kappa(kappa_) {}
 
    using BilinearFormIntegrator::AssembleFaceMatrix;
    virtual void AssembleFaceMatrix(const FiniteElement &el1,
@@ -2299,6 +2303,16 @@ public:
 };
 
 
+class DivSkewInterpolator : public DiscreteInterpolator
+{
+public:
+   virtual void AssembleElementMatrix2(const FiniteElement &dom_fe,
+                                       const FiniteElement &ran_fe,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat)
+   { ran_fe.ProjectDivSkew(dom_fe, Trans, elmat); }
+};
+
 /** Class for constructing the (local) discrete divergence matrix which can
     be used as an integrator in a DiscreteLinearOperator object to assemble
     the global discrete divergence matrix.
@@ -2330,89 +2344,130 @@ public:
                                        DenseMatrix &elmat);
 };
 
-/** Interpolator of a scalar coefficient multiplied by a scalar field onto
-    another scalar field. Note that this can produce inaccurate fields unless
-    the target is sufficiently high order. */
-class ScalarProductInterpolator : public DiscreteInterpolator
+
+
+
+class DivSkewDivSkewIntegrator: public BilinearFormIntegrator
 {
+private:
+   DenseMatrix DivSkewshape, DivSkew_dFt;
+
+   Coefficient *Q;
+
 public:
-   ScalarProductInterpolator(Coefficient & sc) : Q(sc) { }
+   DivSkewDivSkewIntegrator() { Q = NULL; }
+   /// Construct a bilinear form integrator for Nedelec elements
+   DivSkewDivSkewIntegrator(Coefficient &q) : Q(&q) { }
 
-   virtual void AssembleElementMatrix2(const FiniteElement &dom_fe,
-                                       const FiniteElement &ran_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
+   /* Given a particular Finite Element, compute the
+      element DivSkew-DivSkew matrix elmat */
+   virtual void AssembleElementMatrix(const FiniteElement &el,
+                                      ElementTransformation &Trans,
+                                      DenseMatrix &elmat)
+   {
+      int nd = el.GetDof();
+      int dim = el.GetDim();
+      double w;
 
-protected:
-   Coefficient &Q;
+      DivSkewshape.SetSize(nd,dim);
+      DivSkew_dFt.SetSize(nd,dim);
+
+      elmat.SetSize(nd);
+
+      const IntegrationRule *ir = IntRule;
+      if (ir == NULL)
+      {
+         int order = 2*el.GetOrder()+2;
+
+         ir = &IntRules.Get(el.GetGeomType(), order);
+      }
+
+      elmat = 0.0;
+      for (int i = 0; i < ir->GetNPoints(); i++)
+      {
+         const IntegrationPoint &ip = ir->IntPoint(i);
+
+         Trans.SetIntPoint (&ip);
+
+         el.CalcDivSkewShape(ip, DivSkewshape);
+
+         MultABt(DivSkewshape, Trans.Jacobian(), DivSkew_dFt);
+
+         DivSkew_dFt *= (1.0 / Trans.Weight());
+
+         w = ip.weight * fabs(Trans.Weight());
+
+         if (Q)
+         {
+            w *= Q->Eval(Trans, ip);
+         }
+
+         AddMult_a_AAt(w, DivSkew_dFt, elmat);
+      }
+   }
+
 };
 
-/** Interpolator of a scalar coefficient multiplied by a vector field onto
-    another vector field. Note that this can produce inaccurate fields unless
-    the target is sufficiently high order. */
-class ScalarVectorProductInterpolator : public DiscreteInterpolator
+class VectorFE_DivSkewMassIntegrator: public BilinearFormIntegrator
 {
-public:
-   ScalarVectorProductInterpolator(Coefficient & sc)
-      : Q(sc) { }
+private:
+   DenseMatrix shape;
 
-   virtual void AssembleElementMatrix2(const FiniteElement &dom_fe,
-                                       const FiniteElement &ran_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-protected:
-   Coefficient &Q;
+   Coefficient *Q;
+
+public:
+   VectorFE_DivSkewMassIntegrator() { Q = NULL; }
+   /// Construct a bilinear form integrator for Nedelec elements
+   VectorFE_DivSkewMassIntegrator(Coefficient &q) : Q(&q) { }
+
+   /* Given a particular Finite Element, compute the
+      element curl-curl matrix elmat */
+   virtual void AssembleElementMatrix(const FiniteElement &el,
+                                      ElementTransformation &Trans,
+                                      DenseMatrix &elmat)
+   {
+      int nd = el.GetDof();
+      int dim = el.GetDim();
+      double w;
+
+
+      shape.SetSize(nd,dim*dim);
+
+      elmat.SetSize(nd);
+
+      const IntegrationRule *ir = IntRule;
+      if (ir == NULL)
+      {
+         int order = Trans.OrderW() + 2 * el.GetOrder();
+
+         ir = &IntRules.Get(el.GetGeomType(), order);
+      }
+
+      elmat = 0.0;
+      for (int i = 0; i < ir->GetNPoints(); i++)
+      {
+         const IntegrationPoint &ip = ir->IntPoint(i);
+         Trans.SetIntPoint (&ip);
+
+         w = ip.weight * fabs(Trans.Weight());
+
+
+         el.CalcVShape(Trans, shape);
+
+
+         if (Q)
+         {
+            w *= Q->Eval(Trans, ip);
+         }
+
+         AddMult_a_AAt(w, shape, elmat);
+      }
+   }
+
 };
 
-/** Interpolator of a vector coefficient multiplied by a scalar field onto
-    another vector field. Note that this can produce inaccurate fields unless
-    the target is sufficiently high order. */
-class VectorScalarProductInterpolator : public DiscreteInterpolator
-{
-public:
-   VectorScalarProductInterpolator(VectorCoefficient & vc)
-      : VQ(vc) { }
 
-   virtual void AssembleElementMatrix2(const FiniteElement &dom_fe,
-                                       const FiniteElement &ran_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-protected:
-   VectorCoefficient &VQ;
-};
 
-/** Interpolator of the cross product between a vector coefficient and an
-    H(curl)-conforming field onto an H(div)-conforming field. The range space
-    can also be vector L2. */
-class VectorCrossProductInterpolator : public DiscreteInterpolator
-{
-public:
-   VectorCrossProductInterpolator(VectorCoefficient & vc)
-      : VQ(vc) { }
-
-   virtual void AssembleElementMatrix2(const FiniteElement &nd_fe,
-                                       const FiniteElement &rt_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-protected:
-   VectorCoefficient &VQ;
-};
-
-/** Interpolator of the inner product between a vector coefficient and an
-    H(div)-conforming field onto an L2-conforming field. The range space can
-    also be H1. */
-class VectorInnerProductInterpolator : public DiscreteInterpolator
-{
-public:
-   VectorInnerProductInterpolator(VectorCoefficient & vc) : VQ(vc) { }
-
-   virtual void AssembleElementMatrix2(const FiniteElement &rt_fe,
-                                       const FiniteElement &l2_fe,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat);
-protected:
-   VectorCoefficient &VQ;
-};
 
 }
 

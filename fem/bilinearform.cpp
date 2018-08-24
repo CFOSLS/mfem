@@ -200,30 +200,51 @@ void BilinearForm::Finalize (int skip_zeros)
 void BilinearForm::AddDomainIntegrator (BilinearFormIntegrator * bfi)
 {
    dbfi.Append (bfi);
+   dbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowDomainIntegrator (BilinearFormIntegrator * bfi)
+{
+   dbfi.Append (bfi);
+   dbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBoundaryIntegrator (BilinearFormIntegrator * bfi)
 {
    bbfi.Append (bfi);
-   bbfi_marker.Append(NULL); // NULL marker means apply everywhere
+   bbfi_owned.Append (true);
 }
 
-void BilinearForm::AddBoundaryIntegrator (BilinearFormIntegrator * bfi,
-                                          Array<int> &bdr_marker)
+void BilinearForm::BorrowBoundaryIntegrator (BilinearFormIntegrator * bfi)
 {
    bbfi.Append (bfi);
-   bbfi_marker.Append(&bdr_marker);
+   bbfi_owned.Append (false);
 }
 
 void BilinearForm::AddInteriorFaceIntegrator (BilinearFormIntegrator * bfi)
 {
    fbfi.Append (bfi);
+   fbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowInteriorFaceIntegrator (BilinearFormIntegrator * bfi)
+{
+   fbfi.Append (bfi);
+   fbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi)
 {
    bfbfi.Append(bfi);
    bfbfi_marker.Append(NULL); // NULL marker means apply everywhere
+   bfbfi_owned.Append (true);
+}
+
+void BilinearForm::BorrowBdrFaceIntegrator(BilinearFormIntegrator *bfi)
+{
+   bfbfi.Append(bfi);
+   bfbfi_marker.Append(NULL); // NULL marker means apply everywhere
+   bfbfi_owned.Append (false);
 }
 
 void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi,
@@ -231,6 +252,7 @@ void BilinearForm::AddBdrFaceIntegrator(BilinearFormIntegrator *bfi,
 {
    bfbfi.Append(bfi);
    bfbfi_marker.Append(&bdr_marker);
+   bfbfi_owned.Append (true);
 }
 
 void BilinearForm::ComputeElementMatrix(int i, DenseMatrix &elmat)
@@ -365,41 +387,14 @@ void BilinearForm::Assemble (int skip_zeros)
 
    if (bbfi.Size())
    {
-      // Which boundary attributes need to be processed?
-      Array<int> bdr_attr_marker(mesh->bdr_attributes.Size() ?
-                                 mesh->bdr_attributes.Max() : 0);
-      bdr_attr_marker = 0;
-      for (int k = 0; k < bbfi.Size(); k++)
-      {
-         if (bbfi_marker[k] == NULL)
-         {
-            bdr_attr_marker = 1;
-            break;
-         }
-         Array<int> &bdr_marker = *bbfi_marker[k];
-         MFEM_ASSERT(bdr_marker.Size() == bdr_attr_marker.Size(),
-                     "invalid boundary marker for boundary integrator #"
-                     << k << ", counting from zero");
-         for (int i = 0; i < bdr_attr_marker.Size(); i++)
-         {
-            bdr_attr_marker[i] |= bdr_marker[i];
-         }
-      }
-
       for (i = 0; i < fes -> GetNBE(); i++)
       {
-         const int bdr_attr = mesh->GetBdrAttribute(i);
-         if (bdr_attr_marker[bdr_attr-1] == 0) { continue; }
-
          const FiniteElement &be = *fes->GetBE(i);
          fes -> GetBdrElementVDofs (i, vdofs);
          eltrans = fes -> GetBdrElementTransformation (i);
          bbfi[0]->AssembleElementMatrix(be, *eltrans, elmat);
          for (int k = 1; k < bbfi.Size(); k++)
          {
-            if (bbfi_marker[k] &&
-                (*bbfi_marker[k])[bdr_attr-1] == 0) { continue; }
-
             bbfi[k]->AssembleElementMatrix(be, *eltrans, elemmat);
             elmat += elemmat;
          }
@@ -609,7 +604,7 @@ void BilinearForm::FormSystemMatrix(const Array<int> &ess_tdof_list,
 {
    // Finish the matrix assembly and perform BC elimination, storing the
    // eliminated part of the matrix.
-   const DiagonalPolicy keep_diag = DIAG_KEEP;
+   const int keep_diag = 1;
    if (static_cond)
    {
       if (!static_cond->HasEliminatedBC())
@@ -733,36 +728,36 @@ void BilinearForm::ComputeElementMatrices()
 }
 
 void BilinearForm::EliminateEssentialBC(const Array<int> &bdr_attr_is_ess,
-                                        Vector &sol, Vector &rhs, DiagonalPolicy dpolicy)
+                                        Vector &sol, Vector &rhs, int d)
 {
    Array<int> ess_dofs, conf_ess_dofs;
    fes->GetEssentialVDofs(bdr_attr_is_ess, ess_dofs);
 
    if (fes->GetVSize() == height)
    {
-      EliminateEssentialBCFromDofs(ess_dofs, sol, rhs, dpolicy);
+      EliminateEssentialBCFromDofs(ess_dofs, sol, rhs, d);
    }
    else
    {
       fes->GetRestrictionMatrix()->BooleanMult(ess_dofs, conf_ess_dofs);
-      EliminateEssentialBCFromDofs(conf_ess_dofs, sol, rhs, dpolicy);
+      EliminateEssentialBCFromDofs(conf_ess_dofs, sol, rhs, d);
    }
 }
 
 void BilinearForm::EliminateEssentialBC(const Array<int> &bdr_attr_is_ess,
-                                        DiagonalPolicy dpolicy)
+                                        int d)
 {
    Array<int> ess_dofs, conf_ess_dofs;
    fes->GetEssentialVDofs(bdr_attr_is_ess, ess_dofs);
 
    if (fes->GetVSize() == height)
    {
-      EliminateEssentialBCFromDofs(ess_dofs, dpolicy);
+      EliminateEssentialBCFromDofs(ess_dofs, d);
    }
    else
    {
       fes->GetRestrictionMatrix()->BooleanMult(ess_dofs, conf_ess_dofs);
-      EliminateEssentialBCFromDofs(conf_ess_dofs, dpolicy);
+      EliminateEssentialBCFromDofs(conf_ess_dofs, d);
    }
 }
 
@@ -784,25 +779,23 @@ void BilinearForm::EliminateEssentialBCDiag (const Array<int> &bdr_attr_is_ess,
 }
 
 void BilinearForm::EliminateVDofs(const Array<int> &vdofs,
-                                  Vector &sol, Vector &rhs,
-                                  DiagonalPolicy dpolicy)
+                                  Vector &sol, Vector &rhs, int d)
 {
    for (int i = 0; i < vdofs.Size(); i++)
    {
       int vdof = vdofs[i];
       if ( vdof >= 0 )
       {
-         mat -> EliminateRowCol (vdof, sol(vdof), rhs, dpolicy);
+         mat -> EliminateRowCol (vdof, sol(vdof), rhs, d);
       }
       else
       {
-         mat -> EliminateRowCol (-1-vdof, sol(-1-vdof), rhs, dpolicy);
+         mat -> EliminateRowCol (-1-vdof, sol(-1-vdof), rhs, d);
       }
    }
 }
 
-void BilinearForm::EliminateVDofs(const Array<int> &vdofs,
-                                  DiagonalPolicy dpolicy)
+void BilinearForm::EliminateVDofs(const Array<int> &vdofs, int d)
 {
    if (mat_e == NULL)
    {
@@ -814,17 +807,17 @@ void BilinearForm::EliminateVDofs(const Array<int> &vdofs,
       int vdof = vdofs[i];
       if ( vdof >= 0 )
       {
-         mat -> EliminateRowCol (vdof, *mat_e, dpolicy);
+         mat -> EliminateRowCol (vdof, *mat_e, d);
       }
       else
       {
-         mat -> EliminateRowCol (-1-vdof, *mat_e, dpolicy);
+         mat -> EliminateRowCol (-1-vdof, *mat_e, d);
       }
    }
 }
 
 void BilinearForm::EliminateEssentialBCFromDofs(
-   const Array<int> &ess_dofs, Vector &sol, Vector &rhs, DiagonalPolicy dpolicy)
+   const Array<int> &ess_dofs, Vector &sol, Vector &rhs, int d)
 {
    MFEM_ASSERT(ess_dofs.Size() == height, "incorrect dof Array size");
    MFEM_ASSERT(sol.Size() == height, "incorrect sol Vector size");
@@ -833,19 +826,19 @@ void BilinearForm::EliminateEssentialBCFromDofs(
    for (int i = 0; i < ess_dofs.Size(); i++)
       if (ess_dofs[i] < 0)
       {
-         mat -> EliminateRowCol (i, sol(i), rhs, dpolicy);
+         mat -> EliminateRowCol (i, sol(i), rhs, d);
       }
 }
 
 void BilinearForm::EliminateEssentialBCFromDofs (const Array<int> &ess_dofs,
-                                                 DiagonalPolicy dpolicy)
+                                                 int d)
 {
    MFEM_ASSERT(ess_dofs.Size() == height, "incorrect dof Array size");
 
    for (int i = 0; i < ess_dofs.Size(); i++)
       if (ess_dofs[i] < 0)
       {
-         mat -> EliminateRowCol (i, dpolicy);
+         mat -> EliminateRowCol (i, d);
       }
 }
 
@@ -919,10 +912,10 @@ BilinearForm::~BilinearForm()
    if (!extern_bfs)
    {
       int k;
-      for (k=0; k < dbfi.Size(); k++) { delete dbfi[k]; }
-      for (k=0; k < bbfi.Size(); k++) { delete bbfi[k]; }
-      for (k=0; k < fbfi.Size(); k++) { delete fbfi[k]; }
-      for (k=0; k < bfbfi.Size(); k++) { delete bfbfi[k]; }
+      for (k=0; k < dbfi.Size(); k++) { if (dbfi_owned[k]) delete dbfi[k]; }
+      for (k=0; k < bbfi.Size(); k++) { if (bbfi_owned[k]) delete bbfi[k]; }
+      for (k=0; k < fbfi.Size(); k++) { if (fbfi_owned[k]) delete fbfi[k]; }
+      for (k=0; k < bfbfi.Size(); k++) { if (bfbfi_owned[k]) delete bfbfi[k]; }
    }
 }
 
@@ -934,6 +927,42 @@ MixedBilinearForm::MixedBilinearForm (FiniteElementSpace *tr_fes,
    trial_fes = tr_fes;
    test_fes = te_fes;
    mat = NULL;
+   extern_bfs = 0;
+}
+
+MixedBilinearForm::MixedBilinearForm (FiniteElementSpace *tr_fes,
+                                      FiniteElementSpace *te_fes,
+                                      MixedBilinearForm * mbf)
+   : Matrix(te_fes->GetVSize(), tr_fes->GetVSize())
+{
+   int i;
+   Array<BilinearFormIntegrator*> *bfi;
+
+   trial_fes = tr_fes;
+   test_fes = te_fes;
+   mat = NULL;
+   extern_bfs = 1;
+
+   bfi = mbf->GetDBFI();
+   dom.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      dom[i] = (*bfi)[i];
+   }
+
+   bfi = mbf->GetBBFI();
+   bdr.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      bdr[i] = (*bfi)[i];
+   }
+
+   bfi = mbf->GetTFBFI();
+   skt.SetSize (bfi->Size());
+   for (i = 0; i < bfi->Size(); i++)
+   {
+      skt[i] = (*bfi)[i];
+   }
 }
 
 double & MixedBilinearForm::Elem (int i, int j)
@@ -988,16 +1017,37 @@ void MixedBilinearForm::GetBlocks(Array2D<SparseMatrix *> &blocks) const
 void MixedBilinearForm::AddDomainIntegrator (BilinearFormIntegrator * bfi)
 {
    dom.Append (bfi);
+   dom_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowDomainIntegrator (BilinearFormIntegrator * bfi)
+{
+   dom.Append (bfi);
+   dom_owned.Append (false);
 }
 
 void MixedBilinearForm::AddBoundaryIntegrator (BilinearFormIntegrator * bfi)
 {
    bdr.Append (bfi);
+   bdr_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowBoundaryIntegrator (BilinearFormIntegrator * bfi)
+{
+   bdr.Append (bfi);
+   bdr_owned.Append (false);
 }
 
 void MixedBilinearForm::AddTraceFaceIntegrator (BilinearFormIntegrator * bfi)
 {
    skt.Append (bfi);
+   skt_owned.Append (true);
+}
+
+void MixedBilinearForm::BorrowTraceFaceIntegrator (BilinearFormIntegrator * bfi)
+{
+   skt.Append (bfi);
+   skt_owned.Append (false);
 }
 
 void MixedBilinearForm::Assemble (int skip_zeros)
@@ -1112,7 +1162,7 @@ void MixedBilinearForm::ConformingAssemble()
 }
 
 void MixedBilinearForm::EliminateTrialDofs (
-   Array<int> &bdr_attr_is_ess, Vector &sol, Vector &rhs )
+   const Array<int> &bdr_attr_is_ess, Vector &sol, Vector &rhs )
 {
    int i, j, k;
    Array<int> tr_vdofs, cols_marker (trial_fes -> GetVSize());
@@ -1140,7 +1190,7 @@ void MixedBilinearForm::EliminateEssentialBCFromTrialDofs (
    mat -> EliminateCols (marked_vdofs, &sol, &rhs);
 }
 
-void MixedBilinearForm::EliminateTestDofs (Array<int> &bdr_attr_is_ess)
+void MixedBilinearForm::EliminateTestDofs (const Array<int> &bdr_attr_is_ess)
 {
    int i, j, k;
    Array<int> te_vdofs;
@@ -1173,9 +1223,9 @@ MixedBilinearForm::~MixedBilinearForm()
    int i;
 
    if (mat) { delete mat; }
-   for (i = 0; i < dom.Size(); i++) { delete dom[i]; }
-   for (i = 0; i < bdr.Size(); i++) { delete bdr[i]; }
-   for (i = 0; i < skt.Size(); i++) { delete skt[i]; }
+   for (i = 0; i < dom.Size(); i++) { if (dom_owned[i]) delete dom[i]; }
+   for (i = 0; i < bdr.Size(); i++) { if (bdr_owned[i]) delete bdr[i]; }
+   for (i = 0; i < skt.Size(); i++) { if (skt_owned[i]) delete skt[i]; }
 }
 
 

@@ -377,6 +377,7 @@ void IsoparametricTransformation::SetIdentityTransformation(int GeomType)
       case Geometry::SQUARE :      FElem = &QuadrilateralFE; break;
       case Geometry::TETRAHEDRON : FElem = &TetrahedronFE; break;
       case Geometry::CUBE :        FElem = &HexahedronFE; break;
+      case Geometry::PENTATOPE :   FElem = &PentatopeFE; break;
       default:
          MFEM_ABORT("unknown Geometry::Type!");
    }
@@ -410,6 +411,7 @@ const DenseMatrix &IsoparametricTransformation::EvalJacobian()
 
    return dFdx;
 }
+
 
 int IsoparametricTransformation::OrderJ()
 {

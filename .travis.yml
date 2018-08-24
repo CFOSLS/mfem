@@ -2,145 +2,15 @@ sudo: false
 
 language: cpp
 
-matrix:
-  include:
-    #
-    # Linux
-    #
-    - os: linux
-      compiler: gcc
-      env: DEBUG=YES
-           MPI=NO
-           CODECOV=NO
-           MFEM_TEST_TARGET=check
-    #
-    - os: linux
-      compiler: gcc
-      env: DEBUG=NO
-           MPI=NO
-           CODECOV=NO
-           MFEM_TEST_TARGET=test
-    #
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          # sources:
-            # - ubuntu-toolchain-r-test
-          packages:
-            # GCC 4.9
-            # - g++-4.9
-            # MPICH
-            - mpich
-            - libmpich-dev
-            # OpenMPI
-            # - openmpi-bin
-            # - libopenmpi-dev
-      env: DEBUG=YES
-           MPI=YES
-           CODECOV=NO
-           MFEM_TEST_TARGET=check
-           NPROCS=2
-      cache:
-        directories:
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/lib
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/include
-          - $TRAVIS_BUILD_DIR/../metis-4.0
-      before_cache:
-        - cd $TRAVIS_BUILD_DIR/../metis-4.0;
-          mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
-    #
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          # sources:
-            # - ubuntu-toolchain-r-test
-          packages:
-            # GCC 4.9
-            # - g++-4.9
-            # MPICH
-            - mpich
-            - libmpich-dev
-            # OpenMPI
-            # - openmpi-bin
-            # - libopenmpi-dev
-      env: DEBUG=NO
-           MPI=YES
-           CODECOV=YES
-           MFEM_TEST_TARGET=test
-           NPROCS=2
-      cache:
-        directories:
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/lib
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/include
-          - $TRAVIS_BUILD_DIR/../metis-4.0
-      before_cache:
-        - cd $TRAVIS_BUILD_DIR/../metis-4.0;
-          mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
-    #
-    # Mac OS X
-    #
-    - os: osx
-      # osx_image: xcode7.3
-      compiler: clang
-      env: DEBUG=YES
-           MPI=NO
-           CODECOV=NO
-           MFEM_TEST_TARGET=check
-    #
-    - os: osx
-      # osx_image: xcode7.3
-      compiler: clang
-      env: DEBUG=NO
-           MPI=NO
-           CODECOV=NO
-           MFEM_TEST_TARGET=test
-    #
-    - os: osx
-      # osx_image: xcode7.3
-      compiler: clang
-      env: DEBUG=YES
-           MPI=YES
-           CODECOV=NO
-           MFEM_TEST_TARGET=check
-           NPROCS=4
-           TMPDIR=/tmp
-      cache:
-        directories:
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/lib
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/include
-          - $TRAVIS_BUILD_DIR/../metis-4.0
-          - $HOME/local-cached
-      before_cache:
-        - cd $TRAVIS_BUILD_DIR/../metis-4.0;
-          mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
-    #
-    - os: osx
-      # osx_image: xcode7.3
-      compiler: clang
-      env: DEBUG=NO
-           MPI=YES
-           CODECOV=YES
-           MFEM_TEST_TARGET=test
-           NPROCS=4
-           TMPDIR=/tmp
-      cache:
-        directories:
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/lib
-          - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/include
-          - $TRAVIS_BUILD_DIR/../metis-4.0
-          - $HOME/local-cached
-      before_cache:
-        - cd $TRAVIS_BUILD_DIR/../metis-4.0;
-          mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
+compiler:
+   - clang
 
+os:
+   - osx
 
-before_install:
-   # No addon for brew yet, have to install OSX packages this way.
-   # - if [ $TRAVIS_OS_NAME == "osx" ] && [ $MPI == "YES" ]; then
-   #      brew install open-mpi;
-   #   fi
+env:
+   - DEBUG=YES MPI=YES TMPDIR=/tmp
+>>>>>>> dev_timeslabbing
 
    # On Mac OS X, build and cache OpenMPI 2.1.1:
    - if [ $TRAVIS_OS_NAME == "osx" ] && [ $MPI == "YES" ]; then
@@ -261,3 +131,11 @@ after_success:
         coveralls --include fem --include general --include linalg --include
            mesh --exclude /usr --gcov-options '\-lp' --root $TRAVIS_BUILD_DIR;
      fi
+
+   # Build and check/test MFEM, its examples and miniapps
+   - cd $TRAVIS_BUILD_DIR &&
+     make config MFEM_USE_MPI=$MPI MFEM_DEBUG=$DEBUG MFEM_CXX="$MYCXX" &&
+     make info &&
+     make all -j 4 &&
+     make $MFEM_TEST_TARGET 1>&2
+

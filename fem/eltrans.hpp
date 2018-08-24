@@ -23,6 +23,8 @@ namespace mfem
 class ElementTransformation
 {
 protected:
+   int JacobianIsEvaluated;
+   int WeightIsEvaluated;
    const IntegrationPoint *IntPoint;
    DenseMatrix dFdx, adjJ, invJ;
    double Wght;
@@ -50,7 +52,7 @@ public:
    ElementTransformation();
 
    void SetIntPoint(const IntegrationPoint *ip)
-   { IntPoint = ip; EvalState = 0; }
+   { IntPoint = ip; EvalState = 0; WeightIsEvaluated = JacobianIsEvaluated = 0; }
    const IntegrationPoint &GetIntPoint() { return *IntPoint; }
 
    virtual void Transform(const IntegrationPoint &, Vector &) = 0;
@@ -68,7 +70,7 @@ public:
    { return (EvalState & JACOBIAN_MASK) ? dFdx : EvalJacobian(); }
 
    double Weight() { return (EvalState & WEIGHT_MASK) ? Wght : EvalWeight(); }
-
+   //virtual double Weight() = 0;
    const DenseMatrix &AdjugateJacobian()
    { return (EvalState & ADJUGATE_MASK) ? adjJ : EvalAdjugateJ(); }
 

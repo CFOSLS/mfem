@@ -16,29 +16,77 @@
 namespace mfem
 {
 
-void LinearForm::AddDomainIntegrator(LinearFormIntegrator *lfi)
+LinearForm::LinearForm (FiniteElementSpace * f, LinearForm *lf)
+   : Vector(f -> GetVSize())
 {
-   DeltaLFIntegrator *maybe_delta =
-      dynamic_cast<DeltaLFIntegrator *>(lfi);
-   if (!maybe_delta || !maybe_delta->IsDelta())
+   int i;
+   Array<LinearFormIntegrator*> *lfi;
+
+   fes = f;
+   extern_lfs = 1;
+
+   lfi = lf->GetDLFI();
+   dlfi.SetSize (lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
    {
-      dlfi.Append(lfi);
+      dlfi[i] = (*lfi)[i];
    }
-   else
+
+   lfi = lf->GetBLFI();
+   blfi.SetSize (lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
    {
-      dlfi_delta.Append(maybe_delta);
+      blfi[i] = (*lfi)[i];
    }
+
+   lfi = lf->GetFLFI();
+   flfi.SetSize (lfi->Size());
+   flfi_marker.SetSize(lfi->Size());
+   for (i = 0; i < lfi->Size(); i++)
+   {
+      flfi[i] = (*lfi)[i];
+      flfi_marker[i] = NULL;
+   }
+
 }
+
+void LinearForm::AddDomainIntegrator (LinearFormIntegrator * lfi)
+{
+   dlfi.Append (lfi);
+   dlfi_owned.Append (true);
+}
+
+void LinearForm::BorrowDomainIntegrator (LinearFormIntegrator * lfi)
+{
+    dlfi.Append (lfi);
+    dlfi_owned.Append (false);
+}
+
 
 void LinearForm::AddBoundaryIntegrator (LinearFormIntegrator * lfi)
 {
    blfi.Append (lfi);
+   blfi_owned.Append (true);
+}
+
+void LinearForm::BorrowBoundaryIntegrator (LinearFormIntegrator * lfi)
+{
+   blfi.Append (lfi);
+   blfi_owned.Append (false);
 }
 
 void LinearForm::AddBdrFaceIntegrator (LinearFormIntegrator * lfi)
 {
    flfi.Append(lfi);
    flfi_marker.Append(NULL); // NULL -> all attributes are active
+   flfi_owned.Append (true);
+}
+
+void LinearForm::BorrowBdrFaceIntegrator (LinearFormIntegrator * lfi)
+{
+   flfi.Append(lfi);
+   flfi_marker.Append(NULL); // NULL -> all attributes are active
+   flfi_owned.Append (false);
 }
 
 void LinearForm::AddBdrFaceIntegrator(LinearFormIntegrator *lfi,
@@ -46,6 +94,7 @@ void LinearForm::AddBdrFaceIntegrator(LinearFormIntegrator *lfi,
 {
    flfi.Append(lfi);
    flfi_marker.Append(&bdr_attr_marker);
+   flfi_owned.Append (true);
 }
 
 void LinearForm::Assemble()
@@ -69,8 +118,6 @@ void LinearForm::Assemble()
             AddElementVector (vdofs, elemvect);
          }
       }
-
-   AssembleDelta();
 
    if (blfi.Size())
       for (i = 0; i < fes -> GetNBE(); i++)
@@ -137,56 +184,14 @@ void LinearForm::Update(FiniteElementSpace *f, Vector &v, int v_offset)
 {
    fes = f;
    NewDataAndSize((double *)v + v_offset, fes->GetVSize());
-   ResetDeltaLocations();
-}
-
-void LinearForm::AssembleDelta()
-{
-   if (dlfi_delta.Size() == 0) { return; }
-
-   if (!HaveDeltaLocations())
-   {
-      int sdim = fes->GetMesh()->SpaceDimension();
-      Vector center;
-      DenseMatrix centers(sdim, dlfi_delta.Size());
-      for (int i = 0; i < centers.Width(); i++)
-      {
-         centers.GetColumnReference(i, center);
-         dlfi_delta[i]->GetDeltaCenter(center);
-         MFEM_VERIFY(center.Size() == sdim,
-                     "Point dim " << center.Size() <<
-                     " does not match space dim " << sdim);
-      }
-      fes->GetMesh()->FindPoints(centers, dlfi_delta_elem_id, dlfi_delta_ip);
-   }
-
-   Array<int> vdofs;
-   Vector elemvect;
-   for (int i = 0; i < dlfi_delta.Size(); i++)
-   {
-      int elem_id = dlfi_delta_elem_id[i];
-      // The delta center may be outside of this sub-domain, or
-      // (Par)Mesh::FindPoints() failed to find this point:
-      if (elem_id < 0) { continue; }
-
-      const IntegrationPoint &ip = dlfi_delta_ip[i];
-      ElementTransformation &Trans = *fes->GetElementTransformation(elem_id);
-      Trans.SetIntPoint(&ip);
-
-      fes->GetElementVDofs(elem_id, vdofs);
-      dlfi_delta[i]->AssembleDeltaElementVect(*fes->GetFE(elem_id), Trans,
-                                              elemvect);
-      AddElementVector(vdofs, elemvect);
-   }
 }
 
 LinearForm::~LinearForm()
 {
    int k;
-   for (k=0; k < dlfi_delta.Size(); k++) { delete dlfi_delta[k]; }
-   for (k=0; k < dlfi.Size(); k++) { delete dlfi[k]; }
-   for (k=0; k < blfi.Size(); k++) { delete blfi[k]; }
-   for (k=0; k < flfi.Size(); k++) { delete flfi[k]; }
+   for (k=0; k < dlfi.Size(); k++) { if (dlfi_owned[k]) delete dlfi[k]; }
+   for (k=0; k < blfi.Size(); k++) { if (blfi_owned[k]) delete blfi[k]; }
+   for (k=0; k < flfi.Size(); k++) { if (flfi_owned[k]) delete flfi[k]; }
 }
 
 }
