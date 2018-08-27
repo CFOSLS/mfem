@@ -69,6 +69,8 @@ ParMesh::ParMesh(const ParMesh &pmesh, bool copy_nodes)
 
    if (pmesh.pncmesh)
        pncmesh = new ParNCMesh(*pmesh.pncmesh);
+   else
+       pncmesh = NULL;
    //MFEM_VERIFY(pmesh.pncmesh == NULL,
                //"copying non-conforming meshes is not implemented");
    //pncmesh = NULL;
