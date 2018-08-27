@@ -67,6 +67,9 @@ class ParNCMesh : public NCMesh
 public:
    ParNCMesh(MPI_Comm comm, const NCMesh& ncmesh);
 
+   // deep copy constructor
+   ParNCMesh(ParNCMesh& pncmesh);
+
    virtual ~ParNCMesh();
 
    /** An override of NCMesh::Refine, which is called eventually, after making

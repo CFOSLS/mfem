@@ -144,18 +144,20 @@ int main(int argc, char *argv[])
     // doing one refinement to turn the mesh into non-conforming
     // since "ParMesh must be constructed from non-conforming serial mesh" happens
     // later otherwise
-    /*
     Array<Refinement> refs(mesh->GetNE());
     for (int i = 0; i < mesh->GetNE(); i++)
         refs[i] = Refinement(i, 7);
     mesh->GeneralRefinement(refs, -1, -1);
-    */
 
     auto pmesh = make_shared<ParMesh>(comm, *mesh);
 
     // creating ref. flags for the hierarchy
     // there will be applied from end to start
     // (ref_flags[0] will be applied last)
+    int par_ref_lvls = 1;
+    Array<int> ref_flags(par_ref_lvls);
+    ref_flags[0] = 3;
+
     /*
     int par_ref_lvls = 5;
     Array<int> ref_flags(par_ref_lvls);
@@ -166,10 +168,12 @@ int main(int argc, char *argv[])
     ref_flags[4] = 7;
     */
 
+    /*
     int par_ref_lvls = 2;
     Array<int> ref_flags(par_ref_lvls);
     ref_flags[0] = -1;
     ref_flags[1] = -1;
+    */
 
     const int dim = 3;
 
