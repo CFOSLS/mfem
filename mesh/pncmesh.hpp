@@ -68,7 +68,7 @@ public:
    ParNCMesh(MPI_Comm comm, const NCMesh& ncmesh);
 
    // deep copy constructor
-   ParNCMesh(ParNCMesh& pncmesh);
+   ParNCMesh(const ParNCMesh &other);
 
    virtual ~ParNCMesh();
 

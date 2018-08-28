@@ -154,11 +154,7 @@ int main(int argc, char *argv[])
     // creating ref. flags for the hierarchy
     // there will be applied from end to start
     // (ref_flags[0] will be applied last)
-    int par_ref_lvls = 1;
-    Array<int> ref_flags(par_ref_lvls);
-    ref_flags[0] = 3;
 
-    /*
     int par_ref_lvls = 5;
     Array<int> ref_flags(par_ref_lvls);
     ref_flags[0] = 3;
@@ -166,7 +162,6 @@ int main(int argc, char *argv[])
     ref_flags[2] = 4;
     ref_flags[3] = 4;
     ref_flags[4] = 7;
-    */
 
     /*
     int par_ref_lvls = 2;

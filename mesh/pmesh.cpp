@@ -67,13 +67,17 @@ ParMesh::ParMesh(const ParMesh &pmesh, bool copy_nodes)
    // Do not copy face-neighbor data (can be generated if needed)
    have_face_nbr_data = false;
 
+   // Copy ParNCMesh, if present
    if (pmesh.pncmesh)
-       pncmesh = new ParNCMesh(*pmesh.pncmesh);
+   {
+      pncmesh = new ParNCMesh(*pmesh.pncmesh);
+      pncmesh->OnMeshUpdated(this);
+   }
    else
-       pncmesh = NULL;
-   //MFEM_VERIFY(pmesh.pncmesh == NULL,
-               //"copying non-conforming meshes is not implemented");
-   //pncmesh = NULL;
+   {
+      pncmesh = NULL;
+   }
+   ncmesh = pncmesh;
 
    // Copy the Nodes as a ParGridFunction, including the FiniteElementCollection
    // and the FiniteElementSpace (as a ParFiniteElementSpace)

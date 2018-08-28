@@ -24,112 +24,14 @@
 namespace mfem
 {
 
-ParNCMesh::ParNCMesh(ParNCMesh& pncmesh)
-    : NCMesh(pncmesh)
+ParNCMesh::ParNCMesh(const ParNCMesh &other)
+   // copy primary data only
+   : NCMesh(other)
+   , MyComm(other.MyComm)
+   , NRanks(other.NRanks)
+   , MyRank(other.MyRank)
 {
-    MyComm = pncmesh.MyComm;
-
-    NRanks = pncmesh.NRanks;
-    MyRank = pncmesh.MyRank;
-
-    NVertices = pncmesh.NVertices;
-    NGhostVertices = pncmesh.NGhostVertices;
-    NEdges = pncmesh.NEdges;
-    NGhostEdges = pncmesh.NGhostEdges;
-    NFaces = pncmesh.NFaces;
-    NGhostFaces = pncmesh.NGhostFaces;
-    NElements = pncmesh.NElements;
-    NGhostElements = pncmesh.NGhostElements;
-
-    // lists of vertices/edges/faces shared by us and at least one more processor
-    shared_vertices.conforming.resize(pncmesh.shared_vertices.conforming.size());
-    for (unsigned int i = 0; i < shared_vertices.conforming.size(); ++i)
-    {
-        shared_vertices.conforming[i].index = pncmesh.shared_vertices.conforming[i].index;
-        shared_vertices.conforming[i].element = pncmesh.shared_vertices.conforming[i].element;
-        shared_vertices.conforming[i].local = pncmesh.shared_vertices.conforming[i].local;
-    }
-    for (unsigned int i = 0; i < pncmesh.shared_vertices.masters.size(); ++i)
-    {
-        shared_vertices.masters.push_back(Master(pncmesh.shared_vertices.masters[i].index,
-                                                 pncmesh.shared_vertices.masters[i].element,
-                                                 pncmesh.shared_vertices.masters[i].local,
-                                                 pncmesh.shared_vertices.masters[i].slaves_begin,
-                                                 pncmesh.shared_vertices.masters[i].slaves_end));
-    }
-    for (unsigned int i = 0; i < pncmesh.shared_vertices.slaves.size(); ++i)
-    {
-        shared_vertices.slaves.push_back(Slave(pncmesh.shared_vertices.slaves[i].index,
-                                               pncmesh.shared_vertices.slaves[i].element,
-                                               pncmesh.shared_vertices.slaves[i].local));
-        shared_vertices.slaves[i].master = pncmesh.shared_vertices.slaves[i].master;
-        shared_vertices.slaves[i].edge_flags = pncmesh.shared_vertices.slaves[i].edge_flags;
-        shared_vertices.slaves[i].point_matrix = pncmesh.shared_vertices.slaves[i].point_matrix;
-    }
-
-    //shared_vertices.conforming = pncmesh.shared_vertices.conforming;
-    //shared_vertices.masters = pncmesh.shared_vertices.masters;
-    //shared_vertices.slaves = pncmesh.shared_vertices.slaves;
-
-    shared_edges.conforming = pncmesh.shared_edges.conforming;
-    shared_edges.masters = pncmesh.shared_edges.masters;
-    shared_edges.slaves = pncmesh.shared_edges.slaves;
-
-    shared_faces.conforming = pncmesh.shared_faces.conforming;
-    shared_faces.masters = pncmesh.shared_faces.masters;
-    shared_faces.slaves = pncmesh.shared_faces.slaves;
-
-    // owner processor for each vertex/edge/face
-    vertex_owner.SetSize(pncmesh.vertex_owner.Size());
-    for (int i = 0; i < vertex_owner.Size(); ++i)
-        vertex_owner[i] = pncmesh.vertex_owner[i];
-
-    edge_owner.SetSize(pncmesh.edge_owner.Size());
-    for (int i = 0; i < edge_owner.Size(); ++i)
-        edge_owner[i] = pncmesh.edge_owner[i];
-
-    face_owner.SetSize(pncmesh.face_owner.Size());
-    for (int i = 0; i < face_owner.Size(); ++i)
-        face_owner[i] = pncmesh.face_owner[i];
-
-    // list of processors sharing each vertex/edge/face
-    pncmesh.vertex_group.Copy(vertex_group);
-    pncmesh.edge_group.Copy(edge_group);
-    pncmesh.face_group.Copy(face_group);
-
-    face_orient.SetSize(pncmesh.face_orient.Size());
-    for (int i = 0; i < face_orient.Size(); ++i)
-        face_orient[i] = pncmesh.face_orient[i];
-
-    element_type.SetSize(pncmesh.element_type.Size());
-    for (int i = 0; i < element_type.Size(); ++i)
-        element_type[i] = pncmesh.element_type[i];
-
-    ghost_layer.SetSize(pncmesh.ghost_layer.Size());
-    for (int i = 0; i < ghost_layer.Size(); ++i)
-        ghost_layer[i] = pncmesh.ghost_layer[i];
-
-    boundary_layer.SetSize(pncmesh.boundary_layer.Size());
-    for (int i = 0; i < boundary_layer.Size(); ++i)
-        boundary_layer[i] = pncmesh.boundary_layer[i];
-
-    index_rank.SetSize(pncmesh.index_rank.Size());
-    for (int i = 0; i < index_rank.Size(); ++i)
-    {
-        index_rank[i].from = pncmesh.index_rank[i].from;
-        index_rank[i].to = pncmesh.index_rank[i].to;
-    }
-
-    tmp_neighbors.SetSize(pncmesh.tmp_neighbors.Size());
-    for (int i = 0; i < tmp_neighbors.Size(); ++i)
-        tmp_neighbors[i] = pncmesh.tmp_neighbors[i];
-
-    send_rebalance_dofs = pncmesh.send_rebalance_dofs;
-    recv_rebalance_dofs = pncmesh.recv_rebalance_dofs;
-
-    old_index_or_rank.SetSize(pncmesh.old_index_or_rank.Size());
-    for (int i = 0; i < old_index_or_rank.Size(); ++i)
-        old_index_or_rank[i] = pncmesh.old_index_or_rank[i];
+   Update(); // mark all secondary stuff for recalculation
 }
 
 ParNCMesh::ParNCMesh(MPI_Comm comm, const NCMesh &ncmesh)

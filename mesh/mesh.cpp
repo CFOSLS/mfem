@@ -2696,6 +2696,7 @@ Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
       faces[i] = (face) ? face->Duplicate(this) : NULL;
    }
    mesh.faces_info.Copy(faces_info);
+   mesh.nc_faces_info.Copy(nc_faces_info);
 
    // Duplicate the planars.
    if (Dim == 4)
@@ -2727,7 +2728,16 @@ Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
    NURBSext = NULL;
 
    // Deep copy the NCMesh.
-   ncmesh = mesh.ncmesh ? new NCMesh(*mesh.ncmesh) : NULL;
+#ifdef MFEM_USE_MPI
+   if (dynamic_cast<const ParMesh*>(&mesh))
+   {
+      ncmesh = NULL; // skip; will be done in ParMesh copy ctor
+   }
+   else
+#endif
+   {
+      ncmesh = mesh.ncmesh ? new NCMesh(*mesh.ncmesh) : NULL;
+   }
 
    // Duplicate the Nodes, including the FiniteElementCollection and the
    // FiniteElementSpace
