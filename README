@@ -37,6 +37,9 @@ Incomplete list of new classes (w.r.t to base version of MFEM):
 - Specific integrators and classes for CFOSLS formulation of linear transport, heat, wave and
   laplace equations
   
+- Visualization routines for slicing 3D and 4D meshes and grid functions defined on them
+  to produce VTK output suitable for futher postprocessing, e.g., in ParaView.
+  
 Incomplete list of features (improvements) upon MFEM:
 - 4D finite element spaces & 4D meshes
 - general multigrid preconditioners and minimization solver
