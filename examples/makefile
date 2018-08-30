@@ -29,7 +29,7 @@ PAR_EXAMPLES = ex1p ex2p ex3p ex4p ex5p ex6p ex7p ex8p ex9p ex10p ex11p ex12p\
  ex13p ex14p ex15p ex16p ex17p ex4D_DivSkew cfosls_parabolic cfosls_hyperbolic cfosls_wave \ cfosls_hyperbolic_anisoMG cfosls_laplace laplace_mg cfosls_hyperbolic_timestepping \    cfosls_hyperbolic_tst_multigrid cfosls_hyperbolic_adref cfosls_hyperbolic_adref_Hcurl_new \
 cfosls_laplace_adref_Hcurl cfosls_laplace_adref_Hcurl_new \
 cfosls_hyperbolic_multigrid heat_timestepping ParMeshGenViz4D cfosls_hyperbolic_multigrid \
-4D_poisson
+4D_poisson cfosls_laplace_amr_4D
 
 ifeq ($(MFEM_USE_MPI),NO)
    EXAMPLES = $(SEQ_EXAMPLES)
