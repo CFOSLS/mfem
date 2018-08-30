@@ -63,10 +63,10 @@
 // and one has to split bdr attributes for the faces, which is quite a pain
 // Instead, we prescribe homogeneous bdr conditions at the entire boundary except for the top,
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
-#define OVERCONSTRAINED
+//#define OVERCONSTRAINED
 
 // If passive, the mesh is simply uniformly refined at each iteration
-#define AMR
+//#define AMR
 
 // When active, this macro makes the code create an instance of DivConstraintSolver
 // whicha llows to search for a particular solution of the divergence constraint
@@ -101,7 +101,7 @@
 // i.e, the full-recursive approach when we go back up to the coarsest level,
 // we recoarsen the righthand side, solve from coarsest to finest level
 // which time reusing the previous solution
-#define APPROACH_3
+//#define APPROACH_3
 
 #ifdef APPROACH_0
 #endif
@@ -174,14 +174,14 @@ int main(int argc, char *argv[])
 #endif
 
     bool visualization = 1;
-    bool output_solution = false;
+    bool output_solution = true;
 
     int ser_ref_levels  = 1;
     int par_ref_levels  = 0;
 
     // This must be consistent with what formulation is used below.
     // Search for "using FormulType" below
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1" ("H1" needs to be fixed)
 
     // solver options
@@ -199,7 +199,7 @@ int main(int argc, char *argv[])
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    int feorder         = 0;
+    int feorder         = 1;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation in AMR setting \n";
@@ -266,15 +266,15 @@ int main(int argc, char *argv[])
     }
 
     // 3. Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g.)
-
+    /*
     // Hdiv-H1 case
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Hdiv-H1-L2 formulation must have space_for_S = `H1` \n");
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
+    */
 
-    /*
     // Hdiv-L2 case
 #ifdef HDIVL2L2
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Hdiv-L2-L2 formulation must have space_for_S = `L2` \n");
@@ -289,7 +289,6 @@ int main(int argc, char *argv[])
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2hyp;
 #endif
-    */
 
 #ifdef CYLINDER_CUBE_TEST
     if (verbose)
@@ -382,6 +381,7 @@ int main(int argc, char *argv[])
     // not to bot + square corners + top as we need
     ReArrangeBdrAttributes(mesh);
 
+    /*
     std::string filename_mesh;
     filename_mesh = "checkmesh_cube4transport.mesh";
     std::ofstream ofid(filename_mesh);
@@ -390,6 +390,7 @@ int main(int argc, char *argv[])
 
     MPI_Finalize();
     return 0;
+    */
 #endif
 
 #endif
@@ -663,7 +664,7 @@ int main(int argc, char *argv[])
        std::cout << "Running AMR ... \n";
 
    // upper limit on the number of AMR iterations
-   int max_iter_amr = 3; // 21;
+   int max_iter_amr = 21; // 21;
 
    // controls the print step of the solution into the output files (in terms of AMR iterations)
    int it_print_step = 5;

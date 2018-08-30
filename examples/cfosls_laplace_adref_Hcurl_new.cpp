@@ -61,6 +61,9 @@
 // used as a reference solution
 #define REFERENCE_SOLUTION
 
+// if active, uses minimization solver for the problem
+//#define USE_MINSOLVER
+
 using namespace std;
 using namespace mfem;
 using std::shared_ptr;
@@ -80,10 +83,10 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
 
     int nDimensions     = 3;
-    int numsol          = -3;
+    int numsol          = 11;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 1;
+    int par_ref_levels  = 0;
 
     // This must be consistent with what formulation is used below.
     // Search for "using FormulType" below
@@ -100,7 +103,7 @@ int main(int argc, char *argv[])
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
     mesh_file = "../data/cube_3d_moderate.mesh";
 
-    int feorder         = 0;
+    int feorder         = 1;
 #ifdef H1FEMLAPLACE
     ++feorder;
 #endif
@@ -164,8 +167,8 @@ int main(int argc, char *argv[])
     {
         //mesh_file = "../data/netgen_lshape3D_onemoretry.netgen";
         mesh_file = "../data/netgen_lshape3D_onemoretry_coarsest.netgen";
-        MFEM_ABORT("Something is wrong with the mesh, unlike other tests. A FOSLSProblem cannot "
-                   "assemble the matrix for unnown reason, fails in assembling the (1,1) block. \n");
+        //MFEM_ABORT("Something is wrong with the mesh, unlike other tests. A FOSLSProblem cannot "
+                   //"assemble the matrix for unnown reason, fails in assembling the (1,1) block. \n");
     }
 
     if (verbose)
@@ -212,20 +215,29 @@ int main(int argc, char *argv[])
         std::cout << "AMR passive \n";
 #endif
 
-#ifdef RECOARSENING_AMR
-    if (verbose)
-        std::cout << "RECOARSENING_AMR active \n";
-#else
-    if (verbose)
-        std::cout << "RECOARSENING_AMR passive \n";
-#endif
-
 #ifdef REFERENCE_SOLUTION
     if (verbose)
         std::cout << "REFERENCE_SOLUTION active \n";
 #else
     if (verbose)
         std::cout << "REFERENCE_SOLUTION passive \n";
+#endif
+
+#ifdef USE_MINSOLVER
+    if (verbose)
+        std::cout << "USE_MINSOLVER active \n";
+    MFEM_ASSERT(feorder == 0, "Minimization solver doesn't work for higher-order elements");
+#else
+    if (verbose)
+        std::cout << "USE_MINSOLVER passive \n";
+#endif
+
+#ifdef RECOARSENING_AMR
+    if (verbose)
+        std::cout << "RECOARSENING_AMR active \n";
+#else
+    if (verbose)
+        std::cout << "RECOARSENING_AMR passive \n";
 #endif
 
 #ifdef CLEVER_STARTING_GUESS
@@ -314,10 +326,16 @@ int main(int argc, char *argv[])
    BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
    // 5.1. Creating a hierarchy of meshes and problems at those meshes
+#ifdef USE_MINSOLVER
    bool with_hcurl = true;
+#else
+   bool with_hcurl = false;
+#endif
    GeneralHierarchy * hierarchy = new GeneralHierarchy(1, *pmesh, feorder, verbose, with_hcurl);
    hierarchy->ConstructDofTrueDofs();
+#ifdef USE_MINSOLVER
    hierarchy->ConstructDivfreeDops();
+#endif
    hierarchy->ConstructEl2Dofs();
 
    FOSLSProblHierarchy<ProblemType, GeneralHierarchy> * prob_hierarchy = new
@@ -335,6 +353,7 @@ int main(int argc, char *argv[])
            (*bdr_conds, *fe_formulat, prec_option, verbose);
    hierarchy->AttachProblem(problem_mgtools);
 
+#ifdef USE_MINSOLVER
    bool optimized_localsolvers = true;
    bool with_hcurl_smoothers = true;
    DivConstraintSolver * partsol_finder;
@@ -387,6 +406,7 @@ int main(int argc, char *argv[])
        NewSolver->SetPrintLevel(0);
        NewSolver->SetStopCriteriaType(stopcriteria_type);
    }
+#endif
 
    // 6. Creating the error estimator
 
@@ -467,7 +487,7 @@ int main(int argc, char *argv[])
    problem_mgtools->AddEstimator(*estimator);
 
    //ThresholdRefiner refiner(*estimator);
-   ThresholdSmooRefiner refiner(*estimator); // 0.1, 0.001
+   ThresholdSmooRefiner refiner(*estimator, 1000000);
    refiner.SetTotalErrorFraction(0.95); // 0.5
 
    if (verbose)
@@ -494,7 +514,7 @@ int main(int argc, char *argv[])
    // 7. The main AMR loop. At each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
-   const int max_dofs = 200000;//1600000;
+   const int max_dofs = 300000;//1600000;
 #else // uniform refinement
    const int max_dofs = 600000;
 #endif
@@ -503,7 +523,8 @@ int main(int argc, char *argv[])
    std::cout << "starting n_el = " << problem_mgtools->GetParMesh()->GetNE() << "\n";
 
    // Main loop (with AMR or uniform refinement depending on the predefined macros)
-   int max_iter_amr = 3;
+   int max_iter_amr = 21;
+   int it_viz_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
    {
        if (verbose)
@@ -540,12 +561,14 @@ int main(int argc, char *argv[])
        BlockVector reduced_problem_sol(problem_mgtools->GetTrueOffsetsFunc());
        for (int blk = 0; blk < numblocks_funct; ++blk)
            reduced_problem_sol.GetBlock(blk) = problem_refsols_lvls[0]->GetBlock(blk);
-       CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
-                       "for the problem solution via saddle-point system ", verbose);
+
        if (compute_error)
            problem_mgtools->ComputeError(*problem_refsols_lvls[0], verbose, true);
-
-       if (problem_refsols_lvls.Size() > 1)
+#ifdef USE_MINSOLVER
+       if (report_funct)
+           CheckFunctValueNew(comm,*NewSolver->GetFunctOp_nobnd(0), NULL, reduced_problem_sol,
+                       "for the problem solution via saddle-point system ", verbose);
+       if (report_funct && problem_refsols_lvls.Size() > 1)
        {
            BlockVector temp(problem->GetTrueOffsetsFunc());
            for (int blk = 0; blk < numblocks_funct; ++blk)
@@ -557,6 +580,10 @@ int main(int argc, char *argv[])
                            "for the previous level problem solution via saddle-point system ", verbose);
        }
 #endif
+
+#endif // for ifdef REFERENCE_SOLUTION
+
+#ifdef USE_MINSOLVER
 
 #ifdef RECOARSENING_AMR
        if (verbose)
@@ -782,6 +809,9 @@ int main(int argc, char *argv[])
                         " has been finished\n\n";
 #endif
 
+#else // for #ifdef USE_MINSOLVER
+       *problem_sols_lvls[0] = *problem_refsols_lvls[0];
+#endif // for #ifdef USE_MINSOLVER
        if (compute_error)
            problem_mgtools->ComputeError(*problem_sols_lvls[0], verbose, true);
 
@@ -791,7 +821,7 @@ int main(int argc, char *argv[])
        problem_mgtools->DistributeToGrfuns(*problem_sols_lvls[0]);
 
        // 7.2 (optional) Send the solution by socket to a GLVis server.
-       if (visualization && it == max_iter_amr - 1)
+       if (visualization && (it % it_viz_step == 0 || it == max_iter_amr - 1))
        {
            int ne = pmesh->GetNE();
            for (int elind = 0; elind < ne; ++elind)
@@ -839,7 +869,7 @@ int main(int argc, char *argv[])
        }
 
        // (optional) Send the vector of local element errors by socket to a GLVis server.
-       if (visualization && it == max_iter_amr - 1)
+       if (visualization && (it % it_viz_step == 0 || it == max_iter_amr - 1) && feorder == 0)
        {
            const Vector& local_errors = estimator->GetLastLocalErrors();
            if (feorder == 0)
@@ -886,14 +916,15 @@ int main(int argc, char *argv[])
        bool recoarsen = true;
        prob_hierarchy->Update(recoarsen);
        problem = prob_hierarchy->GetProblem(0);
-
        problem_mgtools->BuildSystem(verbose);
+
+#ifdef USE_MINSOLVER
        mgtools_hierarchy->Update(recoarsen);
        NewSolver->UpdateProblem(*problem_mgtools);
        NewSolver->Update(recoarsen);
-
        partsol_finder->UpdateProblem(*problem_mgtools);
        partsol_finder->Update(recoarsen);
+#endif
 
        // checking #dofs after the refinement
        global_dofs = problem_mgtools->GlobalTrueProblemSize();
@@ -908,11 +939,13 @@ int main(int argc, char *argv[])
    }
 
    // 8. Deallocating memory
+#ifdef USE_MINSOLVER
    delete NewSolver;
    delete mgtools_hierarchy;
    delete descriptor;
 
    delete partsol_finder;
+#endif
 
    for (int i = 0; i < div_rhs_lvls.Size(); ++i)
        delete div_rhs_lvls[i];
