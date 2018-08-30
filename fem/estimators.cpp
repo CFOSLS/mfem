@@ -27,6 +27,23 @@ void ZienkiewiczZhuEstimator::ComputeEstimates()
 
    current_sequence = solution->FESpace()->GetMesh()->GetSequence();
 }
+    
+    void LeastSquaresEstimator::ComputeEstimates()
+    {
+        total_error_uptodate = false;
+        current_sequence = scalar_sol->FESpace()->GetMesh()->GetSequence();
+        
+        error_estimates = VectorMinusGrad(*vec_sol, *scalar_sol);
+        DivMinusFun(*vec_sol, fun, error_estimates);
+        error_estimates.Sqrt();
+    }
+    
+    void LeastSquaresEstimator::ComputeTotalError(){
+        total_error_uptodate = true;
+        error_estimates.Pow(2);
+        total_error = std::sqrt(error_estimates.Sum());
+        error_estimates.Sqrt();
+    }
 
 
 #ifdef MFEM_USE_MPI

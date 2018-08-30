@@ -644,7 +644,34 @@ void Vector::Print_HYPRE(std::ostream &out) const
    out.precision(old_prec);
    out.flags(old_fmt);
 }
-
+    void Vector::Pow(double p)
+    {
+        for(int i = 0; i < size; ++i)
+        {
+            if (data[i] == 0 || data[i] == 1){
+                //data remains constant under exponentiation
+                if (p == 0){
+                    data[i] = 0.0;
+                }
+            }
+            
+            data[i] = std::pow(data[i], p);
+        }
+    }
+    
+    void Vector::Sqrt()
+    {
+        for(int i = 0; i < size; ++i)
+        {
+            if (data[i] == 0 || data[i] == 1){
+                //data remains constant under square root
+            }
+            data[i] = std::sqrt(data[i]);
+        }
+        
+    }
+    
+    
 void Vector::Randomize(int seed)
 {
    // static unsigned int seed = time(0);

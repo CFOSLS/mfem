@@ -146,6 +146,12 @@ if (MFEM_USE_SUITESPARSE)
   include_directories(${SuiteSparse_INCLUDE_DIRS})
 endif()
 
+# SuiteSparse (before SUNDIALS which may depend on KLU)
+if (MFEM_USE_MARS)
+  find_package(MARS REQUIRED)
+  include_directories(${MARS_INCLUDE_DIRS})
+endif()
+
 # SUNDIALS
 if (MFEM_USE_SUNDIALS)
   if (NOT MFEM_USE_MPI)

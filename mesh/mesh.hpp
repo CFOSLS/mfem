@@ -419,6 +419,10 @@ public:
 
    Mesh() { SetEmpty(); }
 
+   Mesh & operator=(const Mesh &);
+   void Copy(const Mesh &mesh, bool copy_nodes = true);   
+
+
    /** Copy constructor. Performs a deep copy of (almost) all data, so that the
        source mesh can be modified (e.g. deleted, refined) without affecting the
        new mesh. If 'copy_nodes' is false, use a shallow (pointer) copy for the
@@ -697,6 +701,11 @@ public:
 
    Element *GetElement(int i) { return elements[i]; }
 
+   void PrepareFinalize4D();
+
+   void AllocateSwappedElements() {
+      swappedElements.SetSize(NumOfElements, false);
+   }
    bool getSwappedElementInfo(int i) const { return swappedElements[i]; }
    bool getSwappedFaceElementInfo(int i) const { return swappedFaces[i]; }
 
@@ -1074,6 +1083,9 @@ public:
    /// \see mfem::ogzstream() for on-the-fly compression of ascii outputs
    void PrintVTK(std::ostream &out, int ref, int field_data=0);
 
+    /// Return the length of face [For 2-D faces] or Area of Face [for 3-D faces]. Currently only works for Segment and Triangle Faces
+    double GetFaceArea(int faceindex) const;
+    
    void GetElementColoring(Array<int> &colors, int el0 = 0);
 
    /** Prints the mesh with bdr elements given by the boundary of

@@ -15,6 +15,7 @@
 #include "../config/config.hpp"
 #include "../linalg/vector.hpp"
 #include "bilinearform.hpp"
+#include "GridFunctionOperators.hpp"
 #ifdef MFEM_USE_MPI
 #include "pgridfunc.hpp"
 #endif
@@ -167,6 +168,87 @@ public:
       if (own_flux_fes) { delete flux_space; }
    }
 };
+    
+    
+    
+    class LeastSquaresEstimator: public ErrorEstimator
+    {
+    protected:
+        double total_error;
+        long current_sequence;
+        
+        //Computed Solutions to PDE using the FOSLS method
+        GridFunction *scalar_sol; // Not owned
+        GridFunction *vec_sol; // Not owned
+        
+        //Function Coefficient describing RHS of the orignal PDE
+        
+        FunctionCoefficient fun;
+        
+        //Current error estimates on each element, labeled in the order defined on the input mesh.
+        Vector error_estimates;
+        
+        bool MeshIsModified()
+        {
+            long mesh_sequence = scalar_sol->FESpace()->GetMesh()->GetSequence();
+            MFEM_ASSERT(mesh_sequence>=current_sequence,"");
+            return(mesh_sequence>current_sequence);
+        }
+        
+        //Compute the element error estimates
+        void ComputeEstimates();
+        void ComputeTotalError();
+        bool total_error_uptodate;
+        
+    public:
+        
+        LeastSquaresEstimator(FunctionCoefficient func):fun(func){
+            total_error = 0.0;
+            current_sequence = -1;
+            total_error_uptodate =false;
+        }
+        
+        LeastSquaresEstimator(GridFunction *vsol, GridFunction *scalarsol,FunctionCoefficient func):fun(func),vec_sol(vsol),scalar_sol(scalarsol){
+            total_error = 0.0;
+            current_sequence = -1;
+            total_error_uptodate =false;
+        }
+        
+        void setVecFun(GridFunction *vsol){
+            vec_sol=vsol;
+        }
+        
+        void setScalarFun(GridFunction *scalarsol){
+            scalar_sol = scalarsol;
+        }
+        
+        void setFunc(FunctionCoefficient func){
+            fun = func;
+        }
+        
+        /// Return the total error from the last error estimate.
+        double GetTotalError()
+        { if (total_error_uptodate){
+            return total_error;
+        } else {
+            ComputeTotalError();
+            return total_error;
+        }
+        }
+        
+        /// Get a Vector with all element errors.
+        virtual const Vector &GetLocalErrors()
+        {
+            ComputeEstimates();
+            return error_estimates;
+        }
+        
+        
+        
+        // Reset the error estimator.
+        virtual void Reset() { current_sequence = -1; }
+        
+    };
 
 
 #ifdef MFEM_USE_MPI

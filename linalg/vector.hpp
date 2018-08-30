@@ -234,6 +234,10 @@ public:
    /// Prints vector to stream out in HYPRE_Vector format.
    void Print_HYPRE(std::ostream &out) const;
 
+    /// Raise each element of the vector to the pth power.
+    void Pow(double p);
+    /// Take the sqaure root of each element of the vector.
+    void Sqrt();
    /// Set random values in the vector.
    void Randomize(int seed = 0);
    /// Returns the l2 norm of the vector.

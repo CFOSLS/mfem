@@ -77,28 +77,21 @@ MFEM_USE_NETCDF      = NO
 MFEM_USE_PETSC       = NO
 MFEM_USE_MPFR        = NO
 MFEM_USE_SIDRE       = NO
-MFEM_WITH_QHULL	     = NO
+MFEM_WITH_MARS	     = YES
 
 # Setting WITH_QHULL flag which defines whether qhull-dependent parts are compiled in mesh generator
-ifneq ($(MFEM_WITH_QHULL),YES)
-    OPTIM_FLAGS = -O3 -g -std=c++11 
-    DEBUG_FLAGS = -g -Wall -std=c++11
-else
-    OPTIM_FLAGS = -O3 -std=c++11 -DWITH_QHULL
-    DEBUG_FLAGS = -g -Wall -std=c++11 -DWITH_QHULL
-endif
+OPTIM_FLAGS = -O3 -g -std=c++11 
+DEBUG_FLAGS = -g -Wall -std=c++11
 
 LIBUNWIND_OPT = -g
 LIBUNWIND_LIB = $(if $(NOTMAC),-lunwind -ldl,)
 
-# QHULL library configuration
-ifneq ($(MFEM_WITH_QHULL),YES)
-    QHULL_OPT =
-    QHULL_LIB =
-else
-    QHULL_OPT = -I$(QHULL_DIR)/src/libqhullcpp -I$(QHULL_DIR)/src/libqhull_r -I$(QHULL_DIR)/src
-    QHULL_LIB = -L$(QHULL_DIR)/lib/ -lqhullcpp -lqhullstatic_r -Wl,-rpath=$(QHULL_DIR)/lib
-endif
+# MARS library configuration
+MARS_SRC_DIR = @MFEM_DIR@/../mars/mars
+MARS_BUILD_DIR = $(MARS_SRC_DIR)/build
+MARS_LIB_DIR = $(MARS_BUILD_DIR)
+MARS_OPT = -I$(MARS_SRC_DIR)/ -I$(MARS_BUILD_DIR)/ 
+MARS_LIB = -L$(MARS_LIB_DIR)/ -lmars -Wl,-rpath=$(MARS_LIB_DIR)
 
 # HYPRE library configuration (needed to build the parallel version)
 HYPRE_DIR = @MFEM_DIR@/../hypre-2.10.0b/src/hypre

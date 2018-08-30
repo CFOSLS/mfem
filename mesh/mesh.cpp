@@ -342,6 +342,47 @@ ElementTransformation *Mesh::GetBdrElementTransformation(int i)
    return &FaceTransformation;
 }
 
+double Mesh::GetFaceArea(int faceindex) const
+{
+    int type = GetFaceElementType(faceindex);
+    double area = 0.0;
+    Array<int> vindexs;
+    //get indexs of the vertices of the given face
+    GetFaceVertices(faceindex,vindexs);
+    if (type == Element::SEGMENT)
+    {
+        double r;
+        //then we have two vertices, and the area is the length of the line between them.
+        for (int i = 0; i <spaceDim; ++i){
+            r = vertices[vindexs[0]](i)-vertices[vindexs[1]](i);
+            area+=(r*r);
+        }
+        area = std::sqrt(area);
+    } else if (type == Element::TRIANGLE){
+        //Using Cross Product method to calculate area
+        //create vectors 1 and 2
+        Vector v1(spaceDim), v2(spaceDim);
+        for(int i =0; i<spaceDim; ++i)
+        {
+            v1[i] = vertices[vindexs[0]](i)-vertices[vindexs[1]](i);
+            v2[i] = vertices[vindexs[2]](i)-vertices[vindexs[1]](i);
+        }
+        //now evaluate cross product of v1 and v2
+        Vector u(spaceDim);
+        if (spaceDim == 3) {
+            u[0] = v1[1]*v2[2]-v1[2]*v2[1];
+            u[1] = v2[0]*v1[2]-v1[0]*v2[2];
+            u[2] = v1[0]*v2[1]-v2[0]*v1[1];
+        } else {
+            mfem_error("spaceDim should be 3");
+        }
+        area = u.Norml2()/2.0;
+    } else {
+        mfem_error("Mesh::GetFaceArea Currently only supports Traingles and Segment Faces");
+    }
+    return area;
+}
+
 void Mesh::GetBdrElementTransformation(int i, IsoparametricTransformation* ElTr)
 {
    ElTr->Attribute = GetBdrAttribute(i);
@@ -2631,6 +2672,137 @@ void Mesh::Make1D(int n, double sx)
    bdr_attributes.Append(1); bdr_attributes.Append(2);
 }
 
+void Mesh::Copy(const Mesh &mesh, bool copy_nodes)
+{
+   Dim = mesh.Dim;
+   spaceDim = mesh.spaceDim;
+
+   NumOfVertices = mesh.NumOfVertices;
+   NumOfElements = mesh.NumOfElements;
+   NumOfBdrElements = mesh.NumOfBdrElements;
+   NumOfEdges = mesh.NumOfEdges;
+   NumOfFaces = mesh.NumOfFaces;
+   NumOfPlanars = mesh.NumOfPlanars;
+
+   BaseGeom = mesh.BaseGeom;
+   BaseBdrGeom = mesh.BaseBdrGeom;
+
+   meshgen = mesh.meshgen;
+
+   // Create the new Mesh instance without a record of its refinement history
+   sequence = 0;
+   last_operation = Mesh::NONE;
+
+   // Duplicate the elements
+   elements.SetSize(NumOfElements);
+   for (int i = 0; i < NumOfElements; i++)
+   {
+      elements[i] = mesh.elements[i]->Duplicate(this);
+   }
+
+   // Copy the vertices
+   MFEM_ASSERT(mesh.vertices.Size() == NumOfVertices, "internal MFEM error!");
+   mesh.vertices.Copy(vertices);
+
+   // Duplicate the boundary
+   boundary.SetSize(NumOfBdrElements);
+   for (int i = 0; i < NumOfBdrElements; i++)
+   {
+      boundary[i] = mesh.boundary[i]->Duplicate(this);
+   }
+
+   // Copy the element-to-face Table, el_to_face
+   el_to_face = (mesh.el_to_face) ? new Table(*mesh.el_to_face) : NULL;
+
+   // Copy the boundary-to-face Array, be_to_face.
+   mesh.be_to_face.Copy(be_to_face);
+
+   // Copy the element-to-edge Table, el_to_edge
+   el_to_edge = (mesh.el_to_edge) ? new Table(*mesh.el_to_edge) : NULL;
+
+   // Copy the boudary-to-edge Table, bel_to_edge (3D)
+   bel_to_edge = (mesh.bel_to_edge) ? new Table(*mesh.bel_to_edge) : NULL;
+
+   // Copy the boudary-to-edge Array, be_to_edge (2D)
+   mesh.be_to_edge.Copy(be_to_edge);
+
+   el_to_planar = (mesh.el_to_planar) ? new Table(*mesh.el_to_planar) : NULL;
+   bel_to_planar = (mesh.bel_to_planar) ? new Table(*mesh.bel_to_planar) : NULL;
+
+   // Duplicate the faces and faces_info.
+   faces.SetSize(mesh.faces.Size());
+   for (int i = 0; i < faces.Size(); i++)
+   {
+      Element *face = mesh.faces[i]; // in 1D the faces are NULL
+      faces[i] = (face) ? face->Duplicate(this) : NULL;
+   }
+   mesh.faces_info.Copy(faces_info);
+   mesh.nc_faces_info.Copy(nc_faces_info);
+
+   // Duplicate the planars.
+   if (Dim == 4)
+   {
+       planars.SetSize(mesh.planars.Size());
+       for (int i = 0; i < planars.Size(); i++)
+       {
+          Element *planar = mesh.planars[i];
+          planars[i] = (planar) ? planar->Duplicate(this) : NULL;
+       }
+   }
+
+   // Do NOT copy the element-to-element Table, el_to_el
+   el_to_el = NULL;
+
+   // Do NOT copy the face-to-edge Table, face_edge
+   face_edge = NULL;
+
+   // Copy the edge-to-vertex Table, edge_vertex
+   edge_vertex = (mesh.edge_vertex) ? new Table(*mesh.edge_vertex) : NULL;
+
+   // Copy the attributes and bdr_attributes
+   mesh.attributes.Copy(attributes);
+   mesh.bdr_attributes.Copy(bdr_attributes);
+
+   // No support for NURBS meshes, yet. Need deep copy for NURBSExtension.
+   MFEM_VERIFY(mesh.NURBSext == NULL,
+               "copying NURBS meshes is not implemented");
+   NURBSext = NULL;
+
+   // Deep copy the NCMesh.
+#ifdef MFEM_USE_MPI
+   if (dynamic_cast<const ParMesh*>(&mesh))
+   {
+      ncmesh = NULL; // skip; will be done in ParMesh copy ctor
+   }
+   else
+#endif
+   {
+      ncmesh = mesh.ncmesh ? new NCMesh(*mesh.ncmesh) : NULL;
+   }
+
+   // Duplicate the Nodes, including the FiniteElementCollection and the
+   // FiniteElementSpace
+   if (mesh.Nodes && copy_nodes)
+   {
+      FiniteElementSpace *fes = mesh.Nodes->FESpace();
+      const FiniteElementCollection *fec = fes->FEColl();
+      FiniteElementCollection *fec_copy =
+         FiniteElementCollection::New(fec->Name());
+      FiniteElementSpace *fes_copy =
+         new FiniteElementSpace(this, fec_copy, fes->GetVDim(),
+                                fes->GetOrdering());
+      Nodes = new GridFunction(fes_copy);
+      Nodes->MakeOwner(fec_copy);
+      *Nodes = *mesh.Nodes;
+      own_nodes = 1;
+   }
+   else
+   {
+      Nodes = mesh.Nodes;
+      own_nodes = 0;
+   }
+}
+
 Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
 {
    Dim = mesh.Dim;
@@ -2760,6 +2932,13 @@ Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
       Nodes = mesh.Nodes;
       own_nodes = 0;
    }
+}
+
+Mesh & Mesh::operator=(const Mesh &mesh)
+{
+   Destroy();
+   Copy(mesh, true);
+   return *this;
 }
 
 Mesh::Mesh(const char *filename, int generate_edges, int refine,
@@ -3139,6 +3318,43 @@ void Mesh::Loader(std::istream &input, int generate_edges,
    }
 
    // Finalize(...) should be called after this, if needed.
+}
+
+void Mesh::PrepareFinalize4D()
+{
+  if (spaceDim==4)
+{
+   swappedElements.SetSize(NumOfElements);
+   DenseMatrix J(4,4);
+   for (int j = 0; j < NumOfElements; j++)
+   {
+      if (elements[j]->GetType() == Element::PENTATOPE)
+      {
+         int *v = elements[j]->GetVertices();
+         Sort5(v[0], v[1], v[2], v[3], v[4]);
+
+         GetElementJacobian(j, J);
+         if (J.Det() < 0.0)
+         {
+            swappedElements[j] = true;
+            Swap(v);
+         }
+         else
+         {
+            swappedElements[j] = false;
+         }
+      }
+
+   }
+   for (int j = 0; j < NumOfBdrElements; j++)
+   {
+      if (boundary[j]->GetType() == Element::TETRAHEDRON)
+      {
+         int *v = boundary[j]->GetVertices();
+         Sort4(v[0], v[1], v[2], v[3]);
+      }
+   }
+}
 }
 
 Mesh::Mesh(Mesh *mesh_array[], int num_pieces)
@@ -7755,15 +7971,6 @@ void Mesh::RedRefinementPentatope(int i, const DSTable & v_to_v, int *middle)
    int *v = elements[i]->GetVertices();
    if (swapped) { Swap(v); }
 
-   /*
-   if (i == 2)
-   {
-       std::cout << "i = 2 \n";
-       std::cout << "swapped = " << swapped << "\n";
-   }
-   */
-
-
    for (int j = 0; j < 10; j++)
    {
       ei = elements[i]->GetEdgeVertices(j);
@@ -7781,26 +7988,6 @@ void Mesh::RedRefinementPentatope(int i, const DSTable & v_to_v, int *middle)
       {
          v_new[j] = middle[bisect[j]];
       }
-
-      /*
-      if ( i == 2 )
-      {
-          std::cout << "first vert \n";
-          for ( int d = 0; d < spaceDim; ++d)
-              std::cout << vertices[v[ei[0]]](d) << " ";
-          std::cout << "\n";
-          std::cout << "second vert \n";
-          for ( int d = 0; d < spaceDim; ++d)
-              std::cout << vertices[v[ei[1]]](d) << " ";
-          std::cout << "\n";
-          std::cout << "middle vert " << j << ": \n";
-          double * vcoords = GetVertex(v_new[j]);
-          for ( int d = 0; d < spaceDim; ++d)
-              std::cout << vcoords[d] << " ";
-          std::cout << "\n";
-      }
-      */
-
    }
 
    int attr = elements[i]->GetAttribute();
@@ -8023,79 +8210,6 @@ void Mesh::RedRefinementPentatope(int i, const DSTable & v_to_v, int *middle)
    CoarseFineTr.embeddings.Append(Embedding(coarse));
    CoarseFineTr.embeddings.Append(Embedding(coarse));
    CoarseFineTr.embeddings.Append(Embedding(coarse));
-
-   /*
-    * old, before adding transforms
-
-   bool mySwaped;
-   w[0] = v[0];     w[1] = v_new[0]; w[2] = v_new[1]; w[3] = v_new[2];
-   w[4] = v_new[3]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[0]; w[1] = v[1];     w[2] = v_new[4]; w[3] = v_new[5];
-   w[4] = v_new[6]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[1]; w[1] = v_new[4]; w[2] = v[2];     w[3] = v_new[7];
-   w[4] = v_new[8]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[2]; w[1] = v_new[5]; w[2] = v_new[7]; w[3] = v[3];
-   w[4] = v_new[9]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[3]; w[1] = v_new[6]; w[2] = v_new[8]; w[3] = v_new[9]; w[4] = v[4];
-   mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-
-   w[0] = v_new[0]; w[1] = v_new[1]; w[2] = v_new[4]; w[3] = v_new[5];
-   w[4] = v_new[6]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[0]; w[1] = v_new[1]; w[2] = v_new[2]; w[3] = v_new[5];
-   w[4] = v_new[6]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[0]; w[1] = v_new[1]; w[2] = v_new[2]; w[3] = v_new[3];
-   w[4] = v_new[6]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-
-   w[0] = v_new[1]; w[1] = v_new[4]; w[2] = v_new[5]; w[3] = v_new[7];
-   w[4] = v_new[8]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[1]; w[1] = v_new[4]; w[2] = v_new[5]; w[3] = v_new[6];
-   w[4] = v_new[8]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[1]; w[1] = v_new[2]; w[2] = v_new[5]; w[3] = v_new[7];
-   w[4] = v_new[8]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[1]; w[1] = v_new[2]; w[2] = v_new[5]; w[3] = v_new[6];
-   w[4] = v_new[8]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[1]; w[1] = v_new[2]; w[2] = v_new[3]; w[3] = v_new[6];
-   w[4] = v_new[8]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-
-   w[0] = v_new[2]; w[1] = v_new[5]; w[2] = v_new[7]; w[3] = v_new[8];
-   w[4] = v_new[9]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[2]; w[1] = v_new[5]; w[2] = v_new[6]; w[3] = v_new[8];
-   w[4] = v_new[9]; mySwaped = swapped;
-   if (mySwaped) { Swap(w); } elements.Append(new Pentatope(w, attr));
-   swappedElements.Append(mySwaped);
-   w[0] = v_new[2]; w[1] = v_new[3]; w[2] = v_new[6]; w[3] = v_new[8];
-   w[4] = v_new[9]; mySwaped = !swapped;
-   if (mySwaped) { Swap(w); } elements[i]->SetVertices(w);
-   swappedElements[i] = mySwaped;
-   */
 
    // DenseMatrix J(4,4);
    // for(int k=0; k<16; k++)
