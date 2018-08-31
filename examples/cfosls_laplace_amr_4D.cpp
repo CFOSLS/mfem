@@ -19,13 +19,6 @@ double pFun_ex(const Vector & x);
 double gFun(const Vector & x);
 double pboundary_condition(const Vector & x);
 
-// Defines required estimator components, such as integrators, grid function structure
-// for a given problem and given version of the functional
-void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version,
-                               std::vector<std::pair<int,int> >& grfuns_descriptor,
-                               Array<ParGridFunction*>& extra_grfuns,
-                               Array2D<BilinearFormIntegrator *> & integs, bool verbose);
-
 int main(int argc, char *argv[])
 {
     using FormulType = CFOSLSFormulation_Laplace;
@@ -50,9 +43,9 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube4d_24.MFEM";
     int order = 0;
     bool visualization = 0;
-    int numofrefinement = 0;
+    int numofrefinement = 2;
     int maxdofs = 900000;
-    double error_frac = .50;
+    double error_frac = .80;
     double betavalue = 0.1;
     int strat = 1;
 
@@ -89,36 +82,124 @@ int main(int argc, char *argv[])
 
     // 3. Define weak f.e. formulation for the problem at hand
     // and create FOSLSProblem on top of them
-
     FormulType * formulat = new FormulType (dim, numsol, verbose);
     FEFormulType * fe_formulat = new FEFormulType(*formulat, order);
-    BdrConditions * bdr_conds = new BdrCondsType(*mesh);
 
-    ProblemType * problem = new ProblemType (*mesh, *bdr_conds, *fe_formulat, prec_option, verbose);
+    MPI_Comm comm_myid;
+    MPI_Comm_split(comm, myid, 0, &comm_myid );
 
-    // 4. Creating the estimator
-    int fosls_func_version = 1;
-    if (verbose)
-     std::cout << "fosls_func_version = " << fosls_func_version << "\n";
+    if (myid == 0)
+    {
+        ParMesh * pmesh = new ParMesh(comm_myid, *mesh);
+        pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
-    std::vector<std::pair<int,int> > grfuns_descriptor;
-    Array<ParGridFunction*> extra_grfuns;
-    Array2D<BilinearFormIntegrator *> integs;
+        BdrConditions * bdr_conds = new BdrCondsType(*pmesh);
 
-    // Create components required for the FOSLSEstimator: bilinear form integrators and grid functions
-    DefineEstimatorComponents(problem, fosls_func_version, grfuns_descriptor, extra_grfuns, integs, verbose);
+        ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
-    FOSLSEstimator * estimator;
-    estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
-    problem->AddEstimator(*estimator);
+        // 4. Creating the estimator
+        int numfoslsfuns = -1;
 
-    NDLSRefiner refiner(estimator);
-    refiner.SetTotalErrorFraction(error_frac);
-    refiner.SetTotalErrorNormP(2.0);
-    refiner.SetRefinementStrategy(strat);
-    refiner.SetBetaCalc(0);
-    refiner.SetBetaConstants(betavalue);
-    refiner.version_difference = false;
+        int fosls_func_version = 1;
+        if (verbose)
+         std::cout << "fosls_func_version = " << fosls_func_version << "\n";
+
+        if (fosls_func_version == 1)
+        {
+            numfoslsfuns = 1;
+            ++numfoslsfuns;
+        }
+
+        int numblocks_funct = 1;
+        ++numblocks_funct;
+
+        std::vector<std::pair<int,int> > grfuns_descriptor(numfoslsfuns);
+
+        Array2D<BilinearFormIntegrator *> integs(numfoslsfuns, numfoslsfuns);
+        for (int i = 0; i < integs.NumRows(); ++i)
+            for (int j = 0; j < integs.NumCols(); ++j)
+                integs(i,j) = NULL;
+
+        // version 1, only || sigma + grad S ||^2, or || sigma ||^2
+        if (fosls_func_version == 1)
+        {
+            // this works
+            grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
+            integs(0,0) = new VectorFEMassIntegrator;
+
+            grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
+            integs(1,1) = new DiffusionIntegrator;
+            integs(0,1) = new MixedVectorGradientIntegrator;
+        }
+        else
+        {
+            MFEM_ABORT("Unsupported version of fosls functional \n");
+        }
+
+        FOSLSEstimator * estimator;
+        estimator = new FOSLSEstimator(*problem, grfuns_descriptor, NULL, integs, verbose);
+        problem->AddEstimator(*estimator);
+
+        //ThresholdRefiner refiner(*estimator);
+        //refiner.SetTotalErrorFraction(0.5);
+
+        NDLSRefiner refiner(*estimator);
+        refiner.SetTotalErrorFraction(error_frac);
+        refiner.SetTotalErrorNormP(2.0);
+        refiner.SetRefinementStrategy(strat);
+        refiner.SetBetaCalc(0);
+        refiner.SetBetaConstants(betavalue);
+        refiner.version_difference = false;
+
+        problem->Solve(verbose, true);
+
+        int global_dofs;
+        int max_dofs = 300000;
+        int max_amr_iter = 5;
+
+        for (int it = 0; it < max_amr_iter; ++it)
+        {
+            refiner.Apply(*pmesh);
+            if(refiner.Stop())
+            {
+                cout<< "Maximum number of dofs has been reached \n";
+                break;
+            }
+
+            problem->Update();
+            problem->BuildSystem(verbose);
+            global_dofs = problem->GlobalTrueProblemSize();
+
+            if (global_dofs > max_dofs)
+            {
+               if (verbose)
+                  cout << "Reached the maximum number of dofs. Stop. \n";
+               break;
+            }
+
+            if (verbose)
+            {
+               cout << "\nAMR iteration " << it << "\n";
+               cout << "Number of unknowns: " << global_dofs << "\n";
+            }
+
+            problem->Solve(verbose, true);
+        }
+
+        delete estimator;
+        delete problem;
+
+        delete bdr_conds;
+        delete pmesh;
+    }
+
+    delete fe_formulat;
+    delete formulat;
+
+
+    MPI_Finalize();
+    return 0;
+
 
 #ifdef AIDANS_CODE
 
@@ -460,91 +541,5 @@ double pboundary_condition(const Vector & x)
         return 0;// pFun_ex(x);
     } else {
     return pFun_ex(x);
-    }
-}
-
-// See it's declaration
-void DefineEstimatorComponents(FOSLSProblem * problem, int fosls_func_version, std::vector<std::pair<int,int> >& grfuns_descriptor,
-                          Array<ParGridFunction*>& extra_grfuns, Array2D<BilinearFormIntegrator *> & integs, bool verbose)
-{
-    int numfoslsfuns = -1;
-
-    if (verbose)
-        std::cout << "fosls_func_version = " << fosls_func_version << "\n";
-
-    if (fosls_func_version == 1)
-        numfoslsfuns = 2;
-    else if (fosls_func_version == 2)
-        numfoslsfuns = 3;
-
-    // extra_grfuns.SetSize(0); // must come by default
-    if (fosls_func_version == 2)
-        extra_grfuns.SetSize(1);
-
-    grfuns_descriptor.resize(numfoslsfuns);
-
-    integs.SetSize(numfoslsfuns, numfoslsfuns);
-    for (int i = 0; i < integs.NumRows(); ++i)
-        for (int j = 0; j < integs.NumCols(); ++j)
-            integs(i,j) = NULL;
-
-    Hyper_test* Mytest = dynamic_cast<Hyper_test*>
-            (problem->GetFEformulation().GetFormulation()->GetTest());
-    MFEM_ASSERT(Mytest, "Unsuccessful cast into Hyper_test* \n");
-
-    const Array<SpaceName>* space_names_funct = problem->GetFEformulation().GetFormulation()->
-            GetFunctSpacesDescriptor();
-
-    // version 1, only || sigma - b S ||^2, or || K sigma ||^2
-    if (fosls_func_version == 1)
-    {
-        // this works
-        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
-        grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
-
-        if ( (*space_names_funct)[0] == SpaceName::HDIV) // sigma is from Hdiv
-            integs(0,0) = new VectorFEMassIntegrator;
-        else // sigma is from H1vec
-            integs(0,0) = new ImproperVectorMassIntegrator;
-
-        integs(1,1) = new MassIntegrator(*Mytest->GetBtB());
-
-        if ( (*space_names_funct)[0] == SpaceName::HDIV) // sigma is from Hdiv
-            integs(1,0) = new VectorFEMassIntegrator(*Mytest->GetMinB());
-        else // sigma is from H1
-            integs(1,0) = new MixedVectorScalarIntegrator(*Mytest->GetMinB());
-    }
-    else if (fosls_func_version == 2)
-    {
-        // version 2, only || sigma - b S ||^2 + || div bS - f ||^2
-        MFEM_ASSERT(problem->GetFEformulation().Nunknowns() == 2 && (*space_names_funct)[1] == SpaceName::H1,
-                "Version 2 works only if S is from H1 \n");
-
-        // this works
-        grfuns_descriptor[0] = std::make_pair<int,int>(1, 0);
-        grfuns_descriptor[1] = std::make_pair<int,int>(1, 1);
-        grfuns_descriptor[2] = std::make_pair<int,int>(-1, 0);
-
-        int numblocks = problem->GetFEformulation().Nblocks();
-
-        extra_grfuns[0] = new ParGridFunction(problem->GetPfes(numblocks - 1));
-        extra_grfuns[0]->ProjectCoefficient(*problem->GetFEformulation().GetFormulation()->GetTest()->GetRhs());
-
-        if ( (*space_names_funct)[0] == SpaceName::HDIV) // sigma is from Hdiv
-            integs(0,0) = new VectorFEMassIntegrator;
-        else // sigma is from H1vec
-            integs(0,0) = new ImproperVectorMassIntegrator;
-
-        integs(1,1) = new H1NormIntegrator(*Mytest->GetBBt(), *Mytest->GetBtB());
-
-        integs(1,0) = new VectorFEMassIntegrator(*Mytest->GetMinB());
-
-        // integrators related to f (rhs side)
-        integs(2,2) = new MassIntegrator;
-        integs(1,2) = new MixedDirectionalDerivativeIntegrator(*Mytest->GetMinB());
-    }
-    else
-    {
-        MFEM_ABORT("Unsupported version of fosls functional \n");
     }
 }

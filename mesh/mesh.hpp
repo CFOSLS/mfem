@@ -1147,6 +1147,9 @@ public:
 
    /// Destroys Mesh.
    virtual ~Mesh() { DestroyPointers(); }
+
+public:
+   friend class NDLSRefiner;
 };
 
 /** Overload operator<< for std::ostream and Mesh; valid also for the derived

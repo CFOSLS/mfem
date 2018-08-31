@@ -201,8 +201,10 @@ namespace mfem {
 				}
 			}
 
-			// mesh.Print();
-		}
+            // mesh.Print();
+            mesh.last_operation = Mesh::REFINE;
+            mesh.sequence++;
+        }
 
 		template<Integer Dim>
 		static void convert(Mesh &in, mars::Mesh<Dim, Dim> &out)
