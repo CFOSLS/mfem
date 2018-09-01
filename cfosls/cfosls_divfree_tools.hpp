@@ -1226,6 +1226,7 @@ public:
                    const Array<int>& ess_dof_coarsestlvl_list
                    )
     {
+        const MPI_Comm comm = d_td_coarse_R->GetComm();
 //        StopWatch chrono;
 
 //        Vector sol_p_c2f;
@@ -1544,7 +1545,7 @@ public:
             //     pressure Schur Complement
 
             HypreParMatrix *MinvBt = B_Global->Transpose();
-            HypreParVector *Md = new HypreParVector(MPI_COMM_WORLD, M_Global->GetGlobalNumRows(),
+            HypreParVector *Md = new HypreParVector(comm, M_Global->GetGlobalNumRows(),
                                                     M_Global->GetRowStarts());
             M_Global->GetDiag(*Md);
 
@@ -1572,7 +1573,7 @@ public:
             double rtol(1.e-16);
             double atol(1.e-16);
 
-            MINRESSolver solver(MPI_COMM_WORLD);
+            MINRESSolver solver(comm);
             solver.SetAbsTol(atol);
             solver.SetRelTol(rtol);
             solver.SetMaxIter(maxIter);
@@ -1617,7 +1618,7 @@ public:
             Vector tmp_c(B_Global->Height());
             tmp_c = 0.0;
 
-            CGSolver solver(MPI_COMM_WORLD);
+            CGSolver solver(comm);
             solver.SetAbsTol(atol);
             solver.SetRelTol(rtol);
             solver.SetMaxIter(maxIter);
