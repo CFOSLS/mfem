@@ -3091,24 +3091,6 @@ void FOSLSProblem::SolveProblem(const Vector& rhs, Vector& sol, bool verbose, bo
     chrono.Clear();
     chrono.Start();
 
-    /*
-    MPI_Barrier(MPI_COMM_WORLD);
-    int num_procs, myid;
-    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
-    for (int i = 0; i < num_procs; ++i)
-    {
-        if (myid == i)
-        {
-            std::cout << "I am " << myid << "\n";
-            std::cout << "rhs norm = " << rhs.Norml2() << "\n" << std::flush;
-            std::cout << "sol norm = " << sol.Norml2() << "\n" << std::flush;
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-    */
-
     solver->Mult(rhs, sol);
 
     chrono.Stop();
@@ -3305,6 +3287,7 @@ ParGridFunction * FOSLSProblem_HdivL2hyp::RecoverS(const Vector& sigma) const
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
 void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
+    const MPI_Comm comm = pmesh.GetComm();
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
     if (verbose)
@@ -3324,7 +3307,7 @@ void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -3374,6 +3357,8 @@ void FOSLSProblem_HdivL2hyp::CreatePrec(BlockOperator& op, int prec_option, bool
 // computes || sigma - L(S) || as (K sigma, sigma)^1/2
 void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
@@ -3408,7 +3393,7 @@ void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h ||_M^2 = " << globalFunctional << "\n";
@@ -3430,7 +3415,7 @@ void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -3449,7 +3434,7 @@ void FOSLSProblem_HdivL2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 
@@ -3505,6 +3490,8 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
+    const MPI_Comm comm = pmesh.GetComm();
+
     if (verbose)
     {
         std::cout << "Block diagonal preconditioner: \n";
@@ -3524,7 +3511,7 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -3578,6 +3565,8 @@ void FOSLSProblem_HdivL2L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 // computes || sigma - L(S) ||
 void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
@@ -3602,7 +3591,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional1;
     MPI_Reduce(&localFunctional1, &globalFunctional1, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional1 << "\n";
@@ -3620,7 +3609,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -3633,7 +3622,7 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 
@@ -3642,6 +3631,8 @@ void FOSLSProblem_HdivL2L2hyp::ComputeFuncError(const Vector& vec) const
 // computes || sigma - L(S) || only, no term with || div bS - f
 void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     Hyper_test * test = dynamic_cast<Hyper_test*>(fe_formul.GetFormulation()->GetTest());
     MFEM_ASSERT(test, "Unsuccessful cast into Hyper_test*");
 
@@ -3677,7 +3668,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional1;
     MPI_Reduce(&localFunctional1, &globalFunctional1, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional1 << "\n";
@@ -3697,7 +3688,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
 
     // approach through a linear form
 
@@ -3720,7 +3711,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional2;
     MPI_Reduce(&localFunctional2, &globalFunctional2, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
 
     if (verbose)
     {
@@ -3745,7 +3736,7 @@ void FOSLSProblem_HdivH1L2hyp::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
@@ -3807,6 +3798,8 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
+    const MPI_Comm comm = pmesh.GetComm();
+
     if (verbose)
     {
         std::cout << "Block diagonal preconditioner: \n";
@@ -3823,7 +3816,7 @@ void FOSLSProblem_HdivH1L2hyp::CreatePrec(BlockOperator& op, int prec_option, bo
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -3881,6 +3874,8 @@ void FOSLSProblem_HdivH1parab::CreatePrec(BlockOperator& op, int prec_option, bo
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
+    const MPI_Comm comm = pmesh.GetComm();
+
     if (verbose)
     {
         std::cout << "Block diagonal preconditioner: \n";
@@ -3897,7 +3892,7 @@ void FOSLSProblem_HdivH1parab::CreatePrec(BlockOperator& op, int prec_option, bo
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -3990,6 +3985,8 @@ void FOSLSProblem_HdivH1parab::ComputeExtraError(const Vector& vec) const
 
 void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
@@ -4013,7 +4010,7 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
@@ -4030,7 +4027,7 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -4041,7 +4038,7 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
@@ -4054,6 +4051,8 @@ void FOSLSProblem_HdivH1parab::ComputeFuncError(const Vector& vec) const
 void FOSLSProblem_HdivH1wave::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    const MPI_Comm comm = pmesh.GetComm();
 
     if (verbose)
     {
@@ -4071,7 +4070,7 @@ void FOSLSProblem_HdivH1wave::CreatePrec(BlockOperator& op, int prec_option, boo
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -4164,6 +4163,8 @@ void FOSLSProblem_HdivH1wave::ComputeExtraError(const Vector& vec) const
 
 void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
@@ -4187,7 +4188,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
@@ -4204,7 +4205,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -4215,7 +4216,7 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
@@ -4227,6 +4228,8 @@ void FOSLSProblem_HdivH1wave::ComputeFuncError(const Vector& vec) const
 void FOSLSProblem_HdivH1lapl::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
+
+    const MPI_Comm comm = pmesh.GetComm();
 
     if (verbose)
     {
@@ -4244,7 +4247,7 @@ void FOSLSProblem_HdivH1lapl::CreatePrec(BlockOperator& op, int prec_option, boo
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(2,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -4337,6 +4340,8 @@ void FOSLSProblem_HdivH1lapl::ComputeExtraError(const Vector& vec) const
 
 void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     ParFiniteElementSpace * Hdiv_space = pfes[0];
@@ -4360,7 +4365,7 @@ void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h - L(S_h) ||^2 = " << globalFunctional << "\n";
@@ -4377,7 +4382,7 @@ void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -4388,7 +4393,7 @@ void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
@@ -4399,6 +4404,8 @@ void FOSLSProblem_HdivH1lapl::ComputeFuncError(const Vector& vec) const
 // 2 for ADS(A) + BommerAMG (Bt diag(A)^-1 B)
 void FOSLSProblem_MixedLaplace::CreatePrec(BlockOperator& op, int prec_option, bool verbose)
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     MFEM_ASSERT(prec_option >= 0, "Invalid prec option was provided");
 
     if (verbose)
@@ -4418,7 +4425,7 @@ void FOSLSProblem_MixedLaplace::CreatePrec(BlockOperator& op, int prec_option, b
     HypreParMatrix & D = ((HypreParMatrix&)(CFOSLSop->GetBlock(1,0)));
 
     HypreParMatrix *AinvDt = D.Transpose();
-    HypreParVector *Ad = new HypreParVector(MPI_COMM_WORLD, A.GetGlobalNumRows(),
+    HypreParVector *Ad = new HypreParVector(comm, A.GetGlobalNumRows(),
                                          A.GetRowStarts());
     A.GetDiag(*Ad);
     AinvDt->InvScaleRows(*Ad);
@@ -4518,6 +4525,8 @@ void FOSLSProblem_MixedLaplace::ComputeExtraError(const Vector& vec) const
 
 void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     Laplace_test * test = dynamic_cast<Laplace_test*>(fe_formul.GetFormulation()->GetTest());
@@ -4563,7 +4572,7 @@ void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| sigma_h ||_M^2 = " << globalFunctional << "\n";
@@ -4585,7 +4594,7 @@ void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
     double mass_loc = Rhs.Norml1();
     double mass;
     MPI_Reduce(&mass_loc, &mass, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         cout << "Sum of local mass = " << mass << "\n";
 
@@ -4598,7 +4607,7 @@ void FOSLSProblem_MixedLaplace::ComputeFuncError(const Vector& vec) const
     double mass_loss_loc = TempL2.Norml1();
     double mass_loss;
     MPI_Reduce(&mass_loss_loc, &mass_loss, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
         std::cout << "Sum of local mass loss = " << mass_loss << "\n";
 }
@@ -4646,6 +4655,8 @@ void FOSLSProblem_Laplace::ComputeExtraError(const Vector& vec) const
 
 void FOSLSProblem_Laplace::ComputeFuncError(const Vector& vec) const
 {
+    const MPI_Comm comm = pmesh.GetComm();
+
     BlockVector vec_viewer(vec.GetData(), blkoffsets_true);
 
     Laplace_test * test = dynamic_cast<Laplace_test*>(fe_formul.GetFormulation()->GetTest());
@@ -4685,7 +4696,7 @@ void FOSLSProblem_Laplace::ComputeFuncError(const Vector& vec) const
 
     double globalFunctional;
     MPI_Reduce(&localFunctional, &globalFunctional, 1,
-               MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+               MPI_DOUBLE, MPI_SUM, 0, comm);
     if (verbose)
     {
         std::cout << "|| u_h ||_M^2 = " << globalFunctional << "\n";

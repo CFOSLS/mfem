@@ -2831,6 +2831,9 @@ Mesh::Mesh(const Mesh &mesh, bool copy_nodes)
       elements[i] = mesh.elements[i]->Duplicate(this);
    }
 
+   if (Dim == 4)
+       mesh.swappedElements.Copy(swappedElements);
+
    // Copy the vertices
    MFEM_ASSERT(mesh.vertices.Size() == NumOfVertices, "internal MFEM error!");
    mesh.vertices.Copy(vertices);

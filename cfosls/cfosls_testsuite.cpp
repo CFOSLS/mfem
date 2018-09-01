@@ -801,6 +801,8 @@ void Laplace_test::Init()
             SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
         if (numsol == 11 && dim == 3)
             SetTestCoeffs<&uFunTestLapLshape_ex, &uFunTestLapLshape_grad, &uFunTestLapLshape_lap>();
+        if (numsol == 111 && dim == 4)
+            SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
         if (numsol == -9)
             SetTestCoeffs<&zero_ex, &zerovec_ex, &delta_center_ex>();
     } // end of setting test coefficients in correct case
@@ -830,6 +832,8 @@ bool Laplace_test::CheckTestConfig()
         if (numsol == -9 && dim == 3)
             return true;
         if (numsol == 11 && dim == 3)
+            return true;
+        if (numsol == 111 && dim == 4)
             return true;
         return false;
     }
