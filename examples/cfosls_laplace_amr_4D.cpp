@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
     int order = 0;
     bool visualization = 0;
 #ifndef ONLY_PAR_UR
-    int numofrefinement = 2;
+    int numofrefinement = 1;
     int maxdofs = 900000;
     double error_frac = .80;
     double betavalue = 0.1;
@@ -206,7 +206,8 @@ int main(int argc, char *argv[])
             if (global_dofs > max_dofs)
             {
                if (verbose)
-                  cout << "Reached the maximum number of dofs. Stop. \n";
+                  cout << "Reached the maximum number of dofs, current problem "
+                          "#dofs = " << global_dofs << ". Stop. \n";
                break;
             }
 

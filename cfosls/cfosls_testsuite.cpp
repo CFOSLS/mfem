@@ -278,6 +278,7 @@ double bFunSphere3Ddiv_ex(const Vector& xt)
 {
     return 0.0;
 }
+
 void bFunCircle2D_ex(const Vector& xt, Vector& b )
 {
     double x = xt(0);
@@ -302,6 +303,27 @@ double bFunCircle2Ddiv_ex(const Vector& xt)
 //    double x = xt(0);
 //    double y = xt(1);
 //    double t = xt(xt.Size()-1);
+    return 0.0;
+}
+
+void bFunCircleT3D_ex(const Vector& xt, Vector& b )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    b.SetSize(xt.Size());
+
+    b(0) = -y * (t + 1);  // -x2
+    b(1) = x * (t + 1);   // x1
+    b(2) = 0.0;
+
+    b(xt.Size()-1) = 1.;
+    return;
+}
+
+double bFunCircleT3Ddiv_ex(const Vector& xt)
+{
     return 0.0;
 }
 
@@ -531,10 +553,15 @@ void Hyper_test::Init()
         {
             SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
         }
-        if (numsol == 8)
+        if (numsol == 8) // a Gaussian hill rotating in (x,y)-plane around the origin with a constant velocity
         {
-            //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
             SetTestCoeffs<&uFunCylinder_ex, &uFunCylinder_ex_dt, &uFunCylinder_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
+        }
+        if (numsol == 88) // a Gaussian hill rotating in (x,y)-plane around the origin with
+                          // a time-increasing velocity
+        {
+            SetTestCoeffs<&uFunCylinder4D_ex, &uFunCylinder4D_ex_dt, &uFunCylinder4D_ex_gradx,
+                    &bFunCircleT3D_ex, &bFunCircleT3Ddiv_ex>();
         }
     } // end of setting test coefficients in correct case
 }
@@ -568,6 +595,8 @@ bool Hyper_test::CheckTestConfig()
         if (numsol == -44 && dim == 4)
             return true;
         if ( numsol == 8 && dim == 3 )
+            return true;
+        if ( numsol == 88 && dim == 4 )
             return true;
         return false;
     }
@@ -914,8 +943,8 @@ double divsigmaTemplate_hyper(const Vector& xt)
         res += b(i) * gradS(i);
     res += divbfunc(xt) * S(xt);
 
-    //if (fabs(res) > 1.0e-13)
-        //std::cout << "error if solution is the clyndric test \n";
+    if (fabs(res) > 1.0e-10)
+        std::cout << "error if solution is the cylindric test w/o dissipation \n";
 
     return res;
 }
@@ -1371,6 +1400,80 @@ void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(1) = dSdr * sin(teta) + dSdteta * dtetady;
     */
 
+}
+
+double uFunCylinder4D_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    double t = xt(xt.Size()-1);
+    Vector xvec(2);
+
+    // now each point was rotating with the speed (t+1) around the circle,
+    // i.e. we need to go back by \int_0^t {(t+1)dt}
+    xvec(0) = r * cos (teta - t - 0.5 * t * t);
+    xvec(1) = r * sin (teta - t - 0.5 * t * t);
+    //xvec(0) = r * cos (teta - t);
+    //xvec(1) = r * sin (teta - t);
+
+    return GaussianHill(xvec);
+}
+
+double uFunCylinder4D_ex_dt(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+    double r = sqrt(x*x + y*y);
+    double teta = atan2(y,x);
+
+    Vector xvec(2);
+    // now each point was rotating with the speed (t+1) around the circle,
+    // i.e. we need to go back by \int_0^t {(t+1)dt}
+    xvec(0) = r * cos (teta - t - 0.5 * t * t);
+    xvec(1) = r * sin (teta - t - 0.5 * t * t);
+
+    return GaussianHill_dteta(xvec) * (- 1.0 - t);
+}
+
+void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    // We compute gradient at point (x,y,z,t) with the following steps:
+
+    // 1. Computing (x0,y0) = Q^tr * (x,y) = initial particle location
+    // consider the fact the we know the rotation speed to be (t+1) for any t
+    // the arc_length covered by the particle is then \int_0^t {(t+1)dt}
+    double arc_length = t + 0.5 * t * t;
+    double x0 = x * cos(arc_length) + y * sin(arc_length);
+    double y0 = x * (-sin(arc_length)) + y * cos(arc_length);
+
+    // 2. Computing gradient of the solution for t = 0 at the initial particle location
+    Vector r0vec(4);
+    r0vec(0) = x0;
+    r0vec(1) = y0;
+    r0vec(2) = 0;
+    r0vec(3) = 0;
+
+    // tempvec = grad u(x0,y0) at t = 0
+    Vector tempvec(2);
+    tempvec(0) = -100.0 * 2.0 * (x0 - 0.5) * uFunCylinder4D_ex(r0vec);
+    tempvec(1) = -100.0 * 2.0 * y0 * uFunCylinder4D_ex(r0vec);
+
+    // 3. Applying the inverse rotation transform to the gradient,
+    // which gives the gradient at the current point (x,y,z,t)
+    //gradx = Q * tempvec
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = tempvec(0) * cos(arc_length) + tempvec(1) * (-sin(arc_length));
+    gradx(1) = tempvec(0) * sin(arc_length) + tempvec(1) * cos(arc_length);
+    gradx(2) = 0.0;
 }
 
 void zerovecx_ex(const Vector& xt, Vector& zerovecx )

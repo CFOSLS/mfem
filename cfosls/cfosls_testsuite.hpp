@@ -116,18 +116,25 @@ double uFunCylinder_ex(const Vector& xt);
 double uFunCylinder_ex_dt(const Vector& xt);
 void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
 
+double uFunCylinder4D_ex(const Vector& xt);
+double uFunCylinder4D_ex_dt(const Vector& xt);
+void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& grad);
+
 /// velocity functions for various domains (for transport equation)
 void bFunRect2D_ex(const Vector& xt, Vector& b );
-double  bFunRect2Ddiv_ex(const Vector& xt);
+double bFunRect2Ddiv_ex(const Vector& xt);
 
 void bFunCube3D_ex(const Vector& xt, Vector& b );
-double  bFunCube3Ddiv_ex(const Vector& xt);
+double bFunCube3Ddiv_ex(const Vector& xt);
 
 void bFunSphere3D_ex(const Vector& xt, Vector& b );
-double  bFunSphere3Ddiv_ex(const Vector& xt);
+double bFunSphere3Ddiv_ex(const Vector& xt);
 
 void bFunCircle2D_ex (const Vector& xt, Vector& b);
-double  bFunCircle2Ddiv_ex(const Vector& xt);
+double bFunCircle2Ddiv_ex(const Vector& xt);
+
+void bFunCircleT3D_ex (const Vector& xt, Vector& b);
+double bFunCircleT3Ddiv_ex(const Vector& xt);
 
 void testVectorFun(const Vector& xt, Vector& res);
 double testH1fun(Vector& xt);
