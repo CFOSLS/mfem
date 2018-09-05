@@ -4,7 +4,6 @@
 namespace mfem
 {
 
-
 double uFunTest_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -487,6 +486,113 @@ void uFunTestLapLshape_grad(const Vector& xt, Vector& grad )
     return;
 }
 
+// Fichera Corner with Vertex Singularity, check out https://math.nist.gov/cgi-bin/amr-display-problem.cgi
+// not tested yet
+double uFunTestFichera_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return pow(r,FICHERA_Q);
+}
+
+double uFunTestFichera_lap(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return (FICHERA_Q) * (FICHERA_Q + 1) * pow(r, FICHERA_Q - 2.0);
+}
+
+void uFunTestFichera_grad(const Vector& xt, Vector& grad )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = (FICHERA_Q) * x * pow(r, FICHERA_Q - 2.0);
+    grad(1) = (FICHERA_Q) * y * pow(r, FICHERA_Q - 2.0);
+    if (xt.Size() == 4)
+        grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0);
+
+    grad(xt.Size() - 1) = 0.0;
+
+    return;
+}
+
+// much alike uFunTestFicheraT, but smoothly depending on t
+// not tested yet
+double uFunTestFicheraT_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return pow(r,FICHERA_Q) * t * (1.0 - t);
+}
+
+double uFunTestFicheraT_lap(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return (FICHERA_Q) * (FICHERA_Q + 1) * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t) +
+            (-2.0) * pow(r,FICHERA_Q);
+}
+
+void uFunTestFicheraT_grad(const Vector& xt, Vector& grad )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = (FICHERA_Q) * x * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+    grad(1) = (FICHERA_Q) * y * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+    if (xt.Size() == 4)
+        grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+
+    grad(xt.Size() - 1) = pow(r,FICHERA_Q) * (1.0 - 2.0 * t);
+
+    return;
+}
+
 
 FOSLS_test::FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients)
     : dim(dimension), nfunc_coeffs(nfunc_coefficients), nvec_coeffs(nvec_coefficients), nmat_coeffs(nmat_coefficients)
@@ -832,6 +938,10 @@ void Laplace_test::Init()
             SetTestCoeffs<&uFunTestLapLshape_ex, &uFunTestLapLshape_grad, &uFunTestLapLshape_lap>();
         if (numsol == 111 && dim == 4)
             SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
+        if (numsol == 1111) // corner singulairt r^q, r in space only, not tested yet
+            SetTestCoeffs<&uFunTestFichera_ex, &uFunTestFichera_grad, &uFunTestFichera_lap>();
+        if (numsol == 1112) // corner singulairt r^q * t(1-t), r in space only, not tested yet
+            SetTestCoeffs<&uFunTestFicheraT_ex, &uFunTestFicheraT_grad, &uFunTestFicheraT_lap>();
         if (numsol == -9)
             SetTestCoeffs<&zero_ex, &zerovec_ex, &delta_center_ex>();
     } // end of setting test coefficients in correct case
@@ -863,6 +973,10 @@ bool Laplace_test::CheckTestConfig()
         if (numsol == 11 && dim == 3)
             return true;
         if (numsol == 111 && dim == 4)
+            return true;
+        if (numsol == 1111 && (dim == 3 || dim == 4))
+            return true;
+        if (numsol == 1112 && (dim == 3 || dim == 4))
             return true;
         return false;
     }

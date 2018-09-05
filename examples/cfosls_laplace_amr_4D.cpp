@@ -8,6 +8,10 @@
 // if active, no serial AMR in 4D is done
 //#define ONLY_PAR_UR
 
+// if defined, activates the Fichera corner test in 4D. The domain then will be constructed
+// as tensor-extension of 3D Fichera corner mesh into 4D.
+#define FICHERA_CORNER_SOLUTION
+
 using namespace std;
 using namespace mfem;
 
@@ -26,6 +30,9 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(comm, &myid);
     bool verbose = (myid == 0);
 
+    MPI_Comm comm_myid;
+    MPI_Comm_split(comm, myid, 0, &comm_myid );
+
     StopWatch chrono;
     chrono.Clear();
     chrono.Start();
@@ -38,7 +45,7 @@ int main(int argc, char *argv[])
     bool visualization = 0;
 #ifndef ONLY_PAR_UR
     int numofrefinement = 1;
-    int maxdofs = 900000;
+    //int maxdofs = 900000;
     double error_frac = .80;
     double betavalue = 0.1;
     int strat = 1;
@@ -55,7 +62,7 @@ int main(int argc, char *argv[])
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
 #ifndef ONLY_PAR_UR
-    args.AddOption(&maxdofs, "-r", "-refine","-r");
+    //args.AddOption(&maxdofs, "-r", "-refine","-r");
     args.AddOption(&strat, "-rs", "--refinementstrategy", "Which refinement strategy to implement for the LS Refiner");
     args.AddOption(&error_frac, "-ef","--errorfraction", "Weight in Dorfler Marking Strategy");
     args.AddOption(&betavalue, "-b","--beta", "Beta in the Difference Term of Estimator");
@@ -68,9 +75,44 @@ int main(int argc, char *argv[])
         return 1;
     }
     args.PrintOptions(cout);
+
+    // 2. Read the mesh from the given mesh file (or do some more steps in case of the Fichera corner test).
+    Mesh * mesh;
+
+#ifdef FICHERA_CORNER_SOLUTION
+    // for the Fichera corner, we create a mesh by mesh generator in 4D
+    numsol = 1112;
+    mesh_file = "../data/fichera_3d_coarse.mesh";
+
+    if (verbose)
+        std::cout << "Extending 3D Fichera corner mesh into 4D \n";
+
+    std::stringstream fname_fichera_temp;
+    fname_fichera_temp << "mesh_file_fichera_temp.mesh";
+
+    if (myid == 0)
+    {
+        Mesh *meshbase = new Mesh(mesh_file, 1, 1);
+        ParMesh * pmeshbase = new ParMesh(comm, *meshbase);
+        delete meshbase;
+
+        int Nt              = 2;   // number of time slabs (e.g. Nsteps = 2 corresponds to 3 levels: t = 0, t = tau, t = 2 * tau
+        double tau          = 0.5; // time step for a slab
+        ParMesh * pmesh = new ParMeshCyl(comm_myid, *pmeshbase, 0.0, tau, Nt);
+        delete pmeshbase;
+
+        std::ofstream ofid(fname_fichera_temp.str().c_str());
+        ofid.precision(8);
+        pmesh->Print(ofid);
+        delete pmesh;
+    }
+
+    std::ifstream ifid_fichera(fname_fichera_temp.str().c_str());
+    mesh = new Mesh(ifid_fichera, 1, 1);
+#else
+    mesh = new Mesh(mesh_file, 1, 1);
+#endif
     
-    // 2. Read the mesh from the given mesh file.
-    Mesh *mesh = new Mesh(mesh_file, 1, 1);
     int dim = mesh->Dimension();
 
     for (int l = 0; l < numofrefinement; l++)
@@ -82,9 +124,6 @@ int main(int argc, char *argv[])
     FEFormulType * fe_formulat = new FEFormulType(*formulat, order);
 
 #ifndef ONLY_PAR_UR
-    MPI_Comm comm_myid;
-    MPI_Comm_split(comm, myid, 0, &comm_myid );
-
     // Perform adaptive refinement in serial
 
     if (myid == 0)
@@ -152,6 +191,7 @@ int main(int argc, char *argv[])
         refiner->SetBetaConstants(betavalue);
         refiner->version_difference = false;
 
+        std::cout << "#dofs for the first solve: " << problem->GlobalTrueProblemSize() << "\n";
         problem->Solve(verbose, true);
 
         int global_dofs;
@@ -160,6 +200,12 @@ int main(int argc, char *argv[])
 
         for (int it = 0; it < max_amr_iter; ++it)
         {
+            if (verbose)
+            {
+               cout << "\nAMR iteration " << it << "\n";
+               cout << "Refining the mesh ... \n";
+            }
+
             refiner->Apply(*mesh);
             if(refiner->Stop())
             {
@@ -202,7 +248,6 @@ int main(int argc, char *argv[])
             refiner->version_difference = false;
 
             global_dofs = problem->GlobalTrueProblemSize();
-
             if (global_dofs > max_dofs)
             {
                if (verbose)
@@ -216,8 +261,8 @@ int main(int argc, char *argv[])
                cout << "\nAMR iteration " << it << "\n";
                cout << "Number of unknowns: " << global_dofs << "\n";
             }
-
             problem->Solve(verbose, true);
+
         }
 
         delete problem;

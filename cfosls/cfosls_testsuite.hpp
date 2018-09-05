@@ -5,6 +5,8 @@
 
 namespace mfem
 {
+// must be greater than -0.5
+#define FICHERA_Q (2.0/3.0)
 
 //// from parabolic example
 double uFun_ex_parab(const Vector & x); // Exact Solution
@@ -86,6 +88,20 @@ void uFunTestLap_grad(const Vector& xt, Vector& grad );
 double uFunTestLapLshape_ex(const Vector& xt);
 double uFunTestLapLshape_lap(const Vector& xt);
 void uFunTestLapLshape_grad(const Vector& xt, Vector& grad );
+
+// r^(FICHERA_Q), r is (xt.Size()-1) dimensional (last coordinate intact)
+// time-independent corner singularity ( ~ r^(FICHERA_Q) )
+double uFunTestFichera_ex(const Vector& xt);
+double uFunTestFichera_lap(const Vector& xt);
+void uFunTestFichera_grad(const Vector& xt, Vector& grad);
+
+// r^(FICHERA_Q) * t * (1 - t),
+// r is (xt.Size()-1) dimensional (last coordinate intact)
+// t is the last coordinate
+// time-dependent Fichera corner singularity
+double uFunTestFicheraT_ex(const Vector& xt);
+double uFunTestFicheraT_lap(const Vector& xt);
+void uFunTestFicheraT_grad(const Vector& xt, Vector& grad);
 /////////////////////////////////////
 
 double delta_center_ex(const Vector& xt);
