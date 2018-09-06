@@ -7816,7 +7816,7 @@ void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname,
 
     // test lines for cell data
     ofid << "CELL_DATA " << celltypes.size() << endl;
-    ofid << "SCALARS cekk_scalars double 1" << endl;
+    ofid << "SCALARS cell_scalars double 1" << endl;
     ofid << "LOOKUP_TABLE default" << endl;
     int cnt = 0;
     for (iter = celltypes.begin(); iter != celltypes.end(); ++iter)
