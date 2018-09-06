@@ -152,18 +152,18 @@ int main(int argc, char *argv[])
 
     bool visualization = 1;
 
-    int nDimensions     = 3;
+    int nDimensions     = 4;
     int numsol          = -3;
 
     int ser_ref_levels  = 1;
-    int par_ref_levels  = 0;
+    int par_ref_levels  = 1;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls" (switch on/off constraint)
-    const char *space_for_S = "H1";     // "H1" or "L2"
+    const char *space_for_S = "L2";     // "H1" or "L2"
     // space_for_sigma = "H1" doesn't work now! The solver doesn't converge
     const char *space_for_sigma = "Hdiv"; // "Hdiv" or "H1"
     // in case space_for_S = "L2" defines whether we eliminate S from the system
-    bool eliminateS = false;
+    bool eliminateS = true;
     // in case space_for_S = "L2" defines whether we keep div-div term in the system
     bool keep_divdiv = false;
 
@@ -275,9 +275,10 @@ int main(int argc, char *argv[])
     {
         numsol = -4;
         mesh_file = "../data/cube4d_96.MFEM";
-    }
 
-    mesh_file = "../data/cube_3d_moderate.mesh";
+        numsol = 88;
+        mesh_file = "../data/cube_4d_96_-11x02.mesh";
+    }
 
     if (verbose)
         std::cout << "For the records: numsol = " << numsol
@@ -401,21 +402,21 @@ int main(int argc, char *argv[])
 
     // 4.5 Define the problem to be solved (CFOSLS Hdiv-L2 or Hdiv-H1 formulation, e.g., here)
 
+    /*
     // Hdiv-H1 case
     MFEM_ASSERT(strcmp(space_for_S,"H1") == 0, "Space for S must be H1 in this case!\n");
     using FormulType = CFOSLSFormulation_HdivH1Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivH1Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivH1_Hyper;
     using ProblemType = FOSLSProblem_HdivH1L2hyp;
+    */
 
-    /*
     // Hdiv-L2 case
     MFEM_ASSERT(strcmp(space_for_S,"L2") == 0, "Space for S must be L2 in this case!\n");
     using FormulType = CFOSLSFormulation_HdivL2Hyper;
     using FEFormulType = CFOSLSFEFormulation_HdivL2Hyper;
     using BdrCondsType = BdrConditions_CFOSLS_HdivL2_Hyper;
     using ProblemType = FOSLSProblem_HdivL2hyp;
-    */
 
     FormulType * formulat = new FormulType (dim, numsol, verbose);
     FEFormulType * fe_formulat = new FEFormulType(*formulat, feorder);
@@ -1292,53 +1293,68 @@ int main(int argc, char *argv[])
 
 
    // 13. Visualization (optional)
-   if (visualization && nDimensions < 4)
+   if (visualization)
    {
-      char vishost[] = "localhost";
-      int  visport   = 19916;
-      socketstream u_sock(vishost, visport);
-      u_sock << "parallel " << num_procs << " " << myid << "\n";
-      u_sock.precision(8);
-      u_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'sigma_exact'"
-             << endl;
+      if (nDimensions < 4)
+      {
+          char vishost[] = "localhost";
+          int  visport   = 19916;
+          socketstream u_sock(vishost, visport);
+          u_sock << "parallel " << num_procs << " " << myid << "\n";
+          u_sock.precision(8);
+          u_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'sigma_exact'"
+                 << endl;
 
-      socketstream uu_sock(vishost, visport);
-      uu_sock << "parallel " << num_procs << " " << myid << "\n";
-      uu_sock.precision(8);
-      uu_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
-             << endl;
+          socketstream uu_sock(vishost, visport);
+          uu_sock << "parallel " << num_procs << " " << myid << "\n";
+          uu_sock.precision(8);
+          uu_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
+                 << endl;
 
-      *sigma_exact -= *sigma;
+          *sigma_exact -= *sigma;
 
-      socketstream uuu_sock(vishost, visport);
-      uuu_sock << "parallel " << num_procs << " " << myid << "\n";
-      uuu_sock.precision(8);
-      uuu_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'difference for sigma'"
-             << endl;
+          socketstream uuu_sock(vishost, visport);
+          uuu_sock << "parallel " << num_procs << " " << myid << "\n";
+          uuu_sock.precision(8);
+          uuu_sock << "solution\n" << *pmesh << *sigma_exact << "window_title 'difference for sigma'"
+                 << endl;
 
-      socketstream s_sock(vishost, visport);
-      s_sock << "parallel " << num_procs << " " << myid << "\n";
-      s_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      s_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
-              << endl;
+          socketstream s_sock(vishost, visport);
+          s_sock << "parallel " << num_procs << " " << myid << "\n";
+          s_sock.precision(8);
+          MPI_Barrier(pmesh->GetComm());
+          s_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
+                  << endl;
 
-      socketstream ss_sock(vishost, visport);
-      ss_sock << "parallel " << num_procs << " " << myid << "\n";
-      ss_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      ss_sock << "solution\n" << *pmesh << *S << "window_title 'S'"
-              << endl;
+          socketstream ss_sock(vishost, visport);
+          ss_sock << "parallel " << num_procs << " " << myid << "\n";
+          ss_sock.precision(8);
+          MPI_Barrier(pmesh->GetComm());
+          ss_sock << "solution\n" << *pmesh << *S << "window_title 'S'"
+                  << endl;
 
-      *S_exact -= *S;
-      socketstream sss_sock(vishost, visport);
-      sss_sock << "parallel " << num_procs << " " << myid << "\n";
-      sss_sock.precision(8);
-      MPI_Barrier(pmesh->GetComm());
-      sss_sock << "solution\n" << *pmesh << *S_exact
-               << "window_title 'difference for S'" << endl;
+          *S_exact -= *S;
+          socketstream sss_sock(vishost, visport);
+          sss_sock << "parallel " << num_procs << " " << myid << "\n";
+          sss_sock.precision(8);
+          MPI_Barrier(pmesh->GetComm());
+          sss_sock << "solution\n" << *pmesh << *S_exact
+                   << "window_title 'difference for S'" << endl;
 
-      MPI_Barrier(pmesh->GetComm());
+          MPI_Barrier(pmesh->GetComm());
+      }
+      else // 4D case
+      {
+          // creating mesh slices (and printing them in VTK format in a file for paraview)
+          ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs);
+
+          // sigma_exact
+          ComputeSlices (*sigma_exact, 0.1, 2, 0.5, myid, num_procs, false, "sigma_ex_slices_");
+
+          // S_exact
+          ComputeSlices (*S_exact, 0.1, 2, 0.5, myid, num_procs, false, "u_ex_slices_");
+      }
+
    }
 
    // 14. Free the used memory.

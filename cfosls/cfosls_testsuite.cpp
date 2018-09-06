@@ -4,7 +4,6 @@
 namespace mfem
 {
 
-
 double uFunTest_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -278,6 +277,7 @@ double bFunSphere3Ddiv_ex(const Vector& xt)
 {
     return 0.0;
 }
+
 void bFunCircle2D_ex(const Vector& xt, Vector& b )
 {
     double x = xt(0);
@@ -302,6 +302,27 @@ double bFunCircle2Ddiv_ex(const Vector& xt)
 //    double x = xt(0);
 //    double y = xt(1);
 //    double t = xt(xt.Size()-1);
+    return 0.0;
+}
+
+void bFunCircleT3D_ex(const Vector& xt, Vector& b )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double t = xt(xt.Size()-1);
+
+    b.SetSize(xt.Size());
+
+    b(0) = -y * (t + 1);  // -x2
+    b(1) = x * (t + 1);   // x1
+    b(2) = 0.0;
+
+    b(xt.Size()-1) = 1.;
+    return;
+}
+
+double bFunCircleT3Ddiv_ex(const Vector& xt)
+{
     return 0.0;
 }
 
@@ -465,6 +486,119 @@ void uFunTestLapLshape_grad(const Vector& xt, Vector& grad )
     return;
 }
 
+// Fichera Corner with Vertex Singularity, check out at
+// https://math.nist.gov/cgi-bin/amr-display-problem.cgi
+// If input vector is (d+1) dimensional, Sobolev regularity is
+// (1.5 + q), when d = 3
+// (1.0 + q), when d = 2
+double uFunTestFichera_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return pow(r,FICHERA_Q);
+}
+
+double uFunTestFichera_lap(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return (FICHERA_Q) * (FICHERA_Q + 1) * pow(r, FICHERA_Q - 2.0);
+}
+
+void uFunTestFichera_grad(const Vector& xt, Vector& grad )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    //double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = (FICHERA_Q) * x * pow(r, FICHERA_Q - 2.0);
+    grad(1) = (FICHERA_Q) * y * pow(r, FICHERA_Q - 2.0);
+    if (xt.Size() == 4)
+        grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0);
+
+    grad(xt.Size() - 1) = 0.0;
+
+    return;
+}
+
+// much alike uFunTestFicheraT, but smoothly depending on t
+// If input vector is (d+1) dimensional, Sobolev regularity is
+// (1.5 + q), when d = 3
+// (1.0 + q), when d = 2
+// not tested yet
+double uFunTestFicheraT_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return pow(r,FICHERA_Q) * t * (1.0 - t);
+}
+
+double uFunTestFicheraT_lap(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    return (FICHERA_Q) * (FICHERA_Q + 1) * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t) +
+            (-2.0) * pow(r,FICHERA_Q);
+}
+
+void uFunTestFicheraT_grad(const Vector& xt, Vector& grad )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = 0.0;
+    if (xt.Size() == 4)
+        z = xt(2);
+    double t = xt(xt.Size()-1);
+
+    double r = sqrt (x * x + y * y + z * z);
+
+    grad.SetSize(xt.Size());
+
+    grad(0) = (FICHERA_Q) * x * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+    grad(1) = (FICHERA_Q) * y * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+    if (xt.Size() == 4)
+        grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0) * t * (1.0 - t);
+
+    grad(xt.Size() - 1) = pow(r,FICHERA_Q) * (1.0 - 2.0 * t);
+
+    return;
+}
+
 
 FOSLS_test::FOSLS_test(int dimension, int nfunc_coefficients, int nvec_coefficients, int nmat_coefficients)
     : dim(dimension), nfunc_coeffs(nfunc_coefficients), nvec_coeffs(nvec_coefficients), nmat_coeffs(nmat_coefficients)
@@ -531,10 +665,15 @@ void Hyper_test::Init()
         {
             SetTestCoeffs<&uFunTestNh_ex, &uFunTestNh_ex_dt, &uFunTestNh_ex_gradx, &bFunCube3D_ex, &bFunCube3Ddiv_ex>();
         }
-        if (numsol == 8)
+        if (numsol == 8) // a Gaussian hill rotating in (x,y)-plane around the origin with a constant velocity
         {
-            //std::cout << "The domain must be a cylinder over a circle" << std::endl << std::flush;
             SetTestCoeffs<&uFunCylinder_ex, &uFunCylinder_ex_dt, &uFunCylinder_ex_gradx, &bFunCircle2D_ex, &bFunCircle2Ddiv_ex>();
+        }
+        if (numsol == 88) // a Gaussian hill rotating in (x,y)-plane around the origin with
+                          // a time-increasing velocity
+        {
+            SetTestCoeffs<&uFunCylinder4D_ex, &uFunCylinder4D_ex_dt, &uFunCylinder4D_ex_gradx,
+                    &bFunCircleT3D_ex, &bFunCircleT3Ddiv_ex>();
         }
     } // end of setting test coefficients in correct case
 }
@@ -568,6 +707,8 @@ bool Hyper_test::CheckTestConfig()
         if (numsol == -44 && dim == 4)
             return true;
         if ( numsol == 8 && dim == 3 )
+            return true;
+        if ( numsol == 88 && dim == 4 )
             return true;
         return false;
     }
@@ -801,6 +942,12 @@ void Laplace_test::Init()
             SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
         if (numsol == 11 && dim == 3)
             SetTestCoeffs<&uFunTestLapLshape_ex, &uFunTestLapLshape_grad, &uFunTestLapLshape_lap>();
+        if (numsol == 111 && dim == 4)
+            SetTestCoeffs<&uFunTestLap_ex, &uFunTestLap_grad, &uFunTestLap_lap>();
+        if (numsol == 1111) // corner singulairt r^q, r in space only, not tested yet
+            SetTestCoeffs<&uFunTestFichera_ex, &uFunTestFichera_grad, &uFunTestFichera_lap>();
+        if (numsol == 1112) // corner singulairt r^q * t(1-t), r in space only, not tested yet
+            SetTestCoeffs<&uFunTestFicheraT_ex, &uFunTestFicheraT_grad, &uFunTestFicheraT_lap>();
         if (numsol == -9)
             SetTestCoeffs<&zero_ex, &zerovec_ex, &delta_center_ex>();
     } // end of setting test coefficients in correct case
@@ -830,6 +977,12 @@ bool Laplace_test::CheckTestConfig()
         if (numsol == -9 && dim == 3)
             return true;
         if (numsol == 11 && dim == 3)
+            return true;
+        if (numsol == 111 && dim == 4)
+            return true;
+        if (numsol == 1111 && (dim == 3 || dim == 4))
+            return true;
+        if (numsol == 1112 && (dim == 3 || dim == 4))
             return true;
         return false;
     }
@@ -910,8 +1063,8 @@ double divsigmaTemplate_hyper(const Vector& xt)
         res += b(i) * gradS(i);
     res += divbfunc(xt) * S(xt);
 
-    //if (fabs(res) > 1.0e-13)
-        //std::cout << "error if solution is the clyndric test \n";
+    if (fabs(res) > 1.0e-10)
+        std::cout << "error if solution is the cylindric test w/o dissipation \n";
 
     return res;
 }
@@ -1292,6 +1445,35 @@ double GaussianHill_dr(const Vector&xvec)
     return -100.0 * (2.0 * r - cos (teta)) * GaussianHill(xvec);
 }
 
+double GaussianHill3D(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25) * (z - 0.25)));
+}
+
+double GaussianHill3D_dphi(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    // d( (r sin(teta) cos(phi) - 0.5)^2 ) / dphi
+    double term1 = 2.0 * (r * sin(teta) * cos(phi) - 0.5) * r * sin(teta) * (-sin(phi));
+
+    // d( (r sin(teta) sin(phi))^2 ) / dphi
+    double term2 = 2.0 * r * sin(teta) * sin(phi) * r * sin(teta) * cos(phi);
+
+    return -100.0 * (term1  + term2) * GaussianHill3D(xvec);
+}
+
+
 double uFunCylinder_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -1367,6 +1549,92 @@ void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
     gradx(1) = dSdr * sin(teta) + dSdteta * dtetady;
     */
 
+}
+
+double uFunCylinder4D_ex(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    double t = xt(xt.Size()-1);
+    Vector xvec(3);
+
+    // now each point was rotating with the speed (t+1) around the circle,
+    // i.e. we need to go back by \int_0^t {(t+1)dt}
+    xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(2) = z;
+    //xvec(0) = r * cos (teta - t);
+    //xvec(1) = r * sin (teta - t);
+
+    return GaussianHill3D(xvec);
+}
+
+double uFunCylinder4D_ex_dt(const Vector& xt)
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    double t = xt(xt.Size()-1);
+    Vector xvec(3);
+    // now each point was rotating with the speed (t+1) around the circle,
+    // i.e. we need to go back by \int_0^t {(t+1)dt}
+    xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(2) = z;
+
+    return GaussianHill3D_dphi(xvec) * (- 1.0 - t);
+}
+
+void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
+{
+    double x = xt(0);
+    double y = xt(1);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    //double phi = atan2(y,x);
+    //double teta = acos(z/r);
+    double t = xt(xt.Size()-1);
+
+    // We compute gradient at point (x,y,z,t) with the following steps:
+
+    // 1. Computing (x0,y0) = Q^tr * (x,y) = initial particle location
+    // consider the fact the we know the rotation speed to be (t+1) for any t
+    // the arc_length covered by the particle is then \int_0^t {(t+1)dt}
+    double arc_length = t + 0.5 * t * t;
+    double x0 = x * cos(arc_length) + y * sin(arc_length);
+    double y0 = x * (-sin(arc_length)) + y * cos(arc_length);
+    double z0 = z;
+
+    // 2. Computing gradient of the solution for t = 0 at the initial particle location
+    Vector r0vec(4);
+    r0vec(0) = x0;
+    r0vec(1) = y0;
+    r0vec(2) = z0;
+    r0vec(3) = 0;
+
+    // tempvec = grad u(x0,y0,z0) at t = 0
+    Vector tempvec(3);
+    tempvec(0) = -100.0 * 2.0 * (x0 - 0.5) * uFunCylinder4D_ex(r0vec);
+    tempvec(1) = -100.0 * 2.0 * y0 * uFunCylinder4D_ex(r0vec);
+    tempvec(2) = -100.0 * 2.0 * (z0 - 0.25) * uFunCylinder4D_ex(r0vec);
+
+    // 3. Applying the inverse rotation transform to the gradient,
+    // which gives the gradient at the current point (x,y,z,t)
+    //gradx = Q * tempvec
+    gradx.SetSize(xt.Size() - 1);
+
+    gradx(0) = tempvec(0) * cos(arc_length) + tempvec(1) * (-sin(arc_length));
+    gradx(1) = tempvec(0) * sin(arc_length) + tempvec(1) * cos(arc_length);
+    gradx(2) = tempvec(2);
 }
 
 void zerovecx_ex(const Vector& xt, Vector& zerovecx )

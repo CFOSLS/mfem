@@ -5,6 +5,8 @@
 
 namespace mfem
 {
+// must be greater than -0.5
+#define FICHERA_Q (0.1)
 
 //// from parabolic example
 double uFun_ex_parab(const Vector & x); // Exact Solution
@@ -86,6 +88,20 @@ void uFunTestLap_grad(const Vector& xt, Vector& grad );
 double uFunTestLapLshape_ex(const Vector& xt);
 double uFunTestLapLshape_lap(const Vector& xt);
 void uFunTestLapLshape_grad(const Vector& xt, Vector& grad );
+
+// r^(FICHERA_Q), r is (xt.Size()-1) dimensional (last coordinate intact)
+// time-independent corner singularity ( ~ r^(FICHERA_Q) )
+double uFunTestFichera_ex(const Vector& xt);
+double uFunTestFichera_lap(const Vector& xt);
+void uFunTestFichera_grad(const Vector& xt, Vector& grad);
+
+// r^(FICHERA_Q) * t * (1 - t),
+// r is (xt.Size()-1) dimensional (last coordinate intact)
+// t is the last coordinate
+// time-dependent Fichera corner singularity
+double uFunTestFicheraT_ex(const Vector& xt);
+double uFunTestFicheraT_lap(const Vector& xt);
+void uFunTestFicheraT_grad(const Vector& xt, Vector& grad);
 /////////////////////////////////////
 
 double delta_center_ex(const Vector& xt);
@@ -116,18 +132,25 @@ double uFunCylinder_ex(const Vector& xt);
 double uFunCylinder_ex_dt(const Vector& xt);
 void uFunCylinder_ex_gradx(const Vector& xt, Vector& grad);
 
+double uFunCylinder4D_ex(const Vector& xt);
+double uFunCylinder4D_ex_dt(const Vector& xt);
+void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& grad);
+
 /// velocity functions for various domains (for transport equation)
 void bFunRect2D_ex(const Vector& xt, Vector& b );
-double  bFunRect2Ddiv_ex(const Vector& xt);
+double bFunRect2Ddiv_ex(const Vector& xt);
 
 void bFunCube3D_ex(const Vector& xt, Vector& b );
-double  bFunCube3Ddiv_ex(const Vector& xt);
+double bFunCube3Ddiv_ex(const Vector& xt);
 
 void bFunSphere3D_ex(const Vector& xt, Vector& b );
-double  bFunSphere3Ddiv_ex(const Vector& xt);
+double bFunSphere3Ddiv_ex(const Vector& xt);
 
 void bFunCircle2D_ex (const Vector& xt, Vector& b);
-double  bFunCircle2Ddiv_ex(const Vector& xt);
+double bFunCircle2Ddiv_ex(const Vector& xt);
+
+void bFunCircleT3D_ex (const Vector& xt, Vector& b);
+double bFunCircleT3Ddiv_ex(const Vector& xt);
 
 void testVectorFun(const Vector& xt, Vector& res);
 double testH1fun(Vector& xt);

@@ -7816,7 +7816,7 @@ void outputSliceMeshVTK (const Mesh& mesh, std::stringstream& fname,
 
     // test lines for cell data
     ofid << "CELL_DATA " << celltypes.size() << endl;
-    ofid << "SCALARS cekk_scalars double 1" << endl;
+    ofid << "SCALARS cell_scalars double 1" << endl;
     ofid << "LOOKUP_TABLE default" << endl;
     int cnt = 0;
     for (iter = celltypes.begin(); iter != celltypes.end(); ++iter)
@@ -8302,7 +8302,8 @@ bool sortWedge3d(std::vector<std::vector<double> > & Points, int * permutation)
 // if the mesh is parallel
 // usually it is reasonable to refer myid to the process id in the communicator
 // so as to produce a correct output for parallel ParaView visualization
-void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid)
+void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid, int nprocs,
+                   const char * filename_root)
 {
     bool verbose = false;
 
@@ -8316,17 +8317,8 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
 
     int dim = mesh.Dimension();
 
-    //const Table& el_to_edge = mesh.ElementToEdgeTable();
-
-    /*
-    if (!el_to_edge)
-    {
-        el_to_edge = new Table;
-        NumOfEdges = mesh.GetElementToEdgeTable(*el_to_edge, be_to_edge);
-    }
-    */
-
-    // = -2 if not considered, -1 if considered, but does not intersected, index of this vertex in the new 3d mesh otherwise
+    // = -2 if not considered, -1 if considered, but does not intersected,
+    // index of this vertex in the new 3d mesh otherwise
     // refilled for each time moment
     vector<int> edgemarkers(mesh.GetNEdges());
 
@@ -8451,7 +8443,11 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
 
         // intermediate output
         std::stringstream fname;
-        fname << "slicemesh_"<< dim - 1 << "d_myid_" << myid << "_moment_" << momentind << ".vtk";
+        //fname << filename_root << dim - 1 << "d_myid_" << myid << "_moment_" << momentind << ".vtk";
+        if (nprocs > 1)
+            fname << filename_root << dim - 1 << "d_moment_" << momentind << "_proc_" << myid << ".vtk";
+        else
+            fname << filename_root << dim - 1 << "d_moment_" << momentind << ".vtk";
         outputSliceMeshVTK (mesh, fname, ipoints, celltypes[momentind], cellstructsize, elvrtindices[momentind]);
 
 
@@ -8473,8 +8469,10 @@ void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int
 // for a given element with index = elind.
 // updates the edgemarkers and vertex_count correspondingly
 // pvec defines the slice plane
-void computeSliceCellValues (const GridFunction& grfun, int elind, vector<vector<double> > & pvec, vector<vector<double> > & ipoints, vector<int>& edgemarkers,
-                             vector<vector<double> >& cellpnts, vector<int>& elvertslocal, int & nip, int & vertex_count, vector<double>& vertvalues)
+void computeSliceCellValues (const GridFunction& grfun, int elind, vector<vector<double> > & pvec,
+                             vector<vector<double> > & ipoints, vector<int>& edgemarkers,
+                             vector<vector<double> >& cellpnts, vector<int>& elvertslocal,
+                             int & nip, int & vertex_count, vector<double>& vertvalues)
 {
     Mesh * mesh = grfun.FESpace()->GetMesh();
 
@@ -8590,8 +8588,16 @@ void computeSliceCellValues (const GridFunction& grfun, int elind, vector<vector
                 grfun.GetVectorValue(elind, integp, pointval2);
         }
 
+        if (verbose)
+        {
+            std::cout << "pointval1: \n";
+            pointval1.Print();
+            std::cout << "pointval2: \n";
+            pointval2.Print();
+        }
+
         val1 = 0.0; val2 = 0.0;
-        for ( int coo = 0; coo < dim; ++coo)
+        for ( int coo = 0; coo < pointval1.Size(); ++coo)
         {
             val1 += pointval1[coo] * pointval1[coo];
             val2 += pointval2[coo] * pointval2[coo];
@@ -8731,20 +8737,23 @@ void computeSliceCellValues (const GridFunction& grfun, int elind, vector<vector
 
     } // end of loop over element edges
 
-    /*
-    cout << "vertvalues in the end of slicecompute" << endl;
-    for ( int i = 0; i < nip; ++i)
+    if (verbose)
     {
-        cout << "vertval = " << vertvalues[i] << endl;
+        cout << "vertvalues in the end of slicecompute" << endl;
+        for ( int i = 0; i < nip; ++i)
+        {
+            cout << "vertval = " << vertvalues[i] << endl;
+        }
     }
-    */
 
     return;
 }
 
-void outputSliceGridFuncVTK (const GridFunction& grfun, std::stringstream& fname, std::vector<std::vector<double> > & ipoints,
-                                            std::list<int> &celltypes, int cellstructsize, std::list<std::vector<int> > &elvrtindices,
-                                            std::list<double > & cellvalues, bool forvideo)
+void outputSliceGridFuncVTK (const GridFunction& grfun, std::stringstream& fname,
+                             std::vector<std::vector<double> > & ipoints,
+                             std::list<int> &celltypes, int cellstructsize,
+                             std::list<std::vector<int> > &elvrtindices,
+                             std::list<double > & cellvalues, bool forvideo)
 {
     Mesh * mesh = grfun.FESpace()->GetMesh();
 
@@ -8828,7 +8837,13 @@ void outputSliceGridFuncVTK (const GridFunction& grfun, std::stringstream& fname
 // usually it is reasonable to refeer myid to the process id in the communicator
 // For each cell, an average of the values of the grid function is computed over
 // slice cell vertexes.
-void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double deltat, int myid, bool forvideo)
+// If forvideo = true, the last coordinate (time) is 0.0 for each slice.
+// This is useful when one makes 2d slices of 3d objects, for making animations or
+// anything else which considers last coordinate as time rather than a one more spatial dimension
+// Otherwise, ParaView will draw each 2D slice at a different place in 3D (might also make sense
+// of course).
+void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double deltat, int myid, int nprocs,
+                   bool forvideo, const char * filename_root)
 {
     bool verbose = false;
 
@@ -8905,7 +8920,8 @@ void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double de
             vector<vector<double> > cellpnts; //points of the cell of the slice mesh
             cellpnts.reserve(6);
 
-            vector<double> vertvalues;          // values of the grid function at the nodes of the slice cell
+            // values of the grid function at the nodes of the slice cell
+            vector<double> vertvalues;
 
             // true mesh element index
             elind = elpartition[momentind][elno];
@@ -8919,12 +8935,15 @@ void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double de
             // points and changing edges markers for a given element elind
             // and plane defined by pvec
             int nip;
-            //mesh->computeSliceCell (elind, pvec, ipoints, edgemarkers, cellpnts, tempvec, nip, vertex_count);
+            //mesh->computeSliceCell (elind, pvec, ipoints, edgemarkers,
+                                            // cellpnts, tempvec, nip, vertex_count);
 
-            computeSliceCellValues (grfun, elind, pvec, ipoints, edgemarkers, cellpnts, tempvec, nip, vertex_count, vertvalues);
+            computeSliceCellValues (grfun, elind, pvec, ipoints, edgemarkers, cellpnts,
+                                    tempvec, nip, vertex_count, vertvalues);
 
             if ( (dim == 4 && (nip != 4 && nip != 6)) || (dim == 3 && (nip != 3 && nip != 4)) )
-                cout << "Strange nip =  " << nip << " for elind = " << elind << ", time = " << t0 + momentind * deltat << endl;
+                cout << "Strange nip =  " << nip << " for elind = " << elind << ", time = " <<
+                        t0 + momentind * deltat << endl;
             else
             {
                 if (nip == 4) // tetrahedron in 3d or quadrilateral in 2d
@@ -8952,6 +8971,9 @@ void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double de
                 if (verbose)
                     cout << "cellvalue = " << cellvalue << endl;
 
+                if ( isnan(cellvalue) )
+                    std::cout << "cellvalue = nan! \n";
+
                 //cellvertvalues[momentind].push_back(vertvalues);
                 cellvalues[momentind].push_back(cellvalue);
 
@@ -8967,7 +8989,11 @@ void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double de
 
         // intermediate output
         std::stringstream fname;
-        fname << "slicegridfunc_"<< dim - 1 << "d_myid_" << myid << "_moment_" << momentind << ".vtk";
+        //fname << filename_root << dim - 1 << "d_myid_" << myid << "_moment_" << momentind << ".vtk";
+        if (nprocs > 1)
+            fname << filename_root << dim - 1 << "d_moment_" << momentind << "_proc_" << myid << ".vtk";
+        else
+            fname << filename_root << dim - 1 << "d_moment_" << momentind << ".vtk";
         //outputSliceGridFuncVTK (fname, ipoints, celltypes[momentind], cellstructsize, elvrtindices[momentind], cellvertvalues[momentind]);
         outputSliceGridFuncVTK (grfun, fname, ipoints, celltypes[momentind], cellstructsize,
                                 elvrtindices[momentind], cellvalues[momentind], forvideo);

@@ -3375,7 +3375,8 @@ BlockOperator * ConstructDivfreeProblemOp(FOSLSDivfreeProblem& problem_divfree, 
 /// Several routines used for slicing 3d and 4d meshes and grid functions
 /// See the usage in ... <example name>
 // time moments: t0 + i * deltat, i = 0, ... Nmoments - 1
-void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid);
+void ComputeSlices(const Mesh& mesh, double t0, int Nmoments, double deltat, int myid, int nprocs,
+                   const char * filename_root = "slicemesh_");
 void Compute_elpartition (const Mesh& mesh, double t0, int Nmoments, double deltat,
                           std::vector<std::vector<int> > & elpartition);
 void computeSliceCell (const Mesh& mesh, int elind, std::vector<std::vector<double> > & pvec,
@@ -3396,7 +3397,8 @@ bool intdComparison(const std::pair<int,double> &a,const std::pair<int,double> &
 
 // forvideo = true -> all points have the same time coordinate = 0, which is good for visualizing via ParaView
 // forvideo = false -> all points are written with the actual time coordinate which corresponds to the considered time moment
-void ComputeSlices(const GridFunction& pgfun, double t0, int Nmoments, double deltat, int myid, bool forvideo);
+void ComputeSlices(const GridFunction& pgfun, double t0, int Nmoments, double deltat, int myid, int nprocs,
+                   bool forvideo, const char * filename_root = "slicegridfunc_");
 void computeSliceCellValues (const GridFunction& pgfun, int elind, std::vector<std::vector<double> > & pvec,
                        std::vector<std::vector<double> > & ipoints, std::vector<int>& edgemarkers,
                        std::vector<std::vector<double> >& cellpnts, std::vector<int>& elvertslocal, int & nip, int & vertex_count,
