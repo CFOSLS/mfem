@@ -306,6 +306,7 @@ int main(int argc, char *argv[])
         if (verbose)
             cout << "Test Hdiv function was sliced successfully" << endl;
 
+        delete pgridfuntest;
         delete hdiv_coll;
         delete R_space;
     }

@@ -128,12 +128,23 @@ int main(int argc, char *argv[])
     if (dim == 3)
         numsol = 8;
     else
+    {
+#ifndef OVERCONSTRAINED
+        {
+            MFEM_ABORT("In 4D due to the boundary attributes for a space-time cylinder, "
+                       "we cannot get rid of the overconstraining so easily as in 3D. This "
+                       "case has not been implemented");
+        }
+#endif
         numsol = 88;
+        mesh_file = "../data/cube_4d_96_-11x02.mesh";
+    }
     if (verbose)
         std::cout << "numsol = " << numsol << "\n";
 
+    /*
     if (verbose)
-        std::cout << "WARNING: CYLINDER_CUBE_TEST works only when the domain is a cube [0,1]! \n";
+        std::cout << "WARNING: CYLINDER_CUBE_TEST works only when the domain is a cube [0,1]^(d+1)! \n";
 
     // Posprocessing the mesh in case of a "cylinder" test running in the cube
     // For n = 3, if the domain cube was [0,1]^2 x [0,T] before, here we want to stretch
@@ -147,7 +158,7 @@ int main(int argc, char *argv[])
     {
         for (int j = 0; j < dim; ++j)
         {
-            if (j < 2) // shift only in (x,y)
+            if (j < dim - 1) // shift only in (x,y)
             {
                 // translation by -0.5 in space variables
                 vert_coos(j*nv + vind) -= 0.5;
@@ -161,6 +172,18 @@ int main(int argc, char *argv[])
         }
     }
     mesh->SetVertices(vert_coos);
+    */
+
+    /*
+    std::string filename_mesh;
+    filename_mesh = "blablabla_4d.mesh";
+    std::ofstream ofid(filename_mesh);
+    ofid.precision(8);
+    mesh->Print(ofid);
+
+    MPI_Finalize();
+    return 0;
+    */
 
     // if we don't want to overconstrain the solution (see comments before
     // #define OVERCONSTRAINED), we need to manually rearrange boundary attributes

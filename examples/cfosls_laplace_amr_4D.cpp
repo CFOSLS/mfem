@@ -43,8 +43,8 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube4d_24.MFEM";
     int order = 0;
     bool visualization = 0;
-#ifndef ONLY_PAR_UR
     int numofrefinement = 1;
+#ifndef ONLY_PAR_UR
     //int maxdofs = 900000;
     double error_frac = .80;
     double betavalue = 0.1;
@@ -80,9 +80,12 @@ int main(int argc, char *argv[])
     Mesh * mesh;
 
 #ifdef FICHERA_CORNER_SOLUTION
+    if (verbose)
+        std::cout << "Fichera corner solution \n";
+    /*
     // for the Fichera corner, we create a mesh by mesh generator in 4D
-    numsol = 1112;
-    mesh_file = "../data/fichera_3d_coarse.mesh";
+    numsol = 1111;
+    mesh_file = "../data/fichera_3d_coarse_-11.mesh";
 
     if (verbose)
         std::cout << "Extending 3D Fichera corner mesh into 4D \n";
@@ -109,6 +112,10 @@ int main(int argc, char *argv[])
 
     std::ifstream ifid_fichera(fname_fichera_temp.str().c_str());
     mesh = new Mesh(ifid_fichera, 1, 1);
+    */
+    numsol = 1111;
+    mesh_file = "../data/fichera_4d_cylinder.mesh";
+    mesh = new Mesh(mesh_file, 1, 1);
 #else
     mesh = new Mesh(mesh_file, 1, 1);
 #endif
@@ -195,8 +202,8 @@ int main(int argc, char *argv[])
         problem->Solve(verbose, true);
 
         int global_dofs;
-        int max_dofs = 20000;
-        int max_amr_iter = 5;
+        int max_dofs = 300000;
+        int max_amr_iter = 10;
 
         for (int it = 0; it < max_amr_iter; ++it)
         {

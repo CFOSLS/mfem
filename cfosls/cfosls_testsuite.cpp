@@ -486,8 +486,11 @@ void uFunTestLapLshape_grad(const Vector& xt, Vector& grad )
     return;
 }
 
-// Fichera Corner with Vertex Singularity, check out https://math.nist.gov/cgi-bin/amr-display-problem.cgi
-// not tested yet
+// Fichera Corner with Vertex Singularity, check out at
+// https://math.nist.gov/cgi-bin/amr-display-problem.cgi
+// If input vector is (d+1) dimensional, Sobolev regularity is
+// (1.5 + q), when d = 3
+// (1.0 + q), when d = 2
 double uFunTestFichera_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -540,6 +543,9 @@ void uFunTestFichera_grad(const Vector& xt, Vector& grad )
 }
 
 // much alike uFunTestFicheraT, but smoothly depending on t
+// If input vector is (d+1) dimensional, Sobolev regularity is
+// (1.5 + q), when d = 3
+// (1.0 + q), when d = 2
 // not tested yet
 double uFunTestFicheraT_ex(const Vector& xt)
 {
@@ -1439,6 +1445,35 @@ double GaussianHill_dr(const Vector&xvec)
     return -100.0 * (2.0 * r - cos (teta)) * GaussianHill(xvec);
 }
 
+double GaussianHill3D(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25) * (z - 0.25)));
+}
+
+double GaussianHill3D_dphi(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    // d( (r sin(teta) cos(phi) - 0.5)^2 ) / dphi
+    double term1 = 2.0 * (r * sin(teta) * cos(phi) - 0.5) * r * sin(teta) * (-sin(phi));
+
+    // d( (r sin(teta) sin(phi))^2 ) / dphi
+    double term2 = 2.0 * r * sin(teta) * sin(phi) * r * sin(teta) * cos(phi);
+
+    return -100.0 * (term1  + term2) * GaussianHill3D(xvec);
+}
+
+
 double uFunCylinder_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -1520,43 +1555,53 @@ double uFunCylinder4D_ex(const Vector& xt)
 {
     double x = xt(0);
     double y = xt(1);
-    double r = sqrt(x*x + y*y);
-    double teta = atan2(y,x);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
 
     double t = xt(xt.Size()-1);
-    Vector xvec(2);
+    Vector xvec(3);
 
     // now each point was rotating with the speed (t+1) around the circle,
     // i.e. we need to go back by \int_0^t {(t+1)dt}
-    xvec(0) = r * cos (teta - t - 0.5 * t * t);
-    xvec(1) = r * sin (teta - t - 0.5 * t * t);
+    xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(2) = z;
     //xvec(0) = r * cos (teta - t);
     //xvec(1) = r * sin (teta - t);
 
-    return GaussianHill(xvec);
+    return GaussianHill3D(xvec);
 }
 
 double uFunCylinder4D_ex_dt(const Vector& xt)
 {
     double x = xt(0);
     double y = xt(1);
-    double t = xt(xt.Size()-1);
-    double r = sqrt(x*x + y*y);
-    double teta = atan2(y,x);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
 
-    Vector xvec(2);
+    double t = xt(xt.Size()-1);
+    Vector xvec(3);
     // now each point was rotating with the speed (t+1) around the circle,
     // i.e. we need to go back by \int_0^t {(t+1)dt}
-    xvec(0) = r * cos (teta - t - 0.5 * t * t);
-    xvec(1) = r * sin (teta - t - 0.5 * t * t);
+    xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
+    xvec(2) = z;
 
-    return GaussianHill_dteta(xvec) * (- 1.0 - t);
+    return GaussianHill3D_dphi(xvec) * (- 1.0 - t);
 }
 
 void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
 {
     double x = xt(0);
     double y = xt(1);
+    double z = xt(2);
+    double r = sqrt(x*x + y*y + z*z);
+    //double phi = atan2(y,x);
+    //double teta = acos(z/r);
     double t = xt(xt.Size()-1);
 
     // We compute gradient at point (x,y,z,t) with the following steps:
@@ -1567,18 +1612,20 @@ void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
     double arc_length = t + 0.5 * t * t;
     double x0 = x * cos(arc_length) + y * sin(arc_length);
     double y0 = x * (-sin(arc_length)) + y * cos(arc_length);
+    double z0 = z;
 
     // 2. Computing gradient of the solution for t = 0 at the initial particle location
     Vector r0vec(4);
     r0vec(0) = x0;
     r0vec(1) = y0;
-    r0vec(2) = 0;
+    r0vec(2) = z0;
     r0vec(3) = 0;
 
-    // tempvec = grad u(x0,y0) at t = 0
-    Vector tempvec(2);
+    // tempvec = grad u(x0,y0,z0) at t = 0
+    Vector tempvec(3);
     tempvec(0) = -100.0 * 2.0 * (x0 - 0.5) * uFunCylinder4D_ex(r0vec);
     tempvec(1) = -100.0 * 2.0 * y0 * uFunCylinder4D_ex(r0vec);
+    tempvec(2) = -100.0 * 2.0 * (z0 - 0.25) * uFunCylinder4D_ex(r0vec);
 
     // 3. Applying the inverse rotation transform to the gradient,
     // which gives the gradient at the current point (x,y,z,t)
@@ -1587,7 +1634,7 @@ void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
 
     gradx(0) = tempvec(0) * cos(arc_length) + tempvec(1) * (-sin(arc_length));
     gradx(1) = tempvec(0) * sin(arc_length) + tempvec(1) * cos(arc_length);
-    gradx(2) = 0.0;
+    gradx(2) = tempvec(2);
 }
 
 void zerovecx_ex(const Vector& xt, Vector& zerovecx )
