@@ -424,8 +424,9 @@ int main(int argc, char *argv[])
 
     ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
+    int global_size = problem->GlobalTrueProblemSize();
     if (verbose)
-        std::cout << "Size of the problem (global) = " << problem->GlobalTrueProblemSize() << "\n";
+        std::cout << "Size of the problem (global) = " << global_size << "\n";
     problem->Solve(verbose, true);
 
     delete problem;

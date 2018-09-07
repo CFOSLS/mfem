@@ -279,8 +279,9 @@ int main(int argc, char *argv[])
     bool checkbnd = true;
     if (verbose)
         std::cout << "Solving the problem using the new interfaces \n";
+    int global_size = problem->GlobalTrueProblemSize();
     if (verbose)
-        std::cout << "Size of the problem (global) = " << problem->GlobalTrueProblemSize() << "\n";
+        std::cout << "Size of the problem (global) = " << global_size << "\n";
     problem->Solve(verbose, checkbnd);
 
     if (verbose)
