@@ -48,6 +48,9 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(comm, &myid);
     bool verbose = (myid == 0);
 
+    MPI_Comm comm_myid;
+    MPI_Comm_split(comm, myid, 0, &comm_myid );
+
     StopWatch chrono;
     chrono.Clear();
     chrono.Start();
@@ -60,10 +63,10 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube4d_24.MFEM";
     int order = 1;
     bool visualization = 0;
-    int numofrefinement = 2;
+    int numofrefinement = 1;
 #ifndef ONLY_PAR_UR
-    int maxdofs = 900000;
-    double error_frac = .80;
+    //int maxdofs = 900000;
+    double error_frac = .90;
     double betavalue = 0.1;
     int strat = 1;
 #endif
@@ -81,7 +84,7 @@ int main(int argc, char *argv[])
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
 #ifndef ONLY_PAR_UR
-    args.AddOption(&maxdofs, "-r", "-refine","-r");
+    //args.AddOption(&maxdofs, "-r", "-refine","-r");
     args.AddOption(&strat, "-rs", "--refinementstrategy", "Which refinement strategy to implement for the LS Refiner");
     args.AddOption(&error_frac, "-ef","--errorfraction", "Weight in Dorfler Marking Strategy");
     args.AddOption(&betavalue, "-b","--beta", "Beta in the Difference Term of Estimator");
@@ -216,9 +219,6 @@ int main(int argc, char *argv[])
     FEFormulType * fe_formulat = new FEFormulType(*formulat, order);
 
 #ifndef ONLY_PAR_UR
-    MPI_Comm comm_myid;
-    MPI_Comm_split(comm, myid, 0, &comm_myid );
-
     // Perform adaptive refinement in serial
 
     if (myid == 0)
@@ -257,6 +257,7 @@ int main(int argc, char *argv[])
         refiner->SetBetaConstants(betavalue);
         refiner->version_difference = false;
 
+        std::cout << "#dofs for the first solve: " << problem->GlobalTrueProblemSize() << "\n";
         problem->Solve(verbose, true);
 
         if (visualization)
@@ -277,11 +278,17 @@ int main(int argc, char *argv[])
         }
 
         int global_dofs;
-        int max_dofs = 20000;
-        int max_amr_iter = 5;
+        int max_dofs = 450000;
+        int max_amr_iter = 20;
 
         for (int it = 0; it < max_amr_iter; ++it)
         {
+            if (verbose)
+            {
+               cout << "\nAMR iteration " << it << "\n";
+               cout << "Refining the mesh ... \n";
+            }
+
             refiner->Apply(*mesh);
             if(refiner->Stop())
             {
@@ -324,11 +331,11 @@ int main(int argc, char *argv[])
             refiner->version_difference = false;
 
             global_dofs = problem->GlobalTrueProblemSize();
-
             if (global_dofs > max_dofs)
             {
                if (verbose)
-                  cout << "Reached the maximum number of dofs. Stop. \n";
+                  cout << "Reached the maximum number of dofs, current problem "
+                          "#dofs = " << global_dofs << ". Stop. \n";
                break;
             }
 
@@ -356,6 +363,7 @@ int main(int argc, char *argv[])
                 sigma_fname << "sigma_it_" << it + 1 << "_slices_";
                 ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
             }
+
         }
 
         delete problem;

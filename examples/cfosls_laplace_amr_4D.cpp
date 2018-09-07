@@ -200,6 +200,7 @@ int main(int argc, char *argv[])
 
         std::cout << "#dofs for the first solve: " << problem->GlobalTrueProblemSize() << "\n";
         problem->Solve(verbose, true);
+
         if (visualization)
         {
             problem->DistributeToGrfuns(problem->GetSol());
@@ -290,6 +291,7 @@ int main(int argc, char *argv[])
                cout << "\nAMR iteration " << it << "\n";
                cout << "Number of unknowns: " << global_dofs << "\n";
             }
+
             problem->Solve(verbose, true);
 
             if (visualization)
@@ -320,6 +322,13 @@ int main(int argc, char *argv[])
         delete problem;
         delete refiner;
         delete estimator;
+        for (int i = 0; i < extra_grfuns.Size(); ++i)
+            if (extra_grfuns[i])
+                delete extra_grfuns[i];
+        for (int i = 0; i < integs.NumRows(); ++i)
+            for (int j = 0; j < integs.NumCols(); ++j)
+                if (integs(i,j))
+                    delete integs(i,j);
 
         delete bdr_conds;
         delete pmesh;
