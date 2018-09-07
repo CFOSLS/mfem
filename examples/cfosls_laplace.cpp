@@ -50,10 +50,10 @@ int main(int argc, char *argv[])
     bool verbose = (myid == 0);
     bool visualization = 1;
 
-    int nDimensions     = 3;
+    int nDimensions     = 4;
     int numsol          = 4;
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
 
     const char *space_for_S = "H1";    // "H1" or "L2"
@@ -124,6 +124,9 @@ int main(int argc, char *argv[])
 
         numsol = 1111;
         mesh_file = "../data/fichera_3d_coarse_-11.mesh";
+
+        if (verbose)
+            std::cout << "Fichera test, q = " << FICHERA_Q << "\n";
     }
     else // 4D case
     {
@@ -132,6 +135,9 @@ int main(int argc, char *argv[])
 
         numsol = 1111;
         mesh_file = "../data/fichera_4d_cylinder.mesh";
+
+        if (verbose)
+            std::cout << "Fichera test, q = " << FICHERA_Q << "\n";
     }
 
     if (verbose)
@@ -273,6 +279,8 @@ int main(int argc, char *argv[])
     bool checkbnd = true;
     if (verbose)
         std::cout << "Solving the problem using the new interfaces \n";
+    if (verbose)
+        std::cout << "Size of the problem (global) = " << problem->GlobalTrueProblemSize() << "\n";
     problem->Solve(verbose, checkbnd);
 
     if (verbose)
@@ -872,60 +880,74 @@ int main(int argc, char *argv[])
         std::cout << "Errors were computed in "<< chrono.RealTime() <<" seconds.\n";
 
     // 13. Visualization (optional)
-    if (visualization && nDimensions < 4)
+    if (visualization)
     {
-        char vishost[] = "localhost";
-        int  visport   = 19916;
-
+        if (nDimensions < 4)
         {
-            socketstream S_ex_sock(vishost, visport);
-            S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_ex_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            S_ex_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
-                   << endl;
+            char vishost[] = "localhost";
+            int  visport   = 19916;
 
-            socketstream S_h_sock(vishost, visport);
-            S_h_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_h_sock.precision(8);
-            MPI_Barrier(pmesh->GetComm());
-            S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
-                   << endl;
+            {
+                socketstream S_ex_sock(vishost, visport);
+                S_ex_sock << "parallel " << num_procs << " " << myid << "\n";
+                S_ex_sock.precision(8);
+                MPI_Barrier(pmesh->GetComm());
+                S_ex_sock << "solution\n" << *pmesh << *S_exact << "window_title 'S_exact'"
+                       << endl;
 
-            *S -= *S_exact;
-            socketstream S_diff_sock(vishost, visport);
-            S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
-            S_diff_sock.precision(8);
+                socketstream S_h_sock(vishost, visport);
+                S_h_sock << "parallel " << num_procs << " " << myid << "\n";
+                S_h_sock.precision(8);
+                MPI_Barrier(pmesh->GetComm());
+                S_h_sock << "solution\n" << *pmesh << *S << "window_title 'S_h'"
+                       << endl;
+
+                *S -= *S_exact;
+                socketstream S_diff_sock(vishost, visport);
+                S_diff_sock << "parallel " << num_procs << " " << myid << "\n";
+                S_diff_sock.precision(8);
+                MPI_Barrier(pmesh->GetComm());
+                S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
+                       << endl;
+            }
+
+            socketstream sigma_sock(vishost, visport);
+            sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+            sigma_sock.precision(8);
             MPI_Barrier(pmesh->GetComm());
-            S_diff_sock << "solution\n" << *pmesh << *S << "window_title 'S_h - S_exact'"
-                   << endl;
+            sigma_sock << "solution\n" << *pmesh << *sigma_exact
+                   << "window_title 'sigma_exact'" << endl;
+            // Make sure all ranks have sent their 'u' solution before initiating
+            // another set of GLVis connections (one from each rank):
+
+            socketstream sigmah_sock(vishost, visport);
+            sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
+            sigmah_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            sigmah_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
+                    << endl;
+
+            *sigma_exact -= *sigma;
+            socketstream sigmadiff_sock(vishost, visport);
+            sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
+            sigmadiff_sock.precision(8);
+            MPI_Barrier(pmesh->GetComm());
+            sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact
+                     << "window_title 'sigma_ex - sigma_h'" << endl;
+
+            MPI_Barrier(pmesh->GetComm());
         }
+        else // 4D case
+        {
+            // creating mesh slices (and printing them in VTK format in a file for paraview)
+            ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs);
 
-        socketstream sigma_sock(vishost, visport);
-        sigma_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigma_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigma_sock << "solution\n" << *pmesh << *sigma_exact
-               << "window_title 'sigma_exact'" << endl;
-        // Make sure all ranks have sent their 'u' solution before initiating
-        // another set of GLVis connections (one from each rank):
+            // sigma_exact
+            ComputeSlices (*sigma_exact, 0.1, 2, 0.5, myid, num_procs, false, "sigma_ex_slices_");
 
-        socketstream sigmah_sock(vishost, visport);
-        sigmah_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigmah_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigmah_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma'"
-                << endl;
-
-        *sigma_exact -= *sigma;
-        socketstream sigmadiff_sock(vishost, visport);
-        sigmadiff_sock << "parallel " << num_procs << " " << myid << "\n";
-        sigmadiff_sock.precision(8);
-        MPI_Barrier(pmesh->GetComm());
-        sigmadiff_sock << "solution\n" << *pmesh << *sigma_exact
-                 << "window_title 'sigma_ex - sigma_h'" << endl;
-
-        MPI_Barrier(pmesh->GetComm());
+            // S_exact
+            ComputeSlices (*S_exact, 0.1, 2, 0.5, myid, num_procs, false, "u_ex_slices_");
+        }
     }
 
     chrono.Clear();

@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
     int nDimensions     = 4;
     int numsol          = -3;
 
-    int ser_ref_levels  = 1;
+    int ser_ref_levels  = 3;
     int par_ref_levels  = 1;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls" (switch on/off constraint)
@@ -369,7 +369,7 @@ int main(int argc, char *argv[])
     for (int l = 0; l < par_ref_levels; l++)
        pmesh->UniformRefinement();
 
-    // for the cylinder test in the cube, we dilate the mesh so that it covers [-1,1]^d x [0,1]
+    // for the cylinder test in the cube, 3d, we dilate the mesh so that it covers [-1,1]^d x [0,1]
     if (numsol == 8)
     {
         Vector vert_coos;
@@ -424,6 +424,8 @@ int main(int argc, char *argv[])
 
     ProblemType * problem = new ProblemType (*pmesh, *bdr_conds, *fe_formulat, prec_option, verbose);
 
+    if (verbose)
+        std::cout << "Size of the problem (global) = " << problem->GlobalTrueProblemSize() << "\n";
     problem->Solve(verbose, true);
 
     delete problem;

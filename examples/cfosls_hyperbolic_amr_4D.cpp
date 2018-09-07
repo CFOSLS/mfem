@@ -6,7 +6,7 @@
 #include "ls_temp.cpp"
 
 // if active, no serial AMR in 4D is done
-#define ONLY_PAR_UR
+//#define ONLY_PAR_UR
 
 // A test with a rotating Gaussian hill in the cubic domain.
 // Originally, the test was for the cylinder, hence "cylinder" test,
@@ -259,6 +259,23 @@ int main(int argc, char *argv[])
 
         problem->Solve(verbose, true);
 
+        if (visualization)
+        {
+            problem->DistributeToGrfuns(problem->GetSol());
+
+            ParGridFunction * sigma = problem->GetGrFun(0);
+
+            // creating mesh slices (and printing them in VTK format in a file for paraview)
+            std::stringstream mesh_fname;
+            mesh_fname << "slicedmesh_it_" << 0;
+            ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+
+            // sigma
+            std::stringstream sigma_fname;
+            sigma_fname << "sigma_it_" << 0 << "_slices_";
+            ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+        }
+
         int global_dofs;
         int max_dofs = 20000;
         int max_amr_iter = 5;
@@ -322,6 +339,23 @@ int main(int argc, char *argv[])
             }
 
             problem->Solve(verbose, true);
+
+            if (visualization)
+            {
+                problem->DistributeToGrfuns(problem->GetSol());
+
+                ParGridFunction * sigma = problem->GetGrFun(0);
+
+                // creating mesh slices (and printing them in VTK format in a file for paraview)
+                std::stringstream mesh_fname;
+                mesh_fname << "slicedmesh_it_" << it + 1;
+                ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+
+                // sigma
+                std::stringstream sigma_fname;
+                sigma_fname << "sigma_it_" << it + 1 << "_slices_";
+                ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+            }
         }
 
         delete problem;

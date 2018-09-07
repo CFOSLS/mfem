@@ -2557,12 +2557,17 @@ void FOSLSProblem::AssembleSystem(bool verbose)
        plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
    }
 
+   //std::cout << "trueRhs norm = " << trueRhs->Norml2() << "\n";
+
    //trueRhs->Print();
 
    if (trueBnd)
        delete trueBnd;
 
    trueBnd = GetTrueInitialCondition();
+
+   //trueBnd->Print();
+   //std::cout << "trueBnd norm = " << trueBnd->Norml2() << "\n";
 
    // moving the contribution from inhomogenous bnd conditions
    // from the rhs

@@ -313,8 +313,13 @@ void bFunCircleT3D_ex(const Vector& xt, Vector& b )
 
     b.SetSize(xt.Size());
 
+    /*
     b(0) = -y * (t + 1);  // -x2
     b(1) = x * (t + 1);   // x1
+    */
+
+    b(0) = -y;  // -x2
+    b(1) = x;   // x1
     b(2) = 0.0;
 
     b(xt.Size()-1) = 1.;
@@ -502,6 +507,10 @@ double uFunTestFichera_ex(const Vector& xt)
 
     double r = sqrt (x * x + y * y + z * z);
 
+    double res = pow(r,FICHERA_Q);
+    if (isnan(res) || isinf(res))
+        std::cout << "nan or inf in the rhs \n";
+
     return pow(r,FICHERA_Q);
 }
 
@@ -516,7 +525,10 @@ double uFunTestFichera_lap(const Vector& xt)
 
     double r = sqrt (x * x + y * y + z * z);
 
-    return (FICHERA_Q) * (FICHERA_Q + 1) * pow(r, FICHERA_Q - 2.0);
+    double res = ((xt.Size() - 1) * (FICHERA_Q)  + (FICHERA_Q) * (FICHERA_Q - 2)) * pow(r, FICHERA_Q - 2.0);
+    if (isnan(res) || isinf(res))
+        std::cout << "nan or inf in the rhs \n";
+    return res;
 }
 
 void uFunTestFichera_grad(const Vector& xt, Vector& grad )
@@ -536,8 +548,14 @@ void uFunTestFichera_grad(const Vector& xt, Vector& grad )
     grad(1) = (FICHERA_Q) * y * pow(r, FICHERA_Q - 2.0);
     if (xt.Size() == 4)
         grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0);
-
     grad(xt.Size() - 1) = 0.0;
+
+    if ( isnan(grad.Norml2()) || isinf(grad.Norml2()))
+        std::cout << "nan or inf in the gradient \n";
+
+    for (int i = 0; i < xt.Size(); ++i)
+        if ( isnan(grad[i]) || isinf(grad[i]))
+            std::cout << "nan or inf in the gradient \n";
 
     return;
 }
@@ -1445,35 +1463,6 @@ double GaussianHill_dr(const Vector&xvec)
     return -100.0 * (2.0 * r - cos (teta)) * GaussianHill(xvec);
 }
 
-double GaussianHill3D(const Vector&xvec)
-{
-    double x = xvec(0);
-    double y = xvec(1);
-    double z = xvec(2);
-
-    return exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25) * (z - 0.25)));
-}
-
-double GaussianHill3D_dphi(const Vector&xvec)
-{
-    double x = xvec(0);
-    double y = xvec(1);
-    double z = xvec(2);
-
-    double r = sqrt(x*x + y*y + z*z);
-    double phi = atan2(y,x);
-    double teta = acos(z/r);
-
-    // d( (r sin(teta) cos(phi) - 0.5)^2 ) / dphi
-    double term1 = 2.0 * (r * sin(teta) * cos(phi) - 0.5) * r * sin(teta) * (-sin(phi));
-
-    // d( (r sin(teta) sin(phi))^2 ) / dphi
-    double term2 = 2.0 * r * sin(teta) * sin(phi) * r * sin(teta) * cos(phi);
-
-    return -100.0 * (term1  + term2) * GaussianHill3D(xvec);
-}
-
-
 double uFunCylinder_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -1551,6 +1540,49 @@ void uFunCylinder_ex_gradx(const Vector& xt, Vector& gradx )
 
 }
 
+double GaussianHill3D(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    double res = exp(-100.0 * ((x - 0.5) * (x - 0.5) + y * y + (z - 0.25) * (z - 0.25)));
+
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    double alt = exp(-100.0 * (r * r + 0.5*0.5 - 2.0*0.5*r*cos(phi)*sin(teta) + 0.25*0.25 - 2.0*0.25*r*cos(teta)));
+    MFEM_ASSERT(fabs(alt - res) < 1.0e-12,
+                "Something is wrong in computations of GaussianHill3D \n");
+
+    return res;
+}
+
+double GaussianHill3D_dphi(const Vector&xvec)
+{
+    double x = xvec(0);
+    double y = xvec(1);
+    double z = xvec(2);
+
+    double r = sqrt(x*x + y*y + z*z);
+    double phi = atan2(y,x);
+    double teta = acos(z/r);
+
+    // d( (r sin(teta) cos(phi) - 0.5)^2 ) / dphi
+    double term1 = 2.0 * (r * sin(teta) * cos(phi) - 0.5) * r * sin(teta) * (-sin(phi));
+
+    // d( (r sin(teta) sin(phi))^2 ) / dphi
+    double term2 = 2.0 * r * sin(teta) * sin(phi) * r * sin(teta) * cos(phi);
+
+    double alt_term = - r * sin(teta) * (-sin(phi));
+    MFEM_ASSERT(fabs(term1 + term2 - alt_term) < 1.0e-12,
+                "Something is wrong in computations of GaussianHill3D_dphi \n");
+
+    return -100.0 * (term1  + term2) * GaussianHill3D(xvec);
+}
+
+
 double uFunCylinder4D_ex(const Vector& xt)
 {
     double x = xt(0);
@@ -1563,13 +1595,19 @@ double uFunCylinder4D_ex(const Vector& xt)
     double t = xt(xt.Size()-1);
     Vector xvec(3);
 
+    /*
     // now each point was rotating with the speed (t+1) around the circle,
     // i.e. we need to go back by \int_0^t {(t+1)dt}
     xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
     xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
     xvec(2) = z;
-    //xvec(0) = r * cos (teta - t);
-    //xvec(1) = r * sin (teta - t);
+    */
+
+    // now each point was rotating with the unit speed around the circle,
+    // i.e. we need to go back by \int_0^t {1dt}
+    xvec(0) = r * cos (phi - t) * sin(teta);
+    xvec(1) = r * sin (phi - t) * sin(teta);
+    xvec(2) = z;
 
     return GaussianHill3D(xvec);
 }
@@ -1585,13 +1623,21 @@ double uFunCylinder4D_ex_dt(const Vector& xt)
 
     double t = xt(xt.Size()-1);
     Vector xvec(3);
+    /*
     // now each point was rotating with the speed (t+1) around the circle,
     // i.e. we need to go back by \int_0^t {(t+1)dt}
     xvec(0) = r * cos (phi - t - 0.5 * t * t) * sin(teta);
     xvec(1) = r * sin (phi - t - 0.5 * t * t) * sin(teta);
     xvec(2) = z;
+    */
 
-    return GaussianHill3D_dphi(xvec) * (- 1.0 - t);
+    // now each point was rotating with the speed (t+1) around the circle,
+    // i.e. we need to go back by \int_0^t {(t+1)dt}
+    xvec(0) = r * cos (phi - t) * sin(teta);
+    xvec(1) = r * sin (phi - t) * sin(teta);
+    xvec(2) = z;
+
+    return GaussianHill3D_dphi(xvec) * (- 1.0);
 }
 
 void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
@@ -1607,9 +1653,17 @@ void uFunCylinder4D_ex_gradx(const Vector& xt, Vector& gradx )
     // We compute gradient at point (x,y,z,t) with the following steps:
 
     // 1. Computing (x0,y0) = Q^tr * (x,y) = initial particle location
-    // consider the fact the we know the rotation speed to be (t+1) for any t
+
+    /*
+    // Consider the fact the we know the rotation speed to be (t+1) for any t
     // the arc_length covered by the particle is then \int_0^t {(t+1)dt}
     double arc_length = t + 0.5 * t * t;
+    */
+
+    // Consider the fact the we know the rotation speed to be 1 for any t
+    // the arc_length covered by the particle is then \int_0^t {1dt}
+    double arc_length = t;
+
     double x0 = x * cos(arc_length) + y * sin(arc_length);
     double y0 = x * (-sin(arc_length)) + y * cos(arc_length);
     double z0 = z;

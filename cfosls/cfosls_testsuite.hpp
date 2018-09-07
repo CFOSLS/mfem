@@ -7,6 +7,8 @@ namespace mfem
 {
 // must be greater than -0.5
 #define FICHERA_Q (0.1)
+// smooth solution
+//#define FICHERA_Q (1.0)
 
 //// from parabolic example
 double uFun_ex_parab(const Vector & x); // Exact Solution

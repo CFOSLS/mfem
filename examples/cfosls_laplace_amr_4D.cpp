@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
     int numofrefinement = 1;
 #ifndef ONLY_PAR_UR
     //int maxdofs = 900000;
-    double error_frac = .80;
+    double error_frac = .90;
     double betavalue = 0.1;
     int strat = 1;
 #endif
@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
 
 #ifdef FICHERA_CORNER_SOLUTION
     if (verbose)
-        std::cout << "Fichera corner solution \n";
+        std::cout << "Fichera corner solution, q = " << FICHERA_Q << "\n";
     /*
     // for the Fichera corner, we create a mesh by mesh generator in 4D
     numsol = 1111;
@@ -200,10 +200,32 @@ int main(int argc, char *argv[])
 
         std::cout << "#dofs for the first solve: " << problem->GlobalTrueProblemSize() << "\n";
         problem->Solve(verbose, true);
+        if (visualization)
+        {
+            problem->DistributeToGrfuns(problem->GetSol());
+
+            ParGridFunction * sigma = problem->GetGrFun(0);
+            ParGridFunction * S = problem->GetGrFun(1);
+
+            // creating mesh slices (and printing them in VTK format in a file for paraview)
+            std::stringstream mesh_fname;
+            mesh_fname << "slicedmesh_it_" << 0;
+            ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+
+            // sigma
+            std::stringstream sigma_fname;
+            sigma_fname << "sigma_it_" << 0 << "_slices_";
+            ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+
+            // S
+            std::stringstream u_fname;
+            u_fname << "u_it_" << 0 << "_slices_";
+            ComputeSlices (*S, 0.1, 2, 0.5, myid, num_procs, false, u_fname.str().c_str());
+        }
 
         int global_dofs;
-        int max_dofs = 300000;
-        int max_amr_iter = 10;
+        int max_dofs = 450000;
+        int max_amr_iter = 20;
 
         for (int it = 0; it < max_amr_iter; ++it)
         {
@@ -269,6 +291,29 @@ int main(int argc, char *argv[])
                cout << "Number of unknowns: " << global_dofs << "\n";
             }
             problem->Solve(verbose, true);
+
+            if (visualization)
+            {
+                problem->DistributeToGrfuns(problem->GetSol());
+
+                ParGridFunction * sigma = problem->GetGrFun(0);
+                ParGridFunction * S = problem->GetGrFun(1);
+
+                // creating mesh slices (and printing them in VTK format in a file for paraview)
+                std::stringstream mesh_fname;
+                mesh_fname << "slicedmesh_it_" << it + 1;
+                ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+
+                // sigma
+                std::stringstream sigma_fname;
+                sigma_fname << "sigma_it_" << it + 1 << "_slices_";
+                ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+
+                // S
+                std::stringstream u_fname;
+                u_fname << "u_it_" << it + 1 << "_slices_";
+                ComputeSlices (*S, 0.1, 2, 0.5, myid, num_procs, false, u_fname.str().c_str());
+            }
 
         }
 

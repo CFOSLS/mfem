@@ -77,9 +77,8 @@ MFEM_USE_NETCDF      = NO
 MFEM_USE_PETSC       = NO
 MFEM_USE_MPFR        = NO
 MFEM_USE_SIDRE       = NO
-MFEM_WITH_MARS	     = YES
+MFEM_USE_MARS	     = YES
 
-# Setting WITH_QHULL flag which defines whether qhull-dependent parts are compiled in mesh generator
 OPTIM_FLAGS = -O3 -g -std=c++11 
 DEBUG_FLAGS = -g -Wall -std=c++11
 
