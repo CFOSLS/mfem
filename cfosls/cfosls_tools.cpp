@@ -8976,7 +8976,7 @@ void ComputeSlices(const GridFunction& grfun, double t0, int Nmoments, double de
                 if (verbose)
                     cout << "cellvalue = " << cellvalue << endl;
 
-                if ( isnan(cellvalue) )
+                if ( std::isnan(cellvalue) )
                     std::cout << "cellvalue = nan! \n";
 
                 //cellvertvalues[momentind].push_back(vertvalues);
