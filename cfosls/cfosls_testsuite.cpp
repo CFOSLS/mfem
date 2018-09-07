@@ -508,7 +508,7 @@ double uFunTestFichera_ex(const Vector& xt)
     double r = sqrt (x * x + y * y + z * z);
 
     double res = pow(r,FICHERA_Q);
-    if (isnan(res) || isinf(res))
+    if (std::isnan(res) || std::isinf(res))
         std::cout << "nan or inf in the rhs \n";
 
     return pow(r,FICHERA_Q);
@@ -526,7 +526,7 @@ double uFunTestFichera_lap(const Vector& xt)
     double r = sqrt (x * x + y * y + z * z);
 
     double res = ((xt.Size() - 1) * (FICHERA_Q)  + (FICHERA_Q) * (FICHERA_Q - 2)) * pow(r, FICHERA_Q - 2.0);
-    if (isnan(res) || isinf(res))
+    if (std::isnan(res) || std::isinf(res))
         std::cout << "nan or inf in the rhs \n";
     return res;
 }
@@ -550,11 +550,11 @@ void uFunTestFichera_grad(const Vector& xt, Vector& grad )
         grad(2) = (FICHERA_Q) * z * pow(r, FICHERA_Q - 2.0);
     grad(xt.Size() - 1) = 0.0;
 
-    if ( isnan(grad.Norml2()) || isinf(grad.Norml2()))
+    if ( std::isnan(grad.Norml2()) || std::isinf(grad.Norml2()))
         std::cout << "nan or inf in the gradient \n";
 
     for (int i = 0; i < xt.Size(); ++i)
-        if ( isnan(grad[i]) || isinf(grad[i]))
+        if ( std::isnan(grad[i]) || std::isinf(grad[i]))
             std::cout << "nan or inf in the gradient \n";
 
     return;
