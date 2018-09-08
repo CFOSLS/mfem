@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
     int nDimensions     = 4;
     int numsol          = -3;
 
-    int ser_ref_levels  = 3;
+    int ser_ref_levels  = 0;
     int par_ref_levels  = 1;
 
     const char *formulation = "cfosls"; // "cfosls" or "fosls" (switch on/off constraint)

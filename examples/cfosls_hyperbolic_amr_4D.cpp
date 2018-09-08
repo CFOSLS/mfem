@@ -61,12 +61,12 @@ int main(int argc, char *argv[])
 
     //const char *mesh_file = "../data/cube4d_96.MFEM";
     const char *mesh_file = "../data/cube4d_24.MFEM";
-    int order = 1;
-    bool visualization = 0;
-    int numofrefinement = 1;
+    int order = 0;
+    bool visualization = 1;
+    int numofrefinement = 2;
 #ifndef ONLY_PAR_UR
     //int maxdofs = 900000;
-    double error_frac = .90;
+    double error_frac = .95;
     double betavalue = 0.1;
     int strat = 1;
 #endif
@@ -100,6 +100,13 @@ int main(int argc, char *argv[])
 
     if (verbose)
     {
+        std::cout << "error_frac: " << error_frac << "\n";
+        std::cout << "betavalue: " << betavalue << "\n";
+        std::cout << "strat: " << strat << "\n";
+    }
+
+    if (verbose)
+    {
         if (strcmp(space_for_S,"H1") == 0)
             std::cout << "Space for S: H1 \n";
         else
@@ -124,24 +131,17 @@ int main(int argc, char *argv[])
     using ProblemType = FOSLSProblem_HdivL2hyp;
 
     // 2. Read the mesh from the given mesh file.
-    Mesh *mesh = new Mesh(mesh_file, 1, 1);
-    int dim = mesh->Dimension();
-
 #ifdef CYLINDER_CUBE_TEST
-    if (dim == 3)
-        numsol = 8;
-    else
-    {
 #ifndef OVERCONSTRAINED
-        {
-            MFEM_ABORT("In 4D due to the boundary attributes for a space-time cylinder, "
-                       "we cannot get rid of the overconstraining so easily as in 3D. This "
-                       "case has not been implemented");
-        }
-#endif
-        numsol = 88;
-        mesh_file = "../data/cube_4d_96_-11x02.mesh";
+    {
+        MFEM_ABORT("In 4D due to the boundary attributes for a space-time cylinder, "
+                  "we cannot get rid of the overconstraining so easily as in 3D. This "
+                  "case has not been implemented");
     }
+#endif
+    numsol = 88;
+    mesh_file = "../data/cube_4d_96_-11x02.mesh";
+
     if (verbose)
         std::cout << "numsol = " << numsol << "\n";
 
@@ -210,6 +210,9 @@ int main(int argc, char *argv[])
 
 #endif // for #ifdef CYLINDER_CUBE_TEST
 
+    Mesh *mesh = new Mesh(mesh_file, 1, 1);
+    int dim = mesh->Dimension();
+
     for (int l = 0; l < numofrefinement; l++)
         mesh->UniformRefinement();
 
@@ -268,13 +271,13 @@ int main(int argc, char *argv[])
 
             // creating mesh slices (and printing them in VTK format in a file for paraview)
             std::stringstream mesh_fname;
-            mesh_fname << "slicedmesh_it_" << 0;
-            ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+            mesh_fname << "slicedmesh_it_" << 0 << "_";
+            ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
 
             // sigma
             std::stringstream sigma_fname;
             sigma_fname << "sigma_it_" << 0 << "_slices_";
-            ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+            ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
         }
 
         int global_dofs;
@@ -355,13 +358,13 @@ int main(int argc, char *argv[])
 
                 // creating mesh slices (and printing them in VTK format in a file for paraview)
                 std::stringstream mesh_fname;
-                mesh_fname << "slicedmesh_it_" << it + 1;
-                ComputeSlices (*pmesh, 0.1, 2, 0.5, myid, num_procs, mesh_fname.str().c_str());
+                mesh_fname << "slicedmesh_it_" << it + 1 << "_";
+                ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
 
                 // sigma
                 std::stringstream sigma_fname;
                 sigma_fname << "sigma_it_" << it + 1 << "_slices_";
-                ComputeSlices (*sigma, 0.1, 2, 0.5, myid, num_procs, false, sigma_fname.str().c_str());
+                ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
             }
 
         }

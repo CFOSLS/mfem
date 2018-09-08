@@ -76,6 +76,13 @@ int main(int argc, char *argv[])
     }
     args.PrintOptions(cout);
 
+    if (verbose)
+    {
+        std::cout << "error_frac: " << error_frac << "\n";
+        std::cout << "betavalue: " << betavalue << "\n";
+        std::cout << "strat: " << strat << "\n";
+    }
+
     // 2. Read the mesh from the given mesh file (or do some more steps in case of the Fichera corner test).
     Mesh * mesh;
 
@@ -322,9 +329,6 @@ int main(int argc, char *argv[])
         delete problem;
         delete refiner;
         delete estimator;
-        for (int i = 0; i < extra_grfuns.Size(); ++i)
-            if (extra_grfuns[i])
-                delete extra_grfuns[i];
         for (int i = 0; i < integs.NumRows(); ++i)
             for (int j = 0; j < integs.NumCols(); ++j)
                 if (integs(i,j))
