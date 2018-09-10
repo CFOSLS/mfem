@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube4d_24.MFEM";
     int order = 0;
     bool visualization = 1;
-    int numofrefinement = 0;
+    int numofrefinement = 1;
 #ifndef ONLY_PAR_UR
     //int maxdofs = 900000;
     double error_frac = .95;
@@ -237,8 +237,8 @@ int main(int argc, char *argv[])
         int global_dofs;
         int max_dofs = 45000000;
         int max_amr_iter = 101;
+        int it_viz_step = 2;
 #ifdef SPECIAL_3DCASE
-        int it_viz_step = 6;
         int it_print_step = 2;
         bool output_solution = 1;
         bool glvis_visualize = false;
@@ -333,15 +333,18 @@ int main(int argc, char *argv[])
                 sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
             }
 #else
-            // creating mesh slices (and printing them in VTK format in a file for paraview)
-            std::stringstream mesh_fname;
-            mesh_fname << "slicedmesh_it_" << 0 << "_";
-            ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
+            if ( (it + 1) % it_viz_step == 0 || it + 1 == max_amr_iter - 1)
+            {
+                // creating mesh slices (and printing them in VTK format in a file for paraview)
+                std::stringstream mesh_fname;
+                mesh_fname << "slicedmesh_it_" << 0 << "_";
+                ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
 
-            // sigma
-            std::stringstream sigma_fname;
-            sigma_fname << "sigma_it_" << 0 << "_slices_";
-            ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+                // sigma
+                std::stringstream sigma_fname;
+                sigma_fname << "sigma_it_" << 0 << "_slices_";
+                ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+            }
 #endif
         }
 
@@ -464,15 +467,18 @@ int main(int argc, char *argv[])
                     sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
                 }
 #else
-                // creating mesh slices (and printing them in VTK format in a file for paraview)
-                std::stringstream mesh_fname;
-                mesh_fname << "slicedmesh_it_" << it + 1 << "_";
-                ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
+                if ( (it + 1) % it_viz_step == 0 || it + 1 == max_amr_iter - 1)
+                {
+                    // creating mesh slices (and printing them in VTK format in a file for paraview)
+                    std::stringstream mesh_fname;
+                    mesh_fname << "slicedmesh_it_" << it + 1 << "_";
+                    ComputeSlices (*pmesh, 0.1, 4, 0.399, myid, num_procs, mesh_fname.str().c_str());
 
-                // sigma
-                std::stringstream sigma_fname;
-                sigma_fname << "sigma_it_" << it + 1 << "_slices_";
-                ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+                    // sigma
+                    std::stringstream sigma_fname;
+                    sigma_fname << "sigma_it_" << it + 1 << "_slices_";
+                    ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+                }
 #endif
             }
 
