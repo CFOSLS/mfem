@@ -66,7 +66,7 @@
 //#define OVERCONSTRAINED
 
 // If passive, the mesh is simply uniformly refined at each iteration
-//#define AMR
+#define AMR
 
 // When active, this macro makes the code create an instance of DivConstraintSolver
 // whicha llows to search for a particular solution of the divergence constraint
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
     numsol = 8;
 #endif
 
-    bool visualization = 1;
+    bool visualization = 0;
     bool output_solution = true;
 
     int ser_ref_levels  = 1;
@@ -199,7 +199,7 @@ int main(int argc, char *argv[])
     //mesh_file = "../data/pmesh_cylinder_moderate_0.2.mesh";
     //mesh_file = "../data/pmesh_cylinder_fine_0.1.mesh";
 
-    int feorder         = 1;
+    int feorder         = 0;
 
     if (verbose)
         cout << "Solving (С)FOSLS Transport equation in AMR setting \n";
@@ -488,6 +488,17 @@ int main(int argc, char *argv[])
    bdr_conds->Set(bdr_attribs_data);
 #endif
 
+   /*
+   std::string filename_mesh;
+   filename_mesh = "cube_3d_-11x02_notoverconstrained.mesh";
+   std::ofstream ofid(filename_mesh);
+   ofid.precision(8);
+   pmesh->Print(ofid);
+
+   MPI_Finalize();
+   return 0;
+   */
+
    // for minimization solver we need to build H(curl)-related components in the GeneralHierarchy
 #ifdef DIVFREE_MINSOLVER
    bool with_hcurl = true;
@@ -621,7 +632,7 @@ int main(int argc, char *argv[])
    //ThresholdSmooRefiner refiner(*estimator, 0.0001); // 0.1, 0.001
    ThresholdRefiner refiner(*estimator);
 
-   refiner.SetTotalErrorFraction(0.9); // 0.5
+   refiner.SetTotalErrorFraction(0.95); // 0.5
 
    // Some additional vector arrays for temporary storage
 #ifdef PARTSOL_SETUP
@@ -648,7 +659,7 @@ int main(int argc, char *argv[])
    // 7. The main AMR loop. At each iteration we solve the problem on the
    //     current mesh, visualize the solution, and refine the mesh.
 #ifdef AMR
-   const int max_dofs = 300000;//1600000; 400000;
+   const int max_dofs = 33300000;//1600000; 400000;
 #else // uniform refinement
    const int max_dofs = 600000;
 #endif
@@ -664,10 +675,10 @@ int main(int argc, char *argv[])
        std::cout << "Running AMR ... \n";
 
    // upper limit on the number of AMR iterations
-   int max_iter_amr = 21; // 21;
+   int max_iter_amr = 101; // 21;
 
    // controls the print step of the solution into the output files (in terms of AMR iterations)
-   int it_print_step = 5;
+   int it_print_step = 2;
    // controls the visualization step of the solution (in terms of AMR iterations)
    int it_viz_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
@@ -1171,7 +1182,7 @@ int main(int argc, char *argv[])
 
            //std::ofstream fp_sigma("sigma_test_it0.vtk");
            std::string filename_sig;
-           filename_sig = "sigma_it_";
+           filename_sig = "sigma_mfem_it_";
            filename_sig.append(std::to_string(it));
            if (num_procs > 1)
            {
@@ -1200,7 +1211,7 @@ int main(int argc, char *argv[])
 
            //std::ofstream fp_S("u_test_it0.vtk");
            std::string filename_S;
-           filename_S = "u_it_";
+           filename_S = "u_mfem_it_";
            filename_S.append(std::to_string(it));
            if (num_procs > 1)
            {

@@ -21,6 +21,9 @@
 // since the solution is 0 at the boundary anyway. This is overconstraining but works ok.
 #define OVERCONSTRAINED
 
+// only for one-time test to compare MARS vs. MFEM refinement in terms of AMR performance
+#define SPECIAL_3DCASE
+
 using namespace std;
 using namespace mfem;
 
@@ -63,11 +66,11 @@ int main(int argc, char *argv[])
     const char *mesh_file = "../data/cube4d_24.MFEM";
     int order = 0;
     bool visualization = 1;
-    int numofrefinement = 2;
+    int numofrefinement = 0;
 #ifndef ONLY_PAR_UR
     //int maxdofs = 900000;
     double error_frac = .95;
-    double betavalue = 0.1;
+    double betavalue = 1000000;//0.1;
     int strat = 1;
 #endif
     int numsol = -4;
@@ -141,6 +144,11 @@ int main(int argc, char *argv[])
 #endif
     numsol = 88;
     mesh_file = "../data/cube_4d_96_-11x02.mesh";
+
+#ifdef SPECIAL_3DCASE
+    numsol = 8;
+    mesh_file = "../data/cube_3d_-11x02_notoverconstrained.mesh";
+#endif
 
     if (verbose)
         std::cout << "numsol = " << numsol << "\n";
@@ -226,6 +234,16 @@ int main(int argc, char *argv[])
 
     if (myid == 0)
     {
+        int global_dofs;
+        int max_dofs = 45000000;
+        int max_amr_iter = 101;
+#ifdef SPECIAL_3DCASE
+        int it_viz_step = 6;
+        int it_print_step = 2;
+        bool output_solution = 1;
+        bool glvis_visualize = false;
+#endif
+
         ParMesh * pmesh = new ParMesh(comm_myid, *mesh);
         pmesh->PrintInfo(std::cout); if(verbose) cout << endl;
 
@@ -266,9 +284,55 @@ int main(int argc, char *argv[])
         if (visualization)
         {
             problem->DistributeToGrfuns(problem->GetSol());
-
             ParGridFunction * sigma = problem->GetGrFun(0);
 
+#ifdef SPECIAL_3DCASE
+            if (glvis_visualize)
+            {
+                char vishost[] = "localhost";
+                int  visport   = 19916;
+
+                socketstream sigma_sock(vishost, visport);
+                sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+                sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                       << 0 <<"'" << flush;
+
+                ParGridFunction * sigma_ex = new ParGridFunction(problem->GetPfes(0));
+                BlockVector * exactsol_proj = problem->GetExactSolProj();
+                sigma_ex->SetFromTrueDofs(exactsol_proj->GetBlock(0));
+
+                socketstream sigmaex_sock(vishost, visport);
+                sigmaex_sock << "parallel " << num_procs << " " << myid << "\n";
+                sigmaex_sock << "solution\n" << *pmesh << *sigma_ex << "window_title 'sigma exact, AMR iter No."
+                       << 0 <<"'" << flush;
+
+                delete sigma_ex;
+                delete exactsol_proj;
+            }
+            if (output_solution)
+            {
+                // don't know what exactly ref is used for
+                int ref = 1;
+
+                //std::ofstream fp_sigma("sigma_test_it0.vtk");
+                std::string filename_sig;
+                filename_sig = "sigma_mars_it_";
+                filename_sig.append(std::to_string(0));
+                if (num_procs > 1)
+                {
+                    filename_sig.append("_proc_");
+                    filename_sig.append(std::to_string(myid));
+                }
+                filename_sig.append(".vtk");
+                std::ofstream fp_sigma(filename_sig);
+
+                pmesh->PrintVTK(fp_sigma, ref, true);
+                //pmesh->PrintVTK(fp_sigma);
+
+                std::string field_name_sigma("sigma_h");
+                sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
+            }
+#else
             // creating mesh slices (and printing them in VTK format in a file for paraview)
             std::stringstream mesh_fname;
             mesh_fname << "slicedmesh_it_" << 0 << "_";
@@ -278,11 +342,8 @@ int main(int argc, char *argv[])
             std::stringstream sigma_fname;
             sigma_fname << "sigma_it_" << 0 << "_slices_";
             ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+#endif
         }
-
-        int global_dofs;
-        int max_dofs = 450000;
-        int max_amr_iter = 20;
 
         for (int it = 0; it < max_amr_iter; ++it)
         {
@@ -353,9 +414,56 @@ int main(int argc, char *argv[])
             if (visualization)
             {
                 problem->DistributeToGrfuns(problem->GetSol());
-
                 ParGridFunction * sigma = problem->GetGrFun(0);
 
+#ifdef SPECIAL_3DCASE
+                if (glvis_visualize && ( ( (it + 1) % it_viz_step == 0 || it + 1 == max_amr_iter - 1)) )
+                {
+                    char vishost[] = "localhost";
+                    int  visport   = 19916;
+
+                    socketstream sigma_sock(vishost, visport);
+                    sigma_sock << "parallel " << num_procs << " " << myid << "\n";
+                    sigma_sock << "solution\n" << *pmesh << *sigma << "window_title 'sigma, AMR iter No."
+                           << it + 1 <<"'" << flush;
+
+                    ParGridFunction * sigma_ex = new ParGridFunction(problem->GetPfes(0));
+                    BlockVector * exactsol_proj = problem->GetExactSolProj();
+                    sigma_ex->SetFromTrueDofs(exactsol_proj->GetBlock(0));
+
+                    socketstream sigmaex_sock(vishost, visport);
+                    sigmaex_sock << "parallel " << num_procs << " " << myid << "\n";
+                    sigmaex_sock << "solution\n" << *pmesh << *sigma_ex << "window_title 'sigma exact, AMR iter No."
+                           << it + 1 << "'" << flush;
+
+                    delete sigma_ex;
+                    delete exactsol_proj;
+                }
+
+                if (output_solution && (it + 1) % it_print_step == 0)
+                {
+                    // don't know what exactly ref is used for
+                    int ref = 1;
+
+                    //std::ofstream fp_sigma("sigma_test_it0.vtk");
+                    std::string filename_sig;
+                    filename_sig = "sigma_mars_it_";
+                    filename_sig.append(std::to_string(it + 1));
+                    if (num_procs > 1)
+                    {
+                        filename_sig.append("_proc_");
+                        filename_sig.append(std::to_string(myid));
+                    }
+                    filename_sig.append(".vtk");
+                    std::ofstream fp_sigma(filename_sig);
+
+                    pmesh->PrintVTK(fp_sigma, ref, true);
+                    //pmesh->PrintVTK(fp_sigma);
+
+                    std::string field_name_sigma("sigma_h");
+                    sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
+                }
+#else
                 // creating mesh slices (and printing them in VTK format in a file for paraview)
                 std::stringstream mesh_fname;
                 mesh_fname << "slicedmesh_it_" << it + 1 << "_";
@@ -365,6 +473,7 @@ int main(int argc, char *argv[])
                 std::stringstream sigma_fname;
                 sigma_fname << "sigma_it_" << it + 1 << "_slices_";
                 ComputeSlices (*sigma, 0.1, 4, 0.399, myid, num_procs, false, sigma_fname.str().c_str());
+#endif
             }
 
         }
