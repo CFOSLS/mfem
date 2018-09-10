@@ -1550,10 +1550,16 @@ double GaussianHill3D(const Vector&xvec)
 
     double r = sqrt(x*x + y*y + z*z);
     double phi = atan2(y,x);
-    double teta = acos(z/r);
+    double teta;
+    if (fabs(r) < 1.0e-13)
+        teta = 0.0;
+    else
+        teta = acos(z/r);
 
     double alt = exp(-100.0 * (r * r + 0.5*0.5 - 2.0*0.5*r*cos(phi)*sin(teta) + 0.25*0.25 - 2.0*0.25*r*cos(teta)));
-    MFEM_ASSERT(fabs(alt - res) < 1.0e-12,
+    if (!(fabs(res) < 1.0e-12 || fabs(alt - res) < 1.0e-12))
+        std::cout << "Breakpoint \n";
+    MFEM_ASSERT(fabs(res) < 1.0e-12 || fabs(alt - res) < 1.0e-12,
                 "Something is wrong in computations of GaussianHill3D \n");
 
     return res;
@@ -1567,7 +1573,11 @@ double GaussianHill3D_dphi(const Vector&xvec)
 
     double r = sqrt(x*x + y*y + z*z);
     double phi = atan2(y,x);
-    double teta = acos(z/r);
+    double teta;
+    if (fabs(r) < 1.0e-13)
+        teta = 0.0;
+    else
+        teta = acos(z/r);
 
     // d( (r sin(teta) cos(phi) - 0.5)^2 ) / dphi
     double term1 = 2.0 * (r * sin(teta) * cos(phi) - 0.5) * r * sin(teta) * (-sin(phi));
@@ -1590,7 +1600,11 @@ double uFunCylinder4D_ex(const Vector& xt)
     double z = xt(2);
     double r = sqrt(x*x + y*y + z*z);
     double phi = atan2(y,x);
-    double teta = acos(z/r);
+    double teta;
+    if (fabs(r) < 1.0e-13)
+        teta = 0.0;
+    else
+        teta = acos(z/r);
 
     double t = xt(xt.Size()-1);
     Vector xvec(3);
@@ -1619,7 +1633,11 @@ double uFunCylinder4D_ex_dt(const Vector& xt)
     double z = xt(2);
     double r = sqrt(x*x + y*y + z*z);
     double phi = atan2(y,x);
-    double teta = acos(z/r);
+    double teta;
+    if (fabs(r) < 1.0e-13)
+        teta = 0.0;
+    else
+        teta = acos(z/r);
 
     double t = xt(xt.Size()-1);
     Vector xvec(3);

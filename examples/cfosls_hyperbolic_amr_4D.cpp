@@ -22,7 +22,7 @@
 #define OVERCONSTRAINED
 
 // only for one-time test to compare MARS vs. MFEM refinement in terms of AMR performance
-#define SPECIAL_3DCASE
+//#define SPECIAL_3DCASE
 
 using namespace std;
 using namespace mfem;
