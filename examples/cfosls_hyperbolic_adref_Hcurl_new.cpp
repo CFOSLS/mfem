@@ -175,9 +175,10 @@ int main(int argc, char *argv[])
 
     bool visualization = 0;
     bool output_solution = true;
+    bool output_for_glvis = true;
 
-    int ser_ref_levels  = 1;
-    int par_ref_levels  = 0;
+    int ser_ref_levels  = 2;
+    int par_ref_levels  = 2;
 
     // This must be consistent with what formulation is used below.
     // Search for "using FormulType" below
@@ -675,10 +676,10 @@ int main(int argc, char *argv[])
        std::cout << "Running AMR ... \n";
 
    // upper limit on the number of AMR iterations
-   int max_iter_amr = 101; // 21;
+   int max_iter_amr = 3; // 21;
 
    // controls the print step of the solution into the output files (in terms of AMR iterations)
-   int it_print_step = 2;
+   int it_print_step = 1;
    // controls the visualization step of the solution (in terms of AMR iterations)
    int it_viz_step = 5;
    for (int it = 0; it < max_iter_amr; it++)
@@ -1226,6 +1227,45 @@ int main(int argc, char *argv[])
 
            std::string field_name_S("u_h");
            S->SaveVTK(fp_S, field_name_S, ref);
+
+#ifndef HDIVL2L2
+           if (dynamic_problem->GetFEformulation().Nunknowns() < 2)
+               delete S;
+#endif
+       }
+
+       // Save the refined mesh and the solution in parallel. This output can
+       // be viewed later using GLVis: "glvis -np <np> -m mesh -g sol".
+       if (output_for_glvis && it % it_print_step == 0)
+       {
+           ParGridFunction * sigma = dynamic_problem->GetGrFun(0);
+           ParGridFunction * S;
+
+#ifdef HDIVL2L2
+           S = dynamic_problem->GetGrFun(1);
+#else
+           if (dynamic_problem->GetFEformulation().Nunknowns() >= 2)
+               S = dynamic_problem->GetGrFun(1);
+           else // only sigma = Hdiv-L2 formulation with eliminated S
+               S = (dynamic_cast<ProblemType*>(dynamic_problem))->RecoverS(problem_sols_lvls[0]->GetBlock(0));
+#endif
+
+          ostringstream mesh_name, sigma_name, u_name;
+          mesh_name << "mesh_longrun_it_" << it << "." << setfill('0') << setw(6) << myid;
+          sigma_name << "sigma_longrun_it_" << it << "." << setfill('0') << setw(6) << myid;
+          u_name << "u_longrun_it_" << it << "." << setfill('0') << setw(6) << myid;
+
+          ofstream mesh_ofs(mesh_name.str().c_str());
+          mesh_ofs.precision(8);
+          pmesh->Print(mesh_ofs);
+
+          ofstream sigma_ofs(sigma_name.str().c_str());
+          sigma_ofs.precision(8);
+          sigma->Save(sigma_ofs);
+
+          ofstream u_ofs(u_name.str().c_str());
+          u_ofs.precision(8);
+          S->Save(u_ofs);
 
 #ifndef HDIVL2L2
            if (dynamic_problem->GetFEformulation().Nunknowns() < 2)

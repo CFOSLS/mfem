@@ -236,12 +236,13 @@ int main(int argc, char *argv[])
     {
         int global_dofs;
         int max_dofs = 45000000;
-        int max_amr_iter = 101;
+        int max_amr_iter = 11;
         int it_viz_step = 2;
 #ifdef SPECIAL_3DCASE
         int it_print_step = 2;
         bool output_solution = 1;
         bool glvis_visualize = false;
+        max_amr_iter = 21;
 #endif
 
         ParMesh * pmesh = new ParMesh(comm_myid, *mesh);
@@ -333,7 +334,7 @@ int main(int argc, char *argv[])
                 sigma->SaveVTK(fp_sigma, field_name_sigma, ref);
             }
 #else
-            if ( (it + 1) % it_viz_step == 0 || it + 1 == max_amr_iter - 1)
+            //if ( (it + 1) % it_viz_step == 0 || it + 1 == max_amr_iter - 1)
             {
                 // creating mesh slices (and printing them in VTK format in a file for paraview)
                 std::stringstream mesh_fname;
@@ -501,7 +502,8 @@ int main(int argc, char *argv[])
 
     // Have to print and (later) read the mesh from file, because it's broekn as Mesh after 4D serial AMR through MARS
     std::stringstream fname;
-    fname << "mesh_file_temp.MFEM";
+    //fname << "mesh_file_temp.MFEM";
+    fname << "final_amr_mesh_" << dim << ".mesh";
 
     if (myid == 0)
     {
@@ -512,6 +514,9 @@ int main(int argc, char *argv[])
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+
+    MPI_Finalize();
+    return 0;
 
     //mesh = new Mesh("../data/cube4d_96.MFEM", 1, 1);
     std::ifstream ifid(fname.str().c_str());
