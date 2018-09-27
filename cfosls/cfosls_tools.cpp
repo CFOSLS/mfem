@@ -2331,6 +2331,18 @@ BlockVector * FOSLSProblem::GetInitialCondition()
 
             init_cond->GetBlock(blk) = *exsol_pgfun;
 
+            const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
+
+            Array<int> ess_dofs;
+            pfes[blk]->GetEssentialVDofs(essbdr_attrs, ess_dofs);
+
+            for (int j = 0; j < ess_dofs.Size(); ++j)
+            {
+                if (ess_dofs[j] != 0)
+                    init_cond->GetBlock(blk)[j] = (*exsol_pgfun)[j];
+            }
+
+
             delete exsol_pgfun;
         }
     }
@@ -2557,12 +2569,17 @@ void FOSLSProblem::AssembleSystem(bool verbose)
        plforms[i]->ParallelAssemble(trueRhs->GetBlock(i));
    }
 
+   //std::cout << "trueRhs norm = " << trueRhs->Norml2() << "\n";
+
    //trueRhs->Print();
 
    if (trueBnd)
        delete trueBnd;
 
    trueBnd = GetTrueInitialCondition();
+
+   //trueBnd->Print();
+   //std::cout << "trueBnd norm = " << trueBnd->Norml2() << "\n";
 
    // moving the contribution from inhomogenous bnd conditions
    // from the rhs
