@@ -1063,8 +1063,8 @@ double divsigmaTemplate_hyper(const Vector& xt)
         res += b(i) * gradS(i);
     res += divbfunc(xt) * S(xt);
 
-    if (fabs(res) > 1.0e-10)
-        std::cout << "error if solution is the cylindric test w/o dissipation \n";
+    //if (fabs(res) > 1.0e-10)
+        //std::cout << "error if solution is the cylindric test w/o dissipation \n";
 
     return res;
 }
