@@ -2329,7 +2329,7 @@ BlockVector * FOSLSProblem::GetInitialCondition()
                 break;
             }
 
-            init_cond->GetBlock(blk) = *exsol_pgfun;
+            //init_cond->GetBlock(blk) = *exsol_pgfun;
 
             const Array<int>& essbdr_attrs = bdr_conds.GetBdrAttribs(blk);
 
