@@ -5508,6 +5508,41 @@ void Mesh::ReorientTetMesh()
    }
 }
 
+void Mesh::ReorderPentatope()
+{
+   if (spaceDim != 4)
+      return;
+
+   swappedElements.SetSize(NumOfElements);
+   DenseMatrix J(4,4);
+   for (int j = 0; j < NumOfElements; j++)
+   {
+      if (elements[j]->GetType() == Element::PENTATOPE)
+      {
+         int *v = elements[j]->GetVertices();
+         Sort5(v[0], v[1], v[2], v[3], v[4]);
+         GetElementJacobian(j, J);
+         if (J.Det() < 0.0)
+         {
+            swappedElements[j] = true;
+            Swap(v);
+         }
+         else
+         {
+            swappedElements[j] = false;
+         }
+      }
+   }
+   for (int j = 0; j < NumOfBdrElements; j++)
+   {
+      if (boundary[j]->GetType() == Element::TETRAHEDRON)
+      {
+         int *v = boundary[j]->GetVertices();
+         Sort4(v[0], v[1], v[2], v[3]);
+      }
+   }
+}
+
 void Mesh::ReplaceBoundaryFromFaces()
 {
    for (int i = 0; i < NumOfBdrElements; i++)

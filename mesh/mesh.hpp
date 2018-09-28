@@ -921,6 +921,8 @@ public:
        @note Refinement does not work after a call to this method! */
    virtual void ReorientTetMesh();
 
+   void ReorderPentatope();
+
    void ReplaceBoundaryFromFaces();
 
    int *CartesianPartitioning(int nxyz[]);
